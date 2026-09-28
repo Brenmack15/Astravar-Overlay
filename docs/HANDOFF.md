@@ -2,7 +2,7 @@
 
 The candidate adds automatic dice and the simplified main/overlay combat flow. The existing campaign model, audit journal, explicit migration, resource accounting, backups, settings and owner signing identity are preserved.
 
-Use the accompanying signed APK for phone installation. It is package `com.yazsras.astravar`, version 1.1.0, version code 2, and is intended to install over the existing owner-signed version. Export a current campaign backup first. The `.debug` package and controlled target APKs are for testing and are not the delivered candidate.
+Use the accompanying signed APK for phone installation. It is package `com.yazsras.astravar`, version 1.1.0, version code 3, and is intended to install over the existing owner-signed version. Export a current campaign backup first. The `.debug` package and controlled target APKs are for testing and are not the delivered candidate.
 
 Authoritative automated results, provenance, hashes and remaining coverage boundaries are in [TEST_REPORT.md](TEST_REPORT.md). [ANDROID_INSTALL.md](ANDROID_INSTALL.md) describes the phone flow; [BUILD_AND_SIGNING.md](BUILD_AND_SIGNING.md) documents bounded builds and private signing. No owner key is present in this repository or in public CI artifacts.
 
