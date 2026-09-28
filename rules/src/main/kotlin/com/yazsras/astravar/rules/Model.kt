@@ -100,3 +100,6 @@ import kotlinx.serialization.Serializable
 @Serializable data class HistoryEntry(val id: String, val label: String, val gameSeconds: Long, val before: Campaign, val after: Campaign, val origin: String = "main", val undone: Boolean = false)
 @Serializable data class HistoryArchive(val id: String, val history: List<HistoryEntry>)
 @Serializable data class Backup(val format: String = "astravar-backup", val schema: Int = 1, val campaign: Campaign, val history: List<HistoryEntry> = emptyList(), val archives: List<HistoryArchive> = emptyList())
+
+/** A bounded presentation of the durable journal; no deletion or resource mutation. */
+fun Campaign.recentRolls(): List<PendingShot> = pending.asReversed().take(20)
