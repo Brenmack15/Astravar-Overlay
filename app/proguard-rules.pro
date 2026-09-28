@@ -1,0 +1,2 @@
+-keepattributes Signature,InnerClasses,EnclosingMethod
+-keep class com.yazsras.astravar.rules.**$$serializer { *; }
