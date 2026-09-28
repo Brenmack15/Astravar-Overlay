@@ -168,6 +168,9 @@ class OverlayService: Service() {
     private fun fire(p: ShotPlan) {
         run("Dice saved") {
             val after=app.repository.fire(p,options(),"overlay")
+            // Room's observer may deliver after this coroutine resumes. Render the
+            // committed roll now so an old empty snapshot cannot reset the result page.
+            state=after
             resultId=p.id;outcome=null;targetResults=emptyList();panelPage="result";showDice=false
             if(prefs.haptics) view?.let {rollFeedback(it,after.pending.last().rolled)}
         }
