@@ -5,6 +5,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.*
 import org.junit.Test
+import org.junit.Rule
+import org.junit.rules.TestWatcher
+import org.junit.runner.Description
 import org.junit.FixMethodOrder
 import org.junit.runners.MethodSorters
 import org.junit.runner.RunWith
@@ -16,6 +19,12 @@ import java.util.regex.Pattern
 @RunWith(AndroidJUnit4::class)
 @FixMethodOrder(MethodSorters.NAME_ASCENDING)
 class OverlayInstrumentationTest {
+    @get:Rule val failureEvidence=object: TestWatcher() {
+        override fun failed(error: Throwable,description: Description) {
+            runCatching {device.takeScreenshot(File(files,"failure-${description.methodName}.png"))}
+            runCatching {device.dumpWindowHierarchy(File(files,"failure-${description.methodName}.xml"))}
+        }
+    }
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
     private val device get()=UiDevice.getInstance(instrumentation)
     private val appPackage get()=InstrumentationRegistry.getArguments().getString("astravarPackage") ?: "com.yazsras.astravar"
@@ -50,8 +59,9 @@ class OverlayInstrumentationTest {
         findText("Floating controls").click()
         assertTrue(device.wait(Until.hasObject(By.desc("Expand Astravar crystal")),30000))
         shell("am start -W -n com.yazsras.astravar.target/.TargetActivity")
-        device.wait(Until.findObject(By.desc("Outside tap counter")),30000).click()
-        assertTrue(device.wait(Until.hasObject(By.text("Outside taps: 1")),30000))
+        device.wait(Until.findObject(By.desc("Outside tap counter")),30000).click(100)
+        val outsideWorked=device.wait(Until.hasObject(By.desc("Outside tap counter").text("Outside taps: 1")),5000)
+        assertTrue("Outside tap counter: ${device.findObject(By.desc("Outside tap counter"))?.text}",outsideWorked)
         screenshot("collapsed")
         expand();screenshot("expanded")
         device.findObject(By.desc("Drag Astravar panel")).drag(Point(device.displayWidth-20,160),500)
