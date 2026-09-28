@@ -124,7 +124,7 @@ class DiceRollerTest {
         try {DiceRoller.rollPending(after,p.id);fail("reroll accepted")} catch(_:IllegalArgumentException) {}
     }
     @Test fun recentRollsKeepTwentyNewestWithoutDeletingAuditHistory() {
-        var state=Campaign(attuned=true,installedId="core",cores=listOf(Core("core","Test core")))
+        var state=Campaign(onboarded=true,attuned=true,installedId="core",cores=listOf(Core("core","Test core")))
         repeat(25) {n->state=DiceRoller.fire(state,Engine.plan(state,"shot-$n",Ability.ARCANE),die={1})}
         assertEquals(25,state.pending.size)
         assertEquals(20,state.recentRolls().size)
