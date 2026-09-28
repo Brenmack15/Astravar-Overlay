@@ -18,9 +18,9 @@ timeout 10s adb shell input keyevent 82
 timeout 10s adb shell settings put global window_animation_scale 0
 timeout 10s adb shell settings put global transition_animation_scale 0
 timeout 10s adb shell settings put global animator_duration_scale 0
-timeout -k 5s 35s adb install app/build/outputs/apk/debug/app-debug.apk
+timeout -k 5s 35s adb install "${ASTRAVAR_TEST_APK:-app/build/outputs/apk/debug/app-debug.apk}"
 timeout -k 5s 35s adb install overlay-target/build/outputs/apk/debug/overlay-target-debug.apk
 timeout -k 5s 35s adb install overlay-target/build/outputs/apk/androidTest/debug/overlay-target-debug-androidTest.apk
-timeout -k 5s 240s adb shell am instrument -w -r -e astravarPackage com.yazsras.astravar.debug com.yazsras.astravar.target.test/androidx.test.runner.AndroidJUnitRunner | tee validation/instrumentation.txt
+timeout -k 5s 240s adb shell am instrument -w -r -e astravarPackage "${ASTRAVAR_TEST_PACKAGE:-com.yazsras.astravar.debug}" com.yazsras.astravar.target.test/androidx.test.runner.AndroidJUnitRunner | tee validation/instrumentation.txt
 grep -q '^OK (3 tests)' validation/instrumentation.txt
 ! grep -q 'FAILURES\|INSTRUMENTATION_FAILED\|Process crashed' validation/instrumentation.txt
