@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 mkdir -p validation
+export ANDROID_AVD_HOME="$RUNNER_TEMP/astravar-avd"
+export ANDROID_USER_HOME="$RUNNER_TEMP/astravar-android-user"
+mkdir -p "$ANDROID_AVD_HOME" "$ANDROID_USER_HOME"
 test -c /dev/kvm
 sudo chmod 666 /dev/kvm
-printf 'no\n' | timeout -k 5s 40s avdmanager create avd --force -n AstravarCI -k 'system-images;android-36;google_apis;x86_64' --device pixel_6
+printf 'no\n' | timeout -k 5s 40s avdmanager create avd --force -n AstravarCI -p "$ANDROID_AVD_HOME/AstravarCI.avd" -k 'system-images;android-36;google_apis;x86_64' --device pixel_6
+test -f "$ANDROID_AVD_HOME/AstravarCI.ini"
+timeout 10s "$ANDROID_HOME/emulator/emulator" -list-avds
 "$ANDROID_HOME/emulator/emulator" -avd AstravarCI -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect >validation/emulator.log 2>&1 &
 emulator_pid=$!
 trap 'timeout 8s adb logcat -d >validation/logcat.txt 2>&1 || true; timeout 10s adb pull /sdcard/Android/data/com.yazsras.astravar.target/files validation/screenshots >/dev/null 2>&1 || true; timeout 5s adb emu kill >/dev/null 2>&1 || true; kill "$emulator_pid" 2>/dev/null || true' EXIT
