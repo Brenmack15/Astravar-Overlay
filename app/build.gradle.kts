@@ -9,7 +9,7 @@ android {
         applicationId = "com.yazsras.astravar"
         minSdk = 26
         targetSdk = 36
-        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(2)
+        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(3)
         versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("1.1.0")
     }
     signingConfigs {
