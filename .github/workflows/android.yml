@@ -4,8 +4,15 @@ on:
     branches: ['feat/astravar-android', 'feat/astravar-android/**']
   pull_request:
   workflow_dispatch:
+    inputs:
+      reuse_run_id:
+        description: 'Reuse product APK from this verified workflow run; 0 builds everything'
+        required: false
+        default: '0'
+        type: string
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: android-${{ github.ref }}
   cancel-in-progress: true
@@ -13,8 +20,17 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      REUSE_RUN_ID: ${{ inputs.reuse_run_id || '0' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Select explicit overlay-only recheck
+        env:
+          PUSH_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          if [[ "$PUSH_MESSAGE" =~ ^Reuse\ product\ run\ ([0-9]+)\ for\ overlay\ tests ]]; then
+            echo "REUSE_RUN_ID=${BASH_REMATCH[1]}" >> "$GITHUB_ENV"
+          fi
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
           distribution: temurin
@@ -36,6 +52,7 @@ jobs:
           echo "$ANDROID_HOME/cmdline-tools/19.0/bin" >> "$GITHUB_PATH"
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
       - name: Unit tests, lint and native APKs
+        if: env.REUSE_RUN_ID == '0'
         timeout-minutes: 10
         run: |
           chmod +x gradlew
@@ -48,6 +65,25 @@ jobs:
           timeout 15s keytool -genkeypair -noprompt -keystore "$ASTRAVAR_KEYSTORE" -storetype PKCS12 -storepass "$ASTRAVAR_STORE_PASSWORD" -keypass "$ASTRAVAR_KEY_PASSWORD" -alias "$ASTRAVAR_KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 2 -dname 'CN=Astravar CI test only'
           trap 'rm -f "$ASTRAVAR_KEYSTORE"' EXIT
           timeout -k 10s 540s ./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
+      - name: Reuse verified product and build current overlay tests
+        if: env.REUSE_RUN_ID != '0'
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$REUSE_RUN_ID" =~ ^[0-9]+$ ]]
+          source_sha=$(timeout 15s gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REUSE_RUN_ID" --jq .head_sha)
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
+          timeout -k 5s 30s git fetch --depth=1 origin "$source_sha"
+          # Reuse is permitted only when every product/build input is unchanged.
+          git diff --exit-code "$source_sha" HEAD -- app rules build.gradle.kts settings.gradle.kts gradle.properties gradle gradlew gradlew.bat
+          timeout -k 5s 60s gh run download "$REUSE_RUN_ID" --name android-verification --dir reused-product
+          mkdir -p app/build/outputs/apk/release validation
+          cp reused-product/app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/
+          printf 'Product APK reused without modification from run %s\n' "$REUSE_RUN_ID" > validation/product-provenance.txt
+          sha256sum app/build/outputs/apk/release/app-release.apk >> validation/product-provenance.txt
+          chmod +x gradlew
+          timeout -k 10s 210s ./gradlew --no-daemon --console=plain :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
       - name: Real overlay interaction on Android 16
         timeout-minutes: 9
         env:
