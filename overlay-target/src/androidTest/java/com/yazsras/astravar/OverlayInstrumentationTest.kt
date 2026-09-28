@@ -28,6 +28,7 @@ class OverlayInstrumentationTest {
     private val instrumentation get()=InstrumentationRegistry.getInstrumentation()
     private val device get()=UiDevice.getInstance(instrumentation)
     private val appPackage get()=InstrumentationRegistry.getArguments().getString("astravarPackage") ?: "com.yazsras.astravar"
+    private val targetPackage get()="com.yazsras.astravar.target"
     private val files get()=instrumentation.targetContext.getExternalFilesDir(null)!!
     private fun shell(command:String)=device.executeShellCommand(command)
     private fun checkpoint(message:String) {instrumentation.sendStatus(0,android.os.Bundle().apply {putString("stream","\nCHECKPOINT: $message\n")})}
@@ -46,6 +47,9 @@ class OverlayInstrumentationTest {
         val control=device.wait(Until.findObject(By.text(text).pkg(appPackage)),30000) ?: error("Missing overlay control: $text")
         control.click();device.waitForIdle()
     }
+    private fun targetText(text:String):UiObject2 = device.wait(
+        Until.findObject(By.text(text).pkg(targetPackage)),30000
+    ) ?: error("Missing controlled target control: $text")
     private fun expand() {device.wait(Until.findObject(By.desc("Expand Astravar crystal")),30000).click();assertTrue(device.wait(Until.hasObject(By.desc("Drag Astravar panel")),30000))}
     private fun startOverlay() {shell("am force-stop $appPackage");openMain();findText("Floating controls").click();assertTrue(device.wait(Until.hasObject(By.desc("Expand Astravar crystal")),30000))}
     private fun stopPanel() {tapPanel("More");tapPanel("Stop session");assertTrue(device.wait(Until.gone(By.desc("Drag Astravar panel")),30000));assertFalse(device.hasObject(By.desc("Expand Astravar crystal")))}
@@ -92,9 +96,10 @@ class OverlayInstrumentationTest {
         assertTrue(device.wait(Until.hasObject(By.desc("Expand Astravar crystal")),30000))
         expand();screenshot("large-text-result");tapPanel("Collapse")
         shell("settings put system font_scale 1.0");device.waitForIdle()
-        device.findObject(By.text("Toggle protected screen")).click()
+        targetText("Toggle protected screen").click()
+        assertTrue("Protected target button must reflect its secure state",device.wait(Until.hasObject(By.text("Protected screen ON").pkg(targetPackage)),10000))
         assertTrue(device.wait(Until.gone(By.desc("Expand Astravar crystal")),30000))
-        device.findObject(By.text("Protected screen ON")).click()
+        targetText("Protected screen ON").click()
         assertTrue(device.wait(Until.hasObject(By.desc("Expand Astravar crystal")),30000))
         expand();tapPanel("Weapon");stopPanel();device.unfreezeRotation()
         checkpoint("Two automatic overlay attacks, raw dice, drag, outside touch, keyboard, rotation, large text and protected screen exercised")
@@ -121,7 +126,11 @@ class OverlayInstrumentationTest {
         assertTrue(device.wait(Until.gone(By.desc("Expand Astravar crystal")),30000))
         shell("am force-stop $appPackage");openMain();findText("Floating controls").click();device.waitForIdle()
         assertFalse(device.hasObject(By.desc("Expand Astravar crystal")))
-        shell("appops set $appPackage SYSTEM_ALERT_WINDOW allow");openMain();findText("Floating controls").click()
+        assertTrue("Denied permission should open Android's overlay settings",device.wait(Until.hasObject(By.text("Display over other apps").pkg("com.android.settings")),30000))
+        shell("appops set $appPackage SYSTEM_ALERT_WINDOW allow")
+        device.pressBack();device.waitForIdle()
+        assertTrue(device.wait(Until.hasObject(By.text("ASTRAVAR").pkg(appPackage)),30000))
+        findText("Floating controls").click()
         assertTrue(device.wait(Until.hasObject(By.desc("Expand Astravar crystal")),30000))
         expand();stopPanel()
         checkpoint("Identical saved dice restored in main app and history; live permission revocation and recovery exercised")
