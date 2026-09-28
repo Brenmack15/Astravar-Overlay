@@ -162,7 +162,7 @@ class OverlayService: Service() {
     private fun requestRoll(s: Campaign) {
         try {
             val p=makePlan(s)
-            if(p.hasSpell || p.blast) {preview=p;panelPage="confirm";render()} else fire(p)
+            if(p.blast) {preview=p;panelPage="confirm";render()} else fire(p)
         } catch(e: Exception) {status=e.message ?: "Check weapon configuration";panelPage="combat";render()}
     }
     private fun fire(p: ShotPlan) {
@@ -267,8 +267,10 @@ class OverlayService: Service() {
             }
             else -> {
                 content.addView(text("${prefs.mode.title}     +${s.profile.attack} TO HIT",20f))
-                val damage=runCatching {Engine.components(makePlan(s)).joinToString(" + ") {"${it.damage.dice} ${it.damage.type.name.lowercase()}"}}.getOrDefault("${s.profile.base} Force")
+                val planned=runCatching {makePlan(s)}
+                val damage=planned.map {Engine.components(it).joinToString(" + ") {"${it.damage.dice} ${it.damage.type.name.lowercase()}"}}.getOrDefault("${s.profile.base} Force")
                 content.addView(text(damage,16f))
+                planned.getOrNull()?.takeIf {it.hasSpell}?.let {p->content.addView(text("Uses ${p.selectedPayloads.size} stored spell(s)${p.immediate?.let {" + level-${it.castingLevel} slot"} ?: ""}, even on a miss.",12f))}
                 row(content,*RollMode.entries.map {mode->button("${if((mode==RollMode.ADVANTAGE && prefs.advantage) || (mode==RollMode.DISADVANTAGE && prefs.disadvantage) || (mode==RollMode.NORMAL && !prefs.advantage && !prefs.disadvantage)) "✓ " else ""}${when(mode) {RollMode.NORMAL->"Normal";RollMode.ADVANTAGE->"Adv";RollMode.DISADVANTAGE->"Dis"}}") {run("Roll mode selected") {app.preferences.targeting(options().copy(advantage=mode==RollMode.ADVANTAGE,disadvantage=mode==RollMode.DISADVANTAGE))}}}.toTypedArray())
                 content.addView(button("Roll attack") {requestRoll(s)})
                 row(content,button("${s.installed?.name ?: "Core"} · ${s.installed?.readiness(s.gameSeconds) ?: "None"}") {panelPage="cores";render()},button("Payload · ${s.installed?.payloads?.filter {it.id in selected}?.joinToString {it.template.name}?.ifBlank {"None"} ?: "None"}") {panelPage="payloads";render()})
