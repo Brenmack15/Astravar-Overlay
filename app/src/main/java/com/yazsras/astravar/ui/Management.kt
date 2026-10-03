@@ -37,18 +37,16 @@ import java.util.UUID
     Page {
         Section("${p.name} · version ${p.version}") {
             Text("ACCEPTED: attunement and a usable core are required. ${p.base} Force; 60/180 ft. Extra Attack gives two ordinary attacks within one Attack action. Selector changes are free. Explosions always take one Action.")
-            Text("Discharge: ${p.dischargeDice}d10 Force, 60 ft range / 15 ft radius. Shatter: ${p.dischargeDice*3}d10 Force, 120 ft range / 60 ft RADIUS. Success halves the rolled Force, not the dice. No selector or flat bonus on the blast.")
+            Text("Discharge: ${p.dischargeDice}d10 Force, 60 ft range / 15 ft radius. Shatter: ${p.shatterDice}d10 Force, 120 ft range / 60 ft RADIUS. Success halves the rolled Force, not the dice. No selector or flat bonus on the blast.")
             Text("PROVISIONAL: one spell-powered firing per turn; spell shots replace all free selector dice; one stored payload until confirmed dual storage at level 12, then two. Loaded magic persists through rests and swaps.")
             Text("ASSUMPTION: starter +1 calibration. PROPOSED, disabled by default: +2 at 10 / +3 at 15. Four/five payloads at level 20 are not finalized.")
         }
         Section("Weapon → Upgrades") {
-            Text("BASE WEAPON DAMAGE")
-            ChoiceGrid((1..4).toList(),p.baseDamageDiceCount,display={"${it}d10"}) { count ->
-                if(count!=p.baseDamageDiceCount) a.change("Base weapon damage upgraded to ${count}d10") {
+            BaseDamageUpgrade(p,enabled=!a.busy) { count ->
+                if(count!=p.baseDamageDiceCount) a.change("Base weapon damage set to ${count}d10") {
                     it.copy(profile=it.profile.copy(version=it.profile.version+1,baseDamageDiceCount=count))
                 }
             }
-            Text("Current: ${p.base} Force. This affects Astravar's direct weapon hit; selector, payload, overcharge, and explosion dice follow their own rules.")
         }
         Section("Edit next profile version") {
             Field("Artificer level",level,{level=it}); Field("INT modifier",intelligence,{intelligence=it}); Field("Proficiency bonus",proficiency,{proficiency=it}); Field("Spell save DC (independent)",dc,{dc=it})

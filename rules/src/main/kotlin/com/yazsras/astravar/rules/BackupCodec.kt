@@ -21,7 +21,7 @@ object BackupCodec {
         b.archives.forEach { archive -> require(archive.id.length in 1..100 && archive.history.map {it.id}.distinct().size==archive.history.size);archive.history.forEach {validate(it.before);validate(it.after)} }
         return b
     }
-    /** Campaign profiles default to canonical 2d10; individual pending shot snapshots retain v1.1's 1d10. */
+    /** Campaigns default to 2d10; old shots retain their original direct and emergency expressions. */
     fun decodeCampaignSnapshot(text: String): Campaign =
         json.decodeFromJsonElement<Campaign>(migrateCampaign(json.parseToJsonElement(text))).also(::validate)
 
@@ -79,6 +79,16 @@ object BackupCodec {
             if(plan!=null) {
                 val planFields=plan.toMutableMap()
                 planFields["profile"]?.let { planFields["profile"]=withBaseCount(it,1) }
+                if("blastDiceCount" !in planFields) {
+                    // Before v1.3, blasts used only the level tier, even when direct dice were upgraded.
+                    val profile=json.decodeFromJsonElement<Profile>(planFields.getValue("profile"))
+                    val count=when(planFields["ability"]?.jsonPrimitive?.content) {
+                        "DISCHARGE" -> profile.levelBasedDischargeDice
+                        "SHATTER" -> profile.levelBasedDischargeDice * 3
+                        else -> 0
+                    }
+                    planFields["blastDiceCount"]=JsonPrimitive(count)
+                }
                 fields["plan"]=JsonObject(planFields)
             }
         }
@@ -111,6 +121,7 @@ object BackupCodec {
         s.projects.forEach { require(it.daysWorked in 0..10000 && it.name.length in 1..120 && it.notes.length<=2000 && it.recipe.length in 1..4000) }
         s.pending.forEach {
             val p=it.plan; p.profile.validate()
+            require(if(p.blast) p.blastDiceCount in 1..200 else p.blastDiceCount==0) { "Invalid saved blast dice" }
             require(s.cores.any { c -> c.id==p.coreId } && p.revision>=0 && p.revision<=s.revision && p.distance in 0..p.range && p.targetPoint.length<=500)
             require(p.selectedPayloads.size<=12 && p.elements.size<=p.profile.elementCapacity && p.elements.distinct().size==p.elements.size)
             require(p.selectedPayloads.map {it.id}.distinct().size==p.selectedPayloads.size && p.selectedPayloads.size+(if(p.immediate!=null) 1 else 0)<=p.profile.releaseLimit)

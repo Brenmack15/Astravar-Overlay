@@ -78,20 +78,28 @@ class DiceRollerTest {
         assertEquals(5,r.damage.getValue("direct").flat);assertEquals(2,r.damage.getValue("payload0_0").flat)
         try {DiceRoller.fire(after,p);fail("duplicate shot accepted")} catch(_:IllegalArgumentException) {}
     }
-    @Test fun noTargetDiceAreRolledForBlastAndSuccessfulSaveHalvesOneTotal() {
-        val p=Engine.plan(seed(),"blast",Ability.DISCHARGE,point="Archway")
-        val requested=mutableListOf<Int>();val values=ArrayDeque(listOf(10,10,10,9,1,1,1,1))
-        val r=DiceRoller.roll(p,die={requested+=it;values.removeFirst()})
-        assertEquals(List(8) {10},requested);assertTrue(r.attackFaces.isEmpty());assertNull(r.attackTotal)
-        assertEquals(43,r.damage.getValue("blast").total)
-        val targets=listOf(TargetSave("Saved",true),TargetSave("Failed",false))
-        val result=DiceRoller.resolution(p,r,targets=targets)
-        assertEquals(21,Engine.damage(p,result,targets[0])[DamageType.FORCE]);assertEquals(43,Engine.damage(p,result,targets[1])[DamageType.FORCE])
+    @Test fun bothEmergencySavesHalveTheSameFullRollRoundedDownWithoutRerolling() {
+        for(ability in listOf(Ability.DISCHARGE,Ability.SHATTER)) {
+            val p=Engine.plan(seed(),"blast",ability,point="Archway")
+            val faces=if(ability==Ability.DISCHARGE) listOf(7,4,9,2,8,3,6,10,5,3) else List(29) {5}+6
+            val values=ArrayDeque(faces);val requested=mutableListOf<Int>()
+            val roll=DiceRoller.roll(p,die={requested+=it;values.removeFirst()})
+            assertEquals(List(p.blastDiceCount) {10},requested)
+            assertTrue(values.isEmpty());assertTrue(roll.attackFaces.isEmpty());assertNull(roll.attackTotal)
+            assertEquals(faces,roll.damage.getValue("blast").faces)
+            val targets=listOf(TargetSave("Saved",true),TargetSave("Failed",false))
+            val result=DiceRoller.resolution(p,roll,targets=targets)
+            val total=if(ability==Ability.DISCHARGE) 57 else 151
+            assertEquals(total,roll.damage.getValue("blast").total)
+            assertEquals(total/2,Engine.damage(p,result,targets[0])[DamageType.FORCE])
+            assertEquals(total,Engine.damage(p,result,targets[1])[DamageType.FORCE])
+            assertEquals(p.blastDiceCount,requested.size)
+        }
     }
     @Test fun directImpactCriticalDoesNotDoubleTheBlast() {
         val p=Engine.plan(seed(),"blast",Ability.SHATTER,direct=true,point="Gate")
         val r=DiceRoller.roll(p,die={if(it==20) 20 else 1})
-        assertEquals(4,r.damage.getValue("direct").faces.size);assertEquals(24,r.damage.getValue("blast").faces.size)
+        assertEquals(4,r.damage.getValue("direct").faces.size);assertEquals(30,r.damage.getValue("blast").faces.size)
         assertEquals(5,r.damage.getValue("direct").flat);assertEquals(0,r.damage.getValue("blast").flat)
     }
     @Test fun unknownAcAllowsAnotherAttackWithoutManualEntry() {
@@ -113,7 +121,7 @@ class DiceRollerTest {
         assertNull(BackupCodec.decode(json).campaign.pending.single().rolled)
     }
     @Test fun supportedCountsRollIndependentBaseD10sAndApplyFlatModifierOnce() {
-        val cases=listOf(1 to listOf(7),2 to listOf(7,4),3 to listOf(7,4,9),4 to listOf(7,4,9,2))
+        val cases=listOf(1 to listOf(7),2 to listOf(7,4),3 to listOf(7,4,9),4 to listOf(7,4,9,2),10 to listOf(7,4,9,2,8,3,6,10,5,1))
         for((count,faces) in cases) {
             val requested=mutableListOf<Int>()
             val values=ArrayDeque((listOf(14)+faces).toList())
@@ -130,7 +138,7 @@ class DiceRollerTest {
         assertEquals(27,7+4+9+2+5)
     }
     @Test fun criticalRollsTwiceTheConfiguredBaseDiceWithFlatOnce() {
-        for(count in 1..4) {
+        for(count in 1..10) {
             val requested=mutableListOf<Int>()
             val p=plan(profile=Profile(baseDamageDiceCount=count))
             val r=DiceRoller.roll(p,die={sides->requested+=sides;if(sides==20) 20 else 1})
@@ -141,12 +149,24 @@ class DiceRollerTest {
             assertEquals(count*2+5,r.damage.getValue("direct").total)
         }
     }
-    @Test fun impactCriticalKeepsShatterBlastIndependentOfBaseDamageUpgrade() {
-        val p=Engine.plan(seed(Profile(baseDamageDiceCount=4)),"impact-4",Ability.SHATTER,direct=true,point="Gate")
-        val r=DiceRoller.roll(p,die={if(it==20) 20 else 1})
-        assertEquals(8,r.damage.getValue("direct").faces.size)
-        assertEquals(24,r.damage.getValue("blast").faces.size)
-        assertEquals(5,r.damage.getValue("direct").flat)
+    @Test fun impactCriticalDoublesOnlyDirectDiceAndNeverEmergencyOrSavePayloadDice() {
+        val spell=Template("fire","Fire payload",2,2,listOf(TypedDice(Dice(3,6),DamageType.FIRE)),DamageType.FIRE,true)
+        for(count in listOf(1,2,3,4,10)) for(ability in listOf(Ability.DISCHARGE,Ability.SHATTER)) {
+            val before=seed(Profile(baseDamageDiceCount=count))
+            val p=Engine.plan(before,"impact-$count",ability,immediate=spell,direct=true,point="Gate")
+            val r=DiceRoller.roll(p,die={if(it==20) 20 else 1})
+            assertEquals(2*count,r.damage.getValue("direct").faces.size)
+            val expected=(8+2*(count-1))*if(ability==Ability.SHATTER) 3 else 1
+            assertEquals(expected,r.damage.getValue("blast").faces.size)
+            assertEquals(3,r.damage.getValue("payload0_0").faces.size)
+            assertEquals(2,r.damage.getValue("overcharge0").faces.size)
+            assertEquals(5,r.damage.getValue("direct").flat)
+            assertEquals(0,r.damage.getValue("blast").flat)
+            val targets=listOf(TargetSave("Saved impact",true,directTarget=true),TargetSave("Failed",false))
+            val result=DiceRoller.resolution(p,r,targets=targets)
+            assertEquals(2*count+5+expected/2,Engine.damage(p,result,targets[0]).values.sum())
+            assertEquals(expected+5,Engine.damage(p,result,targets[1]).values.sum())
+        }
     }
     @Test fun invalidRecordedDiceAreRejectedWithoutInventingAReplacement() {
         val p=plan();val r=DiceRoller.roll(p,die=dice(14,7,4))

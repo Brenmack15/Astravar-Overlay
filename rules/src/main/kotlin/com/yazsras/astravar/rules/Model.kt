@@ -42,13 +42,15 @@ import kotlinx.serialization.Serializable
     val elementCapacity get() = elementCapacityOverride ?: if(has(Upgrade.DUAL_RESONANCE)) 2 else 1
     val releaseLimit get() = releaseOverride ?: if(has(Upgrade.DUAL_STORAGE)) 2 else 1
     val highestSpell get() = emergencySpellLevelOverride ?: when { level >= 17 -> 5; level >= 13 -> 4; level >= 9 -> 3; else -> 2 }
-    val dischargeDice get() = 4 + 2 * highestSpell
+    val levelBasedDischargeDice get() = 4 + 2 * highestSpell
+    val dischargeDice get() = levelBasedDischargeDice + 2 * (baseDamageDiceCount - 1)
+    val shatterDice get() = 3 * levelBasedDischargeDice + 6 * (baseDamageDiceCount - 1)
     val swapCost get() = if(has(Upgrade.FAST_SWAP)) "Bonus Action" else "Action"
     val replacementCost get() = when { has(Upgrade.INSTANT_REPLACEMENT) -> "Bonus Action"; has(Upgrade.FAST_REPLACEMENT) -> "Action"; else -> "10 in-game minutes" }
     fun validate() {
         require(name.length in 1..120 && character.length in 1..120 && version > 0)
         require(level in 5..20 && intelligence in -5..10 && proficiency in 0..10 && saveDc in 1..40 && calibration in 0..10)
-        require(baseDamageDiceCount in 1..100) { "Base damage dice count must be between 1 and 100" }
+        require(baseDamageDiceCount in 1..10) { "Base damage dice count must be between 1 and 10" }
         require(capacity in 1..12 && elementCapacity in 1..9 && releaseLimit in 1..capacity && spellShotsPerTurn in 1..20 && highestSpell in 1..9 && fastReplacementLevel in 5..20)
         require(syntheticGp == null || syntheticGp in 0..1000000); require(syntheticDays == null || syntheticDays in 1..10000)
     }
@@ -73,7 +75,13 @@ import kotlinx.serialization.Serializable
     val id: String, val revision: Long, val ability: Ability, val coreId: String, val profile: Profile,
     val selectedPayloads: List<Payload>, val immediate: Template? = null,
     val elements: List<DamageType> = emptyList(), val directImpact: Boolean = false,
-    val distance: Int = 30, val targetPoint: String = "", val manualSlotConfirmed: Boolean = false
+    val distance: Int = 30, val targetPoint: String = "", val manualSlotConfirmed: Boolean = false,
+    // Snapshot the expression at planning time so later rules changes cannot rewrite a blast.
+    val blastDiceCount: Int = when(ability) {
+        Ability.DISCHARGE -> profile.dischargeDice
+        Ability.SHATTER -> profile.shatterDice
+        else -> 0
+    }
 ) {
     val blast get() = ability == Ability.DISCHARGE || ability == Ability.SHATTER
     val hasSpell get() = selectedPayloads.isNotEmpty() || immediate != null

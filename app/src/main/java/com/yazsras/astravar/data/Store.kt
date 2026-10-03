@@ -76,7 +76,7 @@ class Repository(private val db: AstravarDb,scope: CoroutineScope) {
             if(dao.event(operationId)!=null) return@withTransaction
             val digest=java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") {"%02x".format(it)}
             val source=HistoryArchive(digest,incoming.history)
-            val archived=dao.archives().associate {it.id to it.body}.toMutableMap()
+            val archived=dao.archives().associate {it.id to BackupCodec.json.encodeToString(BackupCodec.decodeHistoryArchive(it.body))}.toMutableMap()
             for(archive in incoming.archives+source) {
                 val body=BackupCodec.json.encodeToString(archive)
                 require(archived[archive.id]==null || archived[archive.id]==body) {"Conflicting archived history ID; import cancelled without changes"}

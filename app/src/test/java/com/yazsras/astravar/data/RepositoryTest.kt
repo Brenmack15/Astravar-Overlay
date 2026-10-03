@@ -156,4 +156,58 @@ class RepositoryTest {
         assertTrue(overlay.advantage);assertEquals(18,overlay.armorClass);assertEquals(90,overlay.distance);assertEquals("Archway",overlay.targetPoint);assertTrue(overlay.directImpact);assertEquals("cold",overlay.immediateId);assertTrue(overlay.manualSlot);assertFalse(overlay.haptics);assertTrue(overlay.manualOverrides)
     }
 
+    @Test fun sevenAndTenSurviveDatabaseRestartDriveBothSurfacesAndRestoreFromBackup()=runBlocking {
+        context.deleteDatabase("slider-reopen.db")
+        fun open()=Room.databaseBuilder(context,AstravarDb::class.java,"slider-reopen.db").addMigrations(AstravarDb.MIGRATION_1_2).build()
+        for(count in listOf(7,10)) {
+            var db=open();var scope=CoroutineScope(SupervisorJob()+Dispatchers.Default)
+            var main=Repository(db,scope)
+            main.mutate(label="Select ${count}d10") {seed().copy(profile=Profile(baseDamageDiceCount=count),notes="retained campaign")}
+            scope.cancel();db.close()
+
+            db=open();scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);main=Repository(db,scope)
+            try {
+                val overlay=Repository(db,scope)
+                val shared=withTimeout(10000) {overlay.state.first {it?.profile?.baseDamageDiceCount==count}!!}
+                val appState=withTimeout(10000) {main.state.first {it?.profile?.baseDamageDiceCount==count}!!}
+                assertEquals(appState,shared)
+                assertEquals("retained campaign",shared.notes)
+                assertEquals("${count}d10+5",shared.profile.base.toString())
+                assertEquals(if(count==7) 20 else 26,shared.profile.dischargeDice)
+                assertEquals(if(count==7) 60 else 78,shared.profile.shatterDice)
+                val plan=Engine.plan(shared,"slider-shot-$count",Ability.ARCANE)
+                overlay.fire(plan,RollOptions(),"overlay")
+                val saved=BackupCodec.decode(main.export())
+                val shot=saved.campaign.pending.single()
+                assertEquals(count*(if(shot.rolled!!.critical) 2 else 1),shot.rolled!!.damage.getValue("direct").faces.size)
+                assertEquals(Dice(count,10,5),Engine.components(plan).single().damage.dice)
+                val backup=main.export()
+                main.mutate(label="Temporary profile change") {it.copy(profile=it.profile.copy(baseDamageDiceCount=2))}
+                main.import(backup,"restore-$count")
+                val restored=BackupCodec.decode(main.export())
+                assertEquals(count,restored.campaign.profile.baseDamageDiceCount)
+                assertEquals(shot,restored.campaign.pending.single())
+            } finally {scope.cancel();db.close()}
+        }
+    }
+
+    @Test fun migratedArchiveCanBeExportedAndReimportedWithoutFalseConflict()=runBlocking {
+        val db=Room.inMemoryDatabaseBuilder(context,AstravarDb::class.java).build()
+        val scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);val repo=Repository(db,scope)
+        try {
+            val before=seed()
+            val plan=Engine.plan(before,"old-emergency",Ability.DISCHARGE,point="Old door").copy(blastDiceCount=8)
+            val after=before.copy(pending=listOf(PendingShot(plan,rolled=DiceRoller.roll(plan,die={4}))))
+            val archive=HistoryArchive("same-archive",listOf(HistoryEntry("old-event","Old emergency",0,before,after)))
+            val oldBody=BackupCodec.json.encodeToString(HistoryArchive.serializer(),archive).replace(",\"blastDiceCount\":8","")
+            db.dao().archive(ArchiveRow(archive.id,oldBody))
+            repo.mutate(label="Existing campaign") {before}
+            val exported=repo.export()
+            repo.import(exported,"reimport-migrated-archive")
+            val restored=BackupCodec.decode(repo.export()).archives.first {it.id==archive.id}
+            assertEquals(archive,restored)
+            assertEquals(oldBody,db.dao().archives().first {it.id==archive.id}.body)
+        } finally {scope.cancel();db.close()}
+    }
+
 }

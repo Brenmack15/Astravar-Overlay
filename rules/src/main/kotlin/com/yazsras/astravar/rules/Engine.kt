@@ -37,7 +37,7 @@ object Engine {
     fun components(p: ShotPlan, critical: Boolean = false): List<Component> {
         val result = mutableListOf<Component>()
         if(!p.blast || p.directImpact) result += Component("direct",if(p.blast) "Direct impact" else "Weapon",TypedDice(if(critical) p.profile.base.critical() else p.profile.base,DamageType.FORCE),Portion.DIRECT)
-        if(p.blast) result += Component("blast","Force blast",TypedDice(Dice(p.profile.dischargeDice * if(p.ability == Ability.SHATTER) 3 else 1,10),DamageType.FORCE),Portion.BLAST)
+        if(p.blast) result += Component("blast","Force blast",TypedDice(Dice(p.blastDiceCount,10),DamageType.FORCE),Portion.BLAST)
         if(p.ability == Ability.ELEMENTAL) p.elements.forEachIndexed { i,t -> result += Component("element$i","Selector",TypedDice(Dice(if(critical) 2 else 1,8),t),Portion.DIRECT) }
         val templates = p.selectedPayloads.map { it.template } + listOfNotNull(p.immediate)
         templates.forEachIndexed { i,t ->

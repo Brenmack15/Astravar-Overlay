@@ -23,7 +23,7 @@ class EngineTest {
     }
     @Test fun blastScalingUsesUnlockedSpellLevel() {
         for((level,n) in listOf(5 to 8,8 to 8,9 to 10,13 to 12,17 to 14,20 to 14)) {
-            val s=state(level).copy(slots=emptyMap())
+            val s=state(level).copy(profile=state(level).profile.copy(baseDamageDiceCount=1),slots=emptyMap())
             for((ability,mult) in listOf(Ability.DISCHARGE to 1,Ability.SHATTER to 3)) {
                 val p=Engine.plan(s,"blast",ability,point="Declared floor point")
                 assertEquals(Dice(n*mult,10),Engine.components(p,true).single().damage.dice); assertEquals("Action",p.actionCost)
@@ -35,18 +35,18 @@ class EngineTest {
         val r=Resolution(Outcome.POINT,rolls=mapOf("blast" to 43,"payload0_0" to 9,"overcharge0" to 10),targets=listOf(TargetSave("A",false),TargetSave("B",true)))
         Engine.validateResult(p,r)
         assertEquals(62,Engine.damage(p,r,r.targets[0]).values.sum()); assertEquals(21,Engine.damage(p,r,r.targets[1]).values.sum())
-        assertEquals(8,Engine.components(p).first {it.id=="blast"}.damage.dice.count)
+        assertEquals(10,Engine.components(p).first {it.id=="blast"}.damage.dice.count)
     }
     @Test fun directImpactMissStillDetonates() {
         val p=Engine.plan(state(),"blast",Ability.SHATTER,direct=true,point="Declared point",distance=120)
-        assertEquals(listOf(Dice(4,10,5),Dice(24,10)),Engine.components(p,true).map {it.damage.dice})
+        assertEquals(listOf(Dice(4,10,5),Dice(30,10)),Engine.components(p,true).map {it.damage.dice})
         val r=Resolution(Outcome.MISS,rolls=mapOf("blast" to 100),targets=listOf(TargetSave("Target",false,directTarget=true)))
         Engine.validateResult(p,r);assertEquals(100,Engine.damage(p,r,r.targets.single()).values.sum())
         assertFails {Engine.plan(state(),"bad",Ability.SHATTER,distance=121,point="Point")}
     }
-    @Test fun blastPayloadNeverCrits() { val p=Engine.plan(charged(),"blast",Ability.DISCHARGE,listOf("payload"),direct=true,point="Point"); assertEquals(listOf("4d10+5","8d10","3d6","2d8"),Engine.components(p,true).map {it.damage.dice.toString()}) }
-    @Test fun configurableBaseDicePropagateWithoutScalingIndependentDice() {
-        for(count in 1..4) {
+    @Test fun blastPayloadNeverCrits() { val p=Engine.plan(charged(),"blast",Ability.DISCHARGE,listOf("payload"),direct=true,point="Point"); assertEquals(listOf("4d10+5","10d10","3d6","2d8"),Engine.components(p,true).map {it.damage.dice.toString()}) }
+    @Test fun configurableBaseDiceScaleWeaponAndBlastsWithoutScalingPayloads() {
+        for(count in 1..10) {
             val s=state().copy(profile=state().profile.copy(baseDamageDiceCount=count))
             val normal=Engine.plan(s,"arcane-$count",Ability.ARCANE)
             assertEquals(Dice(count,10,5),Engine.components(normal).single().damage.dice)
@@ -57,15 +57,15 @@ class EngineTest {
             assertEquals(listOf(Dice(count,10,5),Dice(3,6),Dice(2,8)),Engine.components(spell).map {it.damage.dice})
             assertEquals(listOf(Dice(count*2,10,5),Dice(6,6),Dice(4,8)),Engine.components(spell,true).map {it.damage.dice})
             val impact=Engine.plan(s,"impact-$count",Ability.DISCHARGE,direct=true,point="Point")
-            assertEquals(listOf(Dice(count,10,5),Dice(8,10)),Engine.components(impact).map {it.damage.dice})
-            assertEquals(listOf(Dice(count*2,10,5),Dice(8,10)),Engine.components(impact,true).map {it.damage.dice})
+            assertEquals(listOf(Dice(count,10,5),Dice(8+2*(count-1),10)),Engine.components(impact).map {it.damage.dice})
+            assertEquals(listOf(Dice(count*2,10,5),Dice(8+2*(count-1),10)),Engine.components(impact,true).map {it.damage.dice})
             val shatter=Engine.plan(s,"shatter-$count",Ability.SHATTER,point="Point")
-            assertEquals(Dice(24,10),Engine.components(shatter,true).single().damage.dice)
+            assertEquals(Dice(24+6*(count-1),10),Engine.components(shatter,true).single().damage.dice)
         }
     }
     @Test fun baseDamageDiceCountRejectsNonPositiveAndOutOfRangeValues() {
         assertEquals(2,Profile().baseDamageDiceCount)
-        for(count in listOf(0,-1,101)) assertFails {Profile(baseDamageDiceCount=count).validate()}
+        for(count in listOf(0,-1,11,101)) assertFails {Profile(baseDamageDiceCount=count).validate()}
     }
     @Test fun storedMagicSpendsOnMissWithoutAnotherSlot() {
         val s=charged(); assertEquals(1,s.slots[2]); val p=Engine.plan(s,"shot",Ability.SPELL,listOf("payload")); val n=Engine.commit(s,p)
