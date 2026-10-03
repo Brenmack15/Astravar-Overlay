@@ -41,7 +41,7 @@ abstract class AstravarDb: RoomDatabase() {
 class Repository(private val db: AstravarDb,scope: CoroutineScope) {
     private val dao=db.dao()
     val error=MutableStateFlow<String?>(null)
-    val state=dao.observe().map { it?.let(BackupCodec::decodeCampaignSnapshot) ?: Campaign() }
+    val state=dao.observe().map { row -> row?.let { BackupCodec.decodeCampaignSnapshot(it.body) } ?: Campaign() }
         .catch { error.value="Cannot read saved campaign. Data has been preserved: ${it.message}" }.stateIn(scope,SharingStarted.Eagerly,null)
     val history=dao.observeEvents().map { rows -> rows.map { BackupCodec.decodeHistoryEntry(it.body) } }
         .catch { error.value="Cannot read history: ${it.message}" }.stateIn(scope,SharingStarted.Eagerly,emptyList())
