@@ -1,8 +1,8 @@
 package com.yazsras.astravar.rules
 
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.json.Json
+import kotlinx.serialization.decodeFromJsonElement
+import kotlinx.serialization.json.*
 
 object BackupCodec {
     const val MAX_BYTES=8*1024*1024
@@ -12,7 +12,7 @@ object BackupCodec {
         require(text.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "Backup exceeds 8 MiB" }
         var depth=0; var quoted=false; var escaped=false
         text.forEach { c -> if(escaped) escaped=false else if(c=='\\' && quoted) escaped=true else if(c=='\"') quoted=!quoted else if(!quoted) { if(c=='{' || c=='[') { depth++; require(depth <= 64) { "JSON nesting too deep" } }; if(c=='}' || c==']') depth-- } }
-        val b=json.decodeFromString<Backup>(text)
+        val b=json.decodeFromJsonElement<Backup>(migrateBackup(json.parseToJsonElement(text)))
         require(b.format=="astravar-backup" && b.schema==1) { "Unsupported backup format/version" }
         validate(b.campaign)
         require(b.history.map { it.id }.distinct().size==b.history.size) { "Duplicate history IDs" }
@@ -20,6 +20,75 @@ object BackupCodec {
         require(b.archives.map { it.id }.distinct().size==b.archives.size)
         b.archives.forEach { archive -> require(archive.id.length in 1..100 && archive.history.map {it.id}.distinct().size==archive.history.size);archive.history.forEach {validate(it.before);validate(it.after)} }
         return b
+    }
+    /** Campaign profiles default to canonical 2d10; individual pending shot snapshots retain v1.1's 1d10. */
+    fun decodeCampaignSnapshot(text: String): Campaign =
+        json.decodeFromJsonElement<Campaign>(migrateCampaign(json.parseToJsonElement(text))).also(::validate)
+
+    fun decodeHistoryEntry(text: String): HistoryEntry =
+        json.decodeFromJsonElement<HistoryEntry>(migrateHistoryEntry(json.parseToJsonElement(text)))
+
+    fun decodeHistoryArchive(text: String): HistoryArchive =
+        json.decodeFromJsonElement<HistoryArchive>(migrateHistoryArchive(json.parseToJsonElement(text)))
+
+    private fun migrateBackup(element: JsonElement): JsonElement {
+        val root=element as? JsonObject ?: return element
+        val fields=root.toMutableMap()
+        fields["campaign"]?.let { fields["campaign"]=migrateCampaign(it) }
+        fields["history"]?.let { value ->
+            if(value is JsonArray) fields["history"]=JsonArray(value.map(::migrateHistoryEntry))
+        }
+        fields["archives"]?.let { value ->
+            if(value is JsonArray) fields["archives"]=JsonArray(value.map(::migrateHistoryArchive))
+        }
+        return JsonObject(fields)
+    }
+
+    private fun migrateHistoryArchive(element: JsonElement): JsonElement {
+        val archive=element as? JsonObject ?: return element
+        val fields=archive.toMutableMap()
+        fields["history"]?.let { value ->
+            if(value is JsonArray) fields["history"]=JsonArray(value.map(::migrateHistoryEntry))
+        }
+        return JsonObject(fields)
+    }
+
+    private fun migrateHistoryEntry(element: JsonElement): JsonElement {
+        val entry=element as? JsonObject ?: return element
+        val fields=entry.toMutableMap()
+        fields["before"]?.let { fields["before"]=migrateCampaign(it) }
+        fields["after"]?.let { fields["after"]=migrateCampaign(it) }
+        return JsonObject(fields)
+    }
+
+    private fun migrateCampaign(element: JsonElement): JsonElement {
+        val campaign=element as? JsonObject ?: return element
+        val fields=campaign.toMutableMap()
+        fields["profile"]?.let { fields["profile"]=withBaseCount(it,2) }
+        fields["pending"]?.let { value ->
+            if(value is JsonArray) fields["pending"]=JsonArray(value.map(::migratePendingShot))
+        }
+        return JsonObject(fields)
+    }
+
+    private fun migratePendingShot(element: JsonElement): JsonElement {
+        val shot=element as? JsonObject ?: return element
+        val fields=shot.toMutableMap()
+        fields["plan"]?.let { planElement ->
+            val plan=planElement as? JsonObject
+            if(plan!=null) {
+                val planFields=plan.toMutableMap()
+                planFields["profile"]?.let { planFields["profile"]=withBaseCount(it,1) }
+                fields["plan"]=JsonObject(planFields)
+            }
+        }
+        return JsonObject(fields)
+    }
+
+    private fun withBaseCount(element: JsonElement,defaultCount: Int): JsonElement {
+        val profile=element as? JsonObject ?: return element
+        return if("baseDamageDiceCount" in profile) profile
+        else JsonObject(profile + ("baseDamageDiceCount" to JsonPrimitive(defaultCount)))
     }
     fun validate(s: Campaign) {
         require(s.schema==1 && s.revision>=0 && s.gameSeconds in 0..315360000000L)

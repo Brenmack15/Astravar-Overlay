@@ -1,6 +1,6 @@
 # Astravar Overlay
 
-**Version 1.1.0 candidate: automatic dice and a simplified combat interface.** See the test report for executed checks and device coverage. No physical Galaxy S26 or D&D Beyond verification is claimed.
+**Version 1.2.0: configurable base weapon damage dice.** Astravar's current base direct damage is 2d10 + INT + Arcane Calibration Force; the Rules & upgrades screen lets the owner choose 1d10–4d10. See the test report for executed checks and device coverage. No physical Galaxy S26 or D&D Beyond verification is claimed.
 
 Native, offline Android companion for the custom Astravar arcane pistol. Kotlin + Jetpack Compose, a shared JVM rules engine, transactional Room storage, DataStore preferences, and a genuine `TYPE_APPLICATION_OVERLAY` foreground service. This is not a website or D&D Beyond integration.
 

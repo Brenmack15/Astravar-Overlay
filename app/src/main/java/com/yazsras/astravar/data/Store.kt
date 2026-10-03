@@ -10,7 +10,6 @@ import com.yazsras.astravar.rules.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.decodeFromString
 import java.util.UUID
 
 @Entity(tableName="campaign") data class StateRow(@PrimaryKey val id: Int = 1, val body: String)
@@ -42,12 +41,12 @@ abstract class AstravarDb: RoomDatabase() {
 class Repository(private val db: AstravarDb,scope: CoroutineScope) {
     private val dao=db.dao()
     val error=MutableStateFlow<String?>(null)
-    val state=dao.observe().map { it?.let { BackupCodec.json.decodeFromString<Campaign>(it.body).also(BackupCodec::validate) } ?: Campaign() }
+    val state=dao.observe().map { it?.let(BackupCodec::decodeCampaignSnapshot) ?: Campaign() }
         .catch { error.value="Cannot read saved campaign. Data has been preserved: ${it.message}" }.stateIn(scope,SharingStarted.Eagerly,null)
-    val history=dao.observeEvents().map { rows -> rows.map { BackupCodec.json.decodeFromString<HistoryEntry>(it.body) } }
+    val history=dao.observeEvents().map { rows -> rows.map { BackupCodec.decodeHistoryEntry(it.body) } }
         .catch { error.value="Cannot read history: ${it.message}" }.stateIn(scope,SharingStarted.Eagerly,emptyList())
     suspend fun mutate(id: String=UUID.randomUUID().toString(),label: String,origin: String="main",change: (Campaign)->Campaign): Campaign = db.withTransaction {
-        val before=dao.state()?.let { BackupCodec.json.decodeFromString<Campaign>(it.body) } ?: Campaign()
+        val before=dao.state()?.let { BackupCodec.decodeCampaignSnapshot(it.body) } ?: Campaign()
         if(dao.event(id)!=null) return@withTransaction before
         val changed=change(before)
         val after=changed.copy(revision=maxOf(before.revision,changed.revision)+1)
@@ -62,14 +61,14 @@ class Repository(private val db: AstravarDb,scope: CoroutineScope) {
     suspend fun rollPending(id: String,options: RollOptions,origin: String) = mutate("roll-$id","Rolled committed shot; no additional expenditure",origin) { DiceRoller.rollPending(it,id,options) }
     suspend fun undo()=db.withTransaction {
         val rows=dao.events()
-        val pair=rows.asReversed().map {it to BackupCodec.json.decodeFromString<HistoryEntry>(it.body)}.firstOrNull {(_,e)->!e.undone && e.origin!="correction"} ?: error("No remaining operation to undo")
+        val pair=rows.asReversed().map {it to BackupCodec.decodeHistoryEntry(it.body)}.firstOrNull {(_,e)->!e.undone && e.origin!="correction"} ?: error("No remaining operation to undo")
         val (row,e)=pair
         dao.updateEvent(row.copy(body=BackupCodec.json.encodeToString(e.copy(undone=true))))
         mutate(label="Undo/correction of ${e.id}: ${e.label}",origin="correction") { e.before }
     }
     suspend fun export(): String = db.withTransaction {
-        val s=dao.state()?.let { BackupCodec.json.decodeFromString<Campaign>(it.body) } ?: Campaign()
-        BackupCodec.encode(Backup(campaign=s,history=dao.events().map { BackupCodec.json.decodeFromString<HistoryEntry>(it.body) },archives=dao.archives().map {BackupCodec.json.decodeFromString<HistoryArchive>(it.body)}))
+        val s=dao.state()?.let { BackupCodec.decodeCampaignSnapshot(it.body) } ?: Campaign()
+        BackupCodec.encode(Backup(campaign=s,history=dao.events().map { BackupCodec.decodeHistoryEntry(it.body) },archives=dao.archives().map {BackupCodec.decodeHistoryArchive(it.body)}))
     }
     suspend fun import(text: String,operationId: String) {
         val incoming=BackupCodec.decode(text)

@@ -5,14 +5,14 @@ Source: the supplied ASTRAVAR_ANDROID_MASTER_PROMPT, read in full before impleme
 ## Accepted
 
 - Zerg must be attuned and a usable core installed. Starter character configuration is Artificer 5, INT +4, proficiency +3, save DC 15. Those values do not establish current resources.
-- Base attack: INT + proficiency + enabled calibration. Base damage: 1d10 + INT + calibration Force. Range 60/180 ft, with ordinary long-range disadvantage. No physical bullet consumption. Neutral Force has no selector d8.
+- Base attack: INT + proficiency + enabled calibration. Base direct damage is `N` d10 + INT + calibration Force; `N` is the persisted Base Damage Dice Count (currently 2, selectable 1–4 in Rules & upgrades). The flat modifier applies once. Range 60/180 ft, with ordinary long-range disadvantage. No physical bullet consumption. Neutral Force has no selector d8.
 - Acid, Cold, Fire, Lightning, Poison, Thunder: +1d8 of the selected type. Selector changes are free, including between the two attacks of level-5 Extra Attack. Extra Attack is two ordinary attacks within one Attack action.
 - Advanced elements unlock at 8; confirmed Dual Resonance at 10 permits two basic selector elements. Calibration applies once to base Force damage, never to blasts, spell overcharge, selector dice, or save DC.
 - Discharge always costs one Action: 60 ft range, 15 ft radius, base 8d10 Force at level 5; core exhausted for 600 game seconds. An intact-core swap does not recover the removed core.
 - Shatter always costs one Action: 120 ft range, **60 ft radius**, base 24d10 Force at level 5; core and ALL remaining payloads permanently destroyed. Only explicitly selected payloads contribute damage.
 - Emergency scaling by Artificer spell progression: level 5–8 = 8/24d10; 9–12 = 10/30d10; 13–16 = 12/36d10; 17–20 = 14/42d10. Remaining slots and loaded scroll levels do not change this. Explicit override is available.
 - A successful Dexterity save halves the single rolled Force total, rounded down, and takes zero optional spell payload/overcharge. Failed saves take full Force plus selected payloads. 43 Force +19 payload means 62 on failure, 21 on success before defenses. No ally exemptions or invented enemy statistics.
-- Direct impact is optional: a pistol attack adds base weapon Force damage once, while the target still saves against the blast. An impact miss does not cancel the explosion or scatter it. An impact critical doubles only its base d10. Separate direct and blast damage packets round defenses independently.
+- Direct impact is optional: a pistol attack adds base weapon Force damage once, while the target still saves against the blast. An impact miss does not cancel the explosion or scatter it. An impact critical doubles the configured base weapon dice, applying the flat modifier once. The blast's independent progression is unchanged. Separate direct and blast damage packets round defenses independently.
 - Stored payloads persist through rests, time, removal, restart, and updates until used, purged, overwritten, or destroyed. Loading snapshots actual spell/slot or documented scroll level, typed eligible damage, approval notes, source, core, and game time.
 - Charge, purge, and overwrite use a Bonus Action. Charge requires confirmation of touch/availability; a slot OR a recorded scroll is consumed, never both. Overwrite selects the old payload explicitly; no refunds. Immediate slot imbuing is part of firing. Scrolls use the Bonus Action charge route.
 - Only approved instantaneous damage transfers; conditions, ongoing damage, concentration effects, forced movement, summons, original area geometry, and unrelated riders do not. Multi-instance totals and unusual scroll eligibility require explicit approval.
@@ -22,7 +22,7 @@ Source: the supplied ASTRAVAR_ANDROID_MASTER_PROMPT, read in full before impleme
 
 ## Provisional and editable
 
-- Spell-Imbued Shot: base Force + eligible approved spell damage +1d8 per actual slot/scroll level. Replaces ALL free selector dice, including Dual Resonance dice. Direct attack critical doubles the base, spell, and overcharge dice, never flat bonuses.
+- Spell-Imbued Shot: configured `N`d10 base Force + eligible approved spell damage +1d8 per actual slot/scroll level. Replaces ALL free selector dice, including Dual Resonance dice. Direct attack critical doubles the base, spell, and overcharge dice, never flat bonuses.
 - One stored payload through 11; two after confirmed level-12 Dual Storage. Level 10 does not grant two spell slots. Release selection is explicit; unselected payloads survive ordinary shots and Discharge.
 - One spell-powered firing per tracked turn initially. This implementation counts a blast that adds spell energy toward this provisional limit as well. Capacity, release limit, and spell firings per turn are editable; the UI labels the policy provisional.
 - Upgrade eligibility is separate from player confirmation that an upgrade has been earned/installed. Milestone confirmations default off. Level gates still apply.
@@ -30,7 +30,7 @@ Source: the supplied ASTRAVAR_ANDROID_MASTER_PROMPT, read in full before impleme
 
 ## Assumptions / proposals
 
-- +1 Arcane Calibration is enabled in the starter profile as an editable assumption: +8 attack, 1d10+5 Force. Proposed +2 at 10 / +3 at 15 is disabled initially.
+- +1 Arcane Calibration is enabled in the starter profile as an editable assumption: +8 attack, currently 2d10+5 Force. Base Damage Dice Count can be changed in Rules & upgrades; proposed +2 at 10 / +3 at 15 calibration is disabled initially.
 - Four/five simultaneous elements or payloads at level 20 is an unresolved direction. No such campaign cap is invented. Capacity/release override controls allow explicit table choices (technical input range 1–12).
 - Level-20 synthetic manufacturing removes the natural crystal requirement only after confirmation. Cost/time remain unknown until explicitly entered; it is not free or instant.
 - Direct pistol impacts beyond its 60 ft normal range show disadvantage, with the emergency ability's own absolute range limit (Discharge 60, Shatter 120). This targeting interpretation is documented, not an extension to 180 ft.

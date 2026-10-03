@@ -9,61 +9,61 @@ class DiceRollerTest {
         val queue=ArrayDeque(values.toList())
         return {sides->check(queue.isNotEmpty()) {"Unexpected extra d$sides"};queue.removeFirst().also {check(it in 1..sides)}}
     }
-    private fun plan(ability: Ability=Ability.ARCANE)=Engine.plan(seed(),"shot",ability,elements=if(ability==Ability.ELEMENTAL) listOf(DamageType.FIRE) else emptyList())
+    private fun plan(ability: Ability=Ability.ARCANE,profile: Profile=Profile())=Engine.plan(seed(profile),"shot",ability,elements=if(ability==Ability.ELEMENTAL) listOf(DamageType.FIRE) else emptyList())
     @Test fun standardAttackPreservesEveryFaceModifierTypeAndTotal() {
-        val p=plan();val r=DiceRoller.roll(p,die=dice(14,7),atMillis=1234)
+        val p=plan();val r=DiceRoller.roll(p,die=dice(14,7,4),atMillis=1234)
         assertEquals(listOf(14),r.attackFaces);assertEquals(14,r.natural);assertEquals(22,r.attackTotal)
-        assertEquals(listOf(7),r.damage.getValue("direct").faces);assertEquals(5,r.damage.getValue("direct").flat);assertEquals(12,r.damage.getValue("direct").total)
+        assertEquals(listOf(7,4),r.damage.getValue("direct").faces);assertEquals(5,r.damage.getValue("direct").flat);assertEquals(16,r.damage.getValue("direct").total)
         assertEquals(DamageType.FORCE,Engine.components(p).single().damage.type)
-        assertEquals("7 + 5 = 12",r.damage.getValue("direct").detail());assertEquals(1234L,r.rolledAtMillis)
+        assertEquals("7 + 4 + 5 = 16",r.damage.getValue("direct").detail());assertEquals(1234L,r.rolledAtMillis)
         assertEquals(Outcome.UNCONFIRMED,DiceRoller.resolution(p,r).outcome)
     }
     @Test fun naturalTwentyDoublesDiceAndAddsFlatOnce() {
-        val p=plan();val r=DiceRoller.roll(p,die=dice(20,7,4))
+        val p=plan();val r=DiceRoller.roll(p,die=dice(20,7,4,3,2))
         assertEquals(20,r.natural);assertTrue(r.critical);assertEquals(Outcome.CRITICAL,r.suggestedOutcome)
-        assertEquals(listOf(7,4),r.damage.getValue("direct").faces);assertEquals(16,r.damage.getValue("direct").total)
+        assertEquals(listOf(7,4,3,2),r.damage.getValue("direct").faces);assertEquals(21,r.damage.getValue("direct").total)
         assertEquals(28,r.attackTotal)
     }
     @Test fun naturalOneMissesDespiteModifierAndArmorClass() {
-        val p=plan();val r=DiceRoller.roll(p,RollOptions(armorClass=1),dice(1,10))
+        val p=plan();val r=DiceRoller.roll(p,RollOptions(armorClass=1),dice(1,10,10))
         assertEquals(1,r.natural);assertEquals(9,r.attackTotal);assertEquals(Outcome.MISS,r.suggestedOutcome)
-        assertEquals(15,r.damage.getValue("direct").total)
+        assertEquals(25,r.damage.getValue("direct").total)
         assertTrue(DiceRoller.resolution(p,r).rolls.isEmpty())
         assertEquals(0,Engine.damage(p,DiceRoller.resolution(p,r)).values.sum())
     }
     @Test fun advantageKeepsBothDiceAndUsesHigherOnce() {
-        val r=DiceRoller.roll(plan(),RollOptions(advantage=true),dice(17,6,4))
+        val r=DiceRoller.roll(plan(),RollOptions(advantage=true),dice(17,6,4,3))
         assertEquals(listOf(17,6),r.attackFaces);assertEquals(17,r.natural);assertEquals(25,r.attackTotal)
     }
     @Test fun disadvantageKeepsBothDiceAndUsesLowerOnce() {
-        val r=DiceRoller.roll(plan(),RollOptions(disadvantage=true),dice(17,6,4))
+        val r=DiceRoller.roll(plan(),RollOptions(disadvantage=true),dice(17,6,4,3))
         assertEquals(listOf(17,6),r.attackFaces);assertEquals(6,r.natural);assertEquals(14,r.attackTotal)
     }
     @Test fun unselectedNaturalTwentyIsNotCritical() {
-        val r=DiceRoller.roll(plan(),RollOptions(disadvantage=true),dice(20,6,4))
-        assertFalse(r.critical);assertEquals(1,r.damage.getValue("direct").faces.size)
+        val r=DiceRoller.roll(plan(),RollOptions(disadvantage=true),dice(20,6,4,3,2))
+        assertFalse(r.critical);assertEquals(2,r.damage.getValue("direct").faces.size)
     }
     @Test fun unselectedNaturalOneDoesNotOverrideAdvantage() {
-        val r=DiceRoller.roll(plan(),RollOptions(advantage=true,armorClass=20),dice(1,17,4))
+        val r=DiceRoller.roll(plan(),RollOptions(advantage=true,armorClass=20),dice(1,17,4,3,2))
         assertEquals(Outcome.HIT,r.suggestedOutcome);assertEquals(17,r.natural)
     }
     @Test fun longRangeAddsDisadvantageAndCancelsAdvantage() {
         val p=Engine.plan(seed(),"long",Ability.ARCANE,distance=90)
-        val normal=DiceRoller.roll(p,die=dice(18,3,5));assertEquals(RollMode.DISADVANTAGE,normal.mode);assertEquals(11,normal.attackTotal)
-        val cancelled=DiceRoller.roll(p,RollOptions(advantage=true),dice(12,5));assertEquals(RollMode.NORMAL,cancelled.mode);assertEquals(listOf(12),cancelled.attackFaces)
+        val normal=DiceRoller.roll(p,die=dice(18,3,5,2));assertEquals(RollMode.DISADVANTAGE,normal.mode);assertEquals(11,normal.attackTotal)
+        val cancelled=DiceRoller.roll(p,RollOptions(advantage=true),dice(12,5,6));assertEquals(RollMode.NORMAL,cancelled.mode);assertEquals(listOf(12),cancelled.attackFaces)
     }
     @Test fun suppliedAdvantageAndDisadvantageCancel() {
-        val r=DiceRoller.roll(plan(),RollOptions(true,true),dice(10,5));assertEquals(RollMode.NORMAL,r.mode)
+        val r=DiceRoller.roll(plan(),RollOptions(true,true),dice(10,5,4,3));assertEquals(RollMode.NORMAL,r.mode)
     }
     @Test fun acDeterminesHitAndMissWithoutChangingDice() {
-        assertEquals(Outcome.HIT,DiceRoller.roll(plan(),RollOptions(armorClass=22),dice(14,7)).suggestedOutcome)
-        assertEquals(Outcome.MISS,DiceRoller.roll(plan(),RollOptions(armorClass=23),dice(14,7)).suggestedOutcome)
-        assertNull(DiceRoller.roll(plan(),die=dice(14,7)).suggestedOutcome)
+        assertEquals(Outcome.HIT,DiceRoller.roll(plan(),RollOptions(armorClass=22),dice(14,7,4)).suggestedOutcome)
+        assertEquals(Outcome.MISS,DiceRoller.roll(plan(),RollOptions(armorClass=23),dice(14,7,4)).suggestedOutcome)
+        assertNull(DiceRoller.roll(plan(),die=dice(14,7,4)).suggestedOutcome)
     }
     @Test fun elementalDamageStaysTypedAndCalibrationIsAppliedOnce() {
-        val p=plan(Ability.ELEMENTAL);val r=DiceRoller.roll(p,die=dice(16,7,4))
+        val p=plan(Ability.ELEMENTAL);val r=DiceRoller.roll(p,die=dice(16,7,4,4))
         val totals=Engine.damage(p,DiceRoller.resolution(p,r))
-        assertEquals(mapOf(DamageType.FORCE to 12,DamageType.FIRE to 4),totals);assertEquals(16,totals.values.sum())
+        assertEquals(mapOf(DamageType.FORCE to 16,DamageType.FIRE to 4),totals);assertEquals(20,totals.values.sum())
         assertEquals(0,r.damage.getValue("element0").flat)
     }
     @Test fun criticalSpellDoublesEligibleDiceOnlyAndConsumesStoredPayloadOnce() {
@@ -74,7 +74,7 @@ class DiceRollerTest {
         val after=DiceRoller.fire(initial,p,die={if(it==20) 20 else 1})
         assertEquals(1,after.slots[2]);assertTrue(after.core("core").payloads.isEmpty())
         val r=after.pending.single().rolled!!
-        assertEquals(2,r.damage.getValue("direct").faces.size);assertEquals(6,r.damage.getValue("payload0_0").faces.size);assertEquals(4,r.damage.getValue("overcharge0").faces.size)
+        assertEquals(4,r.damage.getValue("direct").faces.size);assertEquals(6,r.damage.getValue("payload0_0").faces.size);assertEquals(4,r.damage.getValue("overcharge0").faces.size)
         assertEquals(5,r.damage.getValue("direct").flat);assertEquals(2,r.damage.getValue("payload0_0").flat)
         try {DiceRoller.fire(after,p);fail("duplicate shot accepted")} catch(_:IllegalArgumentException) {}
     }
@@ -91,7 +91,7 @@ class DiceRollerTest {
     @Test fun directImpactCriticalDoesNotDoubleTheBlast() {
         val p=Engine.plan(seed(),"blast",Ability.SHATTER,direct=true,point="Gate")
         val r=DiceRoller.roll(p,die={if(it==20) 20 else 1})
-        assertEquals(2,r.damage.getValue("direct").faces.size);assertEquals(24,r.damage.getValue("blast").faces.size)
+        assertEquals(4,r.damage.getValue("direct").faces.size);assertEquals(24,r.damage.getValue("blast").faces.size)
         assertEquals(5,r.damage.getValue("direct").flat);assertEquals(0,r.damage.getValue("blast").flat)
     }
     @Test fun unknownAcAllowsAnotherAttackWithoutManualEntry() {
@@ -100,7 +100,7 @@ class DiceRollerTest {
         assertEquals(2,s.pending.size);assertTrue(s.pending.all {it.result?.outcome==Outcome.UNCONFIRMED})
     }
     @Test fun backupRoundTripKeepsDiceCorePayloadTimeAndMode() {
-        val s=DiceRoller.fire(seed(),plan(),RollOptions(advantage=true),dice(17,6,4))
+        val s=DiceRoller.fire(seed(),plan(),RollOptions(advantage=true),dice(17,6,4,3))
         val restored=BackupCodec.decode(BackupCodec.encode(Backup(campaign=s))).campaign
         assertEquals(s,restored);val roll=restored.pending.single().rolled!!
         assertEquals("Core One",roll.coreName);assertTrue(roll.rolledAtMillis>0);assertEquals(RollMode.ADVANTAGE,roll.mode)
@@ -112,8 +112,44 @@ class DiceRollerTest {
         val json=BackupCodec.encode(Backup(campaign=saved)).replace(",\"rolled\":null","")
         assertNull(BackupCodec.decode(json).campaign.pending.single().rolled)
     }
+    @Test fun supportedCountsRollIndependentBaseD10sAndApplyFlatModifierOnce() {
+        val cases=listOf(1 to listOf(7),2 to listOf(7,4),3 to listOf(7,4,9),4 to listOf(7,4,9,2))
+        for((count,faces) in cases) {
+            val requested=mutableListOf<Int>()
+            val values=ArrayDeque((listOf(14)+faces).toList())
+            val p=plan(profile=Profile(baseDamageDiceCount=count))
+            val r=DiceRoller.roll(p,die={sides->requested+=sides;values.removeFirst()})
+            assertEquals(count,requested.count {it==10})
+            assertEquals(faces,r.damage.getValue("direct").faces)
+            assertEquals(5,r.damage.getValue("direct").flat)
+            assertEquals(faces.sum()+5,r.damage.getValue("direct").total)
+            assertEquals(DamageType.FORCE,Engine.components(p).single().damage.type)
+        }
+        assertEquals(16,7+4+5)
+        assertEquals(25,7+4+9+5)
+        assertEquals(27,7+4+9+2+5)
+    }
+    @Test fun criticalRollsTwiceTheConfiguredBaseDiceWithFlatOnce() {
+        for(count in 1..4) {
+            val requested=mutableListOf<Int>()
+            val p=plan(profile=Profile(baseDamageDiceCount=count))
+            val r=DiceRoller.roll(p,die={sides->requested+=sides;if(sides==20) 20 else 1})
+            assertTrue(r.critical)
+            assertEquals(count*2,requested.count {it==10})
+            assertEquals(List(count*2) {1},r.damage.getValue("direct").faces)
+            assertEquals(5,r.damage.getValue("direct").flat)
+            assertEquals(count*2+5,r.damage.getValue("direct").total)
+        }
+    }
+    @Test fun impactCriticalKeepsShatterBlastIndependentOfBaseDamageUpgrade() {
+        val p=Engine.plan(seed(Profile(baseDamageDiceCount=4)),"impact-4",Ability.SHATTER,direct=true,point="Gate")
+        val r=DiceRoller.roll(p,die={if(it==20) 20 else 1})
+        assertEquals(8,r.damage.getValue("direct").faces.size)
+        assertEquals(24,r.damage.getValue("blast").faces.size)
+        assertEquals(5,r.damage.getValue("direct").flat)
+    }
     @Test fun invalidRecordedDiceAreRejectedWithoutInventingAReplacement() {
-        val p=plan();val r=DiceRoller.roll(p,die=dice(14,7))
+        val p=plan();val r=DiceRoller.roll(p,die=dice(14,7,4))
         try {DiceRoller.validate(p,r.copy(attackFaces=listOf(21)));fail("invalid face accepted")} catch(_:IllegalArgumentException) {}
         try {DiceRoller.roll(p,die={0});fail("invalid random source accepted")} catch(_:IllegalArgumentException) {}
     }

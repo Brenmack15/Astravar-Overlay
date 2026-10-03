@@ -7,6 +7,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.rules.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import kotlinx.serialization.json.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -19,6 +20,11 @@ class RepositoryTest {
     private val context get()=ApplicationProvider.getApplicationContext<Context>()
     private val template=Template("cold","TEST energy",2,2,listOf(TypedDice(Dice(3,6),DamageType.COLD)),DamageType.COLD,true,"Test fixture only")
     private fun seed()=Campaign(onboarded=true,demo=true,attuned=true,installedId="core",cores=listOf(Core("core","Test core")),slots=mapOf(2 to 2))
+    private fun withoutBaseCount(element: JsonElement): JsonElement = when(element) {
+        is JsonObject -> JsonObject(element.filterKeys {it!="baseDamageDiceCount"}.mapValues {withoutBaseCount(it.value)})
+        is JsonArray -> JsonArray(element.map(::withoutBaseCount))
+        else -> element
+    }
     @Test fun concurrentCommitsConsumeExactlyOnce()= runBlocking {
         val db=Room.inMemoryDatabaseBuilder(context,AstravarDb::class.java).build()
         val scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);val r=Repository(db,scope)
@@ -105,6 +111,43 @@ class RepositoryTest {
         assertEquals(before,BackupCodec.decode(repo.export()))
         repo.fire(plan,RollOptions(disadvantage=true),"main")
         assertEquals(before,BackupCodec.decode(repo.export()))
+        scope.cancel();db.close()
+    }
+    @Test fun baseDamageUpgradeSurvivesRestartAndIsSharedByMainAndOverlayRepositories()=runBlocking {
+        context.deleteDatabase("base-damage-reopen.db")
+        fun open()=Room.databaseBuilder(context,AstravarDb::class.java,"base-damage-reopen.db").addMigrations(AstravarDb.MIGRATION_1_2).build()
+        var db=open();var scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);var main=Repository(db,scope)
+        val initial=main.mutate(label="Seed base damage profile") {seed().copy(notes="preserve this note")}
+        assertEquals(2,initial.profile.baseDamageDiceCount)
+        val n3=main.mutate(label="Select 3d10") {it.copy(profile=it.profile.copy(version=it.profile.version+1,baseDamageDiceCount=3))}
+        val overlay=Repository(db,scope)
+        assertEquals(3,overlay.state.first {it?.profile?.baseDamageDiceCount==3}!!.profile.baseDamageDiceCount)
+        scope.cancel();db.close()
+
+        db=open();scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);main=Repository(db,scope)
+        var restored=main.state.first {it?.profile?.baseDamageDiceCount==3}!!
+        assertEquals("preserve this note",restored.notes);assertEquals(3,restored.profile.baseDamageDiceCount)
+        val n4=main.mutate(label="Select 4d10") {it.copy(profile=it.profile.copy(version=it.profile.version+1,baseDamageDiceCount=4))}
+        assertEquals(4,n4.profile.baseDamageDiceCount)
+        scope.cancel();db.close()
+
+        db=open();scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);main=Repository(db,scope)
+        restored=main.state.first {it?.profile?.baseDamageDiceCount==4}!!
+        assertEquals(4,restored.profile.baseDamageDiceCount)
+        val current=BackupCodec.decode(main.export()).campaign
+        val plan=Engine.plan(current,"new-4d10-shot",Ability.ARCANE)
+        assertEquals(Dice(4,10,5),Engine.components(plan).single().damage.dice)
+        scope.cancel();db.close()
+    }
+    @Test fun oldStoredCampaignWithoutBaseCountDefaultsToTwoAndKeepsCampaignState()=runBlocking {
+        val old=seed().copy(profile=Profile(baseDamageDiceCount=1),notes="existing note",gameSeconds=180,attuned=true)
+        val oldJson=withoutBaseCount(BackupCodec.json.parseToJsonElement(BackupCodec.json.encodeToString(Campaign.serializer(),old))).toString()
+        val db=Room.inMemoryDatabaseBuilder(context,AstravarDb::class.java).build()
+        db.dao().put(StateRow(body=oldJson))
+        val scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);val repo=Repository(db,scope)
+        val migrated=repo.state.first {it?.profile?.baseDamageDiceCount==2}!!
+        assertEquals("existing note",migrated.notes);assertEquals(180L,migrated.gameSeconds)
+        assertEquals(old.cores,migrated.cores);assertTrue(migrated.attuned);assertTrue(migrated.demo)
         scope.cancel();db.close()
     }
     @Test fun targetAndFeedbackPreferencesAreSharedAndDurable()=runBlocking {
