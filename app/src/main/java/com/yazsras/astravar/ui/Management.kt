@@ -42,11 +42,15 @@ import java.util.UUID
             Text("ASSUMPTION: starter +1 calibration. PROPOSED, disabled by default: +2 at 10 / +3 at 15. Four/five payloads at level 20 are not finalized.")
         }
         Section("Weapon → Upgrades") {
-            BaseDamageUpgrade(p,enabled=!a.busy) { count ->
+            WeaponDamageUpgrades(p,enabled=!a.busy,onBaseCountSelected={ count ->
                 if(count!=p.baseDamageDiceCount) a.change("Base weapon damage set to ${count}d10") {
                     it.copy(profile=it.profile.copy(version=it.profile.version+1,baseDamageDiceCount=count))
                 }
-            }
+            },onSelectorCountSelected={ count ->
+                if(count!=p.elementalSelectorDiceCount) a.change("Elemental selector damage set to ${count}d8") {
+                    it.copy(profile=it.profile.copy(version=it.profile.version+1,elementalSelectorDiceCount=count))
+                }
+            })
         }
         Section("Edit next profile version") {
             Field("Artificer level",level,{level=it}); Field("INT modifier",intelligence,{intelligence=it}); Field("Proficiency bonus",proficiency,{proficiency=it}); Field("Spell save DC (independent)",dc,{dc=it})

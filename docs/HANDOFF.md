@@ -1,8 +1,8 @@
-# Astravar 1.3.0 handoff
+# Astravar 1.4.0 handoff
 
-This release adds a discrete base weapon damage slider (1d10–10d10, default 2d10) and weapon-based emergency scaling to the existing automatic combat flow. Historical shot snapshots retain their actual dice; campaign state, audit journal, resources, backups and owner signing identity are preserved.
+This release adds an independent elemental selector slider (1d8–10d8, canonical/default 2d8) alongside the existing base weapon slider. It preserves the configured Force count and weapon-based emergency scaling. Ordinary elemental and Dual Resonance components use the new count; spell shots, Direct Impact and blasts do not receive free selector dice. Historical shot snapshots retain their actual dice; campaign state, audit journal, resources, backups and owner signing identity are preserved.
 
-Use the accompanying signed APK for phone installation. It is package `com.yazsras.astravar`, version 1.3.0, version code 5, and is intended to install over the existing owner-signed version. The `.debug` package and controlled target APKs are for testing and are not the delivered release.
+Use the accompanying signed APK for phone installation. It is package `com.yazsras.astravar`, version 1.4.0, version code 6, and is intended to install over the existing owner-signed version. The `.debug` package and controlled target APKs are for testing and are not the delivered release.
 
 Authoritative automated results, provenance, hashes and remaining coverage boundaries are in [TEST_REPORT.md](TEST_REPORT.md). [ANDROID_INSTALL.md](ANDROID_INSTALL.md) describes the phone flow; [BUILD_AND_SIGNING.md](BUILD_AND_SIGNING.md) documents bounded builds and private signing. No owner key is present in this repository or in public CI artifacts.
 

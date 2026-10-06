@@ -21,7 +21,7 @@ object BackupCodec {
         b.archives.forEach { archive -> require(archive.id.length in 1..100 && archive.history.map {it.id}.distinct().size==archive.history.size);archive.history.forEach {validate(it.before);validate(it.after)} }
         return b
     }
-    /** Campaigns default to 2d10; old shots retain their original direct and emergency expressions. */
+    /** Current profiles default to 2d10/2d8; old shots retain their original damage expressions. */
     fun decodeCampaignSnapshot(text: String): Campaign =
         json.decodeFromJsonElement<Campaign>(migrateCampaign(json.parseToJsonElement(text))).also(::validate)
 
@@ -64,7 +64,7 @@ object BackupCodec {
     private fun migrateCampaign(element: JsonElement): JsonElement {
         val campaign=element as? JsonObject ?: return element
         val fields=campaign.toMutableMap()
-        fields["profile"]?.let { fields["profile"]=withBaseCount(it,2) }
+        fields["profile"]?.let { fields["profile"]=withDamageCounts(it,2) }
         fields["pending"]?.let { value ->
             if(value is JsonArray) fields["pending"]=JsonArray(value.map(::migratePendingShot))
         }
@@ -78,7 +78,7 @@ object BackupCodec {
             val plan=planElement as? JsonObject
             if(plan!=null) {
                 val planFields=plan.toMutableMap()
-                planFields["profile"]?.let { planFields["profile"]=withBaseCount(it,1) }
+                planFields["profile"]?.let { planFields["profile"]=withDamageCounts(it,1) }
                 if("blastDiceCount" !in planFields) {
                     // Before v1.3, blasts used only the level tier, even when direct dice were upgraded.
                     val profile=json.decodeFromJsonElement<Profile>(planFields.getValue("profile"))
@@ -95,10 +95,13 @@ object BackupCodec {
         return JsonObject(fields)
     }
 
-    private fun withBaseCount(element: JsonElement,defaultCount: Int): JsonElement {
+    private fun withDamageCounts(element: JsonElement,defaultCount: Int): JsonElement {
         val profile=element as? JsonObject ?: return element
-        return if("baseDamageDiceCount" in profile) profile
-        else JsonObject(profile + ("baseDamageDiceCount" to JsonPrimitive(defaultCount)))
+        // Only missing fields migrate. Explicit upgrades and per-shot snapshots remain intact.
+        val fields=profile.toMutableMap()
+        if("baseDamageDiceCount" !in fields) fields["baseDamageDiceCount"]=JsonPrimitive(defaultCount)
+        if("elementalSelectorDiceCount" !in fields) fields["elementalSelectorDiceCount"]=JsonPrimitive(defaultCount)
+        return JsonObject(fields)
     }
     fun validate(s: Campaign) {
         require(s.schema==1 && s.revision>=0 && s.gameSeconds in 0..315360000000L)

@@ -23,6 +23,7 @@ import kotlinx.serialization.Serializable
     val character: String = "Zerg Hasma", val level: Int = 5, val intelligence: Int = 4,
     val proficiency: Int = 3, val saveDc: Int = 15, val calibration: Int = 1,
     val baseDamageDiceCount: Int = 2,
+    val elementalSelectorDiceCount: Int = 2,
     val calibrationEnabled: Boolean = true, val proposedCalibrationProgression: Boolean = false,
     val confirmed: Set<Upgrade> = emptySet(), val capacityOverride: Int? = null,
     val elementCapacityOverride: Int? = null,
@@ -33,6 +34,7 @@ import kotlinx.serialization.Serializable
     val bonus get() = if (!calibrationEnabled) 0 else if(proposedCalibrationProgression) { if(level >= 15) 3 else if(level >= 10) 2 else calibration } else calibration
     val attack get() = intelligence + proficiency + bonus
     val base get() = Dice(baseDamageDiceCount, 10, intelligence + bonus)
+    val selector get() = Dice(elementalSelectorDiceCount, 8)
     fun has(u: Upgrade) = u in confirmed && level >= when(u) {
         Upgrade.ADVANCED_ELEMENTS -> 8; Upgrade.DUAL_RESONANCE, Upgrade.FAST_SWAP -> 10
         Upgrade.DUAL_STORAGE -> 12; Upgrade.FAST_REPLACEMENT -> fastReplacementLevel
@@ -51,6 +53,7 @@ import kotlinx.serialization.Serializable
         require(name.length in 1..120 && character.length in 1..120 && version > 0)
         require(level in 5..20 && intelligence in -5..10 && proficiency in 0..10 && saveDc in 1..40 && calibration in 0..10)
         require(baseDamageDiceCount in 1..10) { "Base damage dice count must be between 1 and 10" }
+        require(elementalSelectorDiceCount in 1..10) { "Elemental selector dice count must be between 1 and 10" }
         require(capacity in 1..12 && elementCapacity in 1..9 && releaseLimit in 1..capacity && spellShotsPerTurn in 1..20 && highestSpell in 1..9 && fastReplacementLevel in 5..20)
         require(syntheticGp == null || syntheticGp in 0..1000000); require(syntheticDays == null || syntheticDays in 1..10000)
     }

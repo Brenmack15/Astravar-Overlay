@@ -61,9 +61,9 @@ class DiceRollerTest {
         assertNull(DiceRoller.roll(plan(),die=dice(14,7,4)).suggestedOutcome)
     }
     @Test fun elementalDamageStaysTypedAndCalibrationIsAppliedOnce() {
-        val p=plan(Ability.ELEMENTAL);val r=DiceRoller.roll(p,die=dice(16,7,4,4))
+        val p=plan(Ability.ELEMENTAL);val r=DiceRoller.roll(p,die=dice(16,7,4,4,3))
         val totals=Engine.damage(p,DiceRoller.resolution(p,r))
-        assertEquals(mapOf(DamageType.FORCE to 16,DamageType.FIRE to 4),totals);assertEquals(20,totals.values.sum())
+        assertEquals(mapOf(DamageType.FORCE to 16,DamageType.FIRE to 7),totals);assertEquals(23,totals.values.sum())
         assertEquals(0,r.damage.getValue("element0").flat)
     }
     @Test fun criticalSpellDoublesEligibleDiceOnlyAndConsumesStoredPayloadOnce() {

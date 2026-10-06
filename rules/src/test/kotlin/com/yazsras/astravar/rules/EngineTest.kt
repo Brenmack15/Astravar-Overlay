@@ -10,7 +10,7 @@ class EngineTest {
     @Test fun starterCalibrationAndNeutral() { val s=state(); assertEquals(8,s.profile.attack); assertEquals("2d10+5",s.profile.base.toString()); assertEquals(2,Engine.components(Engine.plan(s,"shot",Ability.ARCANE)).single().damage.dice.count) }
     @Test fun coldAndDualAreTyped() {
         val s=state(); val c=Engine.components(Engine.plan(s,"shot",Ability.ELEMENTAL,elements=listOf(DamageType.COLD)))
-        assertEquals(Dice(1,8),c[1].damage.dice); assertEquals(DamageType.COLD,c[1].damage.type)
+        assertEquals(Dice(2,8),c[1].damage.dice); assertEquals(DamageType.COLD,c[1].damage.type)
         val high=state(10); assertEquals(3,Engine.components(Engine.plan(high,"dual",Ability.ELEMENTAL,elements=listOf(DamageType.COLD,DamageType.FIRE))).size)
         assertFails { Engine.plan(s,"illegal",Ability.ELEMENTAL,elements=listOf(DamageType.FIRE,DamageType.COLD)) }
     }
@@ -52,7 +52,7 @@ class EngineTest {
             assertEquals(Dice(count,10,5),Engine.components(normal).single().damage.dice)
             val elemental=Engine.plan(s,"elemental-$count",Ability.ELEMENTAL,elements=listOf(DamageType.FIRE))
             assertEquals(Dice(count,10,5),Engine.components(elemental).first().damage.dice)
-            assertEquals(Dice(1,8),Engine.components(elemental).last().damage.dice)
+            assertEquals(Dice(2,8),Engine.components(elemental).last().damage.dice)
             val spell=Engine.plan(charged(s),"spell-$count",Ability.SPELL,listOf("payload"))
             assertEquals(listOf(Dice(count,10,5),Dice(3,6),Dice(2,8)),Engine.components(spell).map {it.damage.dice})
             assertEquals(listOf(Dice(count*2,10,5),Dice(6,6),Dice(4,8)),Engine.components(spell,true).map {it.damage.dice})

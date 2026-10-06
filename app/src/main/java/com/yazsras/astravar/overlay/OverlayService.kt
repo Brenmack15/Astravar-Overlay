@@ -231,7 +231,7 @@ class OverlayService: Service() {
                 content.addView(button("Back") {panelPage="combat";render()})
             }
             "elements" -> {
-                content.addView(text("Element selector · ${s.profile.elementCapacity} max",18f))
+                content.addView(text("Element selector · ${s.profile.selector} each · ${s.profile.elementCapacity} max",18f))
                 Engine.elements(s.profile).forEach {type->content.addView(button("${if(type in elements) "✓ " else ""}${type.name.lowercase()}") {
                     val next=if(s.profile.elementCapacity==1) listOf(type) else if(type in elements) elements-type else (elements+type).takeLast(s.profile.elementCapacity)
                     panelPage=if(s.profile.elementCapacity==1) "combat" else "elements";saveElements(next)

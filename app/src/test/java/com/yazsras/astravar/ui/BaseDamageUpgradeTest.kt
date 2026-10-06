@@ -20,7 +20,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.LooperMode
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk=[35])
+@Config(sdk=[35],qualifiers="w400dp-h1000dp")
 @LooperMode(LooperMode.Mode.PAUSED)
 class BaseDamageUpgradeTest {
     @get:Rule val compose=createEmptyComposeRule()
@@ -31,10 +31,10 @@ class BaseDamageUpgradeTest {
         val activity=Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { AstravarTheme {
-                BaseDamageUpgrade(profile.value) { count ->
+                WeaponDamageUpgrades(profile.value,onSelectorCountSelected={},onBaseCountSelected={ count ->
                     persisted+=count
                     profile.value=profile.value.copy(baseDamageDiceCount=count)
-                }
+                })
             } }
             val slider=compose.onNodeWithContentDescription("Base weapon damage")
             slider.assert(SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo,ProgressBarRangeInfo(2f,1f..10f,8)))
@@ -55,7 +55,7 @@ class BaseDamageUpgradeTest {
         val activity=Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { AstravarTheme {
-                BaseDamageUpgrade(profile.value) {profile.value=profile.value.copy(baseDamageDiceCount=it)}
+                WeaponDamageUpgrades(profile.value,onSelectorCountSelected={},onBaseCountSelected={profile.value=profile.value.copy(baseDamageDiceCount=it)})
             } }
             val slider=compose.onNodeWithContentDescription("Base weapon damage")
             for((input,expected) in listOf(7.2f to 7,9.8f to 10,-5f to 1,30f to 10)) {
@@ -71,9 +71,9 @@ class BaseDamageUpgradeTest {
         val activity=Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { AstravarTheme {
-                BaseDamageUpgrade(profile.value) {
+                WeaponDamageUpgrades(profile.value,onSelectorCountSelected={},onBaseCountSelected={
                     persisted+=it;profile.value=profile.value.copy(baseDamageDiceCount=it)
-                }
+                })
             } }
             val slider=compose.onNodeWithContentDescription("Base weapon damage")
             slider.performTouchInput {down(center);moveTo(Offset(width-1f,center.y),delayMillis=100)}

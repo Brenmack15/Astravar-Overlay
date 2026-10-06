@@ -1,6 +1,6 @@
-# Phone-only installation — signed 1.3.0 release
+# Phone-only installation — signed 1.4.0 release
 
-This is the signed 1.3.0 release. It keeps the existing package ID and owner signing identity and is intended to update an existing installation. The accompanying test report records which checks ran and which device checks remain. Start with the explicitly labeled demo for device checks; its resources do not describe your real campaign.
+This is the signed 1.4.0 release. It keeps the existing package ID and owner signing identity and is intended to update an existing installation. The accompanying test report records which checks ran and which device checks remain. Start with the explicitly labeled demo for device checks; its resources do not describe your real campaign.
 
 1. Download the delivered **signed release APK** to your phone and tap it in the download notification or Files app. Follow Android's installer prompt. If Android asks, grant installation permission only to the app opening this APK, then return to the installer. No desktop, Android Studio, terminal, ADB, root, or Play developer account is needed.
 2. Open **Astravar Overlay**. Confirm the starter profile or import your own backup. Record only resources you actually have, confirm attunement, and install a recorded completed core. Demo mode is clearly labeled and optional.
@@ -25,3 +25,7 @@ If the overlay is repeatedly stopped, first reopen Astravar and restart the sess
 - Export a backup, preview/reimport it, and check inventory/history.
 
 Emulator results do not establish these physical Samsung/D&D Beyond checks. Keep a backup before updates; install the next release over the existing app with the same signing identity. Do not uninstall a real campaign merely to fix an update error.
+
+### v1.4.0 elemental upgrade
+
+Open **More → Rules, upgrades & provisional choices → Weapon → Upgrades**. The new **Elemental Selector Damage** slider sits alongside Base Weapon Damage and selects 1d8–10d8 in whole dice. It defaults/migrates to 2d8. Both settings update the combined Elemental Shot preview while dragging and save independently on release. The overlay reads the same saved profile. Existing Force selections, campaign state and old roll expressions are preserved; backups include both settings.
