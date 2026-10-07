@@ -10,6 +10,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import com.yazsras.astravar.rules.Profile
+import com.yazsras.astravar.rules.DamageType
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -31,7 +32,7 @@ class ElementalDamageUpgradeTest {
         val activity=Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { AstravarTheme {
-                WeaponDamageUpgrades(profile.value,onBaseCountSelected={profile.value=profile.value.copy(baseDamageDiceCount=it)},onSelectorCountSelected={
+                WeaponDamageUpgrades(profile.value,elements=listOf(DamageType.LIGHTNING),onBaseCountSelected={profile.value=profile.value.copy(baseDamageDiceCount=it)},onSelectorCountSelected={
                     commits+=it;profile.value=profile.value.copy(elementalSelectorDiceCount=it)
                 })
             } }
@@ -40,14 +41,14 @@ class ElementalDamageUpgradeTest {
             for(m in 1..10) {
                 slider.performSemanticsAction(SemanticsActions.SetProgress) {it(m.toFloat())}
                 slider.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription,"${m}d8"))
-                compose.onNodeWithText("3d10+5 Force + ${m}d8 selected element").assertIsDisplayed()
-                compose.onNodeWithText("Discharge: 12d10 Force").assertIsDisplayed()
-                compose.onNodeWithText("Shatter: 36d10 Force").assertIsDisplayed()
+                compose.onNodeWithText("3d12+5 Force + ${m}d8 Lightning").assertIsDisplayed()
+                compose.onNodeWithText("Discharge: 9d12 Force + ${m}d8 Lightning").assertIsDisplayed()
+                compose.onNodeWithText("Shatter: 63d12 Force + ${m}d8 Lightning").assertIsDisplayed()
                 compose.runOnIdle {assertEquals(m,profile.value.elementalSelectorDiceCount);assertEquals(3,profile.value.baseDamageDiceCount)}
             }
             assertEquals((1..10).toList(),commits)
-            compose.onNodeWithContentDescription("Base weapon damage").performSemanticsAction(SemanticsActions.SetProgress) {it(4f)}
-            compose.onNodeWithText("4d10+5 Force + 10d8 selected element").assertIsDisplayed()
+            compose.onNodeWithContentDescription("Primary Force damage").performSemanticsAction(SemanticsActions.SetProgress) {it(4f)}
+            compose.onNodeWithText("4d12+5 Force + 10d8 Lightning").assertIsDisplayed()
             compose.runOnIdle {assertEquals(10,profile.value.elementalSelectorDiceCount)}
         } finally {activity.pause().stop().destroy()}
     }
@@ -57,7 +58,7 @@ class ElementalDamageUpgradeTest {
         val activity=Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { AstravarTheme {
-                WeaponDamageUpgrades(profile.value,onBaseCountSelected={},onSelectorCountSelected={profile.value=profile.value.copy(elementalSelectorDiceCount=it)})
+                WeaponDamageUpgrades(profile.value,elements=listOf(DamageType.LIGHTNING),onBaseCountSelected={},onSelectorCountSelected={profile.value=profile.value.copy(elementalSelectorDiceCount=it)})
             } }
             val slider=compose.onNodeWithContentDescription("Elemental selector damage")
             for((input,expected) in listOf(7.2f to 7,9.8f to 10,-5f to 1,30f to 10)) {
@@ -73,18 +74,18 @@ class ElementalDamageUpgradeTest {
         val activity=Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { AstravarTheme {
-                WeaponDamageUpgrades(profile.value,onBaseCountSelected={baseCommits+=it;profile.value=profile.value.copy(baseDamageDiceCount=it)},onSelectorCountSelected={selectorCommits+=it;profile.value=profile.value.copy(elementalSelectorDiceCount=it)})
+                WeaponDamageUpgrades(profile.value,elements=listOf(DamageType.LIGHTNING),onBaseCountSelected={baseCommits+=it;profile.value=profile.value.copy(baseDamageDiceCount=it)},onSelectorCountSelected={selectorCommits+=it;profile.value=profile.value.copy(elementalSelectorDiceCount=it)})
             } }
             val selector=compose.onNodeWithContentDescription("Elemental selector damage")
             selector.performTouchInput {down(center);moveTo(Offset(width-1f,center.y),delayMillis=100)}
-            compose.onNodeWithText("2d10+5 Force + 10d8 selected element").assertIsDisplayed()
-            compose.onNodeWithText("Discharge: 10d10 Force").assertIsDisplayed()
+            compose.onNodeWithText("2d12+5 Force + 10d8 Lightning").assertIsDisplayed()
+            compose.onNodeWithText("Discharge: 6d12 Force + 10d8 Lightning").assertIsDisplayed()
             compose.runOnIdle {assertTrue(selectorCommits.isEmpty());assertTrue(baseCommits.isEmpty())}
             selector.performTouchInput {up()}
             compose.runOnIdle {assertEquals(listOf(10),selectorCommits);assertEquals(2,profile.value.baseDamageDiceCount)}
-            val base=compose.onNodeWithContentDescription("Base weapon damage")
+            val base=compose.onNodeWithContentDescription("Primary Force damage")
             base.performTouchInput {down(center);moveTo(Offset(width-1f,center.y),delayMillis=100)}
-            compose.onNodeWithText("10d10+5 Force + 10d8 selected element").assertIsDisplayed()
+            compose.onNodeWithText("10d12+5 Force + 10d8 Lightning").assertIsDisplayed()
             compose.runOnIdle {assertTrue(baseCommits.isEmpty());assertEquals(listOf(10),selectorCommits)}
             base.performTouchInput {up()}
             compose.runOnIdle {assertEquals(listOf(10),baseCommits);assertEquals(10,profile.value.elementalSelectorDiceCount)}
@@ -96,13 +97,13 @@ class ElementalDamageUpgradeTest {
         val activity=Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { AstravarTheme {
-                WeaponDamageUpgrades(profile.value,enabled=false,onBaseCountSelected={fail("Disabled Force slider committed")},onSelectorCountSelected={fail("Disabled selector committed")})
+                WeaponDamageUpgrades(profile.value,elements=listOf(DamageType.LIGHTNING),enabled=false,onBaseCountSelected={fail("Disabled Force slider committed")},onSelectorCountSelected={fail("Disabled selector committed")})
             } }
-            compose.onNodeWithText("4d10+5 Force + 7d8 selected element").assertIsDisplayed()
+            compose.onNodeWithText("4d12+5 Force + 7d8 Lightning").assertIsDisplayed()
             compose.onNodeWithContentDescription("Elemental selector damage").assertIsNotEnabled()
-            compose.onNodeWithContentDescription("Base weapon damage").assertIsNotEnabled()
+            compose.onNodeWithContentDescription("Primary Force damage").assertIsNotEnabled()
             compose.runOnIdle {profile.value=profile.value.copy(elementalSelectorDiceCount=10)}
-            compose.onNodeWithText("4d10+5 Force + 10d8 selected element").assertIsDisplayed()
+            compose.onNodeWithText("4d12+5 Force + 10d8 Lightning").assertIsDisplayed()
         } finally {activity.pause().stop().destroy()}
     }
 }

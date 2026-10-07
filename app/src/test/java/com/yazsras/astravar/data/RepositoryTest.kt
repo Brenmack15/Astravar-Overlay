@@ -119,7 +119,7 @@ class RepositoryTest {
         var db=open();var scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);var main=Repository(db,scope)
         val initial=main.mutate(label="Seed base damage profile") {seed().copy(notes="preserve this note")}
         assertEquals(2,initial.profile.baseDamageDiceCount)
-        val n3=main.mutate(label="Select 3d10") {it.copy(profile=it.profile.copy(version=it.profile.version+1,baseDamageDiceCount=3))}
+        val n3=main.mutate(label="Select 3d12") {it.copy(profile=it.profile.copy(version=it.profile.version+1,baseDamageDiceCount=3))}
         val overlay=Repository(db,scope)
         assertEquals(3,overlay.state.first {it?.profile?.baseDamageDiceCount==3}!!.profile.baseDamageDiceCount)
         scope.cancel();db.close()
@@ -127,7 +127,7 @@ class RepositoryTest {
         db=open();scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);main=Repository(db,scope)
         var restored=main.state.first {it?.profile?.baseDamageDiceCount==3}!!
         assertEquals("preserve this note",restored.notes);assertEquals(3,restored.profile.baseDamageDiceCount)
-        val n4=main.mutate(label="Select 4d10") {it.copy(profile=it.profile.copy(version=it.profile.version+1,baseDamageDiceCount=4))}
+        val n4=main.mutate(label="Select 4d12") {it.copy(profile=it.profile.copy(version=it.profile.version+1,baseDamageDiceCount=4))}
         assertEquals(4,n4.profile.baseDamageDiceCount)
         scope.cancel();db.close()
 
@@ -135,8 +135,8 @@ class RepositoryTest {
         restored=main.state.first {it?.profile?.baseDamageDiceCount==4}!!
         assertEquals(4,restored.profile.baseDamageDiceCount)
         val current=BackupCodec.decode(main.export()).campaign
-        val plan=Engine.plan(current,"new-4d10-shot",Ability.ARCANE)
-        assertEquals(Dice(4,10,5),Engine.components(plan).single().damage.dice)
+        val plan=Engine.plan(current,"new-4d12-shot",Ability.ARCANE)
+        assertEquals(Dice(4,12,5),Engine.components(plan).single().damage.dice)
         scope.cancel();db.close()
     }
     @Test fun oldStoredCampaignWithoutBaseCountDefaultsToTwoAndKeepsCampaignState()=runBlocking {
@@ -162,7 +162,7 @@ class RepositoryTest {
         for(count in listOf(7,10)) {
             var db=open();var scope=CoroutineScope(SupervisorJob()+Dispatchers.Default)
             var main=Repository(db,scope)
-            main.mutate(label="Select ${count}d10") {seed().copy(profile=Profile(baseDamageDiceCount=count),notes="retained campaign")}
+            main.mutate(label="Select ${count}d12") {seed().copy(profile=Profile(baseDamageDiceCount=count),notes="retained campaign")}
             scope.cancel();db.close()
 
             db=open();scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);main=Repository(db,scope)
@@ -172,15 +172,15 @@ class RepositoryTest {
                 val appState=withTimeout(10000) {main.state.first {it?.profile?.baseDamageDiceCount==count}!!}
                 assertEquals(appState,shared)
                 assertEquals("retained campaign",shared.notes)
-                assertEquals("${count}d10+5",shared.profile.base.toString())
-                assertEquals(if(count==7) 20 else 26,shared.profile.dischargeDice)
-                assertEquals(if(count==7) 60 else 78,shared.profile.shatterDice)
+                assertEquals("${count}d12+5",shared.profile.base.toString())
+                assertEquals(count*3,shared.profile.dischargeDice)
+                assertEquals(count*21,shared.profile.shatterDice)
                 val plan=Engine.plan(shared,"slider-shot-$count",Ability.ARCANE)
                 overlay.fire(plan,RollOptions(),"overlay")
                 val saved=BackupCodec.decode(main.export())
                 val shot=saved.campaign.pending.single()
                 assertEquals(count*(if(shot.rolled!!.critical) 2 else 1),shot.rolled!!.damage.getValue("direct").faces.size)
-                assertEquals(Dice(count,10,5),Engine.components(plan).single().damage.dice)
+                assertEquals(Dice(count,12,5),Engine.components(plan).single().damage.dice)
                 val backup=main.export()
                 main.mutate(label="Temporary profile change") {it.copy(profile=it.profile.copy(baseDamageDiceCount=2))}
                 main.import(backup,"restore-$count")
@@ -195,11 +195,11 @@ class RepositoryTest {
         val db=Room.inMemoryDatabaseBuilder(context,AstravarDb::class.java).build()
         val scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);val repo=Repository(db,scope)
         try {
-            val before=seed()
+            val before=seed().let {it.copy(profile=it.profile.copy(forceRulesVersion=1))}
             val plan=Engine.plan(before,"old-emergency",Ability.DISCHARGE,point="Old door").copy(blastDiceCount=8)
             val after=before.copy(pending=listOf(PendingShot(plan,rolled=DiceRoller.roll(plan,die={4}))))
             val archive=HistoryArchive("same-archive",listOf(HistoryEntry("old-event","Old emergency",0,before,after)))
-            val oldBody=BackupCodec.json.encodeToString(HistoryArchive.serializer(),archive).replace(",\"blastDiceCount\":8","")
+            val oldBody=BackupCodec.json.encodeToString(HistoryArchive.serializer(),archive).replace(",\"blastDiceCount\":8","").replace(",\"forceRulesVersion\":1","")
             db.dao().archive(ArchiveRow(archive.id,oldBody))
             repo.mutate(label="Existing campaign") {before}
             val exported=repo.export()

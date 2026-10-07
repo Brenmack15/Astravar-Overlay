@@ -84,7 +84,8 @@ import java.util.UUID
             OutlinedButton(onClick={payloadPicker=true},modifier=Modifier.weight(1f).heightIn(min=56.dp)) {Column {Text("Payload ▾");Text(s.installed?.payloads?.filter {it.id in selected}?.joinToString {it.template.name}?.ifBlank {"None"} ?: "None",style=MaterialTheme.typography.bodySmall)}}
         }
         Choices("Firing mode",Ability.entries.toList(),ability,{it.title}) {v->a.run("") {preferences.mode(v)}}
-        if(ability==Ability.ELEMENTAL) {
+        if(ability==Ability.ELEMENTAL || blast) {
+            if(blast) TextButton(onClick={a.run("") {preferences.elements(emptyList())}}) {Text(if(elements.isEmpty()) "✓ Neutral Force" else "Neutral Force")}
             val allowed=if(s.profile.elementCapacity>1 && s.profile.elementCapacityOverride==null) Engine.basic else Engine.elements(s.profile)
             ChoiceGrid(allowed,elements.firstOrNull(),{it.name.lowercase().replaceFirstChar(Char::titlecase)}) {t->a.run("") {preferences.elements(if(s.profile.elementCapacity==1) listOf(t) else if(t in elements) elements-t else (elements+t).takeLast(s.profile.elementCapacity))}}
             if(elements.size>1) Text(elements.joinToString(" + "){it.name.lowercase()},color=Frost)

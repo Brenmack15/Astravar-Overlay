@@ -12,7 +12,8 @@ object BackupCodec {
         require(text.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "Backup exceeds 8 MiB" }
         var depth=0; var quoted=false; var escaped=false
         text.forEach { c -> if(escaped) escaped=false else if(c=='\\' && quoted) escaped=true else if(c=='\"') quoted=!quoted else if(!quoted) { if(c=='{' || c=='[') { depth++; require(depth <= 64) { "JSON nesting too deep" } }; if(c=='}' || c==']') depth-- } }
-        val b=json.decodeFromJsonElement<Backup>(migrateBackup(json.parseToJsonElement(text)))
+        val decoded=json.decodeFromJsonElement<Backup>(migrateBackup(json.parseToJsonElement(text)))
+        val b=decoded.copy(campaign=decoded.campaign.copy(profile=decoded.campaign.profile.currentForceRules()))
         require(b.format=="astravar-backup" && b.schema==1) { "Unsupported backup format/version" }
         validate(b.campaign)
         require(b.history.map { it.id }.distinct().size==b.history.size) { "Duplicate history IDs" }
@@ -21,9 +22,10 @@ object BackupCodec {
         b.archives.forEach { archive -> require(archive.id.length in 1..100 && archive.history.map {it.id}.distinct().size==archive.history.size);archive.history.forEach {validate(it.before);validate(it.after)} }
         return b
     }
-    /** Current profiles default to 2d10/2d8; old shots retain their original damage expressions. */
+    /** Upgrade only the active profile; every committed shot keeps its rules version and dice. */
     fun decodeCampaignSnapshot(text: String): Campaign =
-        json.decodeFromJsonElement<Campaign>(migrateCampaign(json.parseToJsonElement(text))).also(::validate)
+        json.decodeFromJsonElement<Campaign>(migrateCampaign(json.parseToJsonElement(text)))
+            .let { it.copy(profile=it.profile.currentForceRules()) }.also(::validate)
 
     fun decodeHistoryEntry(text: String): HistoryEntry =
         json.decodeFromJsonElement<HistoryEntry>(migrateHistoryEntry(json.parseToJsonElement(text)))
@@ -82,9 +84,12 @@ object BackupCodec {
                 if("blastDiceCount" !in planFields) {
                     // Before v1.3, blasts used only the level tier, even when direct dice were upgraded.
                     val profile=json.decodeFromJsonElement<Profile>(planFields.getValue("profile"))
+                    val legacyLevel=profile.emergencySpellLevelOverride ?: when { profile.level >= 17 -> 5; profile.level >= 13 -> 4; profile.level >= 9 -> 3; else -> 2 }
+                    val legacyDischarge=4+2*legacyLevel
+                    val current=profile.forceRulesVersion==PrimaryForceRules.VERSION
                     val count=when(planFields["ability"]?.jsonPrimitive?.content) {
-                        "DISCHARGE" -> profile.levelBasedDischargeDice
-                        "SHATTER" -> profile.levelBasedDischargeDice * 3
+                        "DISCHARGE" -> if(current) profile.dischargeDice else legacyDischarge
+                        "SHATTER" -> if(current) profile.shatterDice else legacyDischarge * 3
                         else -> 0
                     }
                     planFields["blastDiceCount"]=JsonPrimitive(count)
@@ -101,6 +106,7 @@ object BackupCodec {
         val fields=profile.toMutableMap()
         if("baseDamageDiceCount" !in fields) fields["baseDamageDiceCount"]=JsonPrimitive(defaultCount)
         if("elementalSelectorDiceCount" !in fields) fields["elementalSelectorDiceCount"]=JsonPrimitive(defaultCount)
+        if("forceRulesVersion" !in fields) fields["forceRulesVersion"]=JsonPrimitive(1)
         return JsonObject(fields)
     }
     fun validate(s: Campaign) {
@@ -124,13 +130,15 @@ object BackupCodec {
         s.projects.forEach { require(it.daysWorked in 0..10000 && it.name.length in 1..120 && it.notes.length<=2000 && it.recipe.length in 1..4000) }
         s.pending.forEach {
             val p=it.plan; p.profile.validate()
-            require(if(p.blast) p.blastDiceCount in 1..200 else p.blastDiceCount==0) { "Invalid saved blast dice" }
+            require(if(p.blast) p.blastDiceCount in 1..maxOf(200,PrimaryForceRules.MAX_SHATTER_DICE) else p.blastDiceCount==0) { "Invalid saved blast dice" }
             require(s.cores.any { c -> c.id==p.coreId } && p.revision>=0 && p.revision<=s.revision && p.distance in 0..p.range && p.targetPoint.length<=500)
             require(p.selectedPayloads.size<=12 && p.elements.size<=p.profile.elementCapacity && p.elements.distinct().size==p.elements.size)
             require(p.selectedPayloads.map {it.id}.distinct().size==p.selectedPayloads.size && p.selectedPayloads.size+(if(p.immediate!=null) 1 else 0)<=p.profile.releaseLimit)
             p.immediate?.validate(); p.selectedPayloads.forEach { payload -> payload.template.validate(); require(payload.coreId==p.coreId) }
             require(p.selectedPayloads.all { payload -> payload.template.approved } && (p.immediate==null || p.immediate.approved))
-            if(p.ability==Ability.ELEMENTAL) require(p.elements.isNotEmpty() && p.elements.all { t -> t in Engine.elements(p.profile) })
+            if(p.ability==Ability.ELEMENTAL) require(p.elements.isNotEmpty())
+            require(p.elements.all { t -> t in Engine.elements(p.profile) })
+            if(p.elements.size>1 && p.profile.elementCapacityOverride==null) require(p.elements.all { it in Engine.basic })
             if(p.ability==Ability.SPELL) require(p.hasSpell)
             if(p.ability in listOf(Ability.ARCANE,Ability.ELEMENTAL)) require(!p.hasSpell)
             it.result?.let { r -> Engine.validateResult(p,r) }

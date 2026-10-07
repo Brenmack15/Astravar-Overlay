@@ -64,3 +64,10 @@ The explicit player correction in ASTRAVAR_RULES supersedes the original manual-
 Combat uses a dark charcoal/gold/frost theme, compact weapon status, one-tap attacks, result cards and quick core/payload selectors. Main and overlay share persistent selections and history. The latest-20 view never deletes the durable journal. Version 1.1.0 increases version code to 2 without changing the Room schema or signing identity.
 
 References: https://developer.android.com/reference/android/content/Context#createWindowContext(int,android.os.Bundle), https://developer.android.com/studio/test/managed-devices, https://android-developers.googleblog.com/2021/10/whats-new-in-scalable-automated-testing.html.
+
+
+## Force rules v2 (application 1.5.0)
+
+The owner's 2026-10-07 correction supersedes d10 and all level/additive emergency calculations. A versioned profile supplies `primaryForceDieSides` from one current `PrimaryForceRules.DIE_SIDES` constant. Current emergency counts use 3N and 7×3N. A plan snapshots the final blast count and its complete profile; legacy shot profiles receive rules version 1, active profiles upgrade to version 2. Event/archive campaign profiles stay historical; Undo normalizes only the restored active profile. No SQL schema or destructive migration is needed.
+
+Explosion selector components reuse `Portion.BLAST`, giving each type its existing independent save-halving path. They never join Direct Impact's critical eligibility. Payloads retain `Portion.PAYLOAD` and their zero-on-success rule. Slider and combat previews share Engine component construction. Large pools use existing compact summaries and expandable text per component, not one View per face. Generic Dice validation permits all 210 canonical Shatter dice while the unrelated template-input limit remains 200.

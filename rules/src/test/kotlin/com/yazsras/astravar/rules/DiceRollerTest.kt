@@ -81,15 +81,15 @@ class DiceRollerTest {
     @Test fun bothEmergencySavesHalveTheSameFullRollRoundedDownWithoutRerolling() {
         for(ability in listOf(Ability.DISCHARGE,Ability.SHATTER)) {
             val p=Engine.plan(seed(),"blast",ability,point="Archway")
-            val faces=if(ability==Ability.DISCHARGE) listOf(7,4,9,2,8,3,6,10,5,3) else List(29) {5}+6
+            val faces=if(ability==Ability.DISCHARGE) listOf(12,11,10,9,8,7) else List(41) {5}+6
             val values=ArrayDeque(faces);val requested=mutableListOf<Int>()
             val roll=DiceRoller.roll(p,die={requested+=it;values.removeFirst()})
-            assertEquals(List(p.blastDiceCount) {10},requested)
+            assertEquals(List(p.blastDiceCount) {12},requested)
             assertTrue(values.isEmpty());assertTrue(roll.attackFaces.isEmpty());assertNull(roll.attackTotal)
             assertEquals(faces,roll.damage.getValue("blast").faces)
             val targets=listOf(TargetSave("Saved",true),TargetSave("Failed",false))
             val result=DiceRoller.resolution(p,roll,targets=targets)
-            val total=if(ability==Ability.DISCHARGE) 57 else 151
+            val total=if(ability==Ability.DISCHARGE) 57 else 211
             assertEquals(total,roll.damage.getValue("blast").total)
             assertEquals(total/2,Engine.damage(p,result,targets[0])[DamageType.FORCE])
             assertEquals(total,Engine.damage(p,result,targets[1])[DamageType.FORCE])
@@ -99,7 +99,7 @@ class DiceRollerTest {
     @Test fun directImpactCriticalDoesNotDoubleTheBlast() {
         val p=Engine.plan(seed(),"blast",Ability.SHATTER,direct=true,point="Gate")
         val r=DiceRoller.roll(p,die={if(it==20) 20 else 1})
-        assertEquals(4,r.damage.getValue("direct").faces.size);assertEquals(30,r.damage.getValue("blast").faces.size)
+        assertEquals(4,r.damage.getValue("direct").faces.size);assertEquals(42,r.damage.getValue("blast").faces.size)
         assertEquals(5,r.damage.getValue("direct").flat);assertEquals(0,r.damage.getValue("blast").flat)
     }
     @Test fun unknownAcAllowsAnotherAttackWithoutManualEntry() {
@@ -120,14 +120,14 @@ class DiceRollerTest {
         val json=BackupCodec.encode(Backup(campaign=saved)).replace(",\"rolled\":null","")
         assertNull(BackupCodec.decode(json).campaign.pending.single().rolled)
     }
-    @Test fun supportedCountsRollIndependentBaseD10sAndApplyFlatModifierOnce() {
+    @Test fun supportedCountsRollIndependentBaseD12sAndApplyFlatModifierOnce() {
         val cases=listOf(1 to listOf(7),2 to listOf(7,4),3 to listOf(7,4,9),4 to listOf(7,4,9,2),10 to listOf(7,4,9,2,8,3,6,10,5,1))
         for((count,faces) in cases) {
             val requested=mutableListOf<Int>()
             val values=ArrayDeque((listOf(14)+faces).toList())
             val p=plan(profile=Profile(baseDamageDiceCount=count))
             val r=DiceRoller.roll(p,die={sides->requested+=sides;values.removeFirst()})
-            assertEquals(count,requested.count {it==10})
+            assertEquals(count,requested.count {it==12})
             assertEquals(faces,r.damage.getValue("direct").faces)
             assertEquals(5,r.damage.getValue("direct").flat)
             assertEquals(faces.sum()+5,r.damage.getValue("direct").total)
@@ -143,7 +143,7 @@ class DiceRollerTest {
             val p=plan(profile=Profile(baseDamageDiceCount=count))
             val r=DiceRoller.roll(p,die={sides->requested+=sides;if(sides==20) 20 else 1})
             assertTrue(r.critical)
-            assertEquals(count*2,requested.count {it==10})
+            assertEquals(count*2,requested.count {it==12})
             assertEquals(List(count*2) {1},r.damage.getValue("direct").faces)
             assertEquals(5,r.damage.getValue("direct").flat)
             assertEquals(count*2+5,r.damage.getValue("direct").total)
@@ -156,7 +156,7 @@ class DiceRollerTest {
             val p=Engine.plan(before,"impact-$count",ability,immediate=spell,direct=true,point="Gate")
             val r=DiceRoller.roll(p,die={if(it==20) 20 else 1})
             assertEquals(2*count,r.damage.getValue("direct").faces.size)
-            val expected=(8+2*(count-1))*if(ability==Ability.SHATTER) 3 else 1
+            val expected=count*if(ability==Ability.SHATTER) 21 else 3
             assertEquals(expected,r.damage.getValue("blast").faces.size)
             assertEquals(3,r.damage.getValue("payload0_0").faces.size)
             assertEquals(2,r.damage.getValue("overcharge0").faces.size)

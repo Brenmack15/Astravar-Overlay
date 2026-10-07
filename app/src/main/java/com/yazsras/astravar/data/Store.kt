@@ -49,7 +49,7 @@ class Repository(private val db: AstravarDb,scope: CoroutineScope) {
         val before=dao.state()?.let { BackupCodec.decodeCampaignSnapshot(it.body) } ?: Campaign()
         if(dao.event(id)!=null) return@withTransaction before
         val changed=change(before)
-        val after=changed.copy(revision=maxOf(before.revision,changed.revision)+1)
+        val after=changed.copy(profile=changed.profile.currentForceRules(),revision=maxOf(before.revision,changed.revision)+1)
         BackupCodec.validate(after)
         val e=HistoryEntry(id,label,after.gameSeconds,before,after,origin)
         dao.insert(EventRow(id,after.revision,BackupCodec.json.encodeToString(e),origin))

@@ -41,14 +41,14 @@ class ElementalSelectorRepositoryTest {
                 assertEquals("Retain campaign",shared.notes);assertEquals(120L,shared.gameSeconds)
                 assertEquals("${m}d8",shared.profile.selector.toString())
                 val p=Engine.plan(shared,"element-$m",Ability.ELEMENTAL,elements=listOf(DamageType.LIGHTNING))
-                assertEquals(listOf(Dice(4,10,5),Dice(m,8)),Engine.components(p).map {it.damage.dice})
+                assertEquals(listOf(Dice(4,12,5),Dice(m,8)),Engine.components(p).map {it.damage.dice})
                 // Both production renderers read these exact engine components from the shared profile.
                 val rolled=main.mutate(label="Deterministic elemental roll") {DiceRoller.fire(it,p,die={if(it==20) 14 else 3})}
                 assertEquals(m,rolled.pending.single().rolled!!.damage.getValue("element0").faces.size)
                 assertEquals(rolled,withTimeout(10000) {overlay.state.first {it?.revision==rolled.revision}!!})
                 val neutral=Engine.plan(rolled,"neutral-$m",Ability.ARCANE)
                 assertEquals(setOf("direct"),DiceRoller.roll(neutral,die={if(it==20) 14 else 3}).damage.keys)
-                assertEquals(14,rolled.profile.dischargeDice);assertEquals(42,rolled.profile.shatterDice)
+                assertEquals(12,rolled.profile.dischargeDice);assertEquals(84,rolled.profile.shatterDice)
             } finally {scope.cancel();db.close()}
         }
     }

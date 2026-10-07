@@ -232,6 +232,9 @@ class OverlayService: Service() {
             }
             "elements" -> {
                 content.addView(text("Element selector · ${s.profile.selector} each · ${s.profile.elementCapacity} max",18f))
+                content.addView(button("${if(elements.isEmpty()) "✓ " else ""}Neutral Force") {run("Neutral Force selected") {
+                    elements=emptyList();app.preferences.elements(emptyList());if(prefs.mode==Ability.ELEMENTAL) app.preferences.mode(Ability.ARCANE);panelPage="combat"
+                }})
                 Engine.elements(s.profile).forEach {type->content.addView(button("${if(type in elements) "✓ " else ""}${type.name.lowercase()}") {
                     val next=if(s.profile.elementCapacity==1) listOf(type) else if(type in elements) elements-type else (elements+type).takeLast(s.profile.elementCapacity)
                     panelPage=if(s.profile.elementCapacity==1) "combat" else "elements";saveElements(next)

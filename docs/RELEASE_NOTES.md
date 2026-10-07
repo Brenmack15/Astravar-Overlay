@@ -1,9 +1,10 @@
-# Astravar v1.4.0 — independent elemental damage
+# Astravar 1.5.0
 
-- Elemental Selector Damage now has a discrete 1d8–10d8 slider alongside Base Weapon Damage in More → Rules, upgrades & provisional choices → Weapon → Upgrades.
-- The canonical selector value is 2d8. Existing Force selections remain unchanged; the repository's canonical Force profile is 2d10+5.
-- Ordinary Elemental Shot rolls the configured independent d8s, preserving each face and damage type. Criticals double eligible selector dice. Confirmed Dual Resonance applies the configured count to each selected basic element.
-- Both sliders update the combined damage preview while dragging and save independently on release. The full app and floating overlay read the same durable profile; selection survives restart and is included in backup/restore.
-- Old profiles missing the selector setting migrate to 2d8. Old pending and historical shots retain their original 1d8 selector expressions, raw faces and results. Campaign state and Force upgrades remain intact.
-- Neutral Force, Spell-Imbued Shot, Direct Impact, Discharge and Shatter receive no free selector dice. Payloads, overcharge, element unlocks and level/Force-driven emergency scaling are unchanged. Cantrip imbuing is not implemented.
-- Same package and existing signing identity; version code increases from 5 to 6. See TEST_REPORT.md for measured build results and device coverage limitations.
+- Primary Force upgraded from d10 to d12; the existing independent 1–10 dice-count slider now displays d12.
+- Discharge redesigned to 3× current Primary Force dice; Shatter to 7× Discharge (21× Primary). Both inherit the authoritative Primary Force die size, with no weapon flat bonus or level/additive damage progression.
+- Elemental Selector remains independently configurable from 1d8–10d8. Each active element, including eligible Dual Resonance components, adds Md8 once to an explosion. Neutral adds none.
+- Successful saves halve each rolled Force/selector total separately, rounded down. Payload/overcharge save behavior and die sizes remain unchanged.
+- Direct weapon criticals still double eligible dice, with flat modifiers once; Direct Impact criticals never double explosion or explosion selector dice.
+- Intentional Shatter pools up to 210d12 retain every individual result, with expandable detail.
+- Both selected counts, shared overlay state, campaign resources and backups survive migration. Historical d10 attacks and old blast expressions remain unchanged.
+- Package and established owner signing identity preserved; versionCode increases from 6 to 7.

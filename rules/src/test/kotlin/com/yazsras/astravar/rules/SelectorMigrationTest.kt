@@ -30,7 +30,7 @@ class SelectorMigrationTest {
     }
 
     @Test fun backupMissingBothUpgradeFieldsKeepsOriginalWeaponAndSelectorRolls() {
-        val before=seed(1).copy(profile=Profile(baseDamageDiceCount=1,elementalSelectorDiceCount=1))
+        val before=seed(1).copy(profile=Profile(baseDamageDiceCount=1,elementalSelectorDiceCount=1,forceRulesVersion=1))
         val after=DiceRoller.fire(before,Engine.plan(before,"very-old",Ability.ELEMENTAL,elements=listOf(DamageType.FIRE)),die={if(it==20) 14 else 4})
         val encoded=withoutSelector(BackupCodec.json.parseToJsonElement(BackupCodec.encode(Backup(campaign=after)))).toString()
         val old=encoded.replace("\"baseDamageDiceCount\":1,","")

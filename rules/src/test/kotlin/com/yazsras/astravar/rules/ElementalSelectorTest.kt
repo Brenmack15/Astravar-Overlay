@@ -13,12 +13,12 @@ class ElementalSelectorTest {
             val profile=Profile(baseDamageDiceCount=n,elementalSelectorDiceCount=m)
             profile.validate()
             val p=elemental(profile)
-            assertEquals(listOf(Dice(n,10,5),Dice(m,8)),Engine.components(p).map {it.damage.dice})
-            assertEquals(listOf(Dice(2*n,10,5),Dice(2*m,8)),Engine.components(p,true).map {it.damage.dice})
+            assertEquals(listOf(Dice(n,12,5),Dice(m,8)),Engine.components(p).map {it.damage.dice})
+            assertEquals(listOf(Dice(2*n,12,5),Dice(2*m,8)),Engine.components(p,true).map {it.damage.dice})
             assertEquals(m*4.5,profile.selector.average,0.0)
             val sides=mutableListOf<Int>()
             val roll=DiceRoller.roll(p,die={sides+=it;if(it==20) 14 else 1})
-            assertEquals(listOf(20)+List(n) {10}+List(m) {8},sides)
+            assertEquals(listOf(20)+List(n) {12}+List(m) {8},sides)
             assertEquals(List(m) {1},roll.damage.getValue("element0").faces)
         }
     }
@@ -49,10 +49,10 @@ class ElementalSelectorTest {
     @Test fun neutralHasNoSelectorEvenAtTenAndNaturalOneAppliesNoDamage() {
         val s=seed(Profile(baseDamageDiceCount=3,elementalSelectorDiceCount=10))
         val p=Engine.plan(s,"neutral",Ability.ARCANE,elements=listOf(DamageType.LIGHTNING))
-        assertTrue(p.elements.isEmpty());assertEquals(listOf(Dice(3,10,5)),Engine.components(p).map {it.damage.dice})
+        assertTrue(p.elements.isEmpty());assertEquals(listOf(Dice(3,12,5)),Engine.components(p).map {it.damage.dice})
         val requested=mutableListOf<Int>()
         val roll=DiceRoller.roll(p,die={requested+=it;1})
-        assertEquals(listOf(20,10,10,10),requested)
+        assertEquals(listOf(20,12,12,12),requested)
         assertEquals(Outcome.MISS,roll.suggestedOutcome)
         assertTrue(DiceRoller.resolution(p,roll).rolls.isEmpty())
     }
@@ -81,13 +81,13 @@ class ElementalSelectorTest {
         }
     }
 
-    @Test fun spellAndEmergencyPayloadsNeverGainFreeSelectorsAndKeepResourceCosts() {
+    @Test fun spellShotsReplaceSelectorsAndNeutralEmergenciesKeepResourceCosts() {
         val spell=Template("spell","Approved test spell",2,2,listOf(TypedDice(Dice(3,6),DamageType.COLD)),DamageType.COLD,true)
         for(ability in listOf(Ability.SPELL,Ability.DISCHARGE,Ability.SHATTER)) for(critical in listOf(false,true)) {
             val profiles=listOf(1,10).map {Profile(level=10,elementalSelectorDiceCount=it,confirmed=setOf(Upgrade.DUAL_RESONANCE))}
             val shots=profiles.map {profile ->
                 val charged=Engine.charge(seed(profile),"core",spell,"payload",SourceKind.SLOT,true)
-                val p=Engine.plan(charged,"shot",ability,listOf("payload"),elements=listOf(DamageType.FIRE,DamageType.LIGHTNING),direct=ability!=Ability.SPELL,point="Gate")
+                val p=Engine.plan(charged,"shot",ability,listOf("payload"),elements=if(ability==Ability.SPELL) listOf(DamageType.FIRE,DamageType.LIGHTNING) else emptyList(),direct=ability!=Ability.SPELL,point="Gate")
                 assertTrue(p.elements.isEmpty());assertFalse(Engine.components(p,critical).any {it.label=="Selector"})
                 val after=DiceRoller.fire(charged,p,die={if(it==20) {if(critical) 20 else 14} else 2})
                 assertEquals(1,after.slots[2]);assertTrue(after.core("core").payloads.isEmpty())
@@ -104,7 +104,7 @@ class ElementalSelectorTest {
         for(level in 5..20) for(n in 1..10) for(ability in listOf(Ability.DISCHARGE,Ability.SHATTER)) {
             val plans=listOf(1,10).map {m -> Engine.plan(seed(Profile(level=level,baseDamageDiceCount=n,elementalSelectorDiceCount=m)),"impact",ability,direct=true,point="Gate")}
             for(crit in listOf(false,true)) assertEquals(Engine.components(plans[0],crit),Engine.components(plans[1],crit))
-            assertEquals(Dice(n*2,10,5),Engine.components(plans[1],true).first().damage.dice)
+            assertEquals(Dice(n*2,12,5),Engine.components(plans[1],true).first().damage.dice)
             assertEquals(plans[1].blastDiceCount,Engine.components(plans[1],true).last().damage.dice.count)
         }
     }

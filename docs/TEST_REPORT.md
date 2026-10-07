@@ -1,82 +1,75 @@
-# Astravar v1.4.0 verification — 2026-10-06
+# Astravar 1.5.0 validation and release report
 
-## Source and implementation
+Validated 2026-10-07 from the exact clean v1.4.0 source commit `c4149d1`, on `feature/primary-force-d12`. No reset, architecture replacement, campaign-data replacement, signing-key rotation, remote force push or merge was performed.
 
-Started from the clean `feature/configurable-weapon-dice` branch at `c51f3fd` (v1.3.0/build 5). Work continues on `feature/configurable-elemental-selector`, preserving that commit and the earlier automatic-combat, base-slider, emergency-scaling and overlay fixes. Package identity and the existing release keystore are unchanged.
+## Current rules and UI
 
-Added `Profile.elementalSelectorDiceCount: Int`, validated from 1 through 10 and defaulting to 2. `Profile.selector` derives the existing `Dice(M, 8)` expression. The value lives alongside the unchanged Force count in Room `astravar.db`, table `campaign`, JSON `body.profile`; it is included in existing JSON backup/export. No Room schema change or destructive migration was introduced.
+- `baseDamageDiceCount: Int` remains the independent Primary Force count, 1–10. `elementalSelectorDiceCount: Int` remains the independent d8 count, 1–10. Neither is reset by this update.
+- `PrimaryForceRules.DIE_SIDES = 12` is the authoritative current Force die size, supplied through `Profile.primaryForceDieSides`. `forceRulesVersion = 2` is serialized with the rules profile in the existing Room campaign JSON and backups.
+- Primary Force: Nd12 + INT + calibration. Discharge: 3N d12. Shatter: 7 × Discharge = 21N d12. Explosions receive no weapon flat modifier, level progression or additive upgrade formula.
+- Each active selector contributes Md8 once to either explosion. Neutral contributes none; eligible Dual Resonance elements each receive their full Md8. Successful saves halve each rolled Force/selector component separately, rounded down. Spell payload/overcharge still deals zero on successful emergency saves.
+- Ordinary direct criticals double eligible weapon/selector/payload/overcharge dice and apply flats once. Direct Impact criticals double only direct weapon dice; explosions and their selectors never critical. Payload/overcharge die sizes and resources are unchanged. Cantrip imbuing is not implemented and was not added.
+- Both discrete sliders remain in More → Rules, upgrades & provisional choices → Weapon → Upgrades. Primary labels now use d12; selector labels retain d8. Compose uses range 1f..10f and 8 intermediate stops, giving unit increments. Live neutral/elemental, Discharge and Shatter previews use shared Engine components and the active element selection. The floating overlay shares persisted profile/selection and gains a Neutral selection option; no upgrade slider is added there.
+- Repository canonical defaults remain N=2/M=2: 2d12+5 Force, 2d8 selector, 6d12 Discharge, 42d12 Shatter. The phone's actual saved counts are not remotely readable; its selections are preserved by migration.
+- Required examples confirmed: 4d12 → 12d12 → 84d12; 5d12 → 15d12 → 105d12; 10d12 → 30d12 → 210d12.
 
-The full-app control is at **More → Rules, upgrades & provisional choices → Weapon → Upgrades**. `WeaponDamageUpgrades` holds two independent whole-number drag previews and uses the existing Compose Material Slider conventions: range 1f..10f, eight intermediate stops (unit increments), at least 48 dp height, an Nd10/Md8 value label and accessible state description. Each release/accessibility action commits only its corresponding profile field. Both drags immediately update the combined preview from actual Profile Dice expressions. The existing Force, Discharge and Shatter previews remain. No upgrade slider was added to the overlay.
+## Migration and historical accuracy
 
-Both combat renderers use `Engine.components` and observe the shared repository. The overlay element picker additionally displays the configured selector expression. Independent selector components preserve damage type, raw faces and critical eligibility.
+Active legacy profiles migrate to Force rules v2 on Room read, backup import and mutations, including Undo into an old profile. Both selected counts, inventory, resources, game clock, notes, crafting/encounter state and preferences remain intact. Historical event/archive profiles and committed shot profiles retain legacy rules v1, d10 faces, original selector count/eligibility and `blastDiceCount`. Pre-v1.3 shots missing a blast snapshot reconstruct the former level-only formula solely in migration. Old event/archive database rows are not rewritten. Re-export/re-import is tested without false archive conflicts. New backups preserve the rules version and both counts. Room stays schema version 2, with no destructive migration.
 
-## Canonical rules and interactions
+## Executed automated validation
 
-The repository's existing canonical profile remains N=2, INT +4, calibration +1. A phone's saved Force selection cannot be read here and is preserved by the migration; it is not overwritten with the repository default.
+| Suite | Tests | Failures | Errors | Skipped |
+| --- | ---: | ---: | ---: | ---: |
+| Rules | 93 | 0 | 0 | 0 |
+| Android debug | 28 | 0 | 0 | 0 |
+| Android release | 28 | 0 | 0 | 0 |
 
-| Component | Canonical expression |
-|---|---|
-| Base Force | 2d10+5 Force |
-| Elemental selector | 2d8 selected element |
-| Ordinary Elemental Shot | 2d10+5 Force + 2d8 selected element |
-| Critical Elemental Shot | 4d10+5 Force + 4d8 selected element |
-| Level-5 Discharge | 10d10 Force |
-| Level-5 Shatter | 30d10 Force |
+Added 13 rules/migration tests (`PrimaryForceTest`, `ForceMigrationTest`) and 4 Android repository/UI tests (`ForceRulesRepositoryTest`, `ForcePresentationTest`). Updated six existing rules test files and four existing Android test files for d12 expressions, emergency formulas and accurate legacy fixtures.
 
-Generic elemental damage is `Nd10 + INT + calibration` Force plus `Md8` per selected element. Criticals use `2N` and `2M`, with flat modifiers once. Confirmed Dual Resonance grants each selected basic element the full M d8 contribution. The average is derived by Dice: M × 4.5.
+Coverage includes all levels 5–20 and all Primary counts 1–10; explicit 1/2/3/4/5/10 emergency examples; independent selector values and averages; exactly N/3N/21N d12 requests; requested 38 Force example; typed 71 Force +9 Lightning saves becoming 35 Force +4 Lightning; critical impact versus unchanged explosion/selector dice; neutral and Dual Resonance; d10 spell payload isolation; normal/advantage/disadvantage/natural 1/20 regressions; core/payload/slot accounting; idempotent firing; both sliders' touch/semantics/rounding/persistence; old and modern backups; shared Room observers, reopen, Undo, and immutable archived rows.
 
-Neutral Force, Spell-Imbued Shot, Direct Impact, Discharge and Shatter gain no free selector dice. Spell payloads, overcharge, element unlocks, core states, resource costs and save resolution are unchanged. Emergency formulas still depend exclusively on level and N: Discharge = level base + 2 × (N−1); Shatter = level base + 6 × (N−1). A successful save halves the same rolled Force total, rounded down. Cantrip imbuing remains absent.
+Large-pool tests deterministically roll 84/105/210 d12s, verify each face and total (maximum 210d12 = 2520), and round-trip complete history. A bounded UI test confirms the 210-die pool starts collapsed and expands as one text node per damage component rather than hundreds of per-die views. These are host tests, not physical-device performance measurements.
 
-## Migration and history
+Focused rules/migration suite: 17/17 passed before broader validation. The first focused run exposed a missing known-AC value in a historical-impact test fixture; corrected. The first broad app run exposed an older archive fixture using the current rules version; corrected to true legacy data and the focused archive recheck passed. No remaining test failure.
 
-Profiles missing only the new setting migrate to M=2 while retaining N and all other data. Missing fields in old committed/historical shot profiles decode to their original 1d8/1d10 rules. Existing explicit modern fields remain exact. Historical expressions, raw faces, results, blast snapshots and event/archive rows are preserved. The old-archive normalization already present in v1.3 remains intact; migrated archives can be exported and reimported without a false conflict. Unrolled committed old elemental shots still roll their original 1d8. A backup missing both upgrade fields is also covered.
+Clean final Gradle run: **BUILD SUCCESSFUL in 9m 47s**. Command used a 720-second timeout with a 15-second termination grace:
 
-## Executed tests and build
+```text
+clean :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest
+:app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease
+:overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
+```
 
-Official checksum-verified Gradle 8.13, Temurin JDK 17.0.20.1 and the repository-pinned Android command-line tools were restored because the prior temporary toolchain was absent. Android API 36 and build-tools 35.0.0 were used. TLS validation stayed enabled. All build, SDK, signing and ADB commands had explicit time limits; no command hung. The initial system-package installation was unavailable, so the official portable JDK was used.
+- Debug lint: 0 errors, 7 warnings: GradleDependency, NewerVersionAvailable, RtlHardcoded, SetTextI18n, UseKtx.
+- Release lint: 0 errors, 8 warnings: GradleDependency, NewerVersionAvailable, RtlHardcoded, SetTextI18n, UseKtx.
 
-Focused rules/migration tests passed after correcting a new test fixture that incorrectly enabled Direct Impact for a regular Spell shot. Focused app tests then passed (11 tests: existing Force slider, new selector UI, new repository tests). An additional combined legacy-migration regression was included in the full run.
+No dependency or toolchain version was changed. JDK 17, Gradle 8.13, API 36 and build tools 35.0.0 were restored from verified official downloads. An initial dependency-resolution failure came from stale environment proxy options; using the current environment's proxy resolved it without disabling TLS verification. Android host tests use Robolectric API 35. All build/install-related commands were bounded; no stalled instrumentation was repeatedly retried.
 
-The clean full Gradle run completed in **5m 39s**, within its 12-minute timeout, executing `clean`, `:rules:test`, `:app:testDebugUnitTest`, `:app:testReleaseUnitTest`, `:app:lintDebug`, `:app:lintRelease`, `:app:assembleDebug`, `:app:assembleRelease`, `:overlay-target:assembleDebug` and `:overlay-target:assembleDebugAndroidTest`.
+## Signed APK verification
 
 | Check | Result |
-|---|---|
-| Rules tests | 80 passed; 0 failures, errors or skips |
-| Debug app/persistence/Compose tests | 24 passed; 0 failures, errors or skips |
-| Release app/persistence/Compose tests | 24 passed; 0 failures, errors or skips |
-| Debug and release lint | Passed; 0 errors, 6 warnings per variant |
-| Clean debug and signed production release builds | Passed |
-| Overlay target and instrumentation APK compilation | Passed |
-
-Added 13 rules/migration tests and 8 app/UI/repository tests. Updated existing elemental fixtures to expect the canonical 2d8 and adapted the three Force-slider UI tests to the combined control.
-
-Coverage includes all 100 independent N/M pairs; each independent d10/d8 face; the requested 7/4 Force and 6/2/8 Lightning example; selector criticals; modifier applied once; Dual Resonance components; unchanged unlocks; no selectors on Neutral/Spell/Direct Impact/emergencies; payload/overcharge and resources; unchanged emergency expressions across levels 5–20; invalid JSON/count rejection; all ten UI stops, fractional/out-of-range input, disabled controls, live touch preview and independent commit; M=3/4/7/10 database reopen/shared observers; M=8 backup restore; old backup migration; and exact historical snapshots/unchanged stored event/archive rows. Existing Normal/Advantage/Disadvantage/natural-1/20, saves, Force progression, core, history, backup and accounting regressions passed.
-
-Lint warnings concern existing dependency-update guidance, URI extensions, overlay text localization and RTL gravity. They do not originate in the new slider or rules implementation.
-
-## Verified release APK
-
-| Property | Result |
-|---|---|
-| Application | Astravar Overlay |
-| Package | `com.yazsras.astravar` — unchanged |
-| Version | 1.4.0, code 6 — previous code 5 |
-| File | `Astravar-v1.4.0-release.apk` |
+| --- | --- |
+| Artifact | Astravar-v1.5.0-release.apk |
+| Package ID | com.yazsras.astravar (unchanged) |
+| versionName | 1.5.0 |
+| versionCode | 7 (previous 6) |
 | Size | 4,106,699 bytes |
-| Signature | `apksigner verify --verbose --print-certs`: passed, v2 signature |
-| Certificate continuity | Exact match with v1.3.0; same keystore also matched v1.2.0 and v1.1.0 |
-| Alignment | `zipalign -c -P 16 -v 4`: passed |
-| Manifest | `aapt` package/version verified; `apkanalyzer manifest debuggable`: false |
-| ZIP integrity | Passed; manifest and classes.dex present |
-| ABIs | arm64-v8a, armeabi-v7a, x86, x86_64 |
-| Optimization | Release minification and resource shrinking retained |
+| APK ZIP integrity | Passed; manifest and DEX present |
+| apksigner verification | Passed, APK Signature Scheme v2 |
+| Certificate continuity | Exact match with owner-signed v1.4.0 APK |
+| zipalign | Passed, 4-byte and 16 KiB native alignment check |
+| Debuggable | false, verified by apkanalyzer and aapt |
+| Release configuration | Minification and resource shrinking enabled |
 
-APK SHA-256: `566b9295c1ae0aaeeaa97d9d5522bbc22cc954b709458af42a81880dbd386d0c`
+APK SHA-256: `8b132d0914f3e07995ac8a40ac09eb3f6091c36b4733fb410da910b3572b6fb0`
 
-Signing certificate SHA-256 (public fingerprint): `4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847`
+Public signing certificate SHA-256: `4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847`
 
-## Device and publication boundaries
+The existing owner PKCS12 key and privately provisioned credentials were used. No private key, password or signing-recovery file is tracked in the repo or included in public source/artifacts. No replacement signing identity was generated. Public GitHub release inventory contained only v1.1.0 when checked; v1.5.0 is the next unused local release after v1.4.0/code 6.
 
-A bounded ADB scan found no connected device; its server was stopped. No emulator or /dev/kvm was available. Device installation, upgrade over v1.3.0, real app launch, end-to-end live overlay smoke tests and instrumentation execution were **not run**. No physical Samsung Galaxy or D&D Beyond coverage is claimed. Local Compose and Room reopen/observer tests do not substitute for those device checks.
+## Not executed / release limits
 
-The verified signed APK is the direct-download deliverable. GitHub's app connection required reauthentication. The requested GitHub browser page was opened and showed the owner already signed in as Brenmack15; its releases page showed only v1.1.0. No GitHub source push, tag, merge or release was created during this update. Source changes remain committed on the local feature branch.
+ADB reported no connected devices; no hardware-accelerated emulator is available. Actual APK update installation, launch/restart on a device, live service-overlay behavior, API 36 instrumentation execution, and physical Samsung Galaxy S26/D&D Beyond smoke tests were **not run**. The controlled target and instrumentation APKs compiled successfully. Database migration/reopen/shared-state and Compose behavior passed the host suites above. Matching package, certificate and higher versionCode satisfy the verified update prerequisites, but they are not a substitute for a device upgrade test.
+
+The signed APK is delivered as a downloadable conversation artifact. No GitHub Release, remote tag or main-branch merge was created. Install over the existing app; do not uninstall a real campaign to update.

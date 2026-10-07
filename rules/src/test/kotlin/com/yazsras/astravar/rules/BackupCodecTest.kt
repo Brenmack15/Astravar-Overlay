@@ -6,7 +6,7 @@ import org.junit.Test
 
 class BackupCodecTest {
     private fun legacyShot(): Pair<Campaign,Campaign> {
-        val before=Campaign(onboarded=true,attuned=true,profile=Profile(baseDamageDiceCount=1),installedId="core",cores=listOf(Core("core","Legacy core")),notes="keep this campaign note")
+        val before=Campaign(onboarded=true,attuned=true,profile=Profile(baseDamageDiceCount=1,forceRulesVersion=1),installedId="core",cores=listOf(Core("core","Legacy core")),notes="keep this campaign note")
         val plan=Engine.plan(before,"legacy-shot",Ability.ARCANE)
         val after=DiceRoller.fire(before,plan,die={if(it==20) 14 else 7})
         return before to after
@@ -60,9 +60,9 @@ class BackupCodecTest {
 
     @Test fun preSliderBlastHistoryKeepsOldExpressionsRawFacesAndResultsInAllSnapshots() {
         for(count in listOf(1,2,4)) for(level in listOf(5,9,13,17)) for(ability in listOf(Ability.DISCHARGE,Ability.SHATTER)) {
-            val before=legacyShot().first.copy(profile=Profile(level=level,baseDamageDiceCount=count))
+            val before=legacyShot().first.copy(profile=Profile(level=level,baseDamageDiceCount=count,forceRulesVersion=1))
             val newPlan=Engine.plan(before,"old-blast",ability,direct=true,point="Old gate")
-            val oldCount=before.profile.levelBasedDischargeDice * if(ability==Ability.SHATTER) 3 else 1
+            val oldCount=(if(level>=17) 14 else if(level>=13) 12 else if(level>=9) 10 else 8) * if(ability==Ability.SHATTER) 3 else 1
             val oldPlan=newPlan.copy(blastDiceCount=oldCount)
             val roll=DiceRoller.roll(oldPlan,die={if(it==20) 20 else 3},atMillis=123)
             val result=DiceRoller.resolution(oldPlan,roll,targets=listOf(TargetSave("Target",true,directTarget=true)))
@@ -84,13 +84,13 @@ class BackupCodecTest {
     }
 
     @Test fun oldUnrolledBlastKeepsOriginalLevelOverrideWhenRolledAfterUpgrade() {
-        val before=legacyShot().first.copy(profile=Profile(baseDamageDiceCount=4,emergencySpellLevelOverride=5))
+        val before=legacyShot().first.copy(profile=Profile(baseDamageDiceCount=4,emergencySpellLevelOverride=5,forceRulesVersion=1))
         val plan=Engine.plan(before,"pending-blast",Ability.SHATTER,point="Gate")
         val committed=Engine.commit(before,plan)
         val oldJson=withoutBlastSnapshot(BackupCodec.json.parseToJsonElement(BackupCodec.encode(Backup(campaign=committed)))).toString()
         val migrated=BackupCodec.decode(oldJson).campaign
         assertEquals(42,migrated.pending.single().plan.blastDiceCount)
-        assertEquals(60,migrated.profile.shatterDice)
+        assertEquals(84,migrated.profile.shatterDice)
         val rolled=DiceRoller.rollPending(migrated,plan.id,die={1})
         assertEquals(42,rolled.pending.single().rolled!!.damage.getValue("blast").faces.size)
         assertEquals(committed.cores,rolled.cores)
@@ -103,7 +103,7 @@ class BackupCodecTest {
             val restored=BackupCodec.decode(BackupCodec.encode(Backup(campaign=after))).campaign
             assertEquals(after,restored)
             assertEquals(count,restored.profile.baseDamageDiceCount)
-            assertEquals(8+2*(count-1),restored.pending.single().plan.blastDiceCount)
+            assertEquals(3*count,restored.pending.single().plan.blastDiceCount)
         }
     }
 
@@ -112,7 +112,7 @@ class BackupCodecTest {
         try {BackupCodec.decode(source.replace("\"baseDamageDiceCount\":2","\"baseDamageDiceCount\":2.5"));fail("Fractional dice accepted")} catch(_:IllegalArgumentException) {}
         val before=legacyShot().first
         val plan=Engine.plan(before,"blast",Ability.DISCHARGE,point="Gate")
-        for(count in listOf(0,-1,201)) {
+        for(count in listOf(0,-1,211)) {
             val invalid=before.copy(pending=listOf(PendingShot(plan.copy(blastDiceCount=count))))
             try {BackupCodec.decode(BackupCodec.encode(Backup(campaign=invalid)));fail("Invalid blast count accepted")} catch(_:IllegalArgumentException) {}
         }

@@ -67,7 +67,7 @@ import java.util.UUID
                         if(morePage!=null) TextButton(onClick={morePage=null}) {Text("‹ More")}
                         when(morePage) {
                             "Encounter" -> EncounterPage(current,history,actions)
-                            "Rules" -> RulesPage(current,actions)
+                            "Rules" -> RulesPage(current,actions,if(prefs.mode in listOf(Ability.ARCANE,Ability.SPELL)) emptyList() else prefs.elements)
                             "Backup" -> Page {BackupPage(current,actions)}
                             "Settings" -> SettingsPage(app,current,actions,startOverlay,grantOverlay,stopOverlay)
                             "Help" -> HelpPage()

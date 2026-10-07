@@ -1,11 +1,9 @@
-# Astravar 1.4.0 handoff
+# Astravar 1.5.0 handoff
 
-This release adds an independent elemental selector slider (1d8–10d8, canonical/default 2d8) alongside the existing base weapon slider. It preserves the configured Force count and weapon-based emergency scaling. Ordinary elemental and Dual Resonance components use the new count; spell shots, Direct Impact and blasts do not receive free selector dice. Historical shot snapshots retain their actual dice; campaign state, audit journal, resources, backups and owner signing identity are preserved.
+This update starts from clean v1.4.0 commit c4149d1 on a new feature branch, preserving both independent count sliders and existing architecture. Current Primary Force is Nd12+INT+calibration; Discharge is 3N d12 and Shatter is 7× Discharge = 21N d12. Each active element adds Md8 once to either explosion, with independent typed save halving. Neutral adds none. Spell shots still replace free selector dice. Cantrip imbuing is absent.
 
-Use the accompanying signed APK for phone installation. It is package `com.yazsras.astravar`, version 1.4.0, version code 6, and is intended to install over the existing owner-signed version. The `.debug` package and controlled target APKs are for testing and are not the delivered release.
+`baseDamageDiceCount` and `elementalSelectorDiceCount` remain independent persisted integers from 1 through 10. `PrimaryForceRules.DIE_SIDES` is the single current Force-size authority; profile `forceRulesVersion` distinguishes current d12 rules from immutable legacy d10 shot snapshots. Old level-based damage exists only in pre-v1.3 history migration. Room remains v2 and DataStore remains unchanged.
 
-Authoritative automated results, provenance, hashes and remaining coverage boundaries are in [TEST_REPORT.md](TEST_REPORT.md). [ANDROID_INSTALL.md](ANDROID_INSTALL.md) describes the phone flow; [BUILD_AND_SIGNING.md](BUILD_AND_SIGNING.md) documents bounded builds and private signing. No owner key is present in this repository or in public CI artifacts.
+The signed APK uses `com.yazsras.astravar`, version 1.5.0, versionCode 7, with the existing owner key. See [TEST_REPORT.md](TEST_REPORT.md) for actual executed validation, hashes and coverage limits, [ANDROID_INSTALL.md](ANDROID_INSTALL.md) for phone instructions, and [BUILD_AND_SIGNING.md](BUILD_AND_SIGNING.md) for bounded builds and private signing. No signing secret is tracked in the repo.
 
-The implementation is maintained on a feature branch from the corrected overlay-test branch. Every new build/test command has an explicit time limit and captures failure evidence. The signed APK is the release deliverable. A GitHub release also requires available repository write access; no existing published tag is replaced.
-
-Remaining device acceptance is physical Galaxy S26/One UI, D&D Beyond, device-specific battery behavior and any tablet/multi-window configurations. The controlled Android emulator is not evidence that those physical checks passed. It is safe to use the separate demo for acceptance; do not populate or replace a real campaign with demo data.
+Physical Galaxy S26/D&D Beyond and real upgrade coverage must be distinguished from host tests. Do not uninstall or replace a real campaign with demo data to perform a check.

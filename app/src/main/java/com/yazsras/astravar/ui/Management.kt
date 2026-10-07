@@ -16,7 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
-@Composable fun RulesPage(s: Campaign,a: Actions) {
+@Composable fun RulesPage(s: Campaign,a: Actions,elements: List<DamageType> = emptyList()) {
     val p=s.profile
     var level by remember(p.version) { mutableStateOf(p.level.toString()) }
     var intelligence by remember(p.version) { mutableStateOf(p.intelligence.toString()) }
@@ -30,20 +30,19 @@ import java.util.UUID
     var elementCapacity by remember(p.version) { mutableStateOf(p.elementCapacityOverride?.toString() ?: "") }
     var release by remember(p.version) { mutableStateOf(p.releaseOverride?.toString() ?: "") }
     var limit by remember(p.version) { mutableStateOf(p.spellShotsPerTurn.toString()) }
-    var spellLevel by remember(p.version) { mutableStateOf(p.emergencySpellLevelOverride?.toString() ?: "") }
     var replacement by remember(p.version) { mutableStateOf(p.fastReplacementLevel.toString()) }
     var syntheticGp by remember(p.version) { mutableStateOf(p.syntheticGp?.toString() ?: "") }
     var syntheticDays by remember(p.version) { mutableStateOf(p.syntheticDays?.toString() ?: "") }
     Page {
         Section("${p.name} · version ${p.version}") {
             Text("ACCEPTED: attunement and a usable core are required. ${p.base} Force; 60/180 ft. Extra Attack gives two ordinary attacks within one Attack action. Selector changes are free. Explosions always take one Action.")
-            Text("Discharge: ${p.dischargeDice}d10 Force, 60 ft range / 15 ft radius. Shatter: ${p.shatterDice}d10 Force, 120 ft range / 60 ft RADIUS. Success halves the rolled Force, not the dice. No selector or flat bonus on the blast.")
+            Text("Discharge: ${p.discharge} Force (3× Primary dice), 60 ft range / 15 ft radius. Shatter: ${p.shatter} Force (7× Discharge dice), 120 ft range / 60 ft RADIUS. Each active element adds ${p.selector} once. A successful save halves each rolled Force/selector component, rounded down; spell payload/overcharge deals zero on success. No flat weapon bonus on explosions.")
             Text("PROVISIONAL: one spell-powered firing per turn; spell shots replace all free selector dice; one stored payload until confirmed dual storage at level 12, then two. Loaded magic persists through rests and swaps.")
             Text("ASSUMPTION: starter +1 calibration. PROPOSED, disabled by default: +2 at 10 / +3 at 15. Four/five payloads at level 20 are not finalized.")
         }
         Section("Weapon → Upgrades") {
-            WeaponDamageUpgrades(p,enabled=!a.busy,onBaseCountSelected={ count ->
-                if(count!=p.baseDamageDiceCount) a.change("Base weapon damage set to ${count}d10") {
+            WeaponDamageUpgrades(p,enabled=!a.busy,elements=elements,onBaseCountSelected={ count ->
+                if(count!=p.baseDamageDiceCount) a.change("Primary Force damage set to ${count}d${p.primaryForceDieSides}") {
                     it.copy(profile=it.profile.copy(version=it.profile.version+1,baseDamageDiceCount=count))
                 }
             },onSelectorCountSelected={ count ->
@@ -62,11 +61,10 @@ import java.util.UUID
             Field("Explicit storage capacity override (blank = milestone rules)",capacity,{capacity=it})
             Field("Proposed selector capacity override (blank = accepted 1/2)",elementCapacity,{elementCapacity=it})
             Field("Explicit release limit override (blank = milestone rules)",release,{release=it})
-            Field("Emergency Artificer spell-level override (blank = pinned progression)",spellLevel,{spellLevel=it})
             Field("Fast replacement threshold · approximately level 15",replacement,{replacement=it})
             Field("Synthetic core gp (blank = unresolved)",syntheticGp,{syntheticGp=it}); Field("Synthetic core days (blank = unresolved)",syntheticDays,{syntheticDays=it})
             Action("Save new rules version",!a.busy) { a.change("Saved explicit profile version ${p.version+1}; past shots and stored payloads preserved") {
-                it.copy(profile=p.copy(version=p.version+1,level=level.intValue("Level",5,20),intelligence=intelligence.intValue("INT",-5,10),proficiency=proficiency.intValue("Proficiency",0,10),saveDc=dc.intValue("DC",1,40),calibration=calibration.intValue("Calibration",0,10),calibrationEnabled=enabled,proposedCalibrationProgression=progression,confirmed=confirmed,spellShotsPerTurn=limit.intValue("Turn limit",1,20),elementCapacityOverride=elementCapacity.takeIf {x->x.isNotBlank()}?.intValue("Selector capacity",1,9),capacityOverride=capacity.takeIf { x->x.isNotBlank() }?.intValue("Capacity",1,12),releaseOverride=release.takeIf { x->x.isNotBlank() }?.intValue("Release",1,12),emergencySpellLevelOverride=spellLevel.takeIf { x->x.isNotBlank() }?.intValue("Spell level",1,9),fastReplacementLevel=replacement.intValue("Replacement level",5,20),syntheticGp=syntheticGp.takeIf { x->x.isNotBlank() }?.intValue("GP",0,1000000),syntheticDays=syntheticDays.takeIf { x->x.isNotBlank() }?.intValue("Days",1,10000)))
+                it.copy(profile=p.copy(version=p.version+1,level=level.intValue("Level",5,20),intelligence=intelligence.intValue("INT",-5,10),proficiency=proficiency.intValue("Proficiency",0,10),saveDc=dc.intValue("DC",1,40),calibration=calibration.intValue("Calibration",0,10),calibrationEnabled=enabled,proposedCalibrationProgression=progression,confirmed=confirmed,spellShotsPerTurn=limit.intValue("Turn limit",1,20),elementCapacityOverride=elementCapacity.takeIf {x->x.isNotBlank()}?.intValue("Selector capacity",1,9),capacityOverride=capacity.takeIf { x->x.isNotBlank() }?.intValue("Capacity",1,12),releaseOverride=release.takeIf { x->x.isNotBlank() }?.intValue("Release",1,12),fastReplacementLevel=replacement.intValue("Replacement level",5,20),syntheticGp=syntheticGp.takeIf { x->x.isNotBlank() }?.intValue("GP",0,1000000),syntheticDays=syntheticDays.takeIf { x->x.isNotBlank() }?.intValue("Days",1,10000)))
             } }
         }
     }
