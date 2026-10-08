@@ -124,9 +124,9 @@ object PrimaryForceRules {
     fun core(id: String) = cores.find { it.id == id } ?: error("Core not found")
     fun replace(core: Core) = copy(cores = cores.map { if(it.id == core.id) core else it })
 }
-@Serializable data class HistoryEntry(val id: String, val label: String, val gameSeconds: Long, val before: Campaign, val after: Campaign, val origin: String = "main", val undone: Boolean = false)
+@Serializable data class HistoryEntry(val id: String, val label: String, val gameSeconds: Long, val before: Campaign, val after: Campaign, val origin: String = "main", val undone: Boolean = false, val rollUndo: List<RollUndo> = emptyList(), val compact: Boolean = false)
 @Serializable data class HistoryArchive(val id: String, val history: List<HistoryEntry>)
 @Serializable data class Backup(val format: String = "astravar-backup", val schema: Int = 1, val campaign: Campaign, val history: List<HistoryEntry> = emptyList(), val archives: List<HistoryArchive> = emptyList())
 
-/** A bounded presentation of the durable journal; no deletion or resource mutation. */
-fun Campaign.recentRolls(): List<PendingShot> = pending.asReversed().take(20)
+/** Shared newest-first presentation of the storage-bounded recent rolls. */
+fun Campaign.recentRolls(): List<PendingShot> = pending.asReversed().take(HistoryRetention.MAX_HISTORY_ENTRIES)

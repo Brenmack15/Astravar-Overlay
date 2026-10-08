@@ -36,11 +36,11 @@ Position is saved independently by orientation and clamped using system-bar/cuto
 
 ## Accounting and persistence
 
-Room stores a versioned campaign snapshot plus immutable before/after event snapshots. Every mutation executes in a Room transaction with a unique command ID. Replays of a committed ID return the existing state; competing stale shot previews fail revision checks. Spend occurs at commit, independent of later hit/miss. Pending plans include the profile and payload snapshots needed to resume after process death.
+Room stores versioned campaign resources, a separate newest-20 compact roll table, and a bounded accounting Undo journal whose resource snapshots omit all roll lists. Every mutation executes in a Room transaction with a unique command ID. Replays of a committed ID return the existing state; competing stale shot previews fail revision checks. Spend occurs at commit, independent of later hit/miss. Pending plans include the profile and payload snapshots needed to resume after process death.
 
-Corrections restore the previous snapshot and append a new explicit event. They do not erase history. Game time advances only by player commands. A Long Rest log does not assume elapsed time or refill unknown counters. Database version 2 has an explicit tested migration from version 1; no destructive fallback exists.
+Corrections restore the previous snapshot and append a new explicit event. Retained dice are not rerolled; expired history cannot be restored. Game time advances only by player commands. A Long Rest log does not assume elapsed time or refill unknown counters. Database version 3 has explicit tested 1→2→3 migrations; no destructive fallback exists.
 
-Backups use strict versioned JSON. They reject malformed references, duplicate IDs, invalid dice/levels, impossible resource values, excessive nesting, and files over 8 MiB. Import previews counts and requires a current backup before replacement. Import is atomic and idempotent; local history remains, imported history is retained in deduplicated archives. Preferences remain device-local. This JSON size limit is a technical import limit, not a campaign resource rule.
+Backups use strict versioned JSON. They validate active references, IDs, dice/levels and resource values; isolate invalid historical records; and bound nesting and retained data. Legacy input is streamed (up to 512 Mi characters) into an 8 MiB retained-data envelope. Import previews counts and requires a current backup before replacement. Import is atomic and idempotent; the newest 20 imported rolls replace the recent-roll window, and duplicate legacy archives are discarded. Preferences remain device-local. This JSON size limit is a technical import limit, not a campaign resource rule.
 
 ## Security / distribution
 
@@ -61,7 +61,7 @@ Recovery preserved the feature branch's existing automatic-dice redesign. The or
 
 The explicit player correction in ASTRAVAR_RULES supersedes the original manual-only requirement. Injectable dice make rules tests deterministic; production uses SecureRandom. Both surfaces call the same transactional fire operation, which persists raw faces, selected d20, modifiers, typed components, critical eligibility and costs together. Other creatures' saves are never rolled. Ordinary attacks permit unknown AC. Discharge/Shatter keep confirmation and per-creature resolution. Optional manual overrides live in advanced settings.
 
-Combat uses a dark charcoal/gold/frost theme, compact weapon status, one-tap attacks, result cards and quick core/payload selectors. Main and overlay share persistent selections and history. The latest-20 view never deletes the durable journal. Version 1.1.0 increases version code to 2 without changing the Room schema or signing identity.
+Combat uses a dark charcoal/gold/frost theme, compact weapon status, one-tap attacks, result cards and quick core/payload selectors. Main and overlay share persistent selections and history. The original latest-20 presentation has been superseded by v1.5.1 storage retention; older rolls are now permanently discarded. Version 1.1.0 increases version code to 2 without changing the Room schema or signing identity.
 
 References: https://developer.android.com/reference/android/content/Context#createWindowContext(int,android.os.Bundle), https://developer.android.com/studio/test/managed-devices, https://android-developers.googleblog.com/2021/10/whats-new-in-scalable-automated-testing.html.
 
@@ -71,3 +71,11 @@ References: https://developer.android.com/reference/android/content/Context#crea
 The owner's 2026-10-07 correction supersedes d10 and all level/additive emergency calculations. A versioned profile supplies `primaryForceDieSides` from one current `PrimaryForceRules.DIE_SIDES` constant. Current emergency counts use 3N and 7×3N. A plan snapshots the final blast count and its complete profile; legacy shot profiles receive rules version 1, active profiles upgrade to version 2. Event/archive campaign profiles stay historical; Undo normalizes only the restored active profile. No SQL schema or destructive migration is needed.
 
 Explosion selector components reuse `Portion.BLAST`, giving each type its existing independent save-halving path. They never join Direct Impact's critical eligibility. Payloads retain `Portion.PAYLOAD` and their zero-on-success rule. Slider and combat previews share Engine component construction. Large pools use existing compact summaries and expandable text per component, not one View per face. Generic Dice validation permits all 210 canonical Shatter dice while the unrelated template-input limit remains 200.
+
+## Bounded history (application 1.5.1)
+
+This correction supersedes the earlier unlimited journal/archive policy. Only the newest 20 rolls are retained. Room v3 separates compact immutable roll snapshots from current resource state and from bounded accounting Undo snapshots, which omit roll lists. Accounting observers read metadata only. Stable roll ordering uses stored sequence then ID; event ordering uses revision then ID. Both descending indexes support bounded reads and SQL cleanup. SQLite insert triggers and Room transactions enforce the shared limit even for batched writes. The single shared repository state flow assembles a coherent Campaign for existing UI/overlay consumers.
+
+Before any legacy observer starts, SQL prunes old events, then 8 KiB BLOB chunks stream oversized campaign/event fields. A streaming JSON filter retains only the newest valid shot window before decoding. Malformed historical items can be discarded without replacing active campaign resources. Duplicate archived journals are removed. Backup import follows the same streaming policy; export has no duplicate roll copies. Operation retries within the retained journal remain idempotent and stale shot revisions remain rejected. Undo is limited to retained accounting operations and does not resurrect expired rolls.
+
+No Force, selector, emergency, critical, save, slot or core rule changes accompany this stability release.

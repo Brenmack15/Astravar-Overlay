@@ -1,9 +1,13 @@
-# Astravar 1.5.0 handoff
+# Astravar 1.5.1 handoff
 
-This update starts from clean v1.4.0 commit c4149d1 on a new feature branch, preserving both independent count sliders and existing architecture. Current Primary Force is Nd12+INT+calibration; Discharge is 3N d12 and Shatter is 7× Discharge = 21N d12. Each active element adds Md8 once to either explosion, with independent typed save halving. Neutral adds none. Spell shots still replace free selector dice. Cantrip imbuing is absent.
+Source began at `613cd67` (1.5.0/code 7) on a clean checkout. Work is on `fix/bounded-roll-history`; no reset or rules rollback was performed.
 
-`baseDamageDiceCount` and `elementalSelectorDiceCount` remain independent persisted integers from 1 through 10. `PrimaryForceRules.DIE_SIDES` is the single current Force-size authority; profile `forceRulesVersion` distinguishes current d12 rules from immutable legacy d10 shot snapshots. Old level-based damage exists only in pre-v1.3 history migration. Room remains v2 and DataStore remains unchanged.
+History OOM mechanism: the v1.5 repository eagerly selected and decoded every `events` row. Each row held before/after Campaigns including the entire growing pending-roll list. Thus roll storage and deserialization grew quadratically with attacks; the UI's latest-20 slice did not prune anything.
 
-The signed APK uses `com.yazsras.astravar`, version 1.5.0, versionCode 7, with the existing owner key. See [TEST_REPORT.md](TEST_REPORT.md) for actual executed validation, hashes and coverage limits, [ANDROID_INSTALL.md](ANDROID_INSTALL.md) for phone instructions, and [BUILD_AND_SIGNING.md](BUILD_AND_SIGNING.md) for bounded builds and private signing. No signing secret is tracked in the repo.
+`HistoryRetention.MAX_HISTORY_ENTRIES = 20` is shared by storage, queries, migration, backups and UI. Room v3 adds indexed `rolls` and event metadata. Rolls are stored once as PendingShot snapshots; campaign JSON and accounting undo states contain no roll lists. Eager event observation selects only bounded metadata. SQL triggers and repository transactions keep at most 20 records in each table. Campaign view assembly reads resources and bounded rolls in one transaction and is shared by main app and overlay.
 
-Physical Galaxy S26/D&D Beyond and real upgrade coverage must be distinguished from host tests. Do not uninstall or replace a real campaign with demo data to perform a check.
+Migration 2→3 prunes event rows by indexed revision/id before decoding any body, reads large text as 8 KiB SQLite BLOB substrings, and streams the campaign pending array into a 20-entry window. Valid retained rolls keep their actual profiles, expressions, faces and results. Bad historical records are isolated; invalid campaign resources cause a concise failure without replacing data. Legacy duplicate archives are deleted. Migration 1→2→3 remains supported; no destructive fallback.
+
+Backups preserve active state and at most 20 combat rolls. Oversized legacy files are streamed from SAF on IO, never loaded into a String/JSON tree first. Parsing has bounded record sizes, depth 64, an 8 MiB retained-data envelope and a 512 Mi-character streaming input limit. The import preview holds only the bounded decoded result. No duplicate archive is created on import. Undo restores retained resources/results, but cannot resurrect rolls permanently discarded by retention.
+
+Combat rules are unchanged. Package `com.yazsras.astravar`, versionName 1.5.1, versionCode 8. Use the existing owner key only; never commit signing material. Consult TEST_REPORT.md for actual results and upgrade-device limits.

@@ -106,7 +106,7 @@ class PrimaryForceTest {
             val event=HistoryEntry("e","Large Shatter",0,s,after)
             val backup=Backup(campaign=after,history=listOf(event),archives=listOf(HistoryArchive("a",listOf(event))))
             val restored=BackupCodec.decode(BackupCodec.encode(backup))
-            assertEquals(backup,restored);assertTrue(shotSummary(restored.campaign.pending.single()).contains("${count}d12"))
+            assertEquals(HistoryRetention.backup(backup),restored);assertTrue(shotSummary(restored.campaign.pending.single()).contains("${count}d12"))
         }
     }
 

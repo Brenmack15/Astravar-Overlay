@@ -1,39 +1,60 @@
-# Astravar 1.5.0 validation and release report
+# Astravar 1.5.1 history stability validation
 
-Validated 2026-10-07 from the exact clean v1.4.0 source commit `c4149d1`, on `feature/primary-force-d12`. No reset, architecture replacement, campaign-data replacement, signing-key rotation, remote force push or merge was performed.
+Validated 2026-10-07 (America/New_York), beginning with clean commit `613cd67`, branch `feature/primary-force-d12`, version 1.5.0/code 7. Changes are on `fix/bounded-roll-history`. No reset, discarded work, signing-key replacement or combat-rules rollback occurred.
 
-## Current rules and UI
+## Root cause evidence
 
-- `baseDamageDiceCount: Int` remains the independent Primary Force count, 1–10. `elementalSelectorDiceCount: Int` remains the independent d8 count, 1–10. Neither is reset by this update.
-- `PrimaryForceRules.DIE_SIDES = 12` is the authoritative current Force die size, supplied through `Profile.primaryForceDieSides`. `forceRulesVersion = 2` is serialized with the rules profile in the existing Room campaign JSON and backups.
-- Primary Force: Nd12 + INT + calibration. Discharge: 3N d12. Shatter: 7 × Discharge = 21N d12. Explosions receive no weapon flat modifier, level progression or additive upgrade formula.
-- Each active selector contributes Md8 once to either explosion. Neutral contributes none; eligible Dual Resonance elements each receive their full Md8. Successful saves halve each rolled Force/selector component separately, rounded down. Spell payload/overcharge still deals zero on successful emergency saves.
-- Ordinary direct criticals double eligible weapon/selector/payload/overcharge dice and apply flats once. Direct Impact criticals double only direct weapon dice; explosions and their selectors never critical. Payload/overcharge die sizes and resources are unchanged. Cantrip imbuing is not implemented and was not added.
-- Both discrete sliders remain in More → Rules, upgrades & provisional choices → Weapon → Upgrades. Primary labels now use d12; selector labels retain d8. Compose uses range 1f..10f and 8 intermediate stops, giving unit increments. Live neutral/elemental, Discharge and Shatter previews use shared Engine components and the active element selection. The floating overlay shares persisted profile/selection and gains a Neutral selection option; no upgrade slider is added there.
-- Repository canonical defaults remain N=2/M=2: 2d12+5 Force, 2d8 selector, 6d12 Discharge, 42d12 Shatter. The phone's actual saved counts are not remotely readable; its selections are preserved by migration.
-- Required examples confirmed: 4d12 → 12d12 → 84d12; 5d12 → 15d12 → 105d12; 10d12 → 30d12 → 210d12.
+At the inspected source revision, `StateDao.observeEvents()` selected every event in descending revision order without a LIMIT. `Repository.history` eagerly decoded every row into a StateFlow collected by the main app even when History was not open. Every mutation serialized a HistoryEntry containing full before/after Campaign objects, each containing the entire ever-growing `pending` roll list. Engine commits appended shots indefinitely. `recentRolls().take(20)` only limited presentation. Thus after n attacks, the event journal contained approximately n² duplicated shot snapshots, as well as the unbounded current campaign JSON. Undo loaded the full event list; export and imports added more complete archived copies. Large Shatter faces amplified this allocation pattern.
 
-## Migration and historical accuracy
+This mechanism is established by the source and seeded database measurements, not an invented device stack trace. The user's phone database/heap dump was unavailable. We did not deliberately crash the old app with OOM; the fixed path was exercised against oversized source data under bounded tests.
 
-Active legacy profiles migrate to Force rules v2 on Room read, backup import and mutations, including Undo into an old profile. Both selected counts, inventory, resources, game clock, notes, crafting/encounter state and preferences remain intact. Historical event/archive profiles and committed shot profiles retain legacy rules v1, d10 faces, original selector count/eligibility and `blastDiceCount`. Pre-v1.3 shots missing a blast snapshot reconstruct the former level-only formula solely in migration. Old event/archive database rows are not rewritten. Re-export/re-import is tested without false archive conflicts. New backups preserve the rules version and both counts. Room stays schema version 2, with no destructive migration.
+## Storage and ordering
 
-## Executed automated validation
+- Authoritative limit: `HistoryRetention.MAX_HISTORY_ENTRIES = 20`.
+- Room schema v3 adds `rolls(id, sequence, body)` with an index on sequence DESC, id DESC. Each body contains only one immutable PendingShot rule/result snapshot, including raw faces, types, modifiers, attack mode, natural roll, timestamp and critical state.
+- Repository mutations save resources, the newest 20 shots and accounting changes in one Room transaction. SQLite AFTER INSERT triggers and explicit SQL pruning enforce the same cap, including direct/batched writes.
+- Reads use ORDER BY sequence DESC, id DESC LIMIT 20. The stored sequence preserves the retained campaign's insertion order; ID breaks ties deterministically. Resolving an existing shot does not change its creation order. The user-facing list remains newest-first.
+- Campaign JSON contains no roll list. Accounting events are also limited to 20, indexed by revision DESC/id DESC, and their Undo snapshots omit roll lists. UI accounting observation fetches metadata only. Undo stores only resolution-change metadata, never another set of individual dice. The existing app/overlay receive one shared, transactionally assembled campaign view.
+- History navigation and cards remain. Large dice details remain collapsed until requested. The current-result card and shared overlay result path remain intact.
+- Retention permanently deletes older rolls, including older unresolved entries in the existing History model; Undo cannot resurrect expired rolls. No core, payload, inventory, settings, encounter, slot, profile or other active resource is deleted by retention.
+
+## Safe legacy cleanup
+
+Explicit Room migration 2→3 runs before normal observations. It creates the ordering indexes, prunes the old event journal directly in SQL, then reads retained records individually. Large campaign/event fields are read in 8 KiB SQLite BLOB substrings through a UTF-8 Reader, avoiding an oversized CursorWindow or whole-text allocation. The streaming JSON filter retains only the latest 20 valid roll records while scanning the old pending array; it never builds all prior roll objects first. Current resource fields are preserved and validated.
+
+Malformed historical record contents are isolated and logged; they do not reset the campaign. Structurally broken import files or invalid active campaign resources fail safely without replacement. Normal player-facing errors are concise; technical exceptions are logged. Duplicate archive journals are deleted under the new retention policy. There is no destructive Room fallback. Legacy 1→2→3 migration is covered.
+
+## Backups
+
+Export includes the current campaign and at most 20 combat snapshots, plus the bounded accounting journal without duplicated dice. No legacy archive copies are exported. Imports read the SAF stream on IO and retain only the bounded decoded preview, rather than both the original huge file string and its object tree. Old files containing thousands of rolls retain only the newest 20. Duplicate legacy accounting archives are discarded; the old History screen's authoritative source was campaign.pending.
+
+Input scanning is bounded to 512 Mi characters, nesting to 64, each roll JSON record to 1 Mi characters and retained normalized data to 8 Mi characters. These are parser/storage safety envelopes, not changes to legitimate dice counts. Existing 210d12 Shatter and independent d8 selector pools remain supported.
+
+## Executed tests
 
 | Suite | Tests | Failures | Errors | Skipped |
 | --- | ---: | ---: | ---: | ---: |
-| Rules | 93 | 0 | 0 | 0 |
-| Android debug | 28 | 0 | 0 | 0 |
-| Android release | 28 | 0 | 0 | 0 |
+| Rules | 99 | 0 | 0 | 0 |
+| Android debug | 35 | 0 | 0 | 0 |
+| Android release | 35 | 0 | 0 | 0 |
 
-Added 13 rules/migration tests (`PrimaryForceTest`, `ForceMigrationTest`) and 4 Android repository/UI tests (`ForceRulesRepositoryTest`, `ForcePresentationTest`). Updated six existing rules test files and four existing Android test files for d12 expressions, emergency formulas and accurate legacy fixtures.
+Added 13 tests: six pure rules/streaming retention tests, six Room repository/migration tests, and one Compose History/current-result presentation test. Updated existing backup/migration expectations to the explicitly requested removal of duplicate archives and before/after roll lists. Updated restart fixture teardown to await observer cancellation before closing/reopening Room.
 
-Coverage includes all levels 5–20 and all Primary counts 1–10; explicit 1/2/3/4/5/10 emergency examples; independent selector values and averages; exactly N/3N/21N d12 requests; requested 38 Force example; typed 71 Force +9 Lightning saves becoming 35 Force +4 Lightning; critical impact versus unchanged explosion/selector dice; neutral and Dual Resonance; d10 spell payload isolation; normal/advantage/disadvantage/natural 1/20 regressions; core/payload/slot accounting; idempotent firing; both sliders' touch/semantics/rounding/persistence; old and modern backups; shared Room observers, reopen, Undo, and immutable archived rows.
+Coverage includes 0, 1, 19, 20, 21 and 100 records; exact attack #21 and #22 rotation; 110 attacks with restart; newest-first ordering; deterministic tied SQL keys; 23-row batch pruning; 50 concurrent mutations; corrupt historical records; current result; a 10,000-roll legacy campaign; 1,000 duplicated event rows; new and old backup export/import; resources/count preservation; Undo; and repeated 84d12/105d12/210d12 results with every face and typed total.
 
-Large-pool tests deterministically roll 84/105/210 d12s, verify each face and total (maximum 210d12 = 2520), and round-trip complete history. A bounded UI test confirms the 210-die pool starts collapsed and expands as one text node per damage component rather than hundreds of per-die views. These are host tests, not physical-device performance measurements.
+Measured database stress fixture:
 
-Focused rules/migration suite: 17/17 passed before broader validation. The first focused run exposed a missing known-AC value in a historical-impact test fixture; corrected. The first broad app run exposed an older archive fixture using the current rules version; corrected to true legacy data and the focused archive recheck passed. No remaining test failure.
+```text
+Legacy fixture: 10000 rolls, 1000 duplicated events; campaign JSON 16737653 chars, event JSON 169490 chars each. Retained total: 76196 chars.
+```
 
-Clean final Gradle run: **BUILD SUCCESSFUL in 9m 47s**. Command used a 720-second timeout with a 15-second termination grace:
+The migration kept the newest 20 exact shot snapshots, reduced both persisted row counts to 20, removed duplicate archives, used the event ordering index, preserved unrelated state and allowed another combat roll afterward. Repeated large-pool histories opened in the Compose test, stayed summarized by default and exposed complete detail on expansion. No OOM occurred in these fixed-path tests. Host results do not establish performance on a physical phone.
+
+A separate 10,000-large-roll streaming backup test passed with the rules JVM restricted to **64 MiB maximum heap** (120-second command timeout; the test itself has a 30-second timeout).
+
+The first broad pass exposed two test teardown races: fixtures closed Room immediately after requesting coroutine cancellation. Awaiting cancellation before closing fixed the affected reopen tests; their focused recheck passed, followed by the final full suites above. Early legacy fixture assertions expecting unlimited duplicate archives were updated to the new retention policy. No remaining test failures.
+
+Final clean build: **BUILD SUCCESSFUL in 4m 4s**, bounded by 600 seconds plus 15-second termination grace:
 
 ```text
 clean :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest
@@ -41,35 +62,34 @@ clean :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest
 :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
 ```
 
-- Debug lint: 0 errors, 7 warnings: GradleDependency, NewerVersionAvailable, RtlHardcoded, SetTextI18n, UseKtx.
-- Release lint: 0 errors, 8 warnings: GradleDependency, NewerVersionAvailable, RtlHardcoded, SetTextI18n, UseKtx.
+- debug: 0 errors, 8 warnings (GradleDependency, NewerVersionAvailable, RtlHardcoded, SetTextI18n, UseKtx).
+- release: 0 errors, 8 warnings (GradleDependency, NewerVersionAvailable, RtlHardcoded, SetTextI18n, UseKtx).
 
-No dependency or toolchain version was changed. JDK 17, Gradle 8.13, API 36 and build tools 35.0.0 were restored from verified official downloads. An initial dependency-resolution failure came from stale environment proxy options; using the current environment's proxy resolved it without disabling TLS verification. Android host tests use Robolectric API 35. All build/install-related commands were bounded; no stalled instrumentation was repeatedly retried.
+Existing combat regression tests passed: d12 Force counts, d8 selector range and independence, normal/advantage/disadvantage, natural 1/20, criticals, neutral/elemental/spell shots, Dual Resonance, Direct Impact, 3N Discharge, 21N Shatter, independent selector-on-blast saves, core/payload/slot accounting, both sliders, persisted shared state and historical d10 expressions. Cantrip imbuing remains absent. No combat engine or dice roller implementation changed.
 
-## Signed APK verification
+## Release verification
 
 | Check | Result |
 | --- | --- |
-| Artifact | Astravar-v1.5.0-release.apk |
-| Package ID | com.yazsras.astravar (unchanged) |
-| versionName | 1.5.0 |
-| versionCode | 7 (previous 6) |
-| Size | 4,106,699 bytes |
-| APK ZIP integrity | Passed; manifest and DEX present |
-| apksigner verification | Passed, APK Signature Scheme v2 |
-| Certificate continuity | Exact match with owner-signed v1.4.0 APK |
-| zipalign | Passed, 4-byte and 16 KiB native alignment check |
-| Debuggable | false, verified by apkanalyzer and aapt |
-| Release configuration | Minification and resource shrinking enabled |
+| APK | Astravar-v1.5.1-release.apk |
+| Package | com.yazsras.astravar (unchanged) |
+| versionName | 1.5.1 |
+| versionCode | 8 (previous 7) |
+| APK size | 4,123,083 bytes |
+| ZIP/DEX/manifest integrity | Passed |
+| apksigner | Verified, v2 signature scheme |
+| Certificate continuity | Exact match with signed v1.5.0 |
+| zipalign | Passed, 4-byte and 16 KiB checks |
+| Debuggable | false, independently checked by aapt and apkanalyzer |
 
-APK SHA-256: `8b132d0914f3e07995ac8a40ac09eb3f6091c36b4733fb410da910b3572b6fb0`
+APK SHA-256: `a27b37ffd8891fcd659616b09add2f3783ccc41174313bc8c96e24afc2811d3b`
 
-Public signing certificate SHA-256: `4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847`
+Public certificate SHA-256: `4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847`
 
-The existing owner PKCS12 key and privately provisioned credentials were used. No private key, password or signing-recovery file is tracked in the repo or included in public source/artifacts. No replacement signing identity was generated. Public GitHub release inventory contained only v1.1.0 when checked; v1.5.0 is the next unused local release after v1.4.0/code 6.
+The existing owner signing key was used privately; no replacement key or signing secrets are included in source or deliverables.
 
-## Not executed / release limits
+## Not run
 
-ADB reported no connected devices; no hardware-accelerated emulator is available. Actual APK update installation, launch/restart on a device, live service-overlay behavior, API 36 instrumentation execution, and physical Samsung Galaxy S26/D&D Beyond smoke tests were **not run**. The controlled target and instrumentation APKs compiled successfully. Database migration/reopen/shared-state and Compose behavior passed the host suites above. Matching package, certificate and higher versionCode satisfy the verified update prerequisites, but they are not a substitute for a device upgrade test.
+ADB reported no connected devices and no /dev/kvm was available. Actual install-over-v1.5.0 on the phone, physical startup/OOM reproduction, live service-overlay smoke testing and instrumentation execution were not run. The controlled target and instrumentation APKs compiled. Package/certificate continuity and higher versionCode verify update prerequisites; the seeded Room migration validates data handling, but does not substitute for a physical update test.
 
-The signed APK is delivered as a downloadable conversation artifact. No GitHub Release, remote tag or main-branch merge was created. Install over the existing app; do not uninstall a real campaign to update.
+The verified release APK is supplied as a downloadable conversation artifact. No GitHub Release, remote tag or main-branch merge was created. Install over the existing app without uninstalling it.

@@ -69,7 +69,7 @@ import java.util.UUID
         }
     }
 }
-@Composable fun EncounterPage(s: Campaign,history: List<HistoryEntry>,a: Actions) {
+@Composable fun EncounterPage(s: Campaign,history: List<HistorySummary>,a: Actions) {
     var seconds by remember { mutableStateOf("600") }; var slotLevel by remember { mutableStateOf(1) }; var slotCount by remember { mutableStateOf("") }
     var notes by remember(s.notes) { mutableStateOf(s.notes) }; var undo by remember { mutableStateOf(false) }
     val c=LocalContext.current
@@ -91,7 +91,7 @@ import java.util.UUID
             Action("Mark this level unknown",!a.busy) {a.change("Slot level $slotLevel marked unknown") {it.copy(slots=it.slots-slotLevel)}}
         }
         Section("Campaign notes") { Field("Player-safe notes",notes,{notes=it},single=false); Action("Save notes",!a.busy) {a.change("Updated campaign notes") {it.copy(notes=notes)}} }
-        s.pending.filter { it.result!=null }.asReversed().take(50).forEach { shot ->
+        s.pending.filter { it.result!=null }.asReversed().take(HistoryRetention.MAX_HISTORY_ENTRIES).forEach { shot ->
             val r=shot.result!!
             Section("${shot.plan.ability} · ${r.outcome}") {
                 Text("${r.provenance} · profile v${shot.plan.profile.version}")
@@ -102,38 +102,34 @@ import java.util.UUID
         }
         Section("Accounting history") {
             Action("Undo last operation with logged correction",!a.busy && history.isNotEmpty(),danger=true) {undo=true}
-            history.take(100).forEach { Text("Game ${it.gameSeconds}s · ${it.origin}${if(it.undone) " · UNDONE" else ""}\n${it.label}"); HorizontalDivider() }
+            history.forEach { Text("Game ${it.gameSeconds}s · ${it.origin}${if(it.undone) " · UNDONE" else ""}\n${it.label}"); HorizontalDivider() }
         }
     }
-    if(undo) AlertDialog(onDismissRequest={undo=false},title={Text("Restore the previous state?")},text={Text("The latest operation will be reversed, including its resources and pending results. A correction event is retained.\n${history.firstOrNull()?.label}")},confirmButton={TextButton(onClick={a.run("Logged correction applied") {a.repo.undo()};undo=false}) {Text("Confirm correction")}},dismissButton={TextButton(onClick={undo=false}) {Text("Cancel")}})
+    if(undo) AlertDialog(onDismissRequest={undo=false},title={Text("Restore the previous state?")},text={Text("The latest operation will be reversed, including its resources and pending results. A correction event is retained. Rolls already removed by the retention limit cannot be recovered.\n${history.firstOrNull()?.label}")},confirmButton={TextButton(onClick={a.run("Logged correction applied") {a.repo.undo()};undo=false}) {Text("Confirm correction")}},dismissButton={TextButton(onClick={undo=false}) {Text("Cancel")}})
 }
 @Composable fun BackupPage(s: Campaign,a: Actions) {
     val c=LocalContext.current
-    var incoming by remember { mutableStateOf<Pair<String,Backup>?>(null) }
+    var incoming by remember { mutableStateOf<Backup?>(null) }
     var backupSaved by remember { mutableStateOf(false) }
     val export=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) {uri -> if(uri!=null) a.run("Versioned backup saved") {
         val text=a.repo.export(); withContext(Dispatchers.IO) { c.contentResolver.openOutputStream(uri,"wt")!!.use { it.write(text.toByteArray()) } }; backupSaved=true
     } }
     val session=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/markdown")) {uri -> if(uri!=null) a.run("Session export saved") { withContext(Dispatchers.IO) {c.contentResolver.openOutputStream(uri,"wt")!!.use {it.write(BackupCodec.session(s).toByteArray())}} } }
     val import=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri -> if(uri!=null) a.run("Backup validated; review before replacing") {
-        val text=withContext(Dispatchers.IO) {c.contentResolver.openInputStream(uri)!!.use { stream ->
-            val out=java.io.ByteArrayOutputStream(); val buffer=ByteArray(8192)
-            while(true) { val n=stream.read(buffer); if(n<0) break; require(out.size()+n<=BackupCodec.MAX_BYTES) {"Backup exceeds 8 MiB"};out.write(buffer,0,n) }
-            out.toString("UTF-8")
-        }}
-        incoming=text to BackupCodec.decode(text); backupSaved=false
+        incoming=withContext(Dispatchers.IO) {c.contentResolver.openInputStream(uri)!!.bufferedReader(Charsets.UTF_8).use {BackupCodec.decode(it)}}
+        backupSaved=false
     } }
     Section("Portable backups") {
-        Text("Versioned JSON contains campaign state and accounting history. Files stay where you choose. Import validates size, IDs, dice, levels, clocks, and references before an atomic replacement. Nothing is merged implicitly.")
+        Text("Versioned JSON contains campaign state and up to ${HistoryRetention.MAX_HISTORY_ENTRIES} recent rolls with bounded accounting history. Files stay where you choose. Import validates size, IDs, dice, levels, clocks, and references before an atomic replacement. Nothing is merged implicitly.")
         Action("Export complete JSON backup",!a.busy) {export.launch("astravar-backup.json")}
         Action("Export player-safe session Markdown",!a.busy) {session.launch("astravar-session.md")}
         Action("Choose JSON backup to preview",!a.busy) {import.launch(arrayOf("application/json","text/plain","application/octet-stream"))}
-        incoming?.let { (text,b) ->
-            Text("IMPORT PREVIEW\n${b.campaign.profile.character} · ${if(b.campaign.demo) "DEMO" else "campaign"}\n${b.campaign.cores.size} cores · ${b.campaign.templates.size} templates · ${b.campaign.pending.count {it.result==null}} unresolved operations · ${b.history.size} archived events\nThis replaces current campaign state. Local history is preserved with an undo point; imported history is retained as an archive and included in future exports.")
-            if(!backupSaved) Text("Save your current backup before replacing. This is required to preserve both histories.")
+        incoming?.let { b ->
+            Text("IMPORT PREVIEW\n${b.campaign.profile.character} · ${if(b.campaign.demo) "DEMO" else "campaign"}\n${b.campaign.cores.size} cores · ${b.campaign.templates.size} templates · ${b.campaign.pending.count {it.result==null}} unresolved operations · ${b.campaign.pending.size} recent rolls\nThis replaces current campaign state. Only the newest ${HistoryRetention.MAX_HISTORY_ENTRIES} imported rolls are retained. Older rolls and duplicate legacy archives are discarded; campaign resources and settings are preserved.")
+            if(!backupSaved) Text("Save your current backup before replacing. This preserves a separate copy before replacement.")
             Action("Back up current state first",!a.busy) {export.launch("astravar-before-import.json")}
-            val id=remember(text) {UUID.randomUUID().toString()}
-            Action("Replace campaign with validated import",!a.busy && backupSaved,danger=true) {a.run("Campaign imported once") {a.repo.import(text,id)};incoming=null}
+            val id=remember(b) {UUID.randomUUID().toString()}
+            Action("Replace campaign with validated import",!a.busy && backupSaved,danger=true) {a.run("Campaign imported once") {a.repo.import(b,id)};incoming=null}
             TextButton(onClick={incoming=null}) {Text("Cancel import")}
         }
     }

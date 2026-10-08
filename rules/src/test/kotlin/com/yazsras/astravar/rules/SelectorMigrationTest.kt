@@ -22,7 +22,7 @@ class SelectorMigrationTest {
             val old=withoutSelector(BackupCodec.json.parseToJsonElement(BackupCodec.encode(backup))).toString()
             val restored=BackupCodec.decode(old)
             assertEquals(after.copy(profile=after.profile.copy(elementalSelectorDiceCount=2)),restored.campaign)
-            val shots=listOf(restored.campaign.pending.single(),restored.history.single().after.pending.single(),restored.archives.single().history.single().after.pending.single())
+            val shots=listOf(restored.campaign.pending.single())
             shots.forEach {assertEquals(after.pending.single(),it);assertEquals(shotSummary(after.pending.single()),shotSummary(it))}
             assertEquals(7,restored.campaign.profile.baseDamageDiceCount)
             assertEquals(restored,BackupCodec.decode(BackupCodec.encode(restored)))

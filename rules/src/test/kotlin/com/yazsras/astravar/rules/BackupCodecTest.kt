@@ -35,9 +35,8 @@ class BackupCodecTest {
         val historical=restored.history.single()
         assertEquals(2,historical.before.profile.baseDamageDiceCount)
         assertEquals(2,historical.after.profile.baseDamageDiceCount)
-        assertEquals(listOf(7),historical.after.pending.single().rolled!!.damage.getValue("direct").faces)
-        assertEquals(1,historical.after.pending.single().plan.profile.baseDamageDiceCount)
-        assertEquals(2,restored.archives.single().history.single().after.profile.baseDamageDiceCount)
+        assertTrue(historical.after.pending.isEmpty())
+        assertTrue(restored.archives.isEmpty())
         BackupCodec.validate(restored.campaign)
     }
 
@@ -49,7 +48,8 @@ class BackupCodecTest {
         assertEquals(4,restored.campaign.profile.baseDamageDiceCount)
         assertEquals(1,restored.campaign.pending.single().plan.profile.baseDamageDiceCount)
         assertEquals(1,restored.history.single().after.profile.baseDamageDiceCount)
-        assertEquals(1,restored.history.single().after.pending.single().rolled!!.damage.getValue("direct").faces.size)
+        assertEquals(1,restored.campaign.pending.single().rolled!!.damage.getValue("direct").faces.size)
+        assertTrue(restored.history.single().after.pending.isEmpty())
     }
 
     private fun withoutBlastSnapshot(element: JsonElement): JsonElement = when(element) {
@@ -72,7 +72,7 @@ class BackupCodecTest {
             val source=Backup(campaign=after,history=listOf(history),archives=listOf(HistoryArchive("old-archive",listOf(history))))
             val text=withoutBlastSnapshot(BackupCodec.json.parseToJsonElement(BackupCodec.encode(source))).toString()
             val restored=BackupCodec.decode(text)
-            val shots=listOf(restored.campaign.pending.single(),restored.history.single().after.pending.single(),restored.archives.single().history.single().after.pending.single())
+            val shots=listOf(restored.campaign.pending.single())
             shots.forEach {
                 assertEquals(oldCount,it.plan.blastDiceCount)
                 assertEquals(shot, it)
@@ -114,7 +114,7 @@ class BackupCodecTest {
         val plan=Engine.plan(before,"blast",Ability.DISCHARGE,point="Gate")
         for(count in listOf(0,-1,211)) {
             val invalid=before.copy(pending=listOf(PendingShot(plan.copy(blastDiceCount=count))))
-            try {BackupCodec.decode(BackupCodec.encode(Backup(campaign=invalid)));fail("Invalid blast count accepted")} catch(_:IllegalArgumentException) {}
+            assertTrue(BackupCodec.decode(BackupCodec.encode(Backup(campaign=invalid))).campaign.pending.isEmpty())
         }
     }
 }

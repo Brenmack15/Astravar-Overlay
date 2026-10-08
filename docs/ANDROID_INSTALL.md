@@ -1,6 +1,6 @@
-# Phone-only installation — signed 1.5.0 release
+# Phone-only installation — signed 1.5.1 release
 
-This is the signed 1.5.0 release. It keeps the existing package ID and owner signing identity and is intended to update an existing installation. The accompanying test report records which checks ran and which device checks remain. Start with the explicitly labeled demo for device checks; its resources do not describe your real campaign.
+This is the signed 1.5.1 release. It keeps the existing package ID and owner signing identity and is intended to update an existing installation. The accompanying test report records which checks ran and which device checks remain. Start with the explicitly labeled demo for device checks; its resources do not describe your real campaign.
 
 1. Download the delivered **signed release APK** to your phone and tap it in the download notification or Files app. Follow Android's installer prompt. If Android asks, grant installation permission only to the app opening this APK, then return to the installer. No desktop, Android Studio, terminal, ADB, root, or Play developer account is needed.
 2. Open **Astravar Overlay**. Confirm the starter profile or import your own backup. Record only resources you actually have, confirm attunement, and install a recorded completed core. Demo mode is clearly labeled and optional.
@@ -31,3 +31,7 @@ Emulator results do not establish these physical Samsung/D&D Beyond checks. Keep
 ### Updating an existing installation
 
 Install over the owner-signed release without uninstalling it. The active Primary Force die size upgrades to d12, while both selected counts and campaign state remain. Old rolls still show d10 and their actual former emergency expressions. New backups include the Force rules version; restoring an old backup upgrades only its active profile. The canonical repository defaults remain N=2/M=2, but this does not overwrite your saved choices.
+
+## History stability update
+
+The first startup migrates old history before the normal screen reads it. The latest 20 rolls remain; older rolls and duplicate accounting archives are permanently discarded. Do not uninstall the app to update. Current campaign resources and preferences remain intact. A device upgrade smoke test is listed separately from automated database migration in TEST_REPORT.md.

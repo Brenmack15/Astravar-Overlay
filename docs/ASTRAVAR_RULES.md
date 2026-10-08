@@ -71,3 +71,7 @@ The Primary Force slider keeps its 1–10 count and now shows d12; the selector 
 Examples: N=4 gives 4d12+modifier direct, 12d12 Discharge and 84d12 Shatter; N=5 gives 5d12+modifier, 15d12 and 105d12. N=10 intentionally permits 210 independent d12 Shatter results. Summaries remain compact; expandable detail/history preserve every face. Spell damage keeps its own die sizes, including d10 where applicable.
 
 The active profile is migrated on database read/import and on mutations (including Undo) without changing either selected count. Missing older N/M fields retain their established default migration rules. Historical event/archive profiles and committed shot profiles retain rules version 1, old selector eligibility, `blastDiceCount`, raw faces and resolved totals. The only remaining legacy level formula is in backup migration for pre-v1.3 plans that lacked a saved blast count. Room remains schema v2; there is no destructive migration or event-row rewrite.
+
+## History retention correction — 2026-10-07
+
+Keep only the newest 20 combat entries, including pending/rolled results shown by History. Automatically discard older entries in persistent storage. History stays newest-first and preserves all individual faces of retained large pools; the current-result card and overlay use the same bounded data. Duplicate archived accounting roll copies are not retained. This supersedes unlimited-history preservation; it does not alter any combat damage, resource, critical or save rule above.

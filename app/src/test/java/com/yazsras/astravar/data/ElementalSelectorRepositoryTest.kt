@@ -26,12 +26,12 @@ class ElementalSelectorRepositoryTest {
 
     @Test fun selectorSurvivesReopenSynchronizesBothObserversAndDrivesAllCombatModes()=runBlocking {
         context.deleteDatabase("selector-reopen.db")
-        fun open()=Room.databaseBuilder(context,AstravarDb::class.java,"selector-reopen.db").addMigrations(AstravarDb.MIGRATION_1_2).build()
+        fun open()=Room.databaseBuilder(context,AstravarDb::class.java,"selector-reopen.db").addMigrations(AstravarDb.MIGRATION_1_2,AstravarDb.MIGRATION_2_3).build()
         for(m in listOf(3,4,7,10)) {
             var db=open();var scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);var main=Repository(db,scope)
             main.mutate(label="Seed test campaign") {seed(2)}
             main.mutate(label="Select ${m}d8") {it.copy(profile=it.profile.copy(version=it.profile.version+1,elementalSelectorDiceCount=m))}
-            scope.cancel();db.close()
+            scope.coroutineContext[Job]!!.cancelAndJoin();db.close()
             db=open();scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);main=Repository(db,scope)
             try {
                 val overlay=Repository(db,scope)
@@ -49,11 +49,11 @@ class ElementalSelectorRepositoryTest {
                 val neutral=Engine.plan(rolled,"neutral-$m",Ability.ARCANE)
                 assertEquals(setOf("direct"),DiceRoller.roll(neutral,die={if(it==20) 14 else 3}).damage.keys)
                 assertEquals(12,rolled.profile.dischargeDice);assertEquals(84,rolled.profile.shatterDice)
-            } finally {scope.cancel();db.close()}
+            } finally {scope.coroutineContext[Job]!!.cancelAndJoin();db.close()}
         }
     }
 
-    @Test fun legacyDatabaseAndArchivesMigrateWithoutRewritingStoredRowsOrLosingState()=runBlocking {
+    @Test fun legacyDatabaseCompactsDuplicateJournalButPreservesExactHistoricalRolls()=runBlocking {
         val before=seed(1)
         val p=Engine.plan(before,"old-shot",Ability.ELEMENTAL,elements=listOf(DamageType.FIRE))
         val after=DiceRoller.fire(before,p,die={if(it==20) 14 else 4})
@@ -68,17 +68,17 @@ class ElementalSelectorRepositoryTest {
         try {
             val migrated=withTimeout(10000) {main.state.first {it!=null}!!}
             assertEquals(after.copy(profile=after.profile.copy(elementalSelectorDiceCount=2)),migrated)
-            assertEquals(oldState,db.dao().state()!!.body)
-            assertEquals(oldEvent,db.dao().events().single().body)
+            assertTrue(BackupCodec.decodeCampaignSnapshot(db.dao().state()!!.body).pending.isEmpty())
+            assertTrue(BackupCodec.decodeHistoryEntry(db.dao().events().single().body).after.pending.isEmpty())
             val exported=main.export()
             main.import(exported,"reimport")
-            assertEquals(oldEvent,db.dao().event(event.id)!!.body)
-            assertEquals(oldArchive,db.dao().archives().first {it.id==archive.id}.body)
+            assertTrue(BackupCodec.decodeHistoryEntry(db.dao().event(event.id)!!.body).after.pending.isEmpty())
+            assertTrue(db.dao().archives().isEmpty())
             val backup=BackupCodec.decode(main.export())
             assertEquals(after.pending,backup.campaign.pending)
-            assertEquals(after.pending,backup.archives.first {it.id==archive.id}.history.single().after.pending)
+            assertTrue(backup.archives.isEmpty())
             assertEquals(4,backup.campaign.profile.baseDamageDiceCount)
-        } finally {scope.cancel();db.close()}
+        } finally {scope.coroutineContext[Job]!!.cancelAndJoin();db.close()}
     }
 
     @Test fun backupsRestoreEightAndMigrateOldSelectorWithoutChangingForceOrHistory()=runBlocking {
@@ -97,7 +97,7 @@ class ElementalSelectorRepositoryTest {
             assertEquals(2,restored.profile.elementalSelectorDiceCount);assertEquals(4,restored.profile.baseDamageDiceCount)
             assertEquals(seed(8).cores,restored.cores);assertEquals(seed(8).slots,restored.slots)
             assertTrue(BackupCodec.decode(main.export()).history.any {it.label=="Temporarily select 1"})
-        } finally {scope.cancel();db.close()}
+        } finally {scope.coroutineContext[Job]!!.cancelAndJoin();db.close()}
     }
 
     @Test fun invalidSelectorMutationIsRejectedAtomicallyWithoutChangingEitherTrack()=runBlocking {
@@ -110,6 +110,6 @@ class ElementalSelectorRepositoryTest {
                 try {main.mutate(label="Invalid") {it.copy(profile=it.profile.copy(elementalSelectorDiceCount=invalid))};fail("Invalid count persisted")} catch(_:IllegalArgumentException) {}
                 assertEquals(saved,main.export())
             }
-        } finally {scope.cancel();db.close()}
+        } finally {scope.coroutineContext[Job]!!.cancelAndJoin();db.close()}
     }
 }

@@ -1,6 +1,7 @@
 package com.yazsras.astravar.data
 
 import android.content.Context
+import android.util.Log
 import androidx.room.*
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
@@ -13,77 +14,106 @@ import kotlinx.serialization.encodeToString
 import java.util.UUID
 
 @Entity(tableName="campaign") data class StateRow(@PrimaryKey val id: Int = 1, val body: String)
-@Entity(tableName="events") data class EventRow(@PrimaryKey val id: String, val revision: Long, val body: String, @ColumnInfo(defaultValue="'main'") val origin: String = "main")
+@Entity(tableName="events",indices=[Index(value=["revision","id"],orders=[Index.Order.DESC,Index.Order.DESC])])
+data class EventRow(@PrimaryKey val id: String,val revision: Long,val body: String,@ColumnInfo(defaultValue="'main'") val origin: String="main",
+    @ColumnInfo(defaultValue="''") val label: String="",@ColumnInfo(defaultValue="0") val gameSeconds: Long=0,@ColumnInfo(defaultValue="0") val undone: Boolean=false)
+@Entity(tableName="rolls",indices=[Index(value=["sequence","id"],orders=[Index.Order.DESC,Index.Order.DESC])])
+data class RollRow(@PrimaryKey val id: String,val sequence: Long,val body: String)
 @Entity(tableName="archives") data class ArchiveRow(@PrimaryKey val id: String,val body: String)
 @Dao interface StateDao {
     @Query("SELECT * FROM campaign WHERE id=1") fun observe(): Flow<StateRow?>
     @Query("SELECT * FROM campaign WHERE id=1") suspend fun state(): StateRow?
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun put(row: StateRow)
-    @Query("SELECT * FROM events ORDER BY revision DESC") fun observeEvents(): Flow<List<EventRow>>
-    @Query("SELECT * FROM events ORDER BY revision ASC") suspend fun events(): List<EventRow>
+    @Query("SELECT id,label,gameSeconds,origin,undone FROM events ORDER BY revision DESC,id DESC LIMIT " + HistoryRetention.MAX_HISTORY_ENTRIES) fun observeEvents(): Flow<List<HistorySummary>>
+    @Query(HistoryStorage.EVENTS_QUERY) suspend fun events(): List<EventRow>
     @Query("SELECT * FROM events WHERE id=:id") suspend fun event(id: String): EventRow?
     @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insert(row: EventRow)
     @Update suspend fun updateEvent(row: EventRow)
+    @Query(HistoryStorage.PRUNE_EVENTS) suspend fun pruneEvents()
     @Query("DELETE FROM events") suspend fun clearEvents()
-    @Query("SELECT * FROM archives ORDER BY id") suspend fun archives(): List<ArchiveRow>
+    @Query(HistoryStorage.ROLLS_QUERY) fun observeRolls(): Flow<List<RollRow>>
+    @Query(HistoryStorage.ROLLS_QUERY) suspend fun rolls(): List<RollRow>
+    @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun putRoll(row: RollRow)
+    @Query("DELETE FROM rolls") suspend fun clearRolls()
+    @Query(HistoryStorage.PRUNE_ROLLS) suspend fun pruneRolls()
+    @Query("SELECT COUNT(*) FROM rolls") suspend fun rollCount(): Int
+    @Query("SELECT COUNT(*) FROM events") suspend fun eventCount(): Int
+    @Query("SELECT * FROM archives ORDER BY id LIMIT " + HistoryRetention.MAX_HISTORY_ENTRIES) suspend fun archives(): List<ArchiveRow>
     @Insert(onConflict=OnConflictStrategy.IGNORE) suspend fun archive(row: ArchiveRow)
 }
-@Database(entities=[StateRow::class,EventRow::class,ArchiveRow::class],version=2,exportSchema=true)
+@Database(entities=[StateRow::class,EventRow::class,ArchiveRow::class,RollRow::class],version=3,exportSchema=true)
 abstract class AstravarDb: RoomDatabase() {
     abstract fun dao(): StateDao
     companion object {
         val MIGRATION_1_2=object: Migration(1,2) {
             override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE events ADD COLUMN origin TEXT NOT NULL DEFAULT 'main'");db.execSQL("CREATE TABLE IF NOT EXISTS archives (id TEXT NOT NULL PRIMARY KEY, body TEXT NOT NULL)") }
         }
-        fun open(context: Context)=Room.databaseBuilder(context,AstravarDb::class.java,"astravar.db").addMigrations(MIGRATION_1_2).build()
+        val MIGRATION_2_3=object: Migration(2,3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE events ADD COLUMN label TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE events ADD COLUMN gameSeconds INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE events ADD COLUMN undone INTEGER NOT NULL DEFAULT 0")
+                HistoryStorage.create(db);HistoryStorage.cleanup(db)
+            }
+        }
+        fun open(context: Context)=Room.databaseBuilder(context,AstravarDb::class.java,"astravar.db").addMigrations(MIGRATION_1_2,MIGRATION_2_3).build()
     }
 }
 class Repository(private val db: AstravarDb,scope: CoroutineScope) {
     private val dao=db.dao()
     val error=MutableStateFlow<String?>(null)
-    val state=dao.observe().map { row -> row?.let { BackupCodec.decodeCampaignSnapshot(it.body) } ?: Campaign() }
-        .catch { error.value="Cannot read saved campaign. Data has been preserved: ${it.message}" }.stateIn(scope,SharingStarted.Eagerly,null)
-    val history=dao.observeEvents().map { rows -> rows.map { BackupCodec.decodeHistoryEntry(it.body) } }
-        .catch { error.value="Cannot read history: ${it.message}" }.stateIn(scope,SharingStarted.Eagerly,emptyList())
-    suspend fun mutate(id: String=UUID.randomUUID().toString(),label: String,origin: String="main",change: (Campaign)->Campaign): Campaign = db.withTransaction {
-        val before=dao.state()?.let { BackupCodec.decodeCampaignSnapshot(it.body) } ?: Campaign()
-        if(dao.event(id)!=null) return@withTransaction before
-        val changed=change(before)
-        val after=changed.copy(profile=changed.profile.currentForceRules(),revision=maxOf(before.revision,changed.revision)+1)
-        BackupCodec.validate(after)
-        val e=HistoryEntry(id,label,after.gameSeconds,before,after,origin)
-        dao.insert(EventRow(id,after.revision,BackupCodec.json.encodeToString(e),origin))
-        dao.put(StateRow(body=BackupCodec.json.encodeToString(after)))
-        after
+    // Gates every read/write, including eager flows. New databases also receive storage triggers.
+    private val ready=scope.async(Dispatchers.IO) {db.withTransaction {HistoryStorage.create(db.openHelper.writableDatabase);HistoryStorage.cleanup(db.openHelper.writableDatabase)}}
+    private fun failure(message: String,cause: Throwable) {Log.e("AstravarStorage",message,cause);error.value=message}
+    private fun roll(row: RollRow): PendingShot? = try {BackupCodec.decodeShot(row.body).also {require(it.plan.id==row.id)}} catch(e: Exception) {Log.w("AstravarHistory","Invalid retained roll ${row.id}",e);null}
+    private fun assemble(row: StateRow?,rolls: List<RollRow>): Campaign = (row?.let {BackupCodec.decodeCampaignSnapshot(it.body)} ?: Campaign()).copy(pending=rolls.asReversed().mapNotNull(::roll))
+    val state=flow {ready.await();emitAll(db.invalidationTracker.createFlow("campaign","rolls").map {db.withTransaction {current()}})}
+        .catch {failure("Saved data is unavailable. Restart Astravar or check diagnostics.",it)}.stateIn(scope,SharingStarted.Eagerly,null)
+    // Metadata only: no before/after campaign graphs decoded by the UI or overlay.
+    val history=flow {ready.await();emitAll(dao.observeEvents())}
+        .catch {failure("Recent history is unavailable. Try reopening Astravar.",it)}.stateIn(scope,SharingStarted.Eagerly,emptyList())
+    private suspend fun current()=assemble(dao.state(),dao.rolls())
+    suspend fun mutate(id: String=UUID.randomUUID().toString(),label: String,origin: String="main",change: (Campaign)->Campaign): Campaign {
+        ready.await()
+        return db.withTransaction {
+            val before=current()
+            if(dao.event(id)!=null) return@withTransaction before
+            val changed=change(before)
+            val after=HistoryRetention.campaign(changed.copy(profile=changed.profile.currentForceRules(),revision=maxOf(before.revision,changed.revision)+1))
+            BackupCodec.validate(after)
+            val e=HistoryRetention.compact(HistoryEntry(id,label,after.gameSeconds,before,after,origin))
+            dao.insert(EventRow(id,after.revision,BackupCodec.json.encodeToString(e),origin,e.label,e.gameSeconds,e.undone))
+            dao.pruneEvents()
+            // The at-most-20 immutable snapshots are the only persisted dice source. Observers
+            // see this replacement atomically with campaign resource consumption and pruning.
+            dao.clearRolls()
+            after.pending.forEachIndexed {i,shot->dao.putRoll(RollRow(shot.plan.id,i.toLong(),BackupCodec.json.encodeToString(shot)))}
+            dao.pruneRolls()
+            dao.put(StateRow(body=BackupCodec.json.encodeToString(after.copy(pending=emptyList()))))
+            after
+        }
     }
     suspend fun commit(p: ShotPlan,origin: String) = mutate(p.id,"Committed ${p.ability}: ${p.actionCost}; ${if(p.ability==Ability.SHATTER) "core and remaining payloads destroyed" else if(p.ability==Ability.DISCHARGE) "core exhausted for 600 game seconds" else "selected magic spent"}",origin) { Engine.commit(it,p) }
     suspend fun fire(p: ShotPlan,options: RollOptions,origin: String) = mutate(p.id,"Rolled ${p.ability.title}: ${p.actionCost}; costs and individual dice saved",origin) { DiceRoller.fire(it,p,options) }
     suspend fun rollPending(id: String,options: RollOptions,origin: String) = mutate("roll-$id","Rolled committed shot; no additional expenditure",origin) { DiceRoller.rollPending(it,id,options) }
-    suspend fun undo()=db.withTransaction {
-        val rows=dao.events()
-        val pair=rows.asReversed().map {it to BackupCodec.decodeHistoryEntry(it.body)}.firstOrNull {(_,e)->!e.undone && e.origin!="correction"} ?: error("No remaining operation to undo")
-        val (row,e)=pair
-        dao.updateEvent(row.copy(body=BackupCodec.json.encodeToString(e.copy(undone=true))))
-        mutate(label="Undo/correction of ${e.id}: ${e.label}",origin="correction") { e.before }
-    }
-    suspend fun export(): String = db.withTransaction {
-        val s=dao.state()?.let { BackupCodec.decodeCampaignSnapshot(it.body) } ?: Campaign()
-        BackupCodec.encode(Backup(campaign=s,history=dao.events().map { BackupCodec.decodeHistoryEntry(it.body) },archives=dao.archives().map {BackupCodec.decodeHistoryArchive(it.body)}))
-    }
-    suspend fun import(text: String,operationId: String) {
-        val incoming=BackupCodec.decode(text)
-        db.withTransaction {
-            if(dao.event(operationId)!=null) return@withTransaction
-            val digest=java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") {"%02x".format(it)}
-            val source=HistoryArchive(digest,incoming.history)
-            val archived=dao.archives().associate {it.id to BackupCodec.json.encodeToString(BackupCodec.decodeHistoryArchive(it.body))}.toMutableMap()
-            for(archive in incoming.archives+source) {
-                val body=BackupCodec.json.encodeToString(archive)
-                require(archived[archive.id]==null || archived[archive.id]==body) {"Conflicting archived history ID; import cancelled without changes"}
-                dao.archive(ArchiveRow(archive.id,body));archived[archive.id]=body
-            }
-            mutate(operationId,"Replace campaign from validated backup; previous state recoverable with Undo", "import") { incoming.campaign }
+    suspend fun undo(): Campaign {
+        ready.await()
+        return db.withTransaction {
+            val row=dao.events().firstOrNull {!it.undone && it.origin!="correction"} ?: error("No retained operation to undo")
+            val e=BackupCodec.decodeHistoryEntry(row.body)
+            dao.updateEvent(row.copy(body=BackupCodec.json.encodeToString(e.copy(undone=true)),undone=true))
+            mutate(label="Undo/correction of ${e.id}: ${e.label}",origin="correction") {s->e.before.copy(pending=HistoryRetention.restoreRolls(s.pending,e))}
         }
+    }
+    suspend fun export(): String {
+        ready.await()
+        return db.withTransaction {BackupCodec.encode(Backup(campaign=current(),history=dao.events().asReversed().map {BackupCodec.decodeHistoryEntry(it.body)}))}
+    }
+    suspend fun import(text: String,operationId: String) = import(BackupCodec.decode(text),operationId)
+    suspend fun import(incoming: Backup,operationId: String) {
+        // Revalidate the bounded preview; never retain the original oversized import text.
+        val validated=BackupCodec.decode(BackupCodec.encode(incoming))
+        mutate(operationId,"Replaced campaign from backup; recent rolls limited to ${HistoryRetention.MAX_HISTORY_ENTRIES}","import") {validated.campaign}
     }
 }
 val Context.overlayPreferences by preferencesDataStore("overlay")

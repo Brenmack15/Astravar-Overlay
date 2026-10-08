@@ -23,7 +23,7 @@ class ForceMigrationTest {
             val event=HistoryEntry("old","Old shot",123,before,after)
             val decoded=BackupCodec.decode(encodeOld(Backup(campaign=after,history=listOf(event),archives=listOf(HistoryArchive("archive",listOf(event))))))
             assertEquals(after.copy(profile=after.profile.copy(forceRulesVersion=2,version=10)),decoded.campaign)
-            assertEquals(event,decoded.history.single());assertEquals(event,decoded.archives.single().history.single())
+            assertEquals(HistoryRetention.compact(event),decoded.history.single());assertTrue(decoded.archives.isEmpty())
             assertEquals(Dice(n,12,5),decoded.campaign.profile.base)
             assertEquals(Dice(n,10,5),decoded.campaign.pending.single().plan.profile.base)
             assertEquals(Dice(m,8),decoded.campaign.profile.selector)

@@ -1,10 +1,12 @@
-# Astravar 1.5.0
+# Astravar 1.5.1 — bounded recent-roll history
 
-- Primary Force upgraded from d10 to d12; the existing independent 1–10 dice-count slider now displays d12.
-- Discharge redesigned to 3× current Primary Force dice; Shatter to 7× Discharge (21× Primary). Both inherit the authoritative Primary Force die size, with no weapon flat bonus or level/additive damage progression.
-- Elemental Selector remains independently configurable from 1d8–10d8. Each active element, including eligible Dual Resonance components, adds Md8 once to an explosion. Neutral adds none.
-- Successful saves halve each rolled Force/selector total separately, rounded down. Payload/overcharge save behavior and die sizes remain unchanged.
-- Direct weapon criticals still double eligible dice, with flat modifiers once; Direct Impact criticals never double explosion or explosion selector dice.
-- Intentional Shatter pools up to 210d12 retain every individual result, with expandable detail.
-- Both selected counts, shared overlay state, campaign resources and backups survive migration. Historical d10 attacks and old blast expressions remain unchanged.
-- Package and established owner signing identity preserved; versionCode increases from 6 to 7.
+- Fixed eager, unlimited history decoding and repeated copies of every previous roll inside accounting snapshots.
+- Keep only the newest 20 combat entries in persistent storage; older rolls are automatically deleted. History remains available, newest first, with expandable individual dice.
+- Room schema v3 streams legacy campaign JSON and prunes the event journal in SQL before observation. Inventory, payloads, resources, settings and both damage counts are preserved.
+- Compact roll snapshots live once in the indexed `rolls` table. Insert triggers and atomic repository transactions enforce retention. Accounting observation reads metadata only; its Undo window is also bounded.
+- Backup export contains at most 20 rolls; streaming import handles oversized legacy histories without building the whole historical object graph. Duplicate legacy accounting archives are discarded under the retention policy.
+- Large 84d12, 105d12 and 210d12 results retain all individual faces and typed totals. Current combat results and the shared overlay state remain available.
+- No combat rules changed: Primary Force remains d12, Discharge 3N, Shatter 21N, and each active d8 selector is added once to explosions.
+- Existing package and owner signing identity retained; versionCode increases from 7 to 8.
+
+Older history removed by retention is permanent, including through Undo. The newest retained dice expressions/results are not recalculated.

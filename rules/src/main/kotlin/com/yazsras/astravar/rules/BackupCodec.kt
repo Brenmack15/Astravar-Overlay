@@ -7,48 +7,44 @@ import kotlinx.serialization.json.decodeFromJsonElement
 object BackupCodec {
     const val MAX_BYTES=8*1024*1024
     val json=Json { encodeDefaults=true; ignoreUnknownKeys=false; isLenient=false }
-    fun encode(backup: Backup): String = json.encodeToString(backup)
-    fun decode(text: String): Backup {
-        require(text.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "Backup exceeds 8 MiB" }
-        var depth=0; var quoted=false; var escaped=false
-        text.forEach { c -> if(escaped) escaped=false else if(c=='\\' && quoted) escaped=true else if(c=='\"') quoted=!quoted else if(!quoted) { if(c=='{' || c=='[') { depth++; require(depth <= 64) { "JSON nesting too deep" } }; if(c=='}' || c==']') depth-- } }
+    fun encode(backup: Backup): String = json.encodeToString(HistoryRetention.backup(backup))
+    fun decode(text: String): Backup = decode(text.reader())
+    fun decode(reader: java.io.Reader): Backup {
+        val stream=HistoryJson(reader)
+        val text=stream.backupText();stream.finish()
         val decoded=json.decodeFromJsonElement<Backup>(migrateBackup(json.parseToJsonElement(text)))
-        val b=decoded.copy(campaign=decoded.campaign.copy(profile=decoded.campaign.profile.currentForceRules()))
+        val b=HistoryRetention.backup(decoded.copy(campaign=cleanCampaign(decoded.campaign)))
         require(b.format=="astravar-backup" && b.schema==1) { "Unsupported backup format/version" }
         validate(b.campaign)
-        require(b.history.map { it.id }.distinct().size==b.history.size) { "Duplicate history IDs" }
-        b.history.forEach { require(it.id.length in 1..100 && it.label.length in 1..1000 && it.origin.length <= 50); validate(it.before); validate(it.after) }
-        require(b.archives.map { it.id }.distinct().size==b.archives.size)
-        b.archives.forEach { archive -> require(archive.id.length in 1..100 && archive.history.map {it.id}.distinct().size==archive.history.size);archive.history.forEach {validate(it.before);validate(it.after)} }
+        require(b.history.map {it.id}.distinct().size==b.history.size) {"Duplicate history IDs"}
+        b.history.forEach(::validateHistory)
         return b
     }
-    /** Upgrade only the active profile; every committed shot keeps its rules version and dice. */
-    fun decodeCampaignSnapshot(text: String): Campaign =
-        json.decodeFromJsonElement<Campaign>(migrateCampaign(json.parseToJsonElement(text)))
-            .let { it.copy(profile=it.profile.currentForceRules()) }.also(::validate)
+    fun validateHistory(e: HistoryEntry) {
+        require(e.id.length in 1..100 && e.label.length in 1..1000 && e.origin.length<=50)
+        validate(e.before);validate(e.after)
+        require(e.rollUndo.size<=HistoryRetention.MAX_HISTORY_ENTRIES && e.rollUndo.all {it.id.length in 1..100})
+    }
+    private fun cleanCampaign(s: Campaign): Campaign = s.copy(profile=s.profile.currentForceRules(),pending=s.pending.filter {p ->
+        p.plan.revision<=s.revision && s.cores.any {it.id==p.plan.coreId}
+    }.takeLast(HistoryRetention.MAX_HISTORY_ENTRIES))
+    /** Stream legacy arrays before constructing any campaign object. */
+    fun decodeCampaignSnapshot(text: String): Campaign = decodeCampaignSnapshot(text.reader())
+    fun decodeCampaignSnapshot(reader: java.io.Reader): Campaign {
+        val stream=HistoryJson(reader);val text=stream.campaignText();stream.finish()
+        return cleanCampaign(json.decodeFromJsonElement<Campaign>(migrateCampaign(json.parseToJsonElement(text)))).also(::validate)
+    }
+    fun decodeShot(text: String): PendingShot = json.decodeFromJsonElement<PendingShot>(migratePendingShot(json.parseToJsonElement(text))).also(::validateShot)
 
-    fun decodeHistoryEntry(text: String): HistoryEntry =
-        json.decodeFromJsonElement<HistoryEntry>(migrateHistoryEntry(json.parseToJsonElement(text)))
-
-    fun decodeHistoryArchive(text: String): HistoryArchive =
-        json.decodeFromJsonElement<HistoryArchive>(migrateHistoryArchive(json.parseToJsonElement(text)))
+    fun decodeHistoryEntry(text: String): HistoryEntry {
+        val stream=HistoryJson(text.reader());val bounded=stream.eventText();stream.finish()
+        return json.decodeFromJsonElement<HistoryEntry>(migrateHistoryEntry(json.parseToJsonElement(bounded)))
+    }
 
     private fun migrateBackup(element: JsonElement): JsonElement {
         val root=element as? JsonObject ?: return element
         val fields=root.toMutableMap()
         fields["campaign"]?.let { fields["campaign"]=migrateCampaign(it) }
-        fields["history"]?.let { value ->
-            if(value is JsonArray) fields["history"]=JsonArray(value.map(::migrateHistoryEntry))
-        }
-        fields["archives"]?.let { value ->
-            if(value is JsonArray) fields["archives"]=JsonArray(value.map(::migrateHistoryArchive))
-        }
-        return JsonObject(fields)
-    }
-
-    private fun migrateHistoryArchive(element: JsonElement): JsonElement {
-        val archive=element as? JsonObject ?: return element
-        val fields=archive.toMutableMap()
         fields["history"]?.let { value ->
             if(value is JsonArray) fields["history"]=JsonArray(value.map(::migrateHistoryEntry))
         }
@@ -129,9 +125,15 @@ object BackupCodec {
         require(s.turn.number>0 && s.turn.attacks in 0..2 && s.turn.spellShots in 0..20 && s.notes.length<=20000)
         s.projects.forEach { require(it.daysWorked in 0..10000 && it.name.length in 1..120 && it.notes.length<=2000 && it.recipe.length in 1..4000) }
         s.pending.forEach {
+            require(s.cores.any {c -> c.id==it.plan.coreId} && it.plan.revision<=s.revision)
+            validateShot(it)
+        }
+    }
+    fun validateShot(it: PendingShot) {
             val p=it.plan; p.profile.validate()
+            require(p.id.length in 1..100 && p.coreId.length in 1..100)
             require(if(p.blast) p.blastDiceCount in 1..maxOf(200,PrimaryForceRules.MAX_SHATTER_DICE) else p.blastDiceCount==0) { "Invalid saved blast dice" }
-            require(s.cores.any { c -> c.id==p.coreId } && p.revision>=0 && p.revision<=s.revision && p.distance in 0..p.range && p.targetPoint.length<=500)
+            require(p.revision>=0 && p.distance in 0..p.range && p.targetPoint.length<=500)
             require(p.selectedPayloads.size<=12 && p.elements.size<=p.profile.elementCapacity && p.elements.distinct().size==p.elements.size)
             require(p.selectedPayloads.map {it.id}.distinct().size==p.selectedPayloads.size && p.selectedPayloads.size+(if(p.immediate!=null) 1 else 0)<=p.profile.releaseLimit)
             p.immediate?.validate(); p.selectedPayloads.forEach { payload -> payload.template.validate(); require(payload.coreId==p.coreId) }
@@ -143,7 +145,6 @@ object BackupCodec {
             if(p.ability in listOf(Ability.ARCANE,Ability.ELEMENTAL)) require(!p.hasSpell)
             it.result?.let { r -> Engine.validateResult(p,r) }
             it.rolled?.let { r -> DiceRoller.validate(p,r) }
-        }
     }
     fun session(s: Campaign): String = buildString {
         appendLine("# Astravar session${if(s.demo) " — DEMO" else ""}")

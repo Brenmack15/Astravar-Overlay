@@ -86,7 +86,7 @@ fun rollFeedback(view: View,roll: ShotRoll?) {
     var selected by remember {mutableStateOf<String?>(null)}
     Page {
         Text("Recent rolls",style=MaterialTheme.typography.headlineSmall,color=Brass)
-        Text("Latest 20 · complete history remains in your backup",style=MaterialTheme.typography.bodySmall)
+        Text("Latest ${HistoryRetention.MAX_HISTORY_ENTRIES} rolls · older rolls are automatically deleted",style=MaterialTheme.typography.bodySmall)
         if(s.pending.isEmpty()) Section("Your first roll will appear here") {Text("Open Combat and tap Roll attack.")}
         s.recentRolls().forEach {shot->
             val roll=shot.rolled

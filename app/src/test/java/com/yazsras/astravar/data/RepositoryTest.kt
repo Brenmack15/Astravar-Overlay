@@ -34,29 +34,29 @@ class RepositoryTest {
         val b=BackupCodec.decode(r.export());assertEquals(1,b.campaign.slots[2]);assertEquals(1,b.campaign.pending.size);assertEquals(1,b.history.count {it.id==p.id})
         r.undo();val undone=BackupCodec.decode(r.export());assertEquals(1,undone.campaign.core("core").payloads.size);assertTrue(undone.campaign.pending.isEmpty())
         r.commit(p,"test");assertEquals(1,BackupCodec.decode(r.export()).campaign.core("core").payloads.size)
-        scope.cancel();db.close()
+        scope.coroutineContext[Job]!!.cancelAndJoin();db.close()
     }
     @Test fun pendingShotSurvivesDatabaseReopen()= runBlocking {
         context.deleteDatabase("reopen-test.db")
-        fun open()=Room.databaseBuilder(context,AstravarDb::class.java,"reopen-test.db").addMigrations(AstravarDb.MIGRATION_1_2).build()
+        fun open()=Room.databaseBuilder(context,AstravarDb::class.java,"reopen-test.db").addMigrations(AstravarDb.MIGRATION_1_2,AstravarDb.MIGRATION_2_3).build()
         var db=open();var scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);var repo=Repository(db,scope)
         val state=repo.mutate(label="Seed") {seed()};repo.commit(Engine.plan(state,"pending",Ability.DISCHARGE,point="Test point"),"test")
-        scope.cancel();db.close()
+        scope.coroutineContext[Job]!!.cancelAndJoin();db.close()
         db=open();scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);repo=Repository(db,scope)
         val restored=BackupCodec.decode(repo.export()).campaign
         assertNull(restored.pending.single().result);assertFalse(restored.core("core").usable(restored.gameSeconds));assertEquals(0L,restored.gameSeconds)
-        scope.cancel();db.close()
+        scope.coroutineContext[Job]!!.cancelAndJoin();db.close()
     }
     @Test fun importIsAtomicIdempotentAndPreservesHistory()= runBlocking {
         val db=Room.inMemoryDatabaseBuilder(context,AstravarDb::class.java).build();val scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);val repo=Repository(db,scope)
         repo.mutate(label="Seed") {seed()};val backup=repo.export()
         repo.mutate(label="Change") {it.copy(attuned=false)}
         repo.import(backup,"import-once");repo.import(backup,"import-once")
-        val b=BackupCodec.decode(repo.export());assertTrue(b.campaign.attuned);assertEquals(1,b.history.count {it.id=="import-once"});assertEquals(1,b.archives.size)
+        val b=BackupCodec.decode(repo.export());assertTrue(b.campaign.attuned);assertEquals(1,b.history.count {it.id=="import-once"});assertTrue(b.archives.isEmpty())
         try {repo.import("{}","invalid");fail("Malformed import accepted")} catch(_: Exception) {}
         assertTrue(BackupCodec.decode(repo.export()).campaign.attuned)
         repo.undo();assertFalse(BackupCodec.decode(repo.export()).campaign.attuned)
-        scope.cancel();db.close()
+        scope.coroutineContext[Job]!!.cancelAndJoin();db.close()
     }
     @Test fun migrationPreservesVersionOneRows()=runBlocking {
         context.deleteDatabase("migration-test.db")
@@ -66,7 +66,7 @@ class RepositoryTest {
         old.execSQL("CREATE TABLE events (id TEXT NOT NULL PRIMARY KEY, revision INTEGER NOT NULL, body TEXT NOT NULL)")
         old.execSQL("INSERT INTO campaign (id,body) VALUES (1,?)",arrayOf(BackupCodec.json.encodeToString(Campaign.serializer(),seed())))
         old.version=1;old.close()
-        val db=Room.databaseBuilder(context,AstravarDb::class.java,"migration-test.db").addMigrations(AstravarDb.MIGRATION_1_2).build()
+        val db=Room.databaseBuilder(context,AstravarDb::class.java,"migration-test.db").addMigrations(AstravarDb.MIGRATION_1_2,AstravarDb.MIGRATION_2_3).build()
         assertNotNull(db.dao().state());assertTrue(db.dao().archives().isEmpty());db.close()
     }
     @Test fun repeatedUndoStepsBackInsteadOfRedoing()=runBlocking {
@@ -75,7 +75,7 @@ class RepositoryTest {
         repo.undo();assertEquals(0L,BackupCodec.decode(repo.export()).campaign.gameSeconds)
         repo.undo();assertFalse(BackupCodec.decode(repo.export()).campaign.onboarded)
         assertEquals(2,BackupCodec.decode(repo.export()).history.count {it.undone})
-        scope.cancel();db.close()
+        scope.coroutineContext[Job]!!.cancelAndJoin();db.close()
     }
     @Test fun bothSurfacesReadTheSameDurableSelections()=runBlocking {
         val main=Preferences(context);val overlay=Preferences(context)
@@ -95,41 +95,41 @@ class RepositoryTest {
         assertTrue(fromMain.campaign.core("core").payloads.isEmpty());assertEquals(1,fromMain.campaign.slots[2])
         assertEquals(1,fromMain.history.count {it.id=="automatic-once"})
         val shot=fromMain.campaign.pending.single();assertNotNull(shot.result);assertEquals(2,shot.rolled!!.attackFaces.size)
-        assertEquals(shot.rolled,fromMain.history.last().after.pending.single().rolled)
+        assertTrue(fromMain.history.last().after.pending.isEmpty())
         assertEquals("overlay",fromMain.history.last().origin)
-        scope.cancel();db.close()
+        scope.coroutineContext[Job]!!.cancelAndJoin();db.close()
     }
     @Test fun automaticDiceSurviveProcessStyleDatabaseReopenExactly()=runBlocking {
         context.deleteDatabase("automatic-reopen.db")
-        fun open()=Room.databaseBuilder(context,AstravarDb::class.java,"automatic-reopen.db").addMigrations(AstravarDb.MIGRATION_1_2).build()
+        fun open()=Room.databaseBuilder(context,AstravarDb::class.java,"automatic-reopen.db").addMigrations(AstravarDb.MIGRATION_1_2,AstravarDb.MIGRATION_2_3).build()
         var db=open();var scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);var repo=Repository(db,scope)
         val initial=repo.mutate(label="Seed") {seed()}
         val plan=Engine.plan(initial,"persisted-roll",Ability.ARCANE)
         repo.fire(plan,RollOptions(disadvantage=true),"overlay")
         val before=BackupCodec.decode(repo.export())
-        scope.cancel();db.close();db=open();scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);repo=Repository(db,scope)
+        scope.coroutineContext[Job]!!.cancelAndJoin();db.close();db=open();scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);repo=Repository(db,scope)
         assertEquals(before,BackupCodec.decode(repo.export()))
         repo.fire(plan,RollOptions(disadvantage=true),"main")
         assertEquals(before,BackupCodec.decode(repo.export()))
-        scope.cancel();db.close()
+        scope.coroutineContext[Job]!!.cancelAndJoin();db.close()
     }
     @Test fun baseDamageUpgradeSurvivesRestartAndIsSharedByMainAndOverlayRepositories()=runBlocking {
         context.deleteDatabase("base-damage-reopen.db")
-        fun open()=Room.databaseBuilder(context,AstravarDb::class.java,"base-damage-reopen.db").addMigrations(AstravarDb.MIGRATION_1_2).build()
+        fun open()=Room.databaseBuilder(context,AstravarDb::class.java,"base-damage-reopen.db").addMigrations(AstravarDb.MIGRATION_1_2,AstravarDb.MIGRATION_2_3).build()
         var db=open();var scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);var main=Repository(db,scope)
         val initial=main.mutate(label="Seed base damage profile") {seed().copy(notes="preserve this note")}
         assertEquals(2,initial.profile.baseDamageDiceCount)
         val n3=main.mutate(label="Select 3d12") {it.copy(profile=it.profile.copy(version=it.profile.version+1,baseDamageDiceCount=3))}
         val overlay=Repository(db,scope)
         assertEquals(3,overlay.state.first {it?.profile?.baseDamageDiceCount==3}!!.profile.baseDamageDiceCount)
-        scope.cancel();db.close()
+        scope.coroutineContext[Job]!!.cancelAndJoin();db.close()
 
         db=open();scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);main=Repository(db,scope)
         var restored=main.state.first {it?.profile?.baseDamageDiceCount==3}!!
         assertEquals("preserve this note",restored.notes);assertEquals(3,restored.profile.baseDamageDiceCount)
         val n4=main.mutate(label="Select 4d12") {it.copy(profile=it.profile.copy(version=it.profile.version+1,baseDamageDiceCount=4))}
         assertEquals(4,n4.profile.baseDamageDiceCount)
-        scope.cancel();db.close()
+        scope.coroutineContext[Job]!!.cancelAndJoin();db.close()
 
         db=open();scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);main=Repository(db,scope)
         restored=main.state.first {it?.profile?.baseDamageDiceCount==4}!!
@@ -137,7 +137,7 @@ class RepositoryTest {
         val current=BackupCodec.decode(main.export()).campaign
         val plan=Engine.plan(current,"new-4d12-shot",Ability.ARCANE)
         assertEquals(Dice(4,12,5),Engine.components(plan).single().damage.dice)
-        scope.cancel();db.close()
+        scope.coroutineContext[Job]!!.cancelAndJoin();db.close()
     }
     @Test fun oldStoredCampaignWithoutBaseCountDefaultsToTwoAndKeepsCampaignState()=runBlocking {
         val old=seed().copy(profile=Profile(baseDamageDiceCount=1),notes="existing note",gameSeconds=180,attuned=true)
@@ -148,7 +148,7 @@ class RepositoryTest {
         val migrated=repo.state.first {it?.profile?.baseDamageDiceCount==2}!!
         assertEquals("existing note",migrated.notes);assertEquals(180L,migrated.gameSeconds)
         assertEquals(old.cores,migrated.cores);assertTrue(migrated.attuned);assertTrue(migrated.demo)
-        scope.cancel();db.close()
+        scope.coroutineContext[Job]!!.cancelAndJoin();db.close()
     }
     @Test fun targetAndFeedbackPreferencesAreSharedAndDurable()=runBlocking {
         val main=Preferences(context);main.targeting(RollOptions(advantage=true,armorClass=18));main.aim(90,"Archway",true,"cold",true);main.haptics(false);main.manualOverrides(true)
@@ -158,12 +158,12 @@ class RepositoryTest {
 
     @Test fun sevenAndTenSurviveDatabaseRestartDriveBothSurfacesAndRestoreFromBackup()=runBlocking {
         context.deleteDatabase("slider-reopen.db")
-        fun open()=Room.databaseBuilder(context,AstravarDb::class.java,"slider-reopen.db").addMigrations(AstravarDb.MIGRATION_1_2).build()
+        fun open()=Room.databaseBuilder(context,AstravarDb::class.java,"slider-reopen.db").addMigrations(AstravarDb.MIGRATION_1_2,AstravarDb.MIGRATION_2_3).build()
         for(count in listOf(7,10)) {
             var db=open();var scope=CoroutineScope(SupervisorJob()+Dispatchers.Default)
             var main=Repository(db,scope)
             main.mutate(label="Select ${count}d12") {seed().copy(profile=Profile(baseDamageDiceCount=count),notes="retained campaign")}
-            scope.cancel();db.close()
+            scope.coroutineContext[Job]!!.cancelAndJoin();db.close()
 
             db=open();scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);main=Repository(db,scope)
             try {
@@ -187,7 +187,7 @@ class RepositoryTest {
                 val restored=BackupCodec.decode(main.export())
                 assertEquals(count,restored.campaign.profile.baseDamageDiceCount)
                 assertEquals(shot,restored.campaign.pending.single())
-            } finally {scope.cancel();db.close()}
+            } finally {scope.coroutineContext[Job]!!.cancelAndJoin();db.close()}
         }
     }
 
@@ -204,10 +204,8 @@ class RepositoryTest {
             repo.mutate(label="Existing campaign") {before}
             val exported=repo.export()
             repo.import(exported,"reimport-migrated-archive")
-            val restored=BackupCodec.decode(repo.export()).archives.first {it.id==archive.id}
-            assertEquals(archive,restored)
-            assertEquals(oldBody,db.dao().archives().first {it.id==archive.id}.body)
-        } finally {scope.cancel();db.close()}
+            assertTrue(BackupCodec.decode(repo.export()).archives.isEmpty())
+        } finally {scope.coroutineContext[Job]!!.cancelAndJoin();db.close()}
     }
 
 }

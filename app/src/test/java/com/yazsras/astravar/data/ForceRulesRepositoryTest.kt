@@ -27,7 +27,7 @@ class ForceRulesRepositoryTest {
 
     @Test fun legacyDatabaseMigratesSharedActiveProfileKeepsRowsAndSurvivesRestartUndoAndRestore()=runBlocking {
         context.deleteDatabase("force-migration.db")
-        fun open()=Room.databaseBuilder(context,AstravarDb::class.java,"force-migration.db").addMigrations(AstravarDb.MIGRATION_1_2).build()
+        fun open()=Room.databaseBuilder(context,AstravarDb::class.java,"force-migration.db").addMigrations(AstravarDb.MIGRATION_1_2,AstravarDb.MIGRATION_2_3).build()
         val before=old()
         val after=DiceRoller.fire(before,Engine.plan(before,"old-shot",Ability.ARCANE),die={if(it==20) 14 else 9})
         val event=HistoryEntry("old-event","Old shot",300,before,after)
@@ -43,23 +43,24 @@ class ForceRulesRepositoryTest {
             assertEquals(shared,withTimeout(10000) {main.state.first {it!=null}!!})
             assertEquals(Dice(5,12,5),shared.profile.base);assertEquals(Dice(7,8),shared.profile.selector)
             assertEquals(after.pending,shared.pending);assertEquals(after.cores,shared.cores);assertEquals(after.slots,shared.slots)
-            assertEquals(oldState,db.dao().state()!!.body);assertEquals(oldEvent,db.dao().event(event.id)!!.body)
+            assertTrue(BackupCodec.decodeCampaignSnapshot(db.dao().state()!!.body).pending.isEmpty())
+            assertEquals(after.pending,shared.pending)
             val prefs=Preferences(context);prefs.elements(listOf(DamageType.FIRE));prefs.mode(Ability.SHATTER)
             main.mutate(label="Keep migrated state") {it}
-            scope.cancel();db.close();db=open();scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);main=Repository(db,scope)
+            scope.coroutineContext[Job]!!.cancelAndJoin();db.close();db=open();scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);main=Repository(db,scope)
             val reopened=withTimeout(10000) {main.state.first {it!=null}!!}
             assertEquals(5,reopened.profile.baseDamageDiceCount);assertEquals(7,reopened.profile.elementalSelectorDiceCount)
             assertEquals(2,reopened.profile.forceRulesVersion);assertEquals(300L,reopened.gameSeconds)
             assertEquals(listOf(DamageType.FIRE),Preferences(context).flow.first().elements)
             assertEquals(Ability.SHATTER,Preferences(context).flow.first().mode)
             val backup=main.export();main.import(backup,"restore")
-            assertEquals(oldEvent,db.dao().event(event.id)!!.body);assertEquals(oldArchive,db.dao().archives().first {it.id==archive.id}.body)
+            assertTrue(BackupCodec.decodeHistoryEntry(db.dao().event(event.id)!!.body).after.pending.isEmpty());assertTrue(db.dao().archives().isEmpty())
             // Undo into a historical pre-upgrade profile must still restore current active Force rules.
             main.undo();main.undo();main.undo()
             val undone=BackupCodec.decode(main.export()).campaign
             assertEquals(Dice(5,12,5),undone.profile.base);assertEquals(7,undone.profile.elementalSelectorDiceCount)
             assertEquals("Do not lose this",undone.notes)
-        } finally {scope.cancel();db.close()}
+        } finally {scope.coroutineContext[Job]!!.cancelAndJoin();db.close()}
     }
 
     @Test fun maximumShatterPersistsAllFacesAndSharedStateWithoutLosingSelectors()=runBlocking {
@@ -77,6 +78,6 @@ class ForceRulesRepositoryTest {
             assertEquals(List(210) {12},roll.damage.getValue("blast").faces)
             assertEquals(2520,roll.damage.getValue("blast").total);assertEquals(List(8) {8},roll.damage.getValue("element0").faces)
             assertTrue(restored.core("core").destroyed);assertTrue(restored.postShatter)
-        } finally {scope.cancel();db.close()}
+        } finally {scope.coroutineContext[Job]!!.cancelAndJoin();db.close()}
     }
 }
