@@ -8,9 +8,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.Alignment
 import com.yazsras.astravar.*
 import com.yazsras.astravar.rules.*
-import java.util.UUID
 
 @Composable fun AstravarScreen(app: AstravarApp,startOverlay: ()->Unit,grantOverlay: ()->Unit,stopOverlay: ()->Unit) {
     val s by app.repository.state.collectAsState()
@@ -27,7 +27,7 @@ import java.util.UUID
     AstravarTheme {
         Scaffold(
             snackbarHost={SnackbarHost(snackbar)},
-            topBar={AstravarHeader(s?.demo==true)},
+            topBar={AstravarHeader(s?.demo==true) {tab="More";morePage="Settings"}},
             bottomBar={if(s?.onboarded==true) WeaponNavigation(tab) {tab=it;morePage=null}}
         ) {insets->
             Column(Modifier.padding(insets).imePadding()) {
@@ -52,9 +52,7 @@ import java.util.UUID
                 } else when(tab) {
                     "Weapon" -> Dashboard(current,actions,startOverlay,grantOverlay,stopOverlay,app.preferences,prefs)
                     "Cores & Payloads" -> {
-                        Row(Modifier.padding(horizontal=16.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                            listOf("Cores","Payloads").forEach {name->FilterChip(selected=inventoryTab==name,onClick={inventoryTab=name},label={Text(name)},modifier=Modifier.weight(1f).heightIn(min=48.dp))}
-                        }
+                        InventoryTabs(inventoryTab) {inventoryTab=it}
                         if(inventoryTab=="Cores") CoresPage(current,actions) else PayloadsPage(current,actions,app.preferences,prefs.selectedPayloads)
                     }
                     "History" -> CombatHistoryPage(current)
@@ -66,20 +64,38 @@ import java.util.UUID
                             "Backup" -> Page {BackupPage(current,actions)}
                             "Settings" -> SettingsPage(app,current,actions,startOverlay,grantOverlay,stopOverlay)
                             "Help" -> HelpPage()
-                            else -> Page {
-                                Text("Control room",style=MaterialTheme.typography.headlineMedium,color=Brass)
-                                Text("Tune Astravar. Preserve your progress.",color=Muted)
-                                ControlRoomLink("Weapon resources & recovery","Action limits, core recovery and spell slots","Core") {morePage="Resources"}
-                                ControlRoomLink("Rules & upgrades","Damage sliders, profile and approved upgrades","Weapon") {morePage="Rules"}
-                                ControlRoomLink("Overlay & appearance","Permissions, panel size and artwork") {morePage="Settings"}
-                                ControlRoomLink("Backup & restore","Export or restore your weapon data","History") {morePage="Backup"}
-                                ControlRoomLink("Help & diagnostics","Device information and guidance") {morePage="Help"}
-                            }
+                            else -> ControlRoomPage {morePage=it}
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable fun InventoryTabs(selected: String,change: (String)->Unit) {
+    Box(Modifier.fillMaxWidth().instrumentSurface().padding(horizontal=16.dp,vertical=8.dp)) {
+        InstrumentTabs(listOf("Cores","Payloads"),selected,change)
+    }
+}
+
+@Composable fun ControlRoomPage(open: (String)->Unit) {
+    Page {
+        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
+            InstrumentMedallion("More",Modifier.size(54.dp),Brass)
+            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
+                Text("ASTRAVAR SYSTEMS",style=MaterialTheme.typography.labelSmall,color=Brass)
+                Text("Control room",style=MaterialTheme.typography.headlineMedium,color=MaterialTheme.colorScheme.onSurface)
+                Text("Tune Astravar. Preserve your progress.",style=MaterialTheme.typography.bodySmall,color=Muted)
+            }
+        }
+        SectionCaption("WEAPON SYSTEMS")
+        ControlRoomLink("Weapon resources & recovery","Action limits, core recovery and spell slots","Core") {open("Resources")}
+        ControlRoomLink("Rules & upgrades","Damage sliders, profile and approved upgrades","Weapon") {open("Rules")}
+        ControlRoomLink("Overlay & appearance","Permissions, panel size and artwork","Settings") {open("Settings")}
+        SectionCaption("SAFEKEEPING & SUPPORT")
+        ControlRoomLink("Backup & restore","Export or restore your weapon data","History") {open("Backup")}
+        ControlRoomLink("Help & diagnostics","Device information and guidance","Help") {open("Help")}
     }
 }
 

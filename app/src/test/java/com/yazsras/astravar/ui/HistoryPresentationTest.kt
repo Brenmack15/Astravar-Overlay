@@ -41,7 +41,7 @@ class HistoryPresentationTest {
             compose.onAllNodes(hasText("Force blast: 210d12",substring=true)).assertCountEquals(1)
             compose.runOnIdle {showCurrent.value=true}
             compose.onNodeWithText("DEXTERITY SAVE · DC 15").assertIsDisplayed()
-            compose.onNodeWithText("EXPLOSION · ROLLED DAMAGE").assertIsDisplayed()
+            compose.onNode(hasText("EXPLOSION",substring=true)).assertIsDisplayed()
             compose.onAllNodesWithText("2520").assertCountEquals(2)[0].assertIsDisplayed()
             compose.onNodeWithText("Show individual dice").assertExists()
             assertEquals(2520,s.pending.last().rolled!!.damage.getValue("blast").total)

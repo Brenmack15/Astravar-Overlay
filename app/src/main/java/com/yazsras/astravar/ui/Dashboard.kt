@@ -1,6 +1,15 @@
 package com.yazsras.astravar.ui
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CutCornerShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.*
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -58,20 +67,18 @@ import java.util.UUID
         } else if(unresolved==null) WeaponHero(s,prefs.image,ability,planned.getOrNull(),planned.exceptionOrNull()?.message)
         if(!s.attuned) Action("Confirm I am attuned",!a.busy) {a.change("Attunement confirmed by player") {it.copy(attuned=true)}}
         if(unresolved!=null) ResolutionPanel(unresolved,a,prefs.manualOverrides)
+        SectionCaption("Equipped systems")
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick={corePicker=true},modifier=Modifier.weight(1f).heightIn(min=56.dp)) {Column {Text("Core ▾");Text(s.installed?.name ?: "None",style=MaterialTheme.typography.bodySmall)}}
-            OutlinedButton(onClick={payloadPicker=true},modifier=Modifier.weight(1f).heightIn(min=56.dp)) {Column {Text("Payload ▾");Text(s.installed?.payloads?.filter {it.id in selected}?.joinToString {it.template.name}?.ifBlank {"None"} ?: "None",style=MaterialTheme.typography.bodySmall)}}
-        }
-        RollModeControl(if(advantage && !disadvantage) RollMode.ADVANTAGE else if(disadvantage && !advantage) RollMode.DISADVANTAGE else RollMode.NORMAL) {mode->
-            advantage=mode==RollMode.ADVANTAGE;disadvantage=mode==RollMode.DISADVANTAGE
-            a.run("") {preferences.targeting(options())}
+            ModuleControl("Core",s.installed?.name ?: "None",Frost,Modifier.weight(1f)) {corePicker=true}
+            ModuleControl("Payload",s.installed?.payloads?.filter {it.id in selected}?.joinToString {it.template.name}?.ifBlank {"None"} ?: "None",Brass,Modifier.weight(1f)) {payloadPicker=true}
         }
         if((distance.toIntOrNull() ?: 0)>60) Text("Long range · ${if(advantage) "advantage and disadvantage cancel" else "disadvantage applies"}",style=MaterialTheme.typography.bodySmall,color=Frost)
         Choices("Firing mode",Ability.entries.toList(),ability,{it.title}) {v->a.run("") {preferences.mode(v)}}
         if(ability==Ability.ELEMENTAL || blast) {
             TextButton(onClick={a.run("") {preferences.elements(emptyList());if(!blast) preferences.mode(Ability.ARCANE)}}) {Text(if(elements.isEmpty()) "✓ Neutral Force" else "Neutral Force")}
             val allowed=if(s.profile.elementCapacity>1 && s.profile.elementCapacityOverride==null) Engine.basic else Engine.elements(s.profile)
-            ChoiceGrid(allowed,elements.firstOrNull(),{it.name.lowercase().replaceFirstChar(Char::titlecase)}) {t->a.run("") {preferences.elements(if(s.profile.elementCapacity==1) listOf(t) else if(t in elements) elements-t else (elements+t).takeLast(s.profile.elementCapacity))}}
+            SectionCaption("Elemental selector",s.profile.selector.toString())
+            ElementSelector(allowed,elements) {t->a.run("") {preferences.elements(if(s.profile.elementCapacity==1) listOf(t) else if(t in elements) elements-t else (elements+t).takeLast(s.profile.elementCapacity))}}
             if(elements.size>1) Text(elements.joinToString(" + "){it.name.lowercase()},color=Frost)
         }
         if(blast) Section("Blast targeting") {
@@ -80,7 +87,7 @@ import java.util.UUID
             Toggle("Also make a direct pistol attack",direct) {direct=it}
         }
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick={a.run("") {preferences.targeting(options());preferences.aim(distance.intValue("Distance",0,180),target,direct,immediate,manualSlot);start()}},modifier=Modifier.weight(1f).heightIn(min=48.dp)) {Text("Floating controls")}
+            MetalButton("Floating controls",modifier=Modifier.weight(1f),icon="Emblem") {a.run("") {preferences.targeting(options());preferences.aim(distance.intValue("Distance",0,180),target,direct,immediate,manualSlot);start()}}
             TextButton(onClick={optionsOpen=!optionsOpen},modifier=Modifier.weight(1f).heightIn(min=48.dp)) {Text(if(optionsOpen) "Less ▴" else "Shot options ▾")}
         }
         WeaponActionWindow(s,a)
@@ -95,8 +102,12 @@ import java.util.UUID
             if(prefs.manualOverrides) TextButton(onClick={prepare(true)},enabled=!a.busy && unresolved==null) {Text("Manual override · external dice")}
         }
     }
-    Surface(color=Gunmetal,tonalElevation=4.dp) {
+    Surface(color=Color.Transparent,modifier=Modifier.instrumentSurface()) {
         Column(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=10.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+        RollModeControl(if(advantage && !disadvantage) RollMode.ADVANTAGE else if(disadvantage && !advantage) RollMode.DISADVANTAGE else RollMode.NORMAL) {mode->
+            advantage=mode==RollMode.ADVANTAGE;disadvantage=mode==RollMode.DISADVANTAGE
+            a.run("") {preferences.targeting(options())}
+        }
             Action(if(blast) "Review & roll ${ability.title.lowercase()}" else if(showResult && s.pending.lastOrNull()?.result!=null) "Roll again" else "Roll attack",!a.busy && planned.isSuccess && unresolved==null,danger=ability==Ability.SHATTER) {showResult=true;attack()}
             Text(if(blast) "Review the core cost before releasing" else "Attack + potential damage · DM determines the hit",style=MaterialTheme.typography.labelSmall,color=Muted)
         }
@@ -104,7 +115,7 @@ import java.util.UUID
     }
     if(corePicker) CorePicker(s,a) {corePicker=false}
     if(payloadPicker) PayloadPicker(s,a,preferences,selected) {payloadPicker=false}
-    preview?.let {p->AlertDialog(onDismissRequest={preview=null},title={Text(if(p.ability==Ability.SHATTER) "Shatter this core?" else p.ability.title)},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+    preview?.let {p->ArcaneDialog(onDismissRequest={preview=null},title={Text(if(p.ability==Ability.SHATTER) "Shatter this core?" else p.ability.title)},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
         Text(p.actionCost)
         Engine.components(p).forEach {Text("${it.damage.dice} ${it.damage.type.name.lowercase()} · ${it.label}")}
         if(p.disadvantage) Text("Long-range disadvantage applies.")
@@ -115,60 +126,91 @@ import java.util.UUID
     }},confirmButton={TextButton(onClick={if(externalDice) a.run("Enter your dice below") {a.repo.commit(p,"main")} else fire(p);preview=null},enabled=!a.busy) {Text(if(externalDice) "Commit for external dice" else if(p.ability==Ability.SHATTER) "Destroy core & roll" else "Roll now")}},dismissButton={TextButton(onClick={preview=null}) {Text("Cancel")}})}
 }
 
-@Composable fun WeaponHero(s: Campaign,image: String,ability: Ability,plan: ShotPlan?,problem: String?=null) {
-    ArcanePanel(accent=Frost) {
-        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
-            Text("PRIMARY WEAPON",style=MaterialTheme.typography.labelSmall,color=Brass)
-            StatusPill(if(plan!=null) "READY" else "CHECK WEAPON",plan!=null)
+@Composable fun ModuleControl(label:String,value:String,tint:Color,modifier:Modifier=Modifier,open:()->Unit) {
+    ArcanePanel(accent=tint,modifier=modifier.clickable(onClick=open)) {
+        Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+            InstrumentMedallion(label,Modifier.size(38.dp),tint)
+            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
+                Text("${label.uppercase()} MODULE",style=MaterialTheme.typography.labelSmall,color=tint)
+                Text(value,style=MaterialTheme.typography.bodyMedium,maxLines=2,color=Color(0xFFECE6D9))
+            }
+            Text("›",color=tint,fontSize=20.sp)
         }
-        WeaponArtwork(image,Modifier.fillMaxWidth().height(176.dp))
-        Text("Astravar",style=MaterialTheme.typography.headlineMedium,color=Brass)
-        Text(ability.title.uppercase(),style=MaterialTheme.typography.labelSmall,color=Frost)
-        HorizontalDivider(color=Brass.copy(alpha=.2f))
-        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
-            Stat("ATTACK", "+${s.profile.attack}")
-            Stat("PRIMARY FORCE",s.profile.base.toString())
-            Stat("SAVE DC",s.profile.saveDc.toString())
-        }
-        Text(plan?.let {Engine.components(it).joinToString(" + ") {c->"${c.damage.dice} ${c.damage.type.name.lowercase().replaceFirstChar(Char::titlecase)}"}} ?: "${s.profile.base} Force",style=MaterialTheme.typography.bodyMedium,color=Frost)
-        if(problem!=null) Text(problem,style=MaterialTheme.typography.bodySmall,color=Brass)
     }
 }
-
-@Composable fun RollResultCard(pending: PendingShot,onAgain: (()->Unit)?=null,enabled: Boolean=true) {
+@Composable fun WeaponStat(label:String,value:String,modifier:Modifier=Modifier) {
+    Column(modifier.clip(CutCornerShape(6.dp)).metalSurface(Brass.copy(alpha=.6f)).padding(horizontal=4.dp,vertical=11.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(5.dp)) {
+        Text(label,style=MaterialTheme.typography.labelSmall,color=Muted,textAlign=TextAlign.Center,maxLines=1)
+        Text(value,fontFamily=DisplayFace,fontSize=if(value.any(Char::isLetter)) 16.sp else 23.sp,color=Color(0xFFF0E5CE),maxLines=1)
+    }
+}
+@Composable fun WeaponHero(s:Campaign,image:String,ability:Ability,plan:ShotPlan?,problem:String?=null) {
+    SectionCaption("Main weapon",ability.title)
+    ArcanePanel(accent=Brass) {
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
+            Text("ASTRAVAR SYSTEM ONLINE",style=MaterialTheme.typography.labelSmall,color=Brass)
+            StatusPill(if(plan!=null) "READY" else "CHECK WEAPON",plan!=null)
+        }
+        Box(Modifier.fillMaxWidth().height(164.dp),contentAlignment=Alignment.Center) {
+            ArcaneDial(Modifier.size(180.dp),Frost)
+            WeaponArtwork(image,Modifier.fillMaxWidth().height(156.dp))
+        }
+        Column(Modifier.fillMaxWidth(),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(4.dp)) {
+            Text("ASTRAVAR",fontFamily=DisplayFace,fontSize=25.sp,letterSpacing=3.sp,color=Color(0xFFF0E4CA))
+            Text("ARCANE • MECHANICAL • PRECISION",style=MaterialTheme.typography.labelSmall,color=Muted)
+        }
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(5.dp)) {
+            WeaponStat("ATTACK", "+${s.profile.attack}",Modifier.weight(.8f))
+            WeaponStat("FORCE",s.profile.base.toString(),Modifier.weight(1.35f))
+            WeaponStat("TYPE","Force",Modifier.weight(.95f))
+            WeaponStat("SAVE DC",s.profile.saveDc.toString(),Modifier.weight(.9f))
+        }
+        Text(plan?.let {Engine.components(it).joinToString(" + ") {c->"${c.damage.dice} ${c.damage.type.name.lowercase().replaceFirstChar(Char::titlecase)}"}} ?: "${s.profile.base} Force",style=MaterialTheme.typography.bodyMedium,color=Frost,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth())
+        if(problem!=null)Text(problem,style=MaterialTheme.typography.bodySmall,color=Brass)
+    }
+}
+@Composable fun RollResultCard(pending:PendingShot,onAgain:(()->Unit)?=null,enabled:Boolean=true) {
     val p=pending.plan;val result=pending.result ?: return
     val context=LocalContext.current
     val natural=pending.rolled?.natural
     val critical=natural==20 || result.outcome==Outcome.CRITICAL
     val miss=natural==1 || result.outcome==Outcome.MISS
-    ArcanePanel(accent=if(miss) MaterialTheme.colorScheme.error else if(critical) Brass else Frost) {
-        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
+    val tint=if(miss) MaterialTheme.colorScheme.error else if(critical) Brass else Frost
+    SectionCaption("Roll result",p.ability.title)
+    ArcanePanel(accent=tint) {
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
             Text(p.ability.title.uppercase(),style=MaterialTheme.typography.labelSmall,color=Brass)
-            if(critical) StatusPill("NATURAL 20",false)
+            if(critical)StatusPill("NATURAL 20",false)
         }
-        Text(when {critical->"CRITICAL HIT";natural==1->"NATURAL 1 — MISS";p.blast->"DEXTERITY SAVE · DC ${p.profile.saveDc}";else->"ATTACK ROLL"},color=if(miss) MaterialTheme.colorScheme.error else Brass,style=MaterialTheme.typography.labelLarge)
-        result.attackTotal?.let {Text(it.toString(),style=MaterialTheme.typography.headlineLarge,color=if(critical) Brass else Frost)}
-        pending.rolled?.let {Text(it.attackDescription(p),color=Muted,style=MaterialTheme.typography.bodyMedium)}
-        HorizontalDivider(color=Brass.copy(alpha=.2f))
+        val heading=when {critical->"CRITICAL HIT";natural==1->"NATURAL 1 — MISS";p.blast->"DEXTERITY SAVE · DC ${p.profile.saveDc}";else->"ATTACK ROLL"}
+        Text(heading,color=tint,style=MaterialTheme.typography.titleMedium,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth())
+        result.attackTotal?.let {total->
+            Box(Modifier.fillMaxWidth().height(166.dp),contentAlignment=Alignment.Center) {
+                ArcaneDial(Modifier.size(186.dp),tint)
+                Text(total.toString(),fontFamily=DisplayFace,fontSize=79.sp,color=if(critical) Color(0xFFFFE9B7) else Color(0xFFE5F1FF))
+            }
+        }
+        pending.rolled?.let {Text(it.attackDescription(p),color=Color(0xFFDDD5C7),style=MaterialTheme.typography.bodyLarge,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth())}
         if(p.blast) {
+            SectionCaption("Explosion • rolled damage")
             val explosion=Engine.components(p).filter {it.portion!=Portion.DIRECT}.groupBy {it.damage.type}.mapValues {(_,cs)->cs.sumOf {result.rolls[it.id] ?: 0}}
-            Text("EXPLOSION · ROLLED DAMAGE",style=MaterialTheme.typography.labelLarge,color=Brass)
             DamageRows(explosion)
-            if(result.targets.isEmpty()) Text("No affected creatures recorded")
+            if(result.targets.isEmpty())Text("No affected creatures recorded")
             result.targets.forEach {t->Text("${t.name} · ${if(t.saved==true) "save passed" else "save failed"}",style=MaterialTheme.typography.labelLarge);DamageRows(Engine.damage(p,result,t))}
         } else {
             val damage=Engine.damage(p,result)
+            SectionCaption(if(miss) "Damage" else "Potential damage")
             Text("${damage.values.sum()} ${if(miss) "DAMAGE" else "POTENTIAL DAMAGE"}",style=MaterialTheme.typography.headlineSmall,color=Brass)
             DamageRows(damage)
-            if(!miss) Text("DM determines the hit and any target-specific adjustments.",style=MaterialTheme.typography.bodySmall,color=Muted)
-            else if(natural!=1) Text("Miss recorded in this historical result.",style=MaterialTheme.typography.bodySmall,color=Muted)
+            if(!miss)Text("DM determines the hit and any target-specific adjustments.",style=MaterialTheme.typography.bodySmall,color=Muted)
+            else if(natural!=1)Text("Miss recorded in this historical result.",style=MaterialTheme.typography.bodySmall,color=Muted)
         }
         Text("${pending.rolled?.coreName?.ifBlank {p.coreId} ?: p.coreId} · ${p.selectedPayloads.joinToString {it.template.name}.ifBlank {p.immediate?.name ?: "No spell payload"}}",style=MaterialTheme.typography.bodySmall,color=Muted)
-        Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
+        Row(verticalAlignment=Alignment.CenterVertically) {
             TextButton(onClick={(context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Astravar result",shotSummary(pending)))}) {Text("Copy result")}
         }
         DiceDetails(pending)
-        if(onAgain!=null) Action("Roll again",enabled=enabled,onClick=onAgain)
+        if(onAgain!=null)Action("Roll again",enabled=enabled,onClick=onAgain)
     }
 }
 

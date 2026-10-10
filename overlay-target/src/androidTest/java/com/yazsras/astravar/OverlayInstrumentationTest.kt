@@ -75,13 +75,13 @@ class OverlayInstrumentationTest {
             ?: error("Dragged panel did not return after its saved-position refresh")).visibleBounds
         assertTrue(panel.left>=0 && panel.right<=device.displayWidth)
         tapPanel("Adv");tapPanel("Roll attack")
-        assertTrue(device.wait(Until.hasObject(By.text(Pattern.compile("ATTACK ROLL: \\d+"))),30000))
+        assertTrue(device.wait(Until.hasObject(By.text("ATTACK ROLL")),30000))
         val formula=device.findObject(By.textStartsWith("d20 ")).text
         assertTrue("Two visible d20s must be preserved",formula.contains(" / ") && formula.contains("advantage"))
         assertFalse("No manual damage entry in normal combat",device.hasObject(By.clazz("android.widget.EditText").pkg(appPackage)))
         screenshot("automatic-result")
         tapPanel("Roll again")
-        assertTrue(device.wait(Until.hasObject(By.text(Pattern.compile("ATTACK ROLL: \\d+"))),30000))
+        assertTrue(device.wait(Until.hasObject(By.text("ATTACK ROLL")),30000))
         File(files,"saved-roll.txt").writeText(device.findObject(By.textStartsWith("d20 ")).text)
         tapPanel("Collapse")
         val edit=device.findObject(By.desc("Keyboard focus test"));edit.click();edit.text="typed under Astravar"
@@ -119,7 +119,7 @@ class OverlayInstrumentationTest {
         screenshot("restored-main-result")
         findText("History").click();device.waitForIdle()
         assertTrue(device.wait(Until.hasObject(By.text("Recent rolls")),30000))
-        assertEquals("Exactly two attacks appear in history",2,device.findObjects(By.text(Pattern.compile(".*to hit · advantage"))).size)
+        assertEquals("Exactly two attacks appear in history",2,device.findObjects(By.text(Pattern.compile("d20 .*advantage.*"))).size)
         screenshot("recent-history")
         startOverlay();shell("am start -W -n com.yazsras.astravar.target/.TargetActivity")
         shell("appops set $appPackage SYSTEM_ALERT_WINDOW deny")

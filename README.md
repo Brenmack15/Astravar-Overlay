@@ -1,6 +1,6 @@
 # Astravar Overlay
 
-**Version 1.6.0: Astravar weapon control redesign.** Four focused destinations, a compact floating overlay, approved pistol artwork and a restrained charcoal/gold/blue interface. Ordinary attacks show attack totals and potential damage; the DM determines hits. Enemy AC, defense pickers and the encounter dashboard are removed. Weapon-specific action limits and recovery controls remain. The d12 / 3N / 21N rules, both independent sliders and persistent newest-20 history are preserved.
+**Version 1.7.0: full Astravar instrument interface.** The native app and floating overlay now use real graphite/brushed-metal textures, chamfered bronze framing, luminous instrument controls, licensed Cinzel/Inter typography, original symbols and a transparent rendering of the approved Astravar pistol. Weapon, Cores & Payloads, History and More share this design system. All controls use actual campaign state; the d12 / 3N / 21N rules, both independent sliders, source costs and persistent newest-20 history are preserved. Ordinary attacks show attack totals and potential damage; the DM determines hits. Enemy AC and the general encounter dashboard remain retired.
 
 Native, offline Android companion for the custom Astravar arcane pistol. Kotlin + Jetpack Compose, a shared JVM rules engine, transactional Room storage, DataStore preferences, and a genuine `TYPE_APPLICATION_OVERLAY` foreground service. This is not a website or D&D Beyond integration.
 
@@ -24,6 +24,8 @@ Release packaging requires the owner's durable signing identity through environm
 - [Mechanics and authority](docs/ASTRAVAR_RULES.md)
 - [Implementation decisions and toolchain](docs/DECISIONS.md)
 - [Actual validation and remaining checks](docs/TEST_REPORT.md)
+- [Rendered UI and reference comparisons](docs/VISUAL_ACCEPTANCE.md)
+- [Visual assets and font licenses](docs/ASSET_LICENSES.md)
 - [Phone-only installation](docs/ANDROID_INSTALL.md)
 - [Build and signing](docs/BUILD_AND_SIGNING.md)
 - [Handoff / capability status](docs/HANDOFF.md)

@@ -6,7 +6,7 @@ import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.graphics.drawable.GradientDrawable
+import android.graphics.Typeface
 import android.hardware.display.DisplayManager
 import android.os.*
 import android.provider.Settings
@@ -15,6 +15,7 @@ import android.widget.*
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.res.ResourcesCompat
 import androidx.core.widget.doAfterTextChanged
 import com.yazsras.astravar.*
 import com.yazsras.astravar.data.*
@@ -107,16 +108,121 @@ class OverlayService: Service() {
     }
     private fun updateNotification() { getSystemService(NotificationManager::class.java).notify(7,notification()) }
     private fun dp(v: Int)=(v*resources.displayMetrics.density*prefs.scale).toInt()
-    private fun background(color: Int)=ArcaneSurface(radius=dp(14).toFloat())
-    private fun text(value: String,size: Float=14f)=TextView(uiContext).apply { text=value; textSize=size; setTextColor(Color.rgb(233,229,222)); setPadding(dp(10),dp(5),dp(10),dp(5)) }
+    private val displayTypeface by lazy { ResourcesCompat.getFont(uiContext,R.font.cinzel) ?: Typeface.create("serif",Typeface.NORMAL) }
+    private val bodyTypeface by lazy { ResourcesCompat.getFont(uiContext,R.font.inter) ?: Typeface.create("sans-serif",Typeface.NORMAL) }
+    private fun glyph(id: Int,size: Int,ink: Int=OverlayInk.GOLD)=ContextCompat.getDrawable(uiContext,id)?.mutate()?.apply {
+        setTint(ink);setBounds(0,0,dp(size),dp(size))
+    }
+    private fun damageGlyph(type: DamageType)=when(type) {
+        DamageType.ACID->R.drawable.ic_acid;DamageType.COLD->R.drawable.ic_cold
+        DamageType.FIRE->R.drawable.ic_fire;DamageType.LIGHTNING->R.drawable.ic_lightning
+        DamageType.POISON->R.drawable.ic_poison;DamageType.THUNDER->R.drawable.ic_thunder
+        DamageType.RADIANT->R.drawable.ic_radiant;DamageType.NECROTIC->R.drawable.ic_necrotic
+        DamageType.PSYCHIC->R.drawable.ic_psychic;else->R.drawable.ic_force
+    }
+    private fun text(value: String,size: Float=14f)=TextView(uiContext).apply {
+        text=value;textSize=size;typeface=bodyTypeface;setTextColor(OverlayInk.TEXT)
+        setPadding(dp(8),dp(4),dp(8),dp(4));includeFontPadding=false
+    }
+    private fun heading(value: String,size: Float=15f)=text(value,size).apply {
+        typeface=displayTypeface;setTextColor(OverlayInk.GOLD);letterSpacing=.06f
+    }
     private fun button(label: String,danger: Boolean=false,action: ()->Unit)=Button(uiContext).apply {
-        text=label; contentDescription=label; isAllCaps=false; minHeight=maxOf(dp(48),(48*resources.displayMetrics.density).toInt()); setTextColor(Color.WHITE)
-        elevation=0f;stateListAnimator=null;textSize=13f;setPadding(dp(6),dp(3),dp(6),dp(3))
+        text=label;contentDescription=label;isAllCaps=false;minWidth=0
+        minHeight=maxOf(dp(48),(48*resources.displayMetrics.density).toInt());setTextColor(if(danger) OverlayInk.RED else OverlayInk.TEXT)
+        elevation=0f;stateListAnimator=null;textSize=14f;typeface=bodyTypeface;includeFontPadding=false
+        setPadding(dp(7),dp(4),dp(7),dp(4))
         val primary=label in listOf("Roll attack","Roll again","Confirm & roll","Destroy core & roll")
-        background=android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x30FFFFFF),ArcaneSurface(primary,danger,dp(10).toFloat()),null)
-        if(primary && !danger) setTextColor(Color.rgb(36,27,16))
-        if(primary) {typeface=android.graphics.Typeface.DEFAULT_BOLD;minHeight=maxOf(dp(52),minHeight)}
+        val selected=label.startsWith("✓")
+        background=android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x30DDB577),
+            ArcaneSurface(primary || selected,danger,dp(12).toFloat(),ornament=primary,texture=OverlayMaterials.shader(resources,primary || selected)),null)
+        if(primary) {
+            setTextColor(if(danger) OverlayInk.RED else OverlayInk.GOLD);typeface=displayTypeface;textSize=18f
+            minHeight=maxOf(dp(54),minHeight);compoundDrawablePadding=dp(8)
+            val mark=glyph(R.drawable.ic_d20,25,if(danger) OverlayInk.RED else OverlayInk.GOLD)
+            setCompoundDrawables(mark,null,null,null);setPadding(dp(16),dp(5),dp(16),dp(5))
+        } else if(selected) setTextColor(OverlayInk.GOLD)
         setOnClickListener { if(!busy) action() }
+    }
+    private fun panel(accent: Int=OverlayInk.GOLD)=LinearLayout(uiContext).apply {
+        orientation=LinearLayout.VERTICAL;background=ArcaneSurface(radius=dp(14).toFloat(),accent=accent,ornament=true,texture=OverlayMaterials.shader(resources))
+        setPadding(dp(6),dp(6),dp(6),dp(6))
+        layoutParams=LinearLayout.LayoutParams(-1,-2).apply {setMargins(0,0,0,dp(5))}
+    }
+    private fun header(ready: Boolean)=LinearLayout(uiContext).apply {
+        orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL
+        setPadding(dp(7),dp(2),dp(6),dp(2));minimumHeight=maxOf(dp(48),(48*resources.displayMetrics.density).toInt())
+        addView(ImageView(uiContext).apply {setImageDrawable(glyph(R.drawable.ic_emblem,37));importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO},LinearLayout.LayoutParams(dp(if(expanded) 37 else 30),dp(if(expanded) 37 else 30)))
+        addView(LinearLayout(uiContext).apply {
+            orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER_VERTICAL
+            addView(heading("ASTRAVAR",if(expanded) 17f else 12.5f).apply {setPadding(dp(5),0,0,0);letterSpacing=if(expanded) .1f else .07f})
+            addView(LinearLayout(uiContext).apply {
+                gravity=Gravity.CENTER_VERTICAL;setPadding(dp(5),dp(3),0,0)
+                addView(OverlayReadyLight(uiContext,ready).apply {importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO},LinearLayout.LayoutParams(dp(9),dp(9)))
+                addView(text(if(ready) "Ready" else "Unavailable",if(expanded) 10f else 9f).apply {setTextColor(if(ready) OverlayInk.GREEN else OverlayInk.RED);setPadding(dp(4),0,0,0)})
+            })
+        },LinearLayout.LayoutParams(0,-2,1f))
+        addView(ImageView(uiContext).apply {setImageDrawable(OverlaySigil(if(expanded) "collapse" else "expand"));importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO},LinearLayout.LayoutParams(dp(if(expanded) 30 else 24),dp(if(expanded) 30 else 24)))
+        contentDescription=if(expanded) "Drag or collapse Astravar panel" else "Expand Astravar crystal · ${if(ready) "Ready" else "Unavailable"}"
+        isClickable=true;isFocusable=true
+    }
+    private fun weaponPanel(s: Campaign,damage: String)=panel(OverlayInk.BLUE).apply {
+        val top=LinearLayout(uiContext).apply {gravity=Gravity.CENTER_VERTICAL;isBaselineAligned=false}
+        top.addView(ImageView(uiContext).apply {
+            setImageDrawable(OverlayMaterials.weapon(resources));scaleType=ImageView.ScaleType.FIT_CENTER
+            contentDescription="Astravar bronze-and-gunmetal arcane pistol"
+        },LinearLayout.LayoutParams(dp(80),dp(54)))
+        top.addView(LinearLayout(uiContext).apply {
+            orientation=LinearLayout.VERTICAL
+            addView(heading(prefs.mode.title,13f).apply {setPadding(dp(5),0,0,dp(3))})
+            addView(text(damage,14f).apply {setPadding(dp(5),0,dp(2),0)})
+        },LinearLayout.LayoutParams(0,-2,1f))
+        addView(top)
+        row(this,
+            text("ATTACK  +${s.profile.attack}",13f).apply {setTextColor(OverlayInk.GOLD);gravity=Gravity.CENTER;setPadding(0,dp(3),0,0)},
+            text("DEX SAVE  ${s.profile.saveDc}",13f).apply {setTextColor(OverlayInk.BLUE);gravity=Gravity.CENTER;setPadding(0,dp(3),0,0)})
+    }
+    private fun moduleButton(label: String,fact: String,kind: String,action: ()->Unit)=button("$label\n$fact",action=action).apply {
+        gravity=Gravity.CENTER_VERTICAL or Gravity.START;textSize=12.5f
+        compoundDrawablePadding=dp(4)
+        val mark=glyph(if(kind=="core") R.drawable.ic_core else R.drawable.ic_payload,23,if(kind=="core") OverlayInk.BLUE else OverlayInk.GOLD)
+        setCompoundDrawables(mark,null,null,null);setPadding(dp(6),dp(4),dp(4),dp(4))
+    }
+    private fun rollDial(p: ShotPlan,r: ShotRoll?,resolution: Resolution?=null)=panel(if(r?.natural==20 || resolution?.outcome==Outcome.CRITICAL) OverlayInk.GOLD else if(r?.natural==1) OverlayInk.RED else OverlayInk.BLUE).apply {
+        val attack=r?.attackTotal ?: resolution?.attackTotal
+        val accent=if(r?.natural==20 || resolution?.outcome==Outcome.CRITICAL) OverlayInk.GOLD else if(r?.natural==1) OverlayInk.RED else OverlayInk.BLUE
+        addView(FrameLayout(uiContext).apply {
+            background=OverlayResultDial(accent)
+            addView(heading(if(attack!=null) "ATTACK ROLL" else "DEX SAVE",11f).apply {gravity=Gravity.CENTER;setTextColor(OverlayInk.TEXT)},FrameLayout.LayoutParams(-1,dp(24),Gravity.TOP))
+            addView(text((attack ?: p.profile.saveDc).toString(),48f).apply {
+                typeface=displayTypeface;gravity=Gravity.CENTER;setTextColor(if(r?.natural==1) OverlayInk.RED else OverlayInk.GOLD)
+                setPadding(0,dp(5),0,0)
+            },FrameLayout.LayoutParams(-1,dp(76),Gravity.CENTER))
+            addView(text(r?.attackDescription(p) ?: if(attack!=null) "Player-entered attack result" else "DM supplies the saving throw",13f).apply {gravity=Gravity.CENTER},FrameLayout.LayoutParams(-1,dp(25),Gravity.BOTTOM))
+        },LinearLayout.LayoutParams(-1,dp(120)))
+    }
+    private fun damagePanel(damage: Map<DamageType,Int>,label: String)=panel(OverlayInk.BLUE).apply {
+        val row=LinearLayout(uiContext).apply {gravity=Gravity.CENTER_VERTICAL;isBaselineAligned=false}
+        row.addView(LinearLayout(uiContext).apply {
+            orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER
+            addView(text(damage.values.sum().toString(),30f).apply {typeface=displayTypeface;setTextColor(OverlayInk.GOLD);gravity=Gravity.CENTER;setPadding(0,0,0,0)})
+            addView(text(label,12f).apply {gravity=Gravity.CENTER;setPadding(0,dp(2),0,0)})
+        },LinearLayout.LayoutParams(dp(93),-2))
+        row.addView(LinearLayout(uiContext).apply {
+            orientation=LinearLayout.VERTICAL
+            damage.forEach {(type,total)->
+                val ink=elementTint(type).toArgb()
+                addView(LinearLayout(uiContext).apply {
+                    gravity=Gravity.CENTER_VERTICAL;isBaselineAligned=false;setPadding(dp(5),dp(3),dp(4),dp(3))
+                    background=ArcaneSurface(radius=dp(7).toFloat(),accent=ink,texture=OverlayMaterials.shader(resources))
+                    layoutParams=LinearLayout.LayoutParams(-1,-2).apply {setMargins(0,dp(1),0,dp(2))}
+                    addView(ImageView(uiContext).apply {setImageDrawable(glyph(damageGlyph(type),19,ink));importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO},LinearLayout.LayoutParams(dp(19),dp(19)))
+                    addView(text(type.name.lowercase().replaceFirstChar {it.uppercase()},14f).apply {setPadding(dp(5),0,0,0);setTextColor(ink)},LinearLayout.LayoutParams(0,-2,1f))
+                    addView(text(total.toString(),16f).apply {typeface=displayTypeface;setPadding(dp(3),0,0,0)})
+                })
+            }
+        },LinearLayout.LayoutParams(0,-2,1f))
+        addView(row)
     }
     private fun run(label: String,block: suspend ()->Unit) {
         if(busy) return; busy=true
@@ -124,20 +230,27 @@ class OverlayService: Service() {
     }
     private fun mainApp() { hidden=true; removeWindow(); updateNotification(); startActivity(Intent(this,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)) }
     private fun saveElements(values: List<DamageType>) {elements=values;scope.launch {app.preferences.elements(values)};render()}
+    // User scaling may shrink the artwork/frame, but never the real drag/tap
+    // target. Measuring the actual header also respects large Android fonts.
+    private fun collapsedHeight(root: LinearLayout,handle: View,width: Int,available: Int): Int {
+        handle.measure(View.MeasureSpec.makeMeasureSpec(maxOf(1,width-root.paddingLeft-root.paddingRight),View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(maxOf(1,available),View.MeasureSpec.AT_MOST))
+        return minOf(available,maxOf(dp(OverlayLayout.COLLAPSED_HEIGHT),handle.measuredHeight+root.paddingTop+root.paddingBottom))
+    }
     private fun render() {
         if(hidden || !preferencesLoaded || !Settings.canDrawOverlays(this)) return
         val s=state ?: return
-        val root=LinearLayout(uiContext).apply { orientation=LinearLayout.VERTICAL; background=background(Color.rgb(17,20,25)); elevation=dp(10).toFloat() }
+        val root=LinearLayout(uiContext).apply {
+            orientation=LinearLayout.VERTICAL;background=ArcaneSurface(radius=dp(18).toFloat(),capsule=!expanded,ornament=expanded,texture=OverlayMaterials.shader(resources))
+            elevation=dp(10).toFloat();setPadding(dp(2),dp(2),dp(2),dp(2))
+        }
         val ready=s.attuned && s.installed?.usable(s.gameSeconds)==true && !s.postShatter
-        val handle=text(if(expanded) "✧  A S T R A V A R                         ⌃" else "✧  ASTRAVAR   ${if(ready) "●" else "○"}  ⌄",if(expanded) 14f else 13f)
-        handle.setTextColor(if(ready && !expanded) Color.rgb(159,218,190) else Color.rgb(227,194,140))
-        handle.typeface=android.graphics.Typeface.create("serif",android.graphics.Typeface.NORMAL)
-        handle.gravity=Gravity.CENTER; handle.contentDescription=if(expanded) "Drag or collapse Astravar panel" else "Expand Astravar crystal · ${if(ready) "Ready" else "Unavailable"}"
+        val handle=header(ready)
         handle.setOnClickListener {expanded=!expanded;if(!expanded) {resultId=null;editingTarget=false};render()}
-        handle.minimumHeight=maxOf(dp(48),(48*resources.displayMetrics.density).toInt()); root.addView(handle); drag(handle)
+        root.addView(handle);drag(handle)
         if(expanded) {
-            val content=LinearLayout(uiContext).apply {orientation=LinearLayout.VERTICAL;setPadding(dp(8),0,dp(8),dp(8))}
-            val scroll=ScrollView(uiContext).apply {isFillViewport=false;addView(content)}
+            val content=LinearLayout(uiContext).apply {orientation=LinearLayout.VERTICAL;setPadding(dp(7),0,dp(7),dp(6))}
+            val scroll=ScrollView(uiContext).apply {isFillViewport=false;isVerticalScrollBarEnabled=false;addView(content)}
             root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
             renderPanel(content,s)
         }
@@ -146,7 +259,7 @@ class OverlayService: Service() {
         removeWindow()
         val bounds=bounds()
         val width=if(expanded) minOf(dp(OverlayLayout.EXPANDED_WIDTH),bounds[2]-bounds[0]) else minOf(dp(OverlayLayout.COLLAPSED_WIDTH),bounds[2]-bounds[0])
-        val height=if(expanded) minOf(dp(if(panelPage=="combat") OverlayLayout.WEAPON_HEIGHT else OverlayLayout.DETAILS_HEIGHT),bounds[3]-bounds[1]) else dp(maxOf(OverlayLayout.COLLAPSED_HEIGHT,(48*resources.configuration.fontScale).toInt()))
+        val height=if(expanded) minOf(dp(if(panelPage=="combat") OverlayLayout.WEAPON_HEIGHT else OverlayLayout.DETAILS_HEIGHT),bounds[3]-bounds[1]) else collapsedHeight(root,handle,width,bounds[3]-bounds[1])
         val lp=WindowManager.LayoutParams(width,height,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             (if(expanded && (editingTarget || resultId?.let {id->s.pending.find {it.plan.id==id}?.let {it.result==null && (it.plan.blast || it.rolled==null)}}==true)) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,PixelFormat.TRANSLUCENT)
         lp.softInputMode=WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
@@ -155,7 +268,7 @@ class OverlayService: Service() {
         lp.y=previous?.y ?: if(portrait) prefs.portraitY else prefs.landscapeY
         clamp(lp); params=lp; view=root
         root.setOnApplyWindowInsetsListener { _,insets ->
-            if(Build.VERSION.SDK_INT>=30) { val bottom=insets.getInsets(WindowInsets.Type.ime()).bottom; if(bottom!=imeBottom) { imeBottom=bottom; params?.let { p -> val b=bounds();p.height=if(expanded) minOf(dp(if(panelPage=="combat") OverlayLayout.WEAPON_HEIGHT else OverlayLayout.DETAILS_HEIGHT),b[3]-b[1]) else dp(OverlayLayout.COLLAPSED_HEIGHT);clamp(p); safeUpdate() } } }; insets
+            if(Build.VERSION.SDK_INT>=30) { val bottom=insets.getInsets(WindowInsets.Type.ime()).bottom; if(bottom!=imeBottom) { imeBottom=bottom; params?.let { p -> val b=bounds();p.height=if(expanded) minOf(dp(if(panelPage=="combat") OverlayLayout.WEAPON_HEIGHT else OverlayLayout.DETAILS_HEIGHT),b[3]-b[1]) else collapsedHeight(root,handle,p.width,b[3]-b[1]);clamp(p); safeUpdate() } } }; insets
         }
         try { wm.addView(root,lp) } catch(_: RuntimeException) { view=null; stopSelf() }
     }
@@ -193,18 +306,17 @@ class OverlayService: Service() {
                     if(r==null && !prefs.manualOverrides) content.addView(button("Roll saved shot") {run("Dice saved") {app.repository.rollPending(p.id,options(),"overlay")}})
                     else resolutionEditor(content,pending)
                 } else {
-                    content.addView(text(when {r?.natural==20->"CRITICAL HIT";r?.natural==1->"NATURAL 1 — MISS";else->p.ability.title.uppercase()},14f))
-                    content.addView(text(r?.attackTotal?.let {"ATTACK ROLL: $it"} ?: "DC ${p.profile.saveDc} DEX SAVE",28f))
-                    r?.let {content.addView(text(it.attackDescription(p),13f))}
+                    content.addView(heading(when {r?.natural==20->"CRITICAL HIT · NATURAL 20";r?.natural==1->"NATURAL 1 — MISS";result?.outcome==Outcome.CRITICAL->"CRITICAL HIT · PLAYER ENTERED";else->p.ability.title.uppercase()},12f).apply {setTextColor(if(r?.natural==1) OverlayInk.RED else OverlayInk.GOLD)})
+                    content.addView(rollDial(p,r,result))
                     if(result!=null) {
                         if(p.blast) {
                             val explosion=Engine.components(p).filter {it.portion!=Portion.DIRECT}.groupBy {it.damage.type}.mapValues {(_,cs)->cs.sumOf {result.rolls[it.id] ?: 0}}
-                            content.addView(text("Explosion rolled: ${explosion.damageText()}",16f))
+                            content.addView(damagePanel(explosion,"EXPLOSION ROLLED"))
                             result.targets.forEach {content.addView(text("${it.name}: ${Engine.damage(p,result,it).damageText()}"))}
                         }
-                        else {val damage=Engine.damage(p,result);content.addView(text("${damage.values.sum()} ${if(result.outcome==Outcome.MISS) "DAMAGE" else "POTENTIAL DAMAGE"}",20f));content.addView(text(damage.damageText(),16f))}
+                        else content.addView(damagePanel(Engine.damage(p,result),if(result.outcome==Outcome.MISS) "DAMAGE" else "POTENTIAL DAMAGE"))
                     }
-                    if(result?.outcome==Outcome.UNCONFIRMED || result?.outcome==Outcome.CRITICAL) content.addView(text("DM determines the hit and target adjustments",12f))
+                    if(result?.outcome==Outcome.UNCONFIRMED || result?.outcome==Outcome.CRITICAL) content.addView(text("DM determines the hit and target adjustments",11f).apply {setTextColor(OverlayInk.MUTED)})
                     content.addView(button("Roll again") {requestRoll(s)})
                     row(content,button("Details") {showDice=!showDice;render()},button("Copy") {(getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Astravar result",shotSummary(pending)))})
                     if(showDice) content.addView(text(shotSummary(pending),12f))
@@ -250,7 +362,11 @@ class OverlayService: Service() {
                 Engine.elements(s.profile).forEach {type->content.addView(button("${if(type in elements) "✓ " else ""}${type.name.lowercase()}") {
                     val next=if(s.profile.elementCapacity==1) listOf(type) else if(type in elements) elements-type else (elements+type).takeLast(s.profile.elementCapacity)
                     panelPage=if(s.profile.elementCapacity==1) "combat" else "elements";saveElements(next)
-                }.apply {setTextColor(elementTint(type).toArgb())})}
+                }.apply {
+                    val ink=elementTint(type).toArgb();setTextColor(ink);compoundDrawablePadding=dp(8)
+                    setCompoundDrawables(glyph(damageGlyph(type),23,ink),null,null,null)
+                    background=android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x28FFFFFF),ArcaneSurface(type in elements,radius=dp(12).toFloat(),accent=ink,texture=OverlayMaterials.shader(resources,type in elements)),null)
+                })}
                 content.addView(button("Done") {panelPage="combat";render()})
             }
             "target" -> {
@@ -283,15 +399,16 @@ class OverlayService: Service() {
                 content.addView(button("Back") {panelPage="combat";render()})
             }
             else -> {
-                content.addView(text("${prefs.mode.title}   ·   +${s.profile.attack} attack",17f))
                 val planned=runCatching {makePlan(s)}
                 val damage=planned.map {Engine.components(it).joinToString(" + ") {"${it.damage.dice} ${it.damage.type.name.lowercase()}"}}.getOrDefault("${s.profile.base} Force")
-                content.addView(text(damage,15f))
+                content.addView(weaponPanel(s,damage))
                 if(planned.isFailure) content.addView(text(planned.exceptionOrNull()?.message ?: "Check configuration",12f))
                 planned.getOrNull()?.takeIf {it.hasSpell}?.let {p->content.addView(text("Uses ${p.selectedPayloads.size} stored spell(s)${p.immediate?.let {" + level-${it.castingLevel} slot"} ?: ""}, even on a miss.",12f))}
                 row(content,*RollMode.entries.map {mode->button("${if((mode==RollMode.ADVANTAGE && prefs.advantage) || (mode==RollMode.DISADVANTAGE && prefs.disadvantage) || (mode==RollMode.NORMAL && !prefs.advantage && !prefs.disadvantage)) "✓ " else ""}${when(mode) {RollMode.NORMAL->"Normal";RollMode.ADVANTAGE->"Adv";RollMode.DISADVANTAGE->"Dis"}}") {run("Roll mode selected") {app.preferences.targeting(options().copy(advantage=mode==RollMode.ADVANTAGE,disadvantage=mode==RollMode.DISADVANTAGE))}}}.toTypedArray())
-                content.addView(button("Roll attack") {requestRoll(s)}.apply {isEnabled=!busy && planned.isSuccess && s.pending.none {it.result==null};alpha=if(isEnabled) 1f else .45f})
-                row(content,button("${s.installed?.name ?: "Core"} · ${s.installed?.readiness(s.gameSeconds) ?: "None"}") {panelPage="cores";render()},button("Payload · ${s.installed?.payloads?.filter {it.id in selected}?.joinToString {it.template.name}?.ifBlank {"None"} ?: "None"}") {panelPage="payloads";render()})
+                row(content,
+                    moduleButton(s.installed?.name ?: "Core",s.installed?.readiness(s.gameSeconds) ?: "None","core") {panelPage="cores";render()},
+                    moduleButton("Payload",s.installed?.payloads?.filter {it.id in selected}?.joinToString {it.template.name}?.ifBlank {"None"} ?: "None","payload") {panelPage="payloads";render()})
+                content.addView(button("Roll attack") {requestRoll(s)}.apply {isEnabled=!busy && planned.isSuccess && s.pending.none {it.result==null}})
                 row(content,button("Mode") {panelPage="modes";render()},button("More") {panelPage="more";render()},button("Collapse") {expanded=false;render()})
                 if(!s.attuned) content.addView(text("Confirm attunement in the full app"))
 

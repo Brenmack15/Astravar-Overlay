@@ -1,13 +1,18 @@
-# Astravar Overlay 1.6.0
+# Astravar Overlay 1.7.0
 
-- A new charcoal, bronze and luminous-blue design uses the approved Astravar pistol artwork, clear status labels and readable cards.
-- Four destinations: Weapon, Cores & Payloads, History, More. Weapon opens first, with a prominent bottom Roll Attack control.
-- Enemy AC entry and automatic ordinary hit/miss predictions are removed. Results show attack totals, raw d20s and potential typed damage. Natural 20 criticals and natural 1 misses remain automatic.
-- The encounter dashboard and defense pickers are removed. Weapon-specific action limits, core recovery, spell sources, crafting, rules/upgrades, diagnostics and backup utilities remain available.
-- The floating overlay is a compact draggable bar or expanded weapon panel, with roll modes, core/payload selection and result details.
-- Stored payload cards use actual names and mechanics. Setup editors are collapsed until needed.
-- The newest 20 rolls remain bounded in persistent storage, newest-first, with expandable individual dice.
-- Primary Force remains Nd12, selector remains Md8, Discharge remains 3N d12 and Shatter remains 21N d12. Costs, criticals, saves and independent damage sliders are preserved.
-- Upgrade preserves campaign state and historical outcomes. Only the obsolete active AC preference is removed.
+- Rebuilt the native presentation as an arcane-mechanical instrument: real graphite and brushed-metal texture tiles, chamfered bronze frames, illuminated controls, engraved dials and original scalable icons.
+- Bundled licensed Cinzel display lettering and readable Inter interface typography, including their redistribution notices.
+- Integrated a transparent, optimized derivative of the approved Astravar pistol into the blue-lit weapon panel. The fictional mockup rifle and example core/payload names are not used.
+- Weapon combines live statistics, readiness, quick core/payload selection, polished roll-mode and elemental controls, and a prominent reachable Roll Attack action.
+- Cores & Payloads uses illustrated instrument medallions, actual capacity and availability, typed spell expressions and quick selection. Charging, overwriting, purging, crafting, approved templates and scroll sources remain available.
+- Results emphasize the actual attack total, transparent d20 calculation and separate potential damage types. Genuine natural 20 and natural 1 results receive their own visual treatment.
+- History is a compact newest-first log with typed damage chips, timestamps and expandable individual dice. Persistent retention remains the newest 20 rolls.
+- More is a grouped control room for resources/recovery, rules/upgrades, overlay settings, backup/restore and help/diagnostics. The header settings control opens appearance settings directly.
+- The genuine native floating overlay now shares the textured, framed visual language: a compact horizontal readiness capsule, miniature weapon instrument panel and detailed result views. Dragging, saved positions, permissions, notifications and shared state retain the existing architecture.
+- Enemy AC and generic encounter-management UI remain retired. Natural 20 criticals, natural 1 misses, weapon action budgets and explicit recovery controls remain intact.
+- Primary Force remains Nd12, selector remains Md8, Discharge remains 3N d12 and Shatter remains 21N d12. Each eligible selector contributes once to explosions; critical eligibility, saving throws, spell payloads, resource costs and independent sliders are unchanged.
+- No new database schema, rules-profile or saved-state migration is introduced. Existing campaign resources, preferences, selected counts and historical snapshots remain intact.
 
-Package: `com.yazsras.astravar` · versionCode 9. Signed using the existing owner identity.
+Package: `com.yazsras.astravar` · versionName `1.7.0` · versionCode `10`.
+
+See [TEST_REPORT.md](TEST_REPORT.md) for actual checks and release verification, [VISUAL_ACCEPTANCE.md](VISUAL_ACCEPTANCE.md) for rendered reference comparisons, and [ASSET_LICENSES.md](ASSET_LICENSES.md) for bundled artwork, textures, icons and font notices. Physical Samsung/D&D Beyond operation is a separate device-verification boundary; screenshot rendering alone does not establish it.

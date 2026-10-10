@@ -9,8 +9,8 @@ android {
         applicationId = "com.yazsras.astravar"
         minSdk = 26
         targetSdk = 36
-        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(9)
-        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("1.6.0")
+        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(10)
+        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("1.7.0")
     }
     signingConfigs {
         create("owner") {

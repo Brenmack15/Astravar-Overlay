@@ -99,7 +99,7 @@ import java.util.UUID
             history.forEach { Text("Game ${it.gameSeconds}s · ${it.origin}${if(it.undone) " · UNDONE" else ""}\n${it.label}"); HorizontalDivider() }
         }
     }
-    if(undo) AlertDialog(onDismissRequest={undo=false},title={Text("Restore the previous state?")},text={Text("The latest operation will be reversed, including its resources and pending results. A correction event is retained. Rolls already removed by the retention limit cannot be recovered.\n${history.firstOrNull()?.label}")},confirmButton={TextButton(onClick={a.run("Logged correction applied") {a.repo.undo()};undo=false}) {Text("Confirm correction")}},dismissButton={TextButton(onClick={undo=false}) {Text("Cancel")}})
+    if(undo) ArcaneDialog(onDismissRequest={undo=false},title={Text("Restore the previous state?")},text={Text("The latest operation will be reversed, including its resources and pending results. A correction event is retained. Rolls already removed by the retention limit cannot be recovered.\n${history.firstOrNull()?.label}")},confirmButton={TextButton(onClick={a.run("Logged correction applied") {a.repo.undo()};undo=false}) {Text("Confirm correction")}},dismissButton={TextButton(onClick={undo=false}) {Text("Cancel")}})
 }
 @Composable fun BackupPage(s: Campaign,a: Actions) {
     val c=LocalContext.current
@@ -152,5 +152,5 @@ import java.util.UUID
         Section("Artwork") { Text("Approved Astravar pistol artwork is included. A personal image can be selected using Android's file picker."); Action("Choose personal artwork") {image.launch(arrayOf("image/*"))}; Action("Use included Astravar artwork") {a.run("Original artwork restored") {app.preferences.image("")}} }
         if(s.demo) Section("Leave demo") {Text("Your demo has its own labeled state. Export it if needed before starting a real campaign. The correction history remains available.");Action("End demo and begin empty real campaign",danger=true) {resetDemo=true}}
     }
-    if(resetDemo) AlertDialog(onDismissRequest={resetDemo=false},title={Text("End demo?")},text={Text("Remove demo resources and return to profile confirmation. No real resources will be assumed.")},confirmButton={TextButton(onClick={a.change("Left labeled demo; empty real campaign") {Campaign()};resetDemo=false}) {Text("End demo")}},dismissButton={TextButton(onClick={resetDemo=false}) {Text("Cancel")}})
+    if(resetDemo) ArcaneDialog(onDismissRequest={resetDemo=false},title={Text("End demo?")},text={Text("Remove demo resources and return to profile confirmation. No real resources will be assumed.")},confirmButton={TextButton(onClick={a.change("Left labeled demo; empty real campaign") {Campaign()};resetDemo=false}) {Text("End demo")}},dismissButton={TextButton(onClick={resetDemo=false}) {Text("Cancel")}})
 }

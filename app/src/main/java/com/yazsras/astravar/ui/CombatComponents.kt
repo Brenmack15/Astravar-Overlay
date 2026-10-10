@@ -5,6 +5,8 @@ import android.view.HapticFeedbackConstants
 import android.view.View
 import android.net.Uri
 import android.graphics.BitmapFactory
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -19,6 +21,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.Alignment
 import com.yazsras.astravar.R
 import com.yazsras.astravar.rules.*
 import com.yazsras.astravar.data.Preferences
@@ -46,18 +50,27 @@ fun rollFeedback(view: View,roll: ShotRoll?) {
             context.contentResolver.openInputStream(Uri.parse(uri))?.use {BitmapFactory.decodeStream(it,null,options)?.asImageBitmap()}
         }.getOrNull()}
     }
-    image?.let {Image(it,"Personal Astravar artwork",modifier,contentScale=ContentScale.Fit)} ?: Image(painterResource(R.drawable.astravar_reference),"Astravar crystal pistol",modifier,contentScale=ContentScale.Fit)
+    image?.let {Image(it,"Personal Astravar artwork",modifier,contentScale=ContentScale.Fit)} ?: Image(painterResource(R.drawable.astravar_cutout),"Astravar crystal pistol",modifier,contentScale=ContentScale.Fit)
 }
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable fun CorePicker(s: Campaign,a: Actions,dismiss: ()->Unit) {
     ModalBottomSheet(onDismissRequest=dismiss) {
         Column(Modifier.fillMaxWidth().heightIn(max=480.dp).verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
-            Text("Choose a core",style=MaterialTheme.typography.titleLarge,color=Brass)
+            SectionCaption("CHOOSE A CORE", "${s.cores.count {it.usable(s.gameSeconds)}} ready")
             if(s.cores.isEmpty()) Text("Add the completed cores you own in Cores & Payloads.")
             s.cores.forEach {c->
                 val active=c.id==s.installedId
-                OutlinedButton(onClick={a.change("Install ${c.name}") {Engine.install(it,c.id)};dismiss()},enabled=!a.busy && !active && c.usable(s.gameSeconds) && s.installation==null,modifier=Modifier.fillMaxWidth().heightIn(min=64.dp)) {
-                    Column(Modifier.fillMaxWidth()) {Text("${c.name}${if(active) " · ACTIVE" else ""}");Text("${c.readiness(s.gameSeconds)} · ${c.payloads.size} stored · ${if(s.postShatter) s.profile.replacementCost else s.profile.swapCost}",style=MaterialTheme.typography.bodySmall)}
+                val ready=c.usable(s.gameSeconds)
+                ArcanePanel(accent=if(active) Brass else Frost,modifier=Modifier.clickable(enabled=!a.busy && !active && ready && s.installation==null) {a.change("Install ${c.name}") {Engine.install(it,c.id)};dismiss()}) {
+                    Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                        InstrumentMedallion("Core",Modifier.size(50.dp),if(ready) Frost else Muted)
+                        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
+                            Text("${c.name}${if(active) " · ACTIVE" else ""}",style=MaterialTheme.typography.titleLarge)
+                            Text("${c.readiness(s.gameSeconds)} · ${c.payloads.size}/${s.profile.capacity} stored",style=MaterialTheme.typography.bodySmall,color=Muted)
+                            if(!active) Text("Install · ${if(s.postShatter) s.profile.replacementCost else s.profile.swapCost}",style=MaterialTheme.typography.labelMedium,color=Brass)
+                        }
+                        StatusPill(if(ready) "READY" else "UNAVAILABLE",ready)
+                    }
                 }
             }
             Spacer(Modifier.height(16.dp))
@@ -68,12 +81,20 @@ fun rollFeedback(view: View,roll: ShotRoll?) {
 @Composable fun PayloadPicker(s: Campaign,a: Actions,preferences: Preferences,selected: Set<String>,dismiss: ()->Unit) {
     ModalBottomSheet(onDismissRequest=dismiss) {
         Column(Modifier.fillMaxWidth().heightIn(max=480.dp).verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text("Stored spells",style=MaterialTheme.typography.titleLarge,color=Brass)
-            Text("Choose up to ${s.profile.releaseLimit} · ${s.installed?.payloads?.size ?: 0} stored")
+            SectionCaption("STORED SPELLS", "Choose up to ${s.profile.releaseLimit}")
             if(s.installed?.payloads.isNullOrEmpty()) Text("Charge a spell in Cores & Payloads → Cores.")
             s.installed?.payloads?.forEach {p->
-                OutlinedButton(onClick={a.run("Payload selected") {preferences.payloads(if(p.id in selected) selected-p.id else if(s.profile.releaseLimit==1) setOf(p.id) else (selected+p.id).toList().takeLast(s.profile.releaseLimit).toSet());preferences.mode(Ability.SPELL);if(s.profile.releaseLimit==1) dismiss()}},modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
-                    Text("${if(p.id in selected) "✓ Selected" else "Stored"} · ${p.template.name} · L${p.template.castingLevel}")
+                val active=p.id in selected
+                val tint=elementTint(p.template.overchargeType)
+                ArcanePanel(accent=if(active) Brass else tint,modifier=Modifier.clickable {a.run("Payload selected") {preferences.payloads(if(active) selected-p.id else if(s.profile.releaseLimit==1) setOf(p.id) else (selected+p.id).toList().takeLast(s.profile.releaseLimit).toSet());preferences.mode(Ability.SPELL);if(s.profile.releaseLimit==1) dismiss()}}) {
+                    Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                        InstrumentMedallion("Payload",Modifier.size(50.dp),tint)
+                        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
+                            Text(p.template.name,style=MaterialTheme.typography.titleLarge)
+                            Text("L${p.template.castingLevel} · ${p.template.damage.joinToString(" + ") {"${it.dice} ${it.type.name.lowercase()}"}}",style=MaterialTheme.typography.bodySmall,color=Muted)
+                        }
+                        Text(if(active) "✓ SELECTED" else "STORED",style=MaterialTheme.typography.labelSmall,color=if(active) Brass else tint)
+                    }
                 }
             }
             TextButton(onClick={a.run("Payload selection cleared") {preferences.payloads(emptySet());preferences.mode(Ability.ARCANE)};dismiss()}) {Text("No payload · arcane shot")}
@@ -85,21 +106,81 @@ fun rollFeedback(view: View,roll: ShotRoll?) {
 @Composable fun CombatHistoryPage(s: Campaign) {
     var selected by remember {mutableStateOf<String?>(null)}
     Page {
-        Text("Recent rolls",style=MaterialTheme.typography.headlineSmall,color=Brass)
-        Text("Latest ${HistoryRetention.MAX_HISTORY_ENTRIES} rolls · older rolls are automatically deleted",style=MaterialTheme.typography.bodySmall)
-        if(s.pending.isEmpty()) Section("Your first roll will appear here") {Text("Open Weapon and tap Roll attack.")}
+        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
+            InstrumentMedallion("History",Modifier.size(54.dp),Brass)
+            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
+                Text("ASTRAVAR ARCHIVE",style=MaterialTheme.typography.labelSmall,color=Brass)
+                Text("Recent rolls",style=MaterialTheme.typography.headlineMedium,color=MaterialTheme.colorScheme.onSurface)
+                Text("Newest first · ${s.pending.size.coerceAtMost(HistoryRetention.MAX_HISTORY_ENTRIES)} retained",style=MaterialTheme.typography.bodySmall,color=Muted)
+            }
+        }
+        SectionCaption("COMBAT HISTORY", "Latest ${HistoryRetention.MAX_HISTORY_ENTRIES}")
+        if(s.pending.isEmpty()) ArcanePanel(accent=Frost) {
+            InstrumentMedallion("History",Modifier.size(64.dp),Frost)
+            Text("Your first roll will appear here",style=MaterialTheme.typography.titleLarge)
+            Text("Open Weapon and tap Roll attack.",style=MaterialTheme.typography.bodyMedium,color=Muted)
+        }
         s.recentRolls().forEach {shot->
             val roll=shot.rolled
             val time=roll?.rolledAtMillis?.takeIf {it>0}?.let {SimpleDateFormat("MMM d · HH:mm",Locale.getDefault()).format(Date(it))} ?: "Earlier"
-            ArcanePanel(accent=if(roll?.natural==1) MaterialTheme.colorScheme.error else if(roll?.critical==true) Brass else Frost,modifier=Modifier.clickable {selected=if(selected==shot.plan.id) null else shot.plan.id}) {
-                    Text("$time · ${shot.plan.ability.title}",color=Brass)
-                    Text(roll?.attackTotal?.let {"$it to hit · ${roll.mode.name.lowercase()}"} ?: if(shot.plan.blast) "DC ${shot.plan.profile.saveDc} Dexterity" else "External dice",style=MaterialTheme.typography.titleMedium)
-                    roll?.natural?.let {Text(if(it==20) "CRITICAL HIT · natural 20" else if(it==1) "NATURAL 1 — MISS" else "Natural $it",style=MaterialTheme.typography.labelMedium,color=if(it==1) MaterialTheme.colorScheme.error else if(it==20) Brass else Frost)}
-                    roll?.takeIf {it.attackTotal!=null}?.let {Text(it.attackDescription(shot.plan),style=MaterialTheme.typography.bodySmall,color=Muted)}
-                    Text(shot.result?.let {if(shot.plan.blast) "${it.targets.size} save results · ${shot.rolled?.damage?.values?.sumOf {d->d.total} ?: it.rolls.values.sum()} rolled damage" else "${if(it.outcome==Outcome.MISS) "Damage" else "Potential damage"}: ${Engine.damage(shot.plan,it).values.sum()} · ${Engine.damage(shot.plan,it).damageText()}"} ?: "Saves / result pending")
-                    Text("${roll?.coreName?.ifBlank {shot.plan.coreId} ?: shot.plan.coreId} · ${shot.plan.selectedPayloads.joinToString {it.template.name}.ifBlank {shot.plan.immediate?.name ?: "No payload"}}",style=MaterialTheme.typography.bodySmall)
-                    Text(if(selected==shot.plan.id) "Hide details ▴" else "View dice & details ▾",style=MaterialTheme.typography.labelMedium,color=Frost)
-                    if(selected==shot.plan.id) Text(shotSummary(shot),style=MaterialTheme.typography.bodySmall)
+            val tint=if(roll?.natural==1) MaterialTheme.colorScheme.error else if(roll?.critical==true) Brass else Frost
+            val damage=historyDamage(shot)
+            val expanded=selected==shot.plan.id
+            ArcanePanel(accent=tint,modifier=Modifier.clickable {selected=if(expanded) null else shot.plan.id}) {
+                Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(9.dp)) {
+                        InstrumentMedallion(if(shot.plan.blast) "Payload" else "Weapon",Modifier.size(40.dp),tint)
+                        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
+                            Text("$time · ${shot.plan.ability.title}",style=MaterialTheme.typography.labelMedium,color=Brass)
+                            when(roll?.natural) {
+                                20 -> Text("CRITICAL HIT · natural 20",style=MaterialTheme.typography.labelSmall,color=Brass)
+                                1 -> Text("NATURAL 1 — MISS",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.error)
+                            }
+                        }
+                        Column(horizontalAlignment=Alignment.End) {
+                            Text(roll?.attackTotal?.toString() ?: if(shot.plan.blast) shot.plan.profile.saveDc.toString() else "—",style=MaterialTheme.typography.headlineMedium,fontSize=30.sp,lineHeight=34.sp,color=tint)
+                            Text(if(roll?.attackTotal!=null) "TO HIT" else if(shot.plan.blast) "SAVE DC" else "ATTACK",style=MaterialTheme.typography.labelSmall,color=Muted)
+                        }
+                    }
+                    Text(roll?.takeIf {it.attackTotal!=null}?.let {it.attackDescription(shot.plan)+if(it.mode==RollMode.NORMAL) " · normal" else ""} ?: if(shot.plan.blast) "Dexterity save · ${shot.result?.targets?.size ?: 0} results${if(shot.result==null) " · awaiting saves" else ""}" else "External dice",style=MaterialTheme.typography.bodySmall,color=Muted)
+                    HorizontalDivider(color=tint.copy(alpha=.24f))
+                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        HistoryDamageChips(damage,Modifier.weight(1f))
+                        Column(horizontalAlignment=Alignment.End) {
+                            Text(damage.values.sum().toString(),style=MaterialTheme.typography.titleLarge,color=MaterialTheme.colorScheme.onSurface)
+                            Text(if(shot.plan.blast) "ROLLED" else if(shot.result?.outcome==Outcome.MISS) "DAMAGE" else "POTENTIAL",style=MaterialTheme.typography.labelSmall,color=Muted)
+                        }
+                    }
+                    Text("${roll?.coreName?.ifBlank {shot.plan.coreId} ?: shot.plan.coreId} · ${shot.plan.selectedPayloads.joinToString {it.template.name}.ifBlank {shot.plan.immediate?.name ?: "No payload"}}",style=MaterialTheme.typography.bodySmall,color=Muted)
+                    Text(if(expanded) "Hide details ▴" else "View dice & details ▾",style=MaterialTheme.typography.labelSmall,color=Frost)
+                    if(expanded) {
+                        HorizontalDivider(color=tint.copy(alpha=.24f))
+                        Text(shotSummary(shot),style=MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+
+        }
+    }
+}
+private fun historyDamage(shot: PendingShot): Map<DamageType,Int> {
+    if(!shot.plan.blast) shot.result?.let {return Engine.damage(shot.plan,it)}
+    val components=Engine.components(shot.plan,shot.rolled?.critical ?: (shot.result?.outcome==Outcome.CRITICAL))
+    return components.mapNotNull {component->
+        val total=shot.rolled?.damage?.get(component.id)?.total ?: shot.result?.rolls?.get(component.id)
+        total?.let {component.damage.type to it}
+    }.groupBy({it.first},{it.second}).mapValues {it.value.sum()}
+}
+@OptIn(ExperimentalLayoutApi::class)
+@Composable private fun HistoryDamageChips(damage: Map<DamageType,Int>,modifier: Modifier=Modifier) {
+    FlowRow(modifier,horizontalArrangement=Arrangement.spacedBy(7.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+        damage.forEach {(type,total)->
+            val tint=elementTint(type)
+            Surface(color=tint.copy(alpha=.06f),shape=RoundedCornerShape(3.dp),border=BorderStroke(.5.dp,tint.copy(alpha=.4f))) {
+                Row(Modifier.padding(horizontal=6.dp,vertical=3.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                    ArcaneIcon(type.name,Modifier.size(12.dp),tint)
+                    Text("${type.name.lowercase().replaceFirstChar(Char::titlecase)} $total",style=MaterialTheme.typography.labelMedium,color=tint)
+                }
             }
         }
     }
