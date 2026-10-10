@@ -50,9 +50,9 @@ class OverlayInstrumentationTest {
     private fun targetText(text:String):UiObject2 = device.wait(
         Until.findObject(By.text(text).pkg(targetPackage)),30000
     ) ?: error("Missing controlled target control: $text")
-    private fun expand() {device.wait(Until.findObject(By.desc("Expand Astravar crystal")),30000).click();assertTrue(device.wait(Until.hasObject(By.desc("Drag Astravar panel")),30000))}
-    private fun startOverlay() {shell("am force-stop $appPackage");openMain();findText("Floating controls").click();assertTrue(device.wait(Until.hasObject(By.desc("Expand Astravar crystal")),30000))}
-    private fun stopPanel() {tapPanel("More");tapPanel("Stop session");assertTrue(device.wait(Until.gone(By.desc("Drag Astravar panel")),30000));assertFalse(device.hasObject(By.desc("Expand Astravar crystal")))}
+    private fun expand() {device.wait(Until.findObject(By.descStartsWith("Expand Astravar crystal")),30000).click();assertTrue(device.wait(Until.hasObject(By.desc("Drag or collapse Astravar panel")),30000))}
+    private fun startOverlay() {shell("am force-stop $appPackage");openMain();findText("Floating controls").click();assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))}
+    private fun stopPanel() {tapPanel("More");tapPanel("Stop session");assertTrue(device.wait(Until.gone(By.desc("Drag or collapse Astravar panel")),30000));assertFalse(device.hasObject(By.descStartsWith("Expand Astravar crystal")))}
 
     @Test fun aAutomaticRollingOutsideTouchKeyboardRotationAndProtection() {
         Configurator.getInstance().setWaitForIdleTimeout(1000).setWaitForSelectorTimeout(30000)
@@ -62,45 +62,45 @@ class OverlayInstrumentationTest {
         val floatingControls=findText("Floating controls")
         screenshot("combat")
         floatingControls.click()
-        assertTrue(device.wait(Until.hasObject(By.desc("Expand Astravar crystal")),30000))
+        assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))
         shell("am start -W -n com.yazsras.astravar.target/.TargetActivity")
         device.wait(Until.findObject(By.desc("Outside tap counter")),30000).click(100)
         val outsideWorked=device.wait(Until.hasObject(By.desc("Outside tap counter").text("Outside taps: 1")),5000)
         assertTrue("Outside tap counter: ${device.findObject(By.desc("Outside tap counter"))?.text}",outsideWorked)
         screenshot("collapsed")
         expand();screenshot("expanded")
-        device.findObject(By.desc("Drag Astravar panel")).drag(Point(device.displayWidth-20,160),500)
+        device.findObject(By.desc("Drag or collapse Astravar panel")).drag(Point(device.displayWidth-20,160),500)
         device.waitForIdle()
-        val panel=(device.wait(Until.findObject(By.desc("Drag Astravar panel")),10000)
+        val panel=(device.wait(Until.findObject(By.desc("Drag or collapse Astravar panel")),10000)
             ?: error("Dragged panel did not return after its saved-position refresh")).visibleBounds
         assertTrue(panel.left>=0 && panel.right<=device.displayWidth)
         tapPanel("Adv");tapPanel("Roll attack")
-        assertTrue(device.wait(Until.hasObject(By.text(Pattern.compile("\\d+ TO HIT"))),30000))
+        assertTrue(device.wait(Until.hasObject(By.text(Pattern.compile("ATTACK ROLL: \\d+"))),30000))
         val formula=device.findObject(By.textStartsWith("d20 ")).text
         assertTrue("Two visible d20s must be preserved",formula.contains(" / ") && formula.contains("advantage"))
         assertFalse("No manual damage entry in normal combat",device.hasObject(By.clazz("android.widget.EditText").pkg(appPackage)))
         screenshot("automatic-result")
         tapPanel("Roll again")
-        assertTrue(device.wait(Until.hasObject(By.text(Pattern.compile("\\d+ TO HIT"))),30000))
+        assertTrue(device.wait(Until.hasObject(By.text(Pattern.compile("ATTACK ROLL: \\d+"))),30000))
         File(files,"saved-roll.txt").writeText(device.findObject(By.textStartsWith("d20 ")).text)
         tapPanel("Collapse")
         val edit=device.findObject(By.desc("Keyboard focus test"));edit.click();edit.text="typed under Astravar"
         assertEquals("typed under Astravar",device.findObject(By.desc("Keyboard focus test")).text)
         device.pressBack();device.setOrientationLeft();device.waitForIdle()
-        assertTrue(device.wait(Until.hasObject(By.desc("Expand Astravar crystal")),30000))
-        val rotated=device.findObject(By.desc("Expand Astravar crystal")).visibleBounds
+        assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))
+        val rotated=device.findObject(By.descStartsWith("Expand Astravar crystal")).visibleBounds
         assertTrue(rotated.left>=0 && rotated.right<=device.displayWidth && rotated.bottom<=device.displayHeight)
         expand();screenshot("landscape-result");tapPanel("Collapse")
         device.setOrientationNatural();device.waitForIdle()
         shell("settings put system font_scale 1.3")
-        assertTrue(device.wait(Until.hasObject(By.desc("Expand Astravar crystal")),30000))
+        assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))
         expand();screenshot("large-text-result");tapPanel("Collapse")
         shell("settings put system font_scale 1.0");device.waitForIdle()
         targetText("Toggle protected screen").click()
         assertTrue("Protected target button must reflect its secure state",device.wait(Until.hasObject(By.text("Protected screen ON").pkg(targetPackage)),10000))
-        assertTrue(device.wait(Until.gone(By.desc("Expand Astravar crystal")),30000))
+        assertTrue(device.wait(Until.gone(By.descStartsWith("Expand Astravar crystal")),30000))
         targetText("Protected screen ON").click()
-        assertTrue(device.wait(Until.hasObject(By.desc("Expand Astravar crystal")),30000))
+        assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))
         expand();tapPanel("Weapon");stopPanel();device.unfreezeRotation()
         checkpoint("Two automatic overlay attacks, raw dice, drag, outside touch, keyboard, rotation, large text and protected screen exercised")
     }
@@ -110,7 +110,7 @@ class OverlayInstrumentationTest {
         if(!device.wait(Until.hasObject(By.text("Stop")),10000)) device.findObject(By.text("Astravar session active"))?.parent?.swipe(Direction.DOWN,1f)
         val stop=device.wait(Until.findObject(By.text("Stop")),30000)
         assertNotNull("Notification Stop action must be visible",stop);stop.click();device.pressBack();device.waitForIdle()
-        assertTrue(device.wait(Until.gone(By.desc("Expand Astravar crystal")),30000))
+        assertTrue(device.wait(Until.gone(By.descStartsWith("Expand Astravar crystal")),30000))
     }
     @Test fun cRollRestorationMainHistoryAndLivePermissionRecovery() {
         shell("am force-stop $appPackage");openMain()
@@ -123,15 +123,15 @@ class OverlayInstrumentationTest {
         screenshot("recent-history")
         startOverlay();shell("am start -W -n com.yazsras.astravar.target/.TargetActivity")
         shell("appops set $appPackage SYSTEM_ALERT_WINDOW deny")
-        assertTrue(device.wait(Until.gone(By.desc("Expand Astravar crystal")),30000))
+        assertTrue(device.wait(Until.gone(By.descStartsWith("Expand Astravar crystal")),30000))
         shell("am force-stop $appPackage");openMain();findText("Floating controls").click();device.waitForIdle()
-        assertFalse(device.hasObject(By.desc("Expand Astravar crystal")))
+        assertFalse(device.hasObject(By.descStartsWith("Expand Astravar crystal")))
         assertTrue("Denied permission should open Android's overlay settings",device.wait(Until.hasObject(By.text("Display over other apps").pkg("com.android.settings")),30000))
         shell("appops set $appPackage SYSTEM_ALERT_WINDOW allow")
         device.pressBack();device.waitForIdle()
         assertTrue(device.wait(Until.hasObject(By.text("ASTRAVAR").pkg(appPackage)),30000))
         findText("Floating controls").click()
-        assertTrue(device.wait(Until.hasObject(By.desc("Expand Astravar crystal")),30000))
+        assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))
         expand();stopPanel()
         checkpoint("Identical saved dice restored in main app and history; live permission revocation and recovery exercised")
     }

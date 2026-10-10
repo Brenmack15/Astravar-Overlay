@@ -15,9 +15,11 @@ import com.yazsras.astravar.rules.Campaign
 import com.yazsras.astravar.rules.DamageType
 import kotlinx.coroutines.*
 
-val Gunmetal=Color(0xFF111419)
-val Brass=Color(0xFFC5A56D)
-val Frost=Color(0xFFB4EBFF)
+val Gunmetal=Color(0xFF101315)
+val Ready=Color(0xFF88D9B2)
+val Muted=Color(0xFFB6B9BC)
+val Brass=Color(0xFFE3C28C)
+val Frost=Color(0xFF9DCEF0)
 fun elementTint(type: DamageType)=when(type) {
     DamageType.FIRE -> Color(0xFFFFA36A)
     DamageType.LIGHTNING -> Color(0xFFDAC0FF)
@@ -29,7 +31,10 @@ fun elementTint(type: DamageType)=when(type) {
     else -> Frost
 }
 @Composable fun AstravarTheme(content: @Composable ()->Unit) {
-    MaterialTheme(colorScheme=darkColorScheme(primary=Brass,secondary=Frost,background=Gunmetal,surface=Color(0xFF1B2028),error=Color(0xFFFF9C9E)),content=content)
+    MaterialTheme(colorScheme=darkColorScheme(primary=Brass,onPrimary=Color(0xFF241B10),secondary=Frost,
+        background=Gunmetal,surface=Color(0xFF1C2126),surfaceVariant=Color(0xFF252B30),
+        onSurface=Color(0xFFF0ECE4),onSurfaceVariant=Muted,outline=Color(0xFF69665F),error=Color(0xFFF2A4A1)),
+        typography=arcaneTypography(),content=content)
 }
 class Actions(val repo: Repository,private val scope: CoroutineScope) {
     var message by mutableStateOf(""); var busy by mutableStateOf(false)
@@ -41,11 +46,13 @@ class Actions(val repo: Repository,private val scope: CoroutineScope) {
     fun change(label: String,block: (Campaign)->Campaign) = run(label) { repo.mutate(label=label,change=block) }
 }
 @Composable fun Section(title: String,content: @Composable ColumnScope.()->Unit) {
-    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) { Text(title,style=MaterialTheme.typography.titleMedium,color=Brass); content() } }
+    ArcanePanel { Text(title,style=MaterialTheme.typography.titleMedium,color=Brass); content() }
 }
-@Composable fun Page(content: @Composable ColumnScope.()->Unit) {
-    Box(Modifier.fillMaxSize(),contentAlignment=Alignment.TopCenter) {
-        Column(Modifier.widthIn(max=900.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp),content=content)
+@Composable fun Page(modifier: Modifier=Modifier,resetKey: Any?=null,content: @Composable ColumnScope.()->Unit) {
+    val scroll=rememberScrollState()
+    LaunchedEffect(resetKey) {scroll.scrollTo(0)}
+    Box(modifier.fillMaxSize().instrumentSurface(),contentAlignment=Alignment.TopCenter) {
+        Column(Modifier.widthIn(max=900.dp).fillMaxWidth().verticalScroll(scroll).padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp),content=content)
     }
 }
 @Composable fun Field(label: String,value: String,change: (String)->Unit,modifier: Modifier=Modifier,single: Boolean=true) {
@@ -65,7 +72,7 @@ class Actions(val repo: Repository,private val scope: CoroutineScope) {
     }
 }
 @Composable fun Action(label: String,enabled: Boolean=true,danger: Boolean=false,onClick: ()->Unit) {
-    Button(onClick,Modifier.fillMaxWidth().heightIn(min=48.dp),enabled=enabled,colors=if(danger) ButtonDefaults.buttonColors(containerColor=Color(0xFF963D44),contentColor=Color.White) else ButtonDefaults.buttonColors()) { Text(label) }
+    Button(onClick,Modifier.fillMaxWidth().heightIn(min=52.dp),shape=androidx.compose.foundation.shape.RoundedCornerShape(12.dp),enabled=enabled,colors=if(danger) ButtonDefaults.buttonColors(containerColor=Color(0xFF963D44),contentColor=Color.White) else ButtonDefaults.buttonColors()) { Text(label) }
 }
 @Composable fun <T> ChoiceGrid(values: List<T>,selected: T?,display: (T)->String={it.toString()},change: (T)->Unit) {
     values.chunked(3).forEach {row->Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {

@@ -45,7 +45,7 @@ class DiceRollerTest {
     }
     @Test fun unselectedNaturalOneDoesNotOverrideAdvantage() {
         val r=DiceRoller.roll(plan(),RollOptions(advantage=true,armorClass=20),dice(1,17,4,3,2))
-        assertEquals(Outcome.HIT,r.suggestedOutcome);assertEquals(17,r.natural)
+        assertNull(r.suggestedOutcome);assertEquals(17,r.natural)
     }
     @Test fun longRangeAddsDisadvantageAndCancelsAdvantage() {
         val p=Engine.plan(seed(),"long",Ability.ARCANE,distance=90)
@@ -55,9 +55,10 @@ class DiceRollerTest {
     @Test fun suppliedAdvantageAndDisadvantageCancel() {
         val r=DiceRoller.roll(plan(),RollOptions(true,true),dice(10,5,4,3));assertEquals(RollMode.NORMAL,r.mode)
     }
-    @Test fun acDeterminesHitAndMissWithoutChangingDice() {
-        assertEquals(Outcome.HIT,DiceRoller.roll(plan(),RollOptions(armorClass=22),dice(14,7,4)).suggestedOutcome)
-        assertEquals(Outcome.MISS,DiceRoller.roll(plan(),RollOptions(armorClass=23),dice(14,7,4)).suggestedOutcome)
+    @Test fun legacyAcInputCannotAdjudicateOrBeStoredByNewRolls() {
+        assertNull(DiceRoller.roll(plan(),RollOptions(armorClass=22),dice(14,7,4)).suggestedOutcome)
+        assertNull(DiceRoller.roll(plan(),RollOptions(armorClass=23),dice(14,7,4)).suggestedOutcome)
+        assertNull(DiceRoller.roll(plan(),RollOptions(armorClass=23),dice(14,7,4)).options.armorClass)
         assertNull(DiceRoller.roll(plan(),die=dice(14,7,4)).suggestedOutcome)
     }
     @Test fun elementalDamageStaysTypedAndCalibrationIsAppliedOnce() {
@@ -113,7 +114,7 @@ class DiceRollerTest {
         assertEquals(s,restored);val roll=restored.pending.single().rolled!!
         assertEquals("Core One",roll.coreName);assertTrue(roll.rolledAtMillis>0);assertEquals(RollMode.ADVANTAGE,roll.mode)
         assertTrue(shotSummary(restored.pending.single()).contains("17 / 6"))
-        assertTrue(shotSummary(restored.pending.single()).contains("AC unknown"))
+        assertTrue(shotSummary(restored.pending.single()).contains("DM determines the hit"))
     }
     @Test fun legacySavedShotsWithoutNewFieldStillRestore() {
         val saved=Engine.commit(seed(),plan())

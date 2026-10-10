@@ -124,6 +124,8 @@ object Engine {
         val installation=next.installation
         return if(installation != null && next.gameSeconds >= installation.completeAt) next.copy(installedId=installation.coreId,postShatter=false,installation=null) else next
     }
+    /** Player confirms their next weapon action window. No encounter counter or clock advances. */
+    fun resetWeaponActions(s: Campaign) = s.copy(turn=Turn(s.turn.number))
     fun resolve(s: Campaign,id: String,r: Resolution): Campaign {
         val pending=s.pending.find { it.plan.id==id } ?: error("Pending shot not found")
         require(pending.result == null) { "Shot already resolved" }

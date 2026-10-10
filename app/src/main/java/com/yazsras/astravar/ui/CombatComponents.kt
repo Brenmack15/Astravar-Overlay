@@ -46,14 +46,14 @@ fun rollFeedback(view: View,roll: ShotRoll?) {
             context.contentResolver.openInputStream(Uri.parse(uri))?.use {BitmapFactory.decodeStream(it,null,options)?.asImageBitmap()}
         }.getOrNull()}
     }
-    image?.let {Image(it,"Personal Astravar artwork",modifier,contentScale=ContentScale.Crop)} ?: Image(painterResource(R.drawable.astravar_reference),"Astravar crystal pistol",modifier,contentScale=ContentScale.Crop)
+    image?.let {Image(it,"Personal Astravar artwork",modifier,contentScale=ContentScale.Fit)} ?: Image(painterResource(R.drawable.astravar_reference),"Astravar crystal pistol",modifier,contentScale=ContentScale.Fit)
 }
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable fun CorePicker(s: Campaign,a: Actions,dismiss: ()->Unit) {
     ModalBottomSheet(onDismissRequest=dismiss) {
         Column(Modifier.fillMaxWidth().heightIn(max=480.dp).verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
             Text("Choose a core",style=MaterialTheme.typography.titleLarge,color=Brass)
-            if(s.cores.isEmpty()) Text("Add the completed cores you own in Inventory.")
+            if(s.cores.isEmpty()) Text("Add the completed cores you own in Cores & Payloads.")
             s.cores.forEach {c->
                 val active=c.id==s.installedId
                 OutlinedButton(onClick={a.change("Install ${c.name}") {Engine.install(it,c.id)};dismiss()},enabled=!a.busy && !active && c.usable(s.gameSeconds) && s.installation==null,modifier=Modifier.fillMaxWidth().heightIn(min=64.dp)) {
@@ -70,7 +70,7 @@ fun rollFeedback(view: View,roll: ShotRoll?) {
         Column(Modifier.fillMaxWidth().heightIn(max=480.dp).verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             Text("Stored spells",style=MaterialTheme.typography.titleLarge,color=Brass)
             Text("Choose up to ${s.profile.releaseLimit} · ${s.installed?.payloads?.size ?: 0} stored")
-            if(s.installed?.payloads.isNullOrEmpty()) Text("Charge a spell in Inventory → Cores.")
+            if(s.installed?.payloads.isNullOrEmpty()) Text("Charge a spell in Cores & Payloads → Cores.")
             s.installed?.payloads?.forEach {p->
                 OutlinedButton(onClick={a.run("Payload selected") {preferences.payloads(if(p.id in selected) selected-p.id else if(s.profile.releaseLimit==1) setOf(p.id) else (selected+p.id).toList().takeLast(s.profile.releaseLimit).toSet());preferences.mode(Ability.SPELL);if(s.profile.releaseLimit==1) dismiss()}},modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
                     Text("${if(p.id in selected) "✓ Selected" else "Stored"} · ${p.template.name} · L${p.template.castingLevel}")
@@ -87,19 +87,19 @@ fun rollFeedback(view: View,roll: ShotRoll?) {
     Page {
         Text("Recent rolls",style=MaterialTheme.typography.headlineSmall,color=Brass)
         Text("Latest ${HistoryRetention.MAX_HISTORY_ENTRIES} rolls · older rolls are automatically deleted",style=MaterialTheme.typography.bodySmall)
-        if(s.pending.isEmpty()) Section("Your first roll will appear here") {Text("Open Combat and tap Roll attack.")}
+        if(s.pending.isEmpty()) Section("Your first roll will appear here") {Text("Open Weapon and tap Roll attack.")}
         s.recentRolls().forEach {shot->
             val roll=shot.rolled
-            val time=roll?.rolledAtMillis?.takeIf {it>0}?.let {SimpleDateFormat("HH:mm",Locale.getDefault()).format(Date(it))} ?: "Earlier"
-            Card(Modifier.fillMaxWidth().clickable {selected=if(selected==shot.plan.id) null else shot.plan.id}) {
-                Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+            val time=roll?.rolledAtMillis?.takeIf {it>0}?.let {SimpleDateFormat("MMM d · HH:mm",Locale.getDefault()).format(Date(it))} ?: "Earlier"
+            ArcanePanel(accent=if(roll?.natural==1) MaterialTheme.colorScheme.error else if(roll?.critical==true) Brass else Frost,modifier=Modifier.clickable {selected=if(selected==shot.plan.id) null else shot.plan.id}) {
                     Text("$time · ${shot.plan.ability.title}",color=Brass)
                     Text(roll?.attackTotal?.let {"$it to hit · ${roll.mode.name.lowercase()}"} ?: if(shot.plan.blast) "DC ${shot.plan.profile.saveDc} Dexterity" else "External dice",style=MaterialTheme.typography.titleMedium)
-                    roll?.natural?.let {Text(if(it==20) "CRITICAL HIT · natural 20" else if(it==1) "NATURAL 1 — MISS" else "Natural $it",style=MaterialTheme.typography.labelMedium,color=Frost)}
-                    Text(shot.result?.let {if(shot.plan.blast) "${it.targets.size} creatures" else Engine.damage(shot.plan,it).damageText()} ?: "Saves / result pending")
+                    roll?.natural?.let {Text(if(it==20) "CRITICAL HIT · natural 20" else if(it==1) "NATURAL 1 — MISS" else "Natural $it",style=MaterialTheme.typography.labelMedium,color=if(it==1) MaterialTheme.colorScheme.error else if(it==20) Brass else Frost)}
+                    roll?.takeIf {it.attackTotal!=null}?.let {Text(it.attackDescription(shot.plan),style=MaterialTheme.typography.bodySmall,color=Muted)}
+                    Text(shot.result?.let {if(shot.plan.blast) "${it.targets.size} save results · ${shot.rolled?.damage?.values?.sumOf {d->d.total} ?: it.rolls.values.sum()} rolled damage" else "${if(it.outcome==Outcome.MISS) "Damage" else "Potential damage"}: ${Engine.damage(shot.plan,it).values.sum()} · ${Engine.damage(shot.plan,it).damageText()}"} ?: "Saves / result pending")
                     Text("${roll?.coreName?.ifBlank {shot.plan.coreId} ?: shot.plan.coreId} · ${shot.plan.selectedPayloads.joinToString {it.template.name}.ifBlank {shot.plan.immediate?.name ?: "No payload"}}",style=MaterialTheme.typography.bodySmall)
+                    Text(if(selected==shot.plan.id) "Hide details ▴" else "View dice & details ▾",style=MaterialTheme.typography.labelMedium,color=Frost)
                     if(selected==shot.plan.id) Text(shotSummary(shot),style=MaterialTheme.typography.bodySmall)
-                }
             }
         }
     }

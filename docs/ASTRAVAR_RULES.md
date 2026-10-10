@@ -75,3 +75,13 @@ The active profile is migrated on database read/import and on mutations (includi
 ## History retention correction — 2026-10-07
 
 Keep only the newest 20 combat entries, including pending/rolled results shown by History. Automatically discard older entries in persistent storage. History stays newest-first and preserves all individual faces of retained large pools; the current-result card and overlay use the same bounded data. Duplicate archived accounting roll copies are not retained. This supersedes unlimited-history preservation; it does not alter any combat damage, resource, critical or save rule above.
+
+## Weapon-focused interface correction — 2026-10-10 (application 1.6.0)
+
+New attacks never consult or save enemy Armor Class. The DM decides ordinary hits. The app rolls attack and potential typed damage together, recognizing the selected natural 20 as a critical and selected natural 1 as an automatic miss. Existing firing costs still occur at commit, including on misses; no costs are deferred or invented. The compatibility-only AC field in old immutable roll snapshots remains readable so recorded outcomes are not rewritten.
+
+General encounter, round and enemy-defense controls are removed. Optional Astravar action-budget enforcement remains under Weapon resources, preserving the established two attacks/full Action, Bonus Action and provisional spell-firing restrictions. “My next turn” resets only those weapon budgets after player confirmation, without incrementing an encounter counter or advancing game time. Explicit elapsed-time controls remain for core recovery and installation. Old stored action budgets and resource state are preserved on upgrade.
+
+Discharge/Shatter still use player-supplied Dexterity saves, and Direct Impact still requires the DM's direct-hit decision when the attack die is neither a natural 1 nor 20. These per-effect save records are not an enemy roster. No new resistance/immunity picker is exposed; the DM handles target-specific defenses. Historical target-defense snapshots remain intact.
+
+The d12 Primary Force, independent d8 selector, 3N Discharge, 21N Shatter, all critical/payload/overcharge rules, and persistent newest-20 retention remain unchanged. Cantrip imbuing is not implemented and is not added by this interface update.

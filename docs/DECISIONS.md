@@ -79,3 +79,13 @@ This correction supersedes the earlier unlimited journal/archive policy. Only th
 Before any legacy observer starts, SQL prunes old events, then 8 KiB BLOB chunks stream oversized campaign/event fields. A streaming JSON filter retains only the newest valid shot window before decoding. Malformed historical items can be discarded without replacing active campaign resources. Duplicate archived journals are removed. Backup import follows the same streaming policy; export has no duplicate roll copies. Operation retries within the retained journal remain idempotent and stale shot revisions remain rejected. Undo is limited to retained accounting operations and does not resurrect expired rolls.
 
 No Force, selector, emergency, critical, save, slot or core rule changes accompany this stability release.
+
+## Weapon control interface (application 1.6.0)
+
+The owner's redesign supersedes the older Combat/Inventory/Encounter layout. Compose now has four primary destinations: Weapon (default), Cores & Payloads, History, More. A restrained charcoal, antique-gold and blue design uses cached linework, painted sigils, system serif headings and readable system body text. The supplied updated pistol artwork replaces the prior approved image. No fictional concept weapon/core/payload names are introduced. Setup forms are disclosed on demand. Weapon's Roll action stays at the bottom of the screen above navigation; roll details expand only when requested.
+
+The native View overlay retains its service-window, permission, drag, position, notification, keyboard and shared-repository architecture. Its standard collapsed bar is 174×52 dp and expanded weapon surface 300×364 dp before display scaling; secondary/result views cap at 420 dp height and scroll. Status and action controls retain accessible text and minimum touch targets. No animated shader, full-screen texture or per-die view allocation is added.
+
+New DiceRoller output strips AC even when passed a legacy RollOptions instance. Legacy-only validation continues to recognize old AC-derived results, and historical defense snapshots are untouched. DataStore migration removes only the obsolete armor_class preference. No Room schema reset, campaign replacement, count migration or history expansion accompanies the redesign. The legacy encounter/turn fields now back only the optional weapon action-budget controls; no general encounter UI remains. Starting the player's next weapon action window never advances the recovery clock.
+
+Screenshot fixtures render actual Compose/native View implementations under Robolectric; they are review evidence, not claims of physical overlay operation on Samsung or D&D Beyond.

@@ -27,7 +27,7 @@ class ElementalSelectorTest {
         val p=elemental(Profile(baseDamageDiceCount=2,elementalSelectorDiceCount=3))
         val values=ArrayDeque(listOf(14,7,4,6,2,8))
         val roll=DiceRoller.roll(p,RollOptions(armorClass=18),die={values.removeFirst()},atMillis=123)
-        assertTrue(values.isEmpty());assertFalse(roll.critical);assertEquals(Outcome.HIT,roll.suggestedOutcome)
+        assertTrue(values.isEmpty());assertFalse(roll.critical);assertNull(roll.suggestedOutcome)
         assertEquals(listOf(7,4),roll.damage.getValue("direct").faces)
         assertEquals(listOf(6,2,8),roll.damage.getValue("element0").faces)
         assertEquals(5,roll.damage.getValue("direct").flat);assertEquals(0,roll.damage.getValue("element0").flat)

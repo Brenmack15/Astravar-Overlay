@@ -38,7 +38,7 @@ class ForceMigrationTest {
             val plan=Engine.plan(before,"old",a,elements=elements,direct=a in listOf(Ability.DISCHARGE,Ability.SHATTER),point="Old gate")
             // v1.4 level 13, N=4: 12+6 = 18d10 Discharge; 36+18 = 54d10 Shatter.
             val historic=plan.copy(blastDiceCount=when(a) {Ability.DISCHARGE->18;Ability.SHATTER->54;else->0})
-            val roll=DiceRoller.roll(historic,RollOptions(armorClass=18),die={if(it==20) {if(crit) 20 else 14} else 4},atMillis=25)
+            val roll=DiceRoller.roll(historic,RollOptions(armorClass=18),die={if(it==20) {if(crit) 20 else 14} else 4},atMillis=25).copy(options=RollOptions(armorClass=18),suggestedOutcome=if(crit) Outcome.CRITICAL else Outcome.HIT)
             val targets=if(plan.blast) listOf(TargetSave("Target",true,directTarget=true)) else emptyList()
             val result=DiceRoller.resolution(historic,roll,targets=targets)
             val saved=PendingShot(historic,result,roll)

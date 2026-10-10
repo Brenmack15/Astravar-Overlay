@@ -69,19 +69,22 @@ import java.util.UUID
         }
     }
 }
-@Composable fun EncounterPage(s: Campaign,history: List<HistorySummary>,a: Actions) {
+@Composable fun ResourcesPage(s: Campaign,history: List<HistorySummary>,a: Actions) {
     var seconds by remember { mutableStateOf("600") }; var slotLevel by remember { mutableStateOf(1) }; var slotCount by remember { mutableStateOf("") }
     var notes by remember(s.notes) { mutableStateOf(s.notes) }; var undo by remember { mutableStateOf(false) }
     val c=LocalContext.current
     Page {
-        Section("Encounter · turn ${s.turn.number}") {
-            Toggle("Track turn action limits",s.encounter) {v -> a.change("Encounter tracking set to $v; turn budget reset") { it.copy(encounter=v,turn=Turn()) } }
-            Text("Attacks ${s.turn.attacks}/2 · Action spent ${s.turn.fullAction} · Bonus Action spent ${s.turn.bonus} · spell firings ${s.turn.spellShots}/${s.profile.spellShotsPerTurn} (provisional)")
-            Text("Game clock ${s.gameSeconds}s. Wall time and app restarts never recover resources.")
-            Action("Advance round / next turn · +6 seconds",!a.busy) {a.change("Player advanced round +6 seconds") {Engine.advance(it,6,true)}}
-            Field("Game seconds to advance",seconds,{seconds=it})
-            Action("Confirm in-game time advancement",!a.busy) {a.change("Player advanced game time") {Engine.advance(it,seconds.intValue("Seconds",0,31536000).toLong())}}
-            Action("Record Long Rest · preserve payloads and counters",!a.busy) {a.change("Long Rest recorded; time and slots require manual reconciliation") {it}}
+        Section("Weapon action limits") {
+            Toggle("Enforce Astravar actions on my turn",s.encounter) {v -> a.change("Weapon action limits set to $v; action budget reset") {it.copy(encounter=v,turn=Turn())}}
+            Text("Optional enforcement of two ordinary attacks or one full Action, one Bonus Action, and the configured spell-firing limit. No initiative, enemy or round tracking.")
+            if(s.encounter) Action("My next turn · reset weapon actions",!a.busy) {a.change("Player confirmed next weapon action window") {Engine.resetWeaponActions(it)}}
+        }
+        Section("Core recovery & installation") {
+            Text("Advance only time that has passed at your table. Wall time and app restarts never recover resources.")
+            s.cores.filter { !it.usable(s.gameSeconds) && !it.destroyed }.forEach {Text("${it.name} · ${it.readiness(s.gameSeconds)}")}
+            s.installation?.let {Text("Installation · ${(it.completeAt-s.gameSeconds).coerceAtLeast(0)} game seconds remaining")}
+            Field("Elapsed game seconds",seconds,{seconds=it})
+            Action("Confirm elapsed time",!a.busy) {a.change("Player confirmed elapsed recovery time") {Engine.advance(it,seconds.intValue("Seconds",0,31536000).toLong())}}
         }
         Section("Spell slots · manually reconciled") {
             Text("Unknown levels have no counter. A rest never silently refills slots; enter your actual remaining count.")
@@ -90,16 +93,7 @@ import java.util.UUID
             Action("Reconcile slot count",!a.busy) {a.change("Manual slot reconciliation L$slotLevel") {it.copy(slots=it.slots+(slotLevel to slotCount.intValue("Slots",0,99)))}}
             Action("Mark this level unknown",!a.busy) {a.change("Slot level $slotLevel marked unknown") {it.copy(slots=it.slots-slotLevel)}}
         }
-        Section("Campaign notes") { Field("Player-safe notes",notes,{notes=it},single=false); Action("Save notes",!a.busy) {a.change("Updated campaign notes") {it.copy(notes=notes)}} }
-        s.pending.filter { it.result!=null }.asReversed().take(HistoryRetention.MAX_HISTORY_ENTRIES).forEach { shot ->
-            val r=shot.result!!
-            Section("${shot.plan.ability} · ${r.outcome}") {
-                Text("${r.provenance} · profile v${shot.plan.profile.version}")
-                if(shot.plan.blast) r.targets.forEach { t -> Text("${t.name} · ${if(t.saved==true) "saved" else "failed"}: ${Engine.damage(shot.plan,r,t).entries.joinToString { "${it.value} ${it.key}" }}") }
-                else Text(Engine.damage(shot.plan,r).entries.joinToString {"${it.value} ${it.key}"})
-                TextButton(onClick={val value="${shot.plan.ability}: ${r.outcome}; ${r.rolls}. Player-entered results; no sheet synchronization."; (c.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Astravar result",value)); a.message="Result copied"}) { Text("Copy result") }
-            }
-        }
+        Section("Weapon notes") { Field("Weapon / crafting notes",notes,{notes=it},single=false); Action("Save notes",!a.busy) {a.change("Updated campaign notes") {it.copy(notes=notes)}} }
         Section("Accounting history") {
             Action("Undo last operation with logged correction",!a.busy && history.isNotEmpty(),danger=true) {undo=true}
             history.forEach { Text("Game ${it.gameSeconds}s · ${it.origin}${if(it.undone) " · UNDONE" else ""}\n${it.label}"); HorizontalDivider() }
@@ -153,7 +147,7 @@ import java.util.UUID
         Section("Feedback & advanced controls") {
             Toggle("Haptic feedback",prefs.haptics) {v->a.run("Feedback updated") {app.preferences.haptics(v)}}
             Toggle("Advanced: manual roll override",prefs.manualOverrides) {v->a.run("Manual override updated") {app.preferences.manualOverrides(v)}}
-            if(prefs.manualOverrides) Text("Combat target settings now includes external dice. Manual entry is recorded separately from Astravar's dice.")
+            if(prefs.manualOverrides) Text("Weapon shot options now includes external dice. Manual entry is recorded separately from Astravar's dice.")
         }
         Section("Artwork") { Text("Approved Astravar pistol artwork is included. A personal image can be selected using Android's file picker."); Action("Choose personal artwork") {image.launch(arrayOf("image/*"))}; Action("Use included Astravar artwork") {a.run("Original artwork restored") {app.preferences.image("")}} }
         if(s.demo) Section("Leave demo") {Text("Your demo has its own labeled state. Export it if needed before starting a real campaign. The correction history remains available.");Action("End demo and begin empty real campaign",danger=true) {resetDemo=true}}

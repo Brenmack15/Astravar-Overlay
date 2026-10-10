@@ -153,7 +153,7 @@ class RepositoryTest {
     @Test fun targetAndFeedbackPreferencesAreSharedAndDurable()=runBlocking {
         val main=Preferences(context);main.targeting(RollOptions(advantage=true,armorClass=18));main.aim(90,"Archway",true,"cold",true);main.haptics(false);main.manualOverrides(true)
         val overlay=Preferences(context).flow.first()
-        assertTrue(overlay.advantage);assertEquals(18,overlay.armorClass);assertEquals(90,overlay.distance);assertEquals("Archway",overlay.targetPoint);assertTrue(overlay.directImpact);assertEquals("cold",overlay.immediateId);assertTrue(overlay.manualSlot);assertFalse(overlay.haptics);assertTrue(overlay.manualOverrides)
+        assertTrue(overlay.advantage);assertFalse(context.overlayPreferences.data.first().contains(androidx.datastore.preferences.core.intPreferencesKey("armor_class")));assertEquals(90,overlay.distance);assertEquals("Archway",overlay.targetPoint);assertTrue(overlay.directImpact);assertEquals("cold",overlay.immediateId);assertTrue(overlay.manualSlot);assertFalse(overlay.haptics);assertTrue(overlay.manualOverrides)
     }
 
     @Test fun sevenAndTenSurviveDatabaseRestartDriveBothSurfacesAndRestoreFromBackup()=runBlocking {
