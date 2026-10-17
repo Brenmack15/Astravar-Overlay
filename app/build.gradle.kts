@@ -24,7 +24,7 @@ android {
         }
     }
     buildTypes {
-        debug { applicationIdSuffix = ".debug"; versionNameSuffix = "-test" }
+        debug { applicationIdSuffix = ".debug"; versionNameSuffix = "-inventory-beta" }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
