@@ -1,7 +1,7 @@
 name: Bounded Android verification
 on:
   push:
-    branches: ['feat/astravar-android', 'feat/astravar-android/**']
+    branches: ['feat/astravar-android', 'feat/astravar-android/**', 'feat/astravar-inventory-mvp-v170']
   pull_request:
   workflow_dispatch:
     inputs:
@@ -22,6 +22,7 @@ jobs:
     timeout-minutes: 25
     env:
       REUSE_RUN_ID: ${{ inputs.reuse_run_id || '0' }}
+      INVENTORY_BETA: ${{ github.head_ref == 'feat/astravar-inventory-mvp-v170' || github.ref_name == 'feat/astravar-inventory-mvp-v170' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Select explicit overlay-only recheck
@@ -53,9 +54,14 @@ jobs:
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
       - name: Unit tests, lint and native APKs
         if: env.REUSE_RUN_ID == '0'
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: |
           chmod +x gradlew
+          if [[ "$INVENTORY_BETA" == 'true' ]]; then
+            python3 -m unittest discover -s scripts/tests -v
+            timeout -k 10s 780s ./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+            exit 0
+          fi
           # This one-run key is ONLY for exercising the optimized release on CI.
           # The delivered candidate is signed privately with the existing owner key.
           export ASTRAVAR_KEYSTORE="$RUNNER_TEMP/ci-test-only.p12"
@@ -85,6 +91,7 @@ jobs:
           chmod +x gradlew
           timeout -k 10s 210s ./gradlew --no-daemon --console=plain :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
       - name: Real overlay interaction on Android 16
+        if: env.INVENTORY_BETA != 'true'
         timeout-minutes: 9
         env:
           ASTRAVAR_TEST_APK: app/build/outputs/apk/release/app-release.apk

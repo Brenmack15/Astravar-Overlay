@@ -59,6 +59,7 @@ import com.yazsras.astravar.rules.*
                     else -> {
                         if(morePage!=null) TextButton(onClick={morePage=null}) {Text("‹ More")}
                         when(morePage) {
+                            "Campaign Inventory" -> if (com.yazsras.astravar.BuildConfig.DEBUG) CampaignLedgerPage(app.campaignLedger) else ControlRoomPage { morePage=it }
                             "Resources" -> ResourcesPage(current,history,actions)
                             "Rules" -> RulesPage(current,actions,if(prefs.mode in listOf(Ability.ARCANE,Ability.SPELL)) emptyList() else prefs.elements)
                             "Backup" -> Page {BackupPage(current,actions)}
@@ -93,6 +94,10 @@ import com.yazsras.astravar.rules.*
         ControlRoomLink("Weapon resources & recovery","Action limits, core recovery and spell slots","Core") {open("Resources")}
         ControlRoomLink("Rules & upgrades","Damage sliders, profile and approved upgrades","Weapon") {open("Rules")}
         ControlRoomLink("Overlay & appearance","Permissions, panel size and artwork","Settings") {open("Settings")}
+        if (com.yazsras.astravar.BuildConfig.DEBUG) {
+            SectionCaption("CAMPAIGN RECORDS")
+            ControlRoomLink("Campaign inventory · local beta", "Item profiles, artwork and research history", "History") { open("Campaign Inventory") }
+        }
         SectionCaption("SAFEKEEPING & SUPPORT")
         ControlRoomLink("Backup & restore","Export or restore your weapon data","History") {open("Backup")}
         ControlRoomLink("Help & diagnostics","Device information and guidance","Help") {open("Help")}
