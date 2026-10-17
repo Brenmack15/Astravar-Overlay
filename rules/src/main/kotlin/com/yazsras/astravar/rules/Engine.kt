@@ -17,12 +17,13 @@ object Engine {
         immediate?.let { it.validate(); require(it.approved) { "Immediate payload needs approval" }; checkSlot(s,it.castingLevel,manualSlotConfirmed) }
         require(ability != Ability.SPELL || payloads.isNotEmpty() || immediate != null) { "Select stored magic or an immediate slot" }
         require(ability !in listOf(Ability.ARCANE,Ability.ELEMENTAL) || (payloads.isEmpty() && immediate == null)) { "Use Spell-Imbued Shot for payloads" }
-        if(ability == Ability.ELEMENTAL) {
-            require(elements.isNotEmpty() && elements.distinct().size == elements.size && elements.all { it in Engine.elements(s.profile) }) { "Choose unlocked elements" }
+        val usesSelector = ability == Ability.ELEMENTAL || (ability in listOf(Ability.DISCHARGE,Ability.SHATTER) && s.profile.forceRulesVersion >= 2)
+        if(usesSelector) {
+            require((ability != Ability.ELEMENTAL || elements.isNotEmpty()) && elements.distinct().size == elements.size && elements.all { it in Engine.elements(s.profile) }) { "Choose unlocked elements" }
             require(elements.size <= s.profile.elementCapacity) { "Selector capacity exceeded; confirm upgrade or explicit profile override" }
             if(elements.size > 1 && s.profile.elementCapacityOverride==null) require(elements.all { it in basic }) { "Dual Resonance uses two basic elements" }
         }
-        val p = ShotPlan(id,s.revision,ability,c.id,s.profile,payloads,immediate,if(ability == Ability.ELEMENTAL) elements else emptyList(),direct,distance,point,manualSlotConfirmed)
+        val p = ShotPlan(id,s.revision,ability,c.id,s.profile,payloads,immediate,if(usesSelector) elements else emptyList(),direct,distance,point,manualSlotConfirmed)
         require(distance in 0..p.range) { "Outside ${p.range} ft range" }
         require(!p.blast || point.isNotBlank()) { "Declare the blast target point" }
         require(p.targetPoint.length <= 500)
@@ -37,8 +38,10 @@ object Engine {
     fun components(p: ShotPlan, critical: Boolean = false): List<Component> {
         val result = mutableListOf<Component>()
         if(!p.blast || p.directImpact) result += Component("direct",if(p.blast) "Direct impact" else "Weapon",TypedDice(if(critical) p.profile.base.critical() else p.profile.base,DamageType.FORCE),Portion.DIRECT)
-        if(p.blast) result += Component("blast","Force blast",TypedDice(Dice(p.profile.dischargeDice * if(p.ability == Ability.SHATTER) 3 else 1,10),DamageType.FORCE),Portion.BLAST)
-        if(p.ability == Ability.ELEMENTAL) p.elements.forEachIndexed { i,t -> result += Component("element$i","Selector",TypedDice(Dice(if(critical) 2 else 1,8),t),Portion.DIRECT) }
+        if(p.blast) result += Component("blast","Force blast",TypedDice(Dice(p.blastDiceCount,p.profile.primaryForceDieSides),DamageType.FORCE),Portion.BLAST)
+        if(p.ability == Ability.ELEMENTAL || (p.blast && p.profile.forceRulesVersion >= 2)) p.elements.forEachIndexed { i,t ->
+            result += Component("element$i","Selector",TypedDice(if(critical && !p.blast) p.profile.selector.critical() else p.profile.selector,t),if(p.blast) Portion.BLAST else Portion.DIRECT)
+        }
         val templates = p.selectedPayloads.map { it.template } + listOfNotNull(p.immediate)
         templates.forEachIndexed { i,t ->
             t.damage.forEachIndexed { j,d -> result += Component("payload${i}_$j",t.name,if(critical && !p.blast) d.copy(dice=d.dice.critical()) else d,if(p.blast) Portion.PAYLOAD else Portion.DIRECT) }
@@ -46,6 +49,10 @@ object Engine {
         }
         return result
     }
+    /** Upgrade previews use the same component construction as combat, without committing resources. */
+    fun previewComponents(profile: Profile,ability: Ability,elements: List<DamageType>) = components(
+        ShotPlan("preview",0,ability,"",profile,emptyList(),elements=elements)
+    )
     fun rollRequest(p: ShotPlan): String = buildString {
         append("Astravar ${p.ability}: ${p.actionCost}. ")
         if(!p.blast || p.directImpact) append("Roll d20 +${p.profile.attack}${if(p.disadvantage) " with disadvantage" else ""}; report hit, miss, or critical. ")
@@ -117,6 +124,8 @@ object Engine {
         val installation=next.installation
         return if(installation != null && next.gameSeconds >= installation.completeAt) next.copy(installedId=installation.coreId,postShatter=false,installation=null) else next
     }
+    /** Player confirms their next weapon action window. No encounter counter or clock advances. */
+    fun resetWeaponActions(s: Campaign) = s.copy(turn=Turn(s.turn.number))
     fun resolve(s: Campaign,id: String,r: Resolution): Campaign {
         val pending=s.pending.find { it.plan.id==id } ?: error("Pending shot not found")
         require(pending.result == null) { "Shot already resolved" }

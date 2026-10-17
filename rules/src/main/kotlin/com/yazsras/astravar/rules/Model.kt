@@ -2,6 +2,15 @@ package com.yazsras.astravar.rules
 
 import kotlinx.serialization.Serializable
 
+/** Current Force family; old shot profiles retain rules version 1 and their d10 faces. */
+object PrimaryForceRules {
+    const val VERSION = 2
+    const val DIE_SIDES = 12
+    const val DISCHARGE_MULTIPLIER = 3
+    const val SHATTER_MULTIPLIER = 7
+    const val MAX_SHATTER_DICE = 10 * DISCHARGE_MULTIPLIER * SHATTER_MULTIPLIER
+}
+
 @Serializable enum class DamageType { FORCE, ACID, COLD, FIRE, LIGHTNING, POISON, THUNDER, RADIANT, NECROTIC, PSYCHIC }
 @Serializable enum class Upgrade { ADVANCED_ELEMENTS, DUAL_RESONANCE, FAST_SWAP, DUAL_STORAGE, FAST_REPLACEMENT, INSTANT_REPLACEMENT, SYNTHETIC }
 @Serializable enum class SourceKind { SLOT, SCROLL }
@@ -10,7 +19,7 @@ import kotlinx.serialization.Serializable
 @Serializable enum class Defense { NORMAL, RESISTANT, IMMUNE, VULNERABLE }
 @Serializable enum class Portion { DIRECT, BLAST, PAYLOAD }
 @Serializable data class Dice(val count: Int, val sides: Int, val flat: Int = 0) {
-    fun validate() { require(count in 0..200 && sides in setOf(4,6,8,10,12,20,100) && flat in -100..100) { "Invalid dice" }; require(count > 0 || flat > 0) }
+    fun validate() { require(count in 0..maxOf(200,PrimaryForceRules.MAX_SHATTER_DICE) && sides in setOf(4,6,8,10,12,20,100) && flat in -100..100) { "Invalid dice" }; require(count > 0 || flat > 0) }
     fun critical() = copy(count = count * 2)
     val minimum get() = count + flat
     val maximum get() = count * sides + flat
@@ -22,16 +31,21 @@ import kotlinx.serialization.Serializable
     val name: String = "Astravar · campaign profile", val version: Int = 1,
     val character: String = "Zerg Hasma", val level: Int = 5, val intelligence: Int = 4,
     val proficiency: Int = 3, val saveDc: Int = 15, val calibration: Int = 1,
+    val baseDamageDiceCount: Int = 2,
+    val elementalSelectorDiceCount: Int = 2,
+    val forceRulesVersion: Int = PrimaryForceRules.VERSION,
     val calibrationEnabled: Boolean = true, val proposedCalibrationProgression: Boolean = false,
     val confirmed: Set<Upgrade> = emptySet(), val capacityOverride: Int? = null,
     val elementCapacityOverride: Int? = null,
     val releaseOverride: Int? = null, val spellShotsPerTurn: Int = 1,
-    val emergencySpellLevelOverride: Int? = null,
+    val emergencySpellLevelOverride: Int? = null, // Legacy backup input only; no current damage effect.
     val fastReplacementLevel: Int = 15, val syntheticGp: Int? = null, val syntheticDays: Int? = null
 ) {
     val bonus get() = if (!calibrationEnabled) 0 else if(proposedCalibrationProgression) { if(level >= 15) 3 else if(level >= 10) 2 else calibration } else calibration
     val attack get() = intelligence + proficiency + bonus
-    val base get() = Dice(1, 10, intelligence + bonus)
+    val primaryForceDieSides get() = if(forceRulesVersion == 1) 10 else PrimaryForceRules.DIE_SIDES
+    val base get() = Dice(baseDamageDiceCount, primaryForceDieSides, intelligence + bonus)
+    val selector get() = Dice(elementalSelectorDiceCount, 8)
     fun has(u: Upgrade) = u in confirmed && level >= when(u) {
         Upgrade.ADVANCED_ELEMENTS -> 8; Upgrade.DUAL_RESONANCE, Upgrade.FAST_SWAP -> 10
         Upgrade.DUAL_STORAGE -> 12; Upgrade.FAST_REPLACEMENT -> fastReplacementLevel
@@ -40,14 +54,21 @@ import kotlinx.serialization.Serializable
     val capacity get() = capacityOverride ?: if(has(Upgrade.DUAL_STORAGE)) 2 else 1
     val elementCapacity get() = elementCapacityOverride ?: if(has(Upgrade.DUAL_RESONANCE)) 2 else 1
     val releaseLimit get() = releaseOverride ?: if(has(Upgrade.DUAL_STORAGE)) 2 else 1
-    val highestSpell get() = emergencySpellLevelOverride ?: when { level >= 17 -> 5; level >= 13 -> 4; level >= 9 -> 3; else -> 2 }
-    val dischargeDice get() = 4 + 2 * highestSpell
+    val dischargeDice get() = PrimaryForceRules.DISCHARGE_MULTIPLIER * baseDamageDiceCount
+    val shatterDice get() = PrimaryForceRules.SHATTER_MULTIPLIER * dischargeDice
+    val discharge get() = Dice(dischargeDice, primaryForceDieSides)
+    val shatter get() = Dice(shatterDice, primaryForceDieSides)
+    fun currentForceRules() = if(forceRulesVersion == 1) copy(forceRulesVersion=PrimaryForceRules.VERSION,version=version+1) else this
     val swapCost get() = if(has(Upgrade.FAST_SWAP)) "Bonus Action" else "Action"
     val replacementCost get() = when { has(Upgrade.INSTANT_REPLACEMENT) -> "Bonus Action"; has(Upgrade.FAST_REPLACEMENT) -> "Action"; else -> "10 in-game minutes" }
     fun validate() {
         require(name.length in 1..120 && character.length in 1..120 && version > 0)
         require(level in 5..20 && intelligence in -5..10 && proficiency in 0..10 && saveDc in 1..40 && calibration in 0..10)
-        require(capacity in 1..12 && elementCapacity in 1..9 && releaseLimit in 1..capacity && spellShotsPerTurn in 1..20 && highestSpell in 1..9 && fastReplacementLevel in 5..20)
+        require(baseDamageDiceCount in 1..10) { "Base damage dice count must be between 1 and 10" }
+        require(elementalSelectorDiceCount in 1..10) { "Elemental selector dice count must be between 1 and 10" }
+        require(forceRulesVersion in 1..PrimaryForceRules.VERSION) { "Unsupported Force rules version" }
+        require(emergencySpellLevelOverride == null || emergencySpellLevelOverride in 1..9)
+        require(capacity in 1..12 && elementCapacity in 1..9 && releaseLimit in 1..capacity && spellShotsPerTurn in 1..20 && fastReplacementLevel in 5..20)
         require(syntheticGp == null || syntheticGp in 0..1000000); require(syntheticDays == null || syntheticDays in 1..10000)
     }
 }
@@ -56,7 +77,7 @@ import kotlinx.serialization.Serializable
     val damage: List<TypedDice>, val overchargeType: DamageType,
     val approved: Boolean = false, val approvalNotes: String = "Needs ruling · instantaneous components only"
 ) {
-    fun validate() { require(id.isNotBlank() && id.length <= 100 && name.length in 1..120); require(baseLevel in 1..9 && castingLevel in baseLevel..9); require(damage.size in 1..16 && approvalNotes.length <= 2000); damage.forEach { it.dice.validate() } }
+    fun validate() { require(id.isNotBlank() && id.length <= 100 && name.length in 1..120); require(baseLevel in 1..9 && castingLevel in baseLevel..9); require(damage.size in 1..16 && approvalNotes.length <= 2000); damage.forEach { it.dice.validate(); require(it.dice.count <= 200) } }
 }
 @Serializable data class Payload(val id: String, val template: Template, val source: SourceKind, val coreId: String, val loadedAt: Long, val sourceReference: String = "")
 @Serializable data class Core(val id: String, val name: String, val destroyed: Boolean = false, val exhaustedUntil: Long? = null, val payloads: List<Payload> = emptyList()) {
@@ -71,7 +92,13 @@ import kotlinx.serialization.Serializable
     val id: String, val revision: Long, val ability: Ability, val coreId: String, val profile: Profile,
     val selectedPayloads: List<Payload>, val immediate: Template? = null,
     val elements: List<DamageType> = emptyList(), val directImpact: Boolean = false,
-    val distance: Int = 30, val targetPoint: String = "", val manualSlotConfirmed: Boolean = false
+    val distance: Int = 30, val targetPoint: String = "", val manualSlotConfirmed: Boolean = false,
+    // Snapshot the expression at planning time so later rules changes cannot rewrite a blast.
+    val blastDiceCount: Int = when(ability) {
+        Ability.DISCHARGE -> profile.dischargeDice
+        Ability.SHATTER -> profile.shatterDice
+        else -> 0
+    }
 ) {
     val blast get() = ability == Ability.DISCHARGE || ability == Ability.SHATTER
     val hasSpell get() = selectedPayloads.isNotEmpty() || immediate != null
@@ -97,9 +124,9 @@ import kotlinx.serialization.Serializable
     fun core(id: String) = cores.find { it.id == id } ?: error("Core not found")
     fun replace(core: Core) = copy(cores = cores.map { if(it.id == core.id) core else it })
 }
-@Serializable data class HistoryEntry(val id: String, val label: String, val gameSeconds: Long, val before: Campaign, val after: Campaign, val origin: String = "main", val undone: Boolean = false)
+@Serializable data class HistoryEntry(val id: String, val label: String, val gameSeconds: Long, val before: Campaign, val after: Campaign, val origin: String = "main", val undone: Boolean = false, val rollUndo: List<RollUndo> = emptyList(), val compact: Boolean = false)
 @Serializable data class HistoryArchive(val id: String, val history: List<HistoryEntry>)
 @Serializable data class Backup(val format: String = "astravar-backup", val schema: Int = 1, val campaign: Campaign, val history: List<HistoryEntry> = emptyList(), val archives: List<HistoryArchive> = emptyList())
 
-/** A bounded presentation of the durable journal; no deletion or resource mutation. */
-fun Campaign.recentRolls(): List<PendingShot> = pending.asReversed().take(20)
+/** Shared newest-first presentation of the storage-bounded recent rolls. */
+fun Campaign.recentRolls(): List<PendingShot> = pending.asReversed().take(HistoryRetention.MAX_HISTORY_ENTRIES)

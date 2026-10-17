@@ -9,8 +9,8 @@ android {
         applicationId = "com.yazsras.astravar"
         minSdk = 26
         targetSdk = 36
-        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(3)
-        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("1.1.0")
+        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(10)
+        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("1.7.0")
     }
     signingConfigs {
         create("owner") {
@@ -63,5 +63,6 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.16")
     testImplementation("androidx.test:core:1.7.0")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

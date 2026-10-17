@@ -36,11 +36,11 @@ Position is saved independently by orientation and clamped using system-bar/cuto
 
 ## Accounting and persistence
 
-Room stores a versioned campaign snapshot plus immutable before/after event snapshots. Every mutation executes in a Room transaction with a unique command ID. Replays of a committed ID return the existing state; competing stale shot previews fail revision checks. Spend occurs at commit, independent of later hit/miss. Pending plans include the profile and payload snapshots needed to resume after process death.
+Room stores versioned campaign resources, a separate newest-20 compact roll table, and a bounded accounting Undo journal whose resource snapshots omit all roll lists. Every mutation executes in a Room transaction with a unique command ID. Replays of a committed ID return the existing state; competing stale shot previews fail revision checks. Spend occurs at commit, independent of later hit/miss. Pending plans include the profile and payload snapshots needed to resume after process death.
 
-Corrections restore the previous snapshot and append a new explicit event. They do not erase history. Game time advances only by player commands. A Long Rest log does not assume elapsed time or refill unknown counters. Database version 2 has an explicit tested migration from version 1; no destructive fallback exists.
+Corrections restore the previous snapshot and append a new explicit event. Retained dice are not rerolled; expired history cannot be restored. Game time advances only by player commands. A Long Rest log does not assume elapsed time or refill unknown counters. Database version 3 has explicit tested 1→2→3 migrations; no destructive fallback exists.
 
-Backups use strict versioned JSON. They reject malformed references, duplicate IDs, invalid dice/levels, impossible resource values, excessive nesting, and files over 8 MiB. Import previews counts and requires a current backup before replacement. Import is atomic and idempotent; local history remains, imported history is retained in deduplicated archives. Preferences remain device-local. This JSON size limit is a technical import limit, not a campaign resource rule.
+Backups use strict versioned JSON. They validate active references, IDs, dice/levels and resource values; isolate invalid historical records; and bound nesting and retained data. Legacy input is streamed (up to 512 Mi characters) into an 8 MiB retained-data envelope. Import previews counts and requires a current backup before replacement. Import is atomic and idempotent; the newest 20 imported rolls replace the recent-roll window, and duplicate legacy archives are discarded. Preferences remain device-local. This JSON size limit is a technical import limit, not a campaign resource rule.
 
 ## Security / distribution
 
@@ -61,6 +61,48 @@ Recovery preserved the feature branch's existing automatic-dice redesign. The or
 
 The explicit player correction in ASTRAVAR_RULES supersedes the original manual-only requirement. Injectable dice make rules tests deterministic; production uses SecureRandom. Both surfaces call the same transactional fire operation, which persists raw faces, selected d20, modifiers, typed components, critical eligibility and costs together. Other creatures' saves are never rolled. Ordinary attacks permit unknown AC. Discharge/Shatter keep confirmation and per-creature resolution. Optional manual overrides live in advanced settings.
 
-Combat uses a dark charcoal/gold/frost theme, compact weapon status, one-tap attacks, result cards and quick core/payload selectors. Main and overlay share persistent selections and history. The latest-20 view never deletes the durable journal. Version 1.1.0 increases version code to 2 without changing the Room schema or signing identity.
+Combat uses a dark charcoal/gold/frost theme, compact weapon status, one-tap attacks, result cards and quick core/payload selectors. Main and overlay share persistent selections and history. The original latest-20 presentation has been superseded by v1.5.1 storage retention; older rolls are now permanently discarded. Version 1.1.0 increases version code to 2 without changing the Room schema or signing identity.
 
 References: https://developer.android.com/reference/android/content/Context#createWindowContext(int,android.os.Bundle), https://developer.android.com/studio/test/managed-devices, https://android-developers.googleblog.com/2021/10/whats-new-in-scalable-automated-testing.html.
+
+
+## Force rules v2 (application 1.5.0)
+
+The owner's 2026-10-07 correction supersedes d10 and all level/additive emergency calculations. A versioned profile supplies `primaryForceDieSides` from one current `PrimaryForceRules.DIE_SIDES` constant. Current emergency counts use 3N and 7×3N. A plan snapshots the final blast count and its complete profile; legacy shot profiles receive rules version 1, active profiles upgrade to version 2. Event/archive campaign profiles stay historical; Undo normalizes only the restored active profile. No SQL schema or destructive migration is needed.
+
+Explosion selector components reuse `Portion.BLAST`, giving each type its existing independent save-halving path. They never join Direct Impact's critical eligibility. Payloads retain `Portion.PAYLOAD` and their zero-on-success rule. Slider and combat previews share Engine component construction. Large pools use existing compact summaries and expandable text per component, not one View per face. Generic Dice validation permits all 210 canonical Shatter dice while the unrelated template-input limit remains 200.
+
+## Bounded history (application 1.5.1)
+
+This correction supersedes the earlier unlimited journal/archive policy. Only the newest 20 rolls are retained. Room v3 separates compact immutable roll snapshots from current resource state and from bounded accounting Undo snapshots, which omit roll lists. Accounting observers read metadata only. Stable roll ordering uses stored sequence then ID; event ordering uses revision then ID. Both descending indexes support bounded reads and SQL cleanup. SQLite insert triggers and Room transactions enforce the shared limit even for batched writes. The single shared repository state flow assembles a coherent Campaign for existing UI/overlay consumers.
+
+Before any legacy observer starts, SQL prunes old events, then 8 KiB BLOB chunks stream oversized campaign/event fields. A streaming JSON filter retains only the newest valid shot window before decoding. Malformed historical items can be discarded without replacing active campaign resources. Duplicate archived journals are removed. Backup import follows the same streaming policy; export has no duplicate roll copies. Operation retries within the retained journal remain idempotent and stale shot revisions remain rejected. Undo is limited to retained accounting operations and does not resurrect expired rolls.
+
+No Force, selector, emergency, critical, save, slot or core rule changes accompany this stability release.
+
+## Weapon control interface (application 1.6.0)
+
+The owner's redesign supersedes the older Combat/Inventory/Encounter layout. Compose now has four primary destinations: Weapon (default), Cores & Payloads, History, More. A restrained charcoal, antique-gold and blue design uses cached linework, painted sigils, system serif headings and readable system body text. The supplied updated pistol artwork replaces the prior approved image. No fictional concept weapon/core/payload names are introduced. Setup forms are disclosed on demand. Weapon's Roll action stays at the bottom of the screen above navigation; roll details expand only when requested.
+
+The native View overlay retains its service-window, permission, drag, position, notification, keyboard and shared-repository architecture. Its standard collapsed bar is 174×52 dp and expanded weapon surface 300×364 dp before display scaling; secondary/result views cap at 420 dp height and scroll. Status and action controls retain accessible text and minimum touch targets. No animated shader, full-screen texture or per-die view allocation is added.
+
+New DiceRoller output strips AC even when passed a legacy RollOptions instance. Legacy-only validation continues to recognize old AC-derived results, and historical defense snapshots are untouched. DataStore migration removes only the obsolete armor_class preference. No Room schema reset, campaign replacement, count migration or history expansion accompanies the redesign. The legacy encounter/turn fields now back only the optional weapon action-budget controls; no general encounter UI remains. Starting the player's next weapon action window never advances the recovery clock.
+
+Screenshot fixtures render actual Compose/native View implementations under Robolectric; they are review evidence, not claims of physical overlay operation on Samsung or D&D Beyond.
+
+
+## Premium instrument presentation (application 1.7.0)
+
+The owner's rejection of the restrained 1.6.0 visual treatment authorizes a substantial presentation-layer replacement, while the existing four destinations and simplified weapon-only workflow remain. The reference archive's Weapon, Core/Payload, History, result and overlay compositions guide materials, hierarchy and typographic contrast. The owner-supplied bronze/gunmetal pistol is the actual weapon reference; the mockup rifle and fictional core/payload catalogue are not mechanics or product labels.
+
+`ArcaneDesign.kt` now supplies a cohesive reusable system: tiled graphite/brushed-metal grain, cached chamfered metallic paths, subtle radial illumination, engraved dial medallions, decorative section rules, selected/pressed/disabled button states, segmented choices, status text and charge indicators. Original Android vector resources cover implemented elemental types and core/payload/navigation symbols. Licensed Cinzel is reserved for display headings and prominent presentation; licensed Inter is used for small labels, descriptions and functional numerical text. Static font instances are subset for the app and their SIL OFL notices survive release shrinking. Asset provenance and licensing are recorded in `ASSET_LICENSES.md`.
+
+The approved pistol derivative uses transparent WebP at a 1024-pixel maximum edge so it can integrate into blue ambient lighting and geometric engraving without a pasted studio rectangle. The original artwork stays available in source. The interface does not use concept screenshots as a background, fictional statistics or baked interactive controls.
+
+Weapon is a complete composition of hero art, live stats, readiness, quick core/payload selection, roll modes/elements and a reachable primary action. Results use instrument dials and typed live totals; only the actual natural outcome receives special feedback. Cores/Payloads pairs medallions with names, real capacity/readiness and typed expressions, while retaining disclosed charging, overwrite, purge, source, template and crafting controls. History cards emphasize attack/DC totals, timestamps and typed damage in compact rows; raw saved faces remain expandable. More groups resource and configuration links separately from backup/support utilities. The top-bar settings action routes to actual appearance settings.
+
+The View-based overlay uses the same small texture resources and separately drawn native framing, gradients, sigils, ready lights and result dials. Material and weapon caches retain resources rather than Activity/Service references, and image decoding is bounded. Existing visible window sizing, input flags, permissions, notification, drag, orientation-position, keyboard and repository synchronization remain unchanged. No full-screen overlay bitmap or hundreds of per-face Views are introduced. Decoration uses no looping animations; pressed/ripple feedback remains native and does not delay firing.
+
+This release introduces no domain rule changes, Room schema increment, DataStore key migration or reset of resources/configuration. Current Nd12/Md8, 3N/21N explosions, selector/save/critical eligibility and resource spending are preserved. The persistent newest-20 cap and streaming legacy/backup cleanup remain storage responsibilities, independent of the redesigned History rendering.
+
+Visual acceptance uses screenshots of production Compose and native View components under the available Android rendering test environment. Comparisons and layout limitations belong in `VISUAL_ACCEPTANCE.md`; actual test/build/signing outcomes belong in `TEST_REPORT.md`. A rendered screenshot is not proof of physical Samsung overlay operation, D&D Beyond coexistence, or an installed update.

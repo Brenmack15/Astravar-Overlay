@@ -1,6 +1,16 @@
 package com.yazsras.astravar.ui
 
 import androidx.compose.material3.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.yazsras.astravar.data.Preferences
 import androidx.compose.runtime.*
 import com.yazsras.astravar.rules.*
 import java.util.UUID
@@ -15,22 +25,69 @@ import java.util.UUID
     var touch by remember { mutableStateOf(false) }
     var manual by remember { mutableStateOf(false) }
     var purge by remember { mutableStateOf<Pair<String,String>?>(null) }
+    var addCore by remember {mutableStateOf(false)}
+    var charging by remember {mutableStateOf(false)}
+    var crafting by remember {mutableStateOf(false)}
+    var expandedCore by remember {mutableStateOf<String?>(null)}
     Page {
-        Section("Core inventory · game clock ${s.gameSeconds}s") {
-            Text("Readiness and installed location are tracked separately. Carrying spare completed cores has no arbitrary campaign cap.")
-            s.cores.forEach { c ->
-                Text("${c.name}${if(c.id==s.installedId) " · INSTALLED" else ""}\n${c.readiness(s.gameSeconds)} · ${c.payloads.size} stored payload(s)")
-                if(!c.destroyed && c.id!=s.installedId) Action("Install ${c.name} · ${if(s.postShatter) s.profile.replacementCost else s.profile.swapCost}",!a.busy && c.usable(s.gameSeconds) && s.installation==null) { a.change("Install ${c.name}") { Engine.install(it,c.id) } }
-                c.payloads.forEach { p ->
-                    Text("${p.template.name} · level ${p.template.castingLevel} ${p.source}\n${p.template.damage.joinToString { "${it.dice} ${it.type}" }} + ${p.template.castingLevel}d8 ${p.template.overchargeType}\nLoaded at game second ${p.loadedAt} · approval: ${p.template.approvalNotes}")
-                    TextButton(onClick={purge=c.id to p.id}) { Text("Purge · Bonus Action · no refund") }
-                }
-                HorizontalDivider()
+        InventoryHeading("Resonant cores","RESONANT SYSTEMS","${s.cores.count {it.usable(s.gameSeconds)}} ready · ${s.profile.capacity} payload capacity per core","Core")
+        SectionCaption("SELECT A CORE", "${s.cores.size} recorded")
+        if(s.cores.isEmpty()) ArcanePanel(accent=Frost) {
+            Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
+                InstrumentMedallion("Core",Modifier.size(64.dp),Frost)
+                Column(Modifier.weight(1f)) {Text("No cores recorded",style=MaterialTheme.typography.titleLarge);Text("Record only the completed cores you own.",style=MaterialTheme.typography.bodySmall,color=Muted)}
             }
+        }
+        s.cores.forEach { c ->
+            val ready=c.usable(s.gameSeconds)
+            val active=c.id==s.installedId
+            val tint=if(ready) Frost else if(c.destroyed) MaterialTheme.colorScheme.error else Brass
+            ArcanePanel(accent=if(active) Brass else tint) {
+                Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+                        InstrumentMedallion("Core",Modifier.size(52.dp),tint)
+                        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(5.dp)) {
+                            Text(c.name,style=MaterialTheme.typography.titleLarge,fontSize=17.sp,lineHeight=22.sp,color=MaterialTheme.colorScheme.onSurface)
+                            Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                                Text(if(active) "EQUIPPED" else "SPARE CORE",style=MaterialTheme.typography.labelSmall,color=if(active) Brass else Muted)
+                                StatusPill(if(ready) "READY" else "UNAVAILABLE",ready)
+                            }
+                        }
+                    }
+                    HorizontalDivider(color=tint.copy(alpha=.25f))
+                    Text(c.payloads.joinToString {it.template.name}.ifBlank {"No payload loaded"},style=MaterialTheme.typography.bodySmall,color=Muted)
+                    Row(verticalAlignment=Alignment.CenterVertically) {
+                        Text("Payload capacity",Modifier.weight(1f),style=MaterialTheme.typography.bodySmall,color=Muted)
+                        ChargeIndicators(c.payloads.size,s.profile.capacity,tint)
+                    }
+                    if(!ready) Text(c.readiness(s.gameSeconds),style=MaterialTheme.typography.bodySmall,color=tint)
+                    if(!c.destroyed && !active) MetalButton("Install core · ${if(s.postShatter) s.profile.replacementCost else s.profile.swapCost}",enabled=!a.busy && ready && s.installation==null,modifier=Modifier.fillMaxWidth(),icon="Core") {a.change("Install ${c.name}") {Engine.install(it,c.id)}}
+                }
+                if(c.payloads.isNotEmpty()) {
+                    TextButton(onClick={expandedCore=if(expandedCore==c.id) null else c.id},modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) {Text(if(expandedCore==c.id) "Hide stored magic ▴" else "Stored magic & purge controls ▾")}
+                    if(expandedCore==c.id) c.payloads.forEach {p->
+                        Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+                            InstrumentMedallion("Payload",Modifier.size(42.dp),elementTint(p.template.overchargeType))
+                            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(2.dp)) {
+                                Text(p.template.name,style=MaterialTheme.typography.titleMedium,color=Brass)
+                                Text("Level ${p.template.castingLevel} · ${p.source.name.lowercase()} · one stored use",style=MaterialTheme.typography.bodySmall,color=Muted)
+                            }
+                        }
+                        PayloadExpressions(p.template)
+                        Text("Loaded at game second ${p.loadedAt} · ${p.template.approvalNotes}",style=MaterialTheme.typography.bodySmall,color=Muted)
+                        TextButton(onClick={purge=c.id to p.id}) {Text("Purge · Bonus Action · no refund")}
+                    }
+                }
+            }
+        }
+        SectionCaption("CORE OPERATIONS")
+        TextButton(onClick={addCore=!addCore}) {Text(if(addCore) "Close core entry" else "+ Record a completed core")}
+        if(addCore) Section("Record a core") {
             Field("Name of a completed core you actually own",name,{name=it})
             Action("Confirm and record completed core",!a.busy && name.isNotBlank()) { val entered=name.trim(); a.change("Player confirmed completed core: $entered") { it.copy(cores=it.cores+Core(UUID.randomUUID().toString(),entered)) }; name="" }
         }
-        Section("Charge / overwrite · Bonus Action") {
+        Action(if(charging) "Close charging controls" else "Charge / overwrite a payload") {charging=!charging}
+        if(charging) Section("Charge / overwrite · Bonus Action") {
             Choices("Available core",s.cores.filter { !it.destroyed }.map { it.id },coreId,display={ id -> s.core(id).name }) { coreId=it; overwrite=null }
             Choices("Approved payload template",s.templates.filter { it.approved }.map { it.id },templateId,display={id -> s.templates.first { it.id==id }.name}) { templateId=it }
             Choices("Source",SourceKind.entries.toList(),source) { source=it }
@@ -46,11 +103,15 @@ import java.util.UUID
                 } }
             }
         }
-        CraftingSection(s,a)
+        TextButton(onClick={crafting=!crafting}) {Text(if(crafting) "Hide crafting" else "Core crafting & materials")}
+        if(crafting) CraftingSection(s,a)
     }
-    purge?.let { (c,p) -> AlertDialog(onDismissRequest={purge=null},title={Text("Purge stored magic?")},text={Text("This spends a Bonus Action and loses the selected payload without refund.")},confirmButton={TextButton(onClick={a.change("Purge payload $p · Bonus Action") { Engine.purge(it,c,p) };purge=null}) {Text("Purge")}},dismissButton={TextButton(onClick={purge=null}) {Text("Cancel")}}) }
+    purge?.let { (c,p) -> ArcaneDialog(onDismissRequest={purge=null},title={Text("Purge stored magic?")},text={Text("This spends a Bonus Action and loses the selected payload without refund.")},confirmButton={TextButton(onClick={a.change("Purge payload $p · Bonus Action") { Engine.purge(it,c,p) };purge=null}) {Text("Purge")}},dismissButton={TextButton(onClick={purge=null}) {Text("Cancel")}}) }
 }
-@Composable fun PayloadsPage(s: Campaign,a: Actions) {
+@Composable fun PayloadsPage(s: Campaign,a: Actions,preferences: Preferences?=null,selected: Set<String> = emptySet()) {
+    var editing by remember {mutableStateOf(false)}
+    var scrollsOpen by remember {mutableStateOf(false)}
+    var templatesOpen by remember {mutableStateOf(false)}
     var editId by remember { mutableStateOf<String?>(null) }
     var name by remember { mutableStateOf("") }
     var base by remember { mutableStateOf("2") }
@@ -66,14 +127,66 @@ import java.util.UUID
     var scrollTemplate by remember { mutableStateOf<String?>(null) }
     var quantity by remember { mutableStateOf("") }
     Page {
-        Section("Payload library · templates are not owned spells") {
-            Text("Only approved instantaneous damage transfers. No conditions, concentration, ongoing damage, forced movement, summons, or original area shape. Multi-projectile totals require an explicit ruling.")
-            s.templates.forEach { t ->
-                Text("${t.name} · L${t.baseLevel} → L${t.castingLevel} · ${if(t.approved) "Approved" else "NEEDS RULING"}\n${t.damage.joinToString { "${it.dice} ${it.type}" }} + ${t.castingLevel}d8 ${t.overchargeType}\n${t.approvalNotes}")
-                TextButton(onClick={ editId=t.id; name=t.name; base=t.baseLevel.toString(); casting=t.castingLevel.toString(); components=t.damage; overcharge=t.overchargeType; approved=t.approved; notes=t.approvalNotes }) { Text("Edit template · stored snapshots stay unchanged") }
+        InventoryHeading("Stored payloads","SPELL STORAGE","${s.installed?.name ?: "No installed core"} · choose up to ${s.profile.releaseLimit}","Payload")
+        SectionCaption("SELECT A PAYLOAD", "${s.installed?.payloads?.size ?: 0} stored")
+        if(s.installed?.payloads.isNullOrEmpty()) ArcanePanel(accent=Brass) {
+            Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
+                InstrumentMedallion("Payload",Modifier.size(64.dp),Brass)
+                Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                    Text("EMPTY",style=MaterialTheme.typography.titleLarge,color=Brass)
+                    Text("Charge approved spell energy into a core to use it here. Templates below are references, not charges.",style=MaterialTheme.typography.bodySmall,color=Muted)
+                }
             }
         }
-        Section(if(editId==null) "Create approved damage template" else "Edit future loads") {
+        s.installed?.payloads?.forEach {p->
+            val ready=s.installed?.usable(s.gameSeconds)==true
+            val active=p.id in selected
+            val tint=elementTint(p.template.overchargeType)
+            ArcanePanel(accent=if(active) Brass else tint) {
+                Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+                    InstrumentMedallion("Payload",Modifier.size(52.dp),tint)
+                    Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(5.dp)) {
+                        Text(p.template.name,style=MaterialTheme.typography.titleLarge,fontSize=17.sp,lineHeight=22.sp)
+                        Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                            Text(if(active) "SELECTED" else "STORED MAGIC",style=MaterialTheme.typography.labelSmall,color=if(active) Brass else Muted)
+                            StatusPill(if(ready) "READY" else "UNAVAILABLE",ready)
+                        }
+                    }
+                }
+                PayloadExpressions(p.template)
+                Text("LEVEL ${p.template.castingLevel} · ${p.source.name.lowercase()} · one stored use",style=MaterialTheme.typography.labelSmall,color=Muted)
+                if(preferences!=null) MetalButton(if(active) "Deselect" else "Select payload",enabled=!a.busy && ready,modifier=Modifier.fillMaxWidth(),icon="Payload") {
+                    a.run("Payload selection saved") {preferences.payloads(if(active) selected-p.id else (selected+p.id).toList().takeLast(s.profile.releaseLimit).toSet());preferences.mode(Ability.SPELL)}
+                }
+            }
+        }
+        SectionCaption("PAYLOAD OPERATIONS")
+        ArcanePanel(accent=Frost) {
+            Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                InstrumentMedallion("History",Modifier.size(48.dp),Frost)
+                Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                    Text("Approved spell templates",style=MaterialTheme.typography.titleLarge,color=Brass)
+                    Text("${s.templates.count {it.approved}} approved · ${s.templates.size} recorded",style=MaterialTheme.typography.bodySmall,color=Muted)
+                }
+            }
+            TextButton(onClick={templatesOpen=!templatesOpen},modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) {Text(if(templatesOpen) "Hide template catalogue ▴" else "Review templates & edit future loads ▾")}
+            if(templatesOpen) {
+                Text("Only approved instantaneous damage transfers. No conditions, concentration, ongoing damage, forced movement, summons, or original area shape. Multi-projectile totals require an explicit ruling.",style=MaterialTheme.typography.bodySmall,color=Muted)
+                s.templates.forEach {t->
+                    HorizontalDivider(color=Frost.copy(alpha=.18f))
+                    Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+                        InstrumentMedallion("Payload",Modifier.size(40.dp),elementTint(t.overchargeType))
+                        Column(Modifier.weight(1f)) {Text(t.name,style=MaterialTheme.typography.titleMedium);Text("L${t.baseLevel} → L${t.castingLevel}",style=MaterialTheme.typography.bodySmall,color=Muted)}
+                        StatusPill(if(t.approved) "APPROVED" else "NEEDS RULING",t.approved)
+                    }
+                    PayloadExpressions(t)
+                    Text(t.approvalNotes,style=MaterialTheme.typography.bodySmall,color=Muted)
+                    TextButton(onClick={editing=true;editId=t.id;name=t.name;base=t.baseLevel.toString();casting=t.castingLevel.toString();components=t.damage;overcharge=t.overchargeType;approved=t.approved;notes=t.approvalNotes}) {Text("Edit template · stored snapshots stay unchanged")}
+                }
+            }
+        }
+        Action(if(editing) "Close template editor" else "+ Create a damage template") {editing=!editing}
+        if(editing) Section(if(editId==null) "Create approved damage template" else "Edit future loads") {
             Field("Spell/payload name",name,{name=it}); Field("Base spell level",base,{base=it}); Field("Actual slot or documented scroll casting level",casting,{casting=it})
             Text("Add each approved damage component separately. Upcast dice are entered explicitly; the app never invents scaling.")
             Field("Dice count",count,{count=it}); Field("Die sides",sides,{sides=it}); Field("Flat damage",flat,{flat=it})
@@ -91,7 +204,8 @@ import java.util.UUID
             }
             TextButton(onClick={editId=null;name="";components=emptyList();approved=false;notes=""}) { Text("Start a new template") }
         }
-        Section("Manually confirmed scroll inventory") {
+        TextButton(onClick={scrollsOpen=!scrollsOpen}) {Text(if(scrollsOpen) "Hide scroll sources" else "Manage scroll sources")}
+        if(scrollsOpen) Section("Manually confirmed scroll inventory") {
             s.scrolls.forEach { x -> Text("${s.templates.find { it.id==x.templateId }?.name}: ${x.quantity} scroll(s)") }
             Choices("Documented scroll payload",s.templates.map { it.id },scrollTemplate,display={id -> s.templates.first { it.id==id }.name}) {scrollTemplate=it}
             Field("Additional scrolls actually owned",quantity,{quantity=it})
@@ -99,6 +213,29 @@ import java.util.UUID
         }
     }
 }
+
+@Composable private fun InventoryHeading(title: String,eyebrow: String,summary: String,kind: String) {
+    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
+        InstrumentMedallion(kind,Modifier.size(54.dp),Brass)
+        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
+            Text(eyebrow,style=MaterialTheme.typography.labelSmall,color=Brass)
+            Text(title,style=MaterialTheme.typography.headlineMedium,color=MaterialTheme.colorScheme.onSurface)
+            Text(summary,style=MaterialTheme.typography.bodySmall,color=Muted)
+        }
+    }
+}
+@OptIn(ExperimentalLayoutApi::class)
+@Composable private fun PayloadExpressions(template: Template) {
+    FlowRow(horizontalArrangement=Arrangement.spacedBy(7.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+        template.damage.forEach {typed->
+            Surface(color=elementTint(typed.type).copy(alpha=.065f),shape=RoundedCornerShape(3.dp),border=BorderStroke(.5.dp,elementTint(typed.type).copy(alpha=.4f))) {
+                Text("${typed.dice} ${typed.type.name.lowercase().replaceFirstChar(Char::titlecase)}",Modifier.padding(horizontal=9.dp,vertical=5.dp),style=MaterialTheme.typography.labelMedium,color=elementTint(typed.type))
+            }
+        }
+    }
+    Text("+ ${template.castingLevel}d8 ${template.overchargeType.name.lowercase()} overcharge",style=MaterialTheme.typography.bodySmall,color=Muted)
+}
+
 @Composable fun CraftingSection(s: Campaign,a: Actions) {
     var name by remember { mutableStateOf("") }; var notes by remember { mutableStateOf("") }
     var recipe by remember { mutableStateOf("Replacement core") }

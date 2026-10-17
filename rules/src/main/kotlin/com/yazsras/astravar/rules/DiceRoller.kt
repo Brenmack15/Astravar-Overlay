@@ -5,6 +5,7 @@ import java.security.SecureRandom
 
 @Serializable enum class RollMode { NORMAL, ADVANTAGE, DISADVANTAGE }
 @Serializable data class RollOptions(val advantage: Boolean = false, val disadvantage: Boolean = false, val armorClass: Int? = null) {
+    // armorClass is decode-only compatibility for historical snapshots. New rolls discard it.
     fun validate() { require(armorClass == null || armorClass in 1..100) { "Armor Class must be 1–100, or leave it blank" } }
     fun mode(p: ShotPlan): RollMode {
         val disadvantageApplies = disadvantage || p.disadvantage
@@ -37,7 +38,7 @@ object DiceRoller {
     private fun face(sides: Int) = random.nextInt(sides) + 1
 
     fun roll(p: ShotPlan, options: RollOptions = RollOptions(), die: (Int)->Int = ::face, atMillis: Long = System.currentTimeMillis()): ShotRoll {
-        options.validate()
+        options.copy(armorClass=null).validate()
         fun draw(sides: Int): Int = die(sides).also { require(it in 1..sides) { "Dice source returned an invalid face" } }
         val attack = !p.blast || p.directImpact
         val mode = options.mode(p)
@@ -48,13 +49,12 @@ object DiceRoller {
             !attack -> Outcome.POINT
             natural == 1 -> Outcome.MISS
             natural == 20 -> Outcome.CRITICAL
-            options.armorClass != null -> if(total!! >= options.armorClass) Outcome.HIT else Outcome.MISS
             else -> null
         }
         val damage = Engine.components(p,natural == 20).associate { c ->
             c.id to DieResult(List(c.damage.dice.count) { draw(c.damage.dice.sides) },c.damage.dice.flat)
         }
-        return ShotRoll(options,mode,faces,total,outcome,damage,atMillis).also { validate(p,it) }
+        return ShotRoll(options.copy(armorClass=null),mode,faces,total,outcome,damage,atMillis).also { validate(p,it) }
     }
 
     fun validate(p: ShotPlan, r: ShotRoll) {
@@ -83,7 +83,7 @@ object DiceRoller {
 
     fun resolution(p: ShotPlan,r: ShotRoll,outcome: Outcome? = r.suggestedOutcome,targets: List<TargetSave> = emptyList()): Resolution {
         validate(p,r)
-        val actual = outcome ?: if(!p.blast) Outcome.UNCONFIRMED else error("Choose the direct impact outcome; the target's AC is unknown")
+        val actual = outcome ?: if(!p.blast) Outcome.UNCONFIRMED else error("Record the DM's direct impact decision")
         require(r.suggestedOutcome == null || actual == r.suggestedOutcome) { "Use the recorded attack result; manual corrections are separate history entries" }
         require((actual == Outcome.CRITICAL) == r.critical) { "Critical damage must match the recorded natural 20" }
         val components = Engine.components(p,r.critical).filterNot { actual == Outcome.MISS && it.portion == Portion.DIRECT }
@@ -109,7 +109,7 @@ fun shotSummary(shot: PendingShot): String = buildString {
     val p=shot.plan;val r=shot.rolled
     appendLine(p.ability.title)
     r?.let {
-        appendLine(it.attackDescription(p));appendLine("Natural: ${it.natural ?: "no attack"} · ${if(it.critical) "CRITICAL HIT" else if(it.natural==1) "NATURAL 1 — MISS" else if(it.options.armorClass==null) "AC unknown" else "AC ${it.options.armorClass}"}")
+        appendLine(it.attackDescription(p));appendLine("Natural: ${it.natural ?: "no attack"} · ${if(it.critical) "CRITICAL HIT" else if(it.natural==1) "NATURAL 1 — MISS" else "DM determines the hit"}")
         Engine.components(p,it.critical).forEach {c->appendLine("${c.label}: ${c.damage.dice} [${it.damage.getValue(c.id).detail()}] ${c.damage.type.name.lowercase()}")}
         appendLine("Core: ${it.coreName.ifBlank {p.coreId}}")
     }
@@ -118,7 +118,7 @@ fun shotSummary(shot: PendingShot): String = buildString {
     if(p.ability==Ability.DISCHARGE) appendLine("Core exhausted for 600 game seconds")
     if(p.ability==Ability.SHATTER) appendLine("Core and all remaining stored spells destroyed")
     shot.result?.let {result->
-        appendLine(if(result.outcome==Outcome.UNCONFIRMED) "Hit/miss not adjudicated · AC unknown" else result.outcome.name)
+        appendLine(if(result.outcome==Outcome.UNCONFIRMED) "Potential damage · DM determines the hit" else result.outcome.name)
         if(p.blast) result.targets.forEach {appendLine("${it.name}: ${if(it.saved==true) "save passed" else "save failed"} · ${Engine.damage(p,result,it).damageText()}")}
         else appendLine("${if(result.outcome==Outcome.UNCONFIRMED) "Rolled" else "Result"}: ${Engine.damage(p,result).damageText()}")
     }
