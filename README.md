@@ -1,5 +1,9 @@
 # Astravar Overlay — 2.0 UI Rebuild
 
+PR #4 also contains the **opt-in Remote Updates experiment**. Config → Remote Updates creates an empty disposable stat profile, accepts strict versioned single-ability proposals for this installation's test session, and requires Apply or Reject. Approved changes use the existing campaign revision/audit/receipt transaction. Nothing targets Zerg or the normal `local-player` profile. See [the exact Galaxy S26 test procedure and protocol](docs/REMOTE_STAT_TEST.md).
+
+The current CI download is **Astravar-2.0-Stat-Test-apk**, built with `-PastravarRemoteStatTest=true`: `2.0.2-remote-stat-test` (22), `com.yazsras.astravar.v2statdebug`, launcher **Astravar 2.0 Stat Test**. It installs alongside the prior UI Rebuild because that CI APK's ephemeral signer is unavailable. Keep all existing apps installed. The ordinary build without that property retains the UI Rebuild identity described below. No release signing configuration changes.
+
 Native Android armor and campaign companion on the verified 2.0 engineering baseline (`7c1e42c0f2b3ea639aa675b9109f8d2ddbcee528`). Development branch: `feat/astravar-2.0-ui-rebuild`. The existing integrated preview and draft PR #3 remain recoverable and unmerged.
 
 ## Native experience
@@ -27,7 +31,7 @@ Export source data before transferring it. Campaign and weapon JSON use separate
 
 ## Public fictional sync
 
-The optional debug client retains the existing disposable Cloudflare origin and fixed `astravar-public-disposable` / `sandbox-merchant-0001` scope. Its database, pending commands, receipts and cursor remain separate from campaign/weapon records. Retries preserve original IDs and payloads; conflicts remain visible. Only fixed fictional templates can be sent.
+The optional debug client retains the existing disposable Cloudflare origin and fixed `astravar-public-disposable` / `sandbox-merchant-0001` scope. Its database, pending commands, receipts and cursor remain separate from campaign/weapon records. Retries preserve original IDs and payloads; conflicts remain visible. The original connectivity page sends only fixed fictional templates. The separately opted-in Remote Updates experiment accepts strict disposable-profile commands and sends only bounded command/session/outcome acknowledgements; no sheet is serialized.
 
 **No real inventory, character, Eek, Connections, currency or Notion data is uploaded.** No paid service, new authentication project, analytics, D&D Beyond scraping or accessibility automation is introduced. Experimental private MCP-tool failures are separate from the native client. Host tests alone do not establish new APK/device or ChatGPT MCP interoperability.
 
@@ -39,13 +43,13 @@ JDK 17, checksum-pinned Gradle 8.13, Android SDK 36 / build-tools 35.0.0; Room 2
 python3 -m unittest discover -s scripts/tests -v
 python3 scripts/verify_v2_protected_source.py
 python3 scripts/verify_ui_foundation.py
-./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug -PastravarScreenshots="$PWD/validation/screenshots"
+./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug -PastravarRemoteStatTest=true -PastravarScreenshots="$PWD/validation/screenshots"
 ```
 
 `SandboxLiveSyncTest` is skipped by default. Explicit `ASTRAVAR_LIVE_SANDBOX=true` enables its single fixed fictional live write, durable-command recovery, exact retry and read-back test. Other HTTP tests use deterministic transports.
 
 Use the exact commit’s Actions artifacts and delivery verification report for current build/test results, native renders and device limitations. Previous preview reports are historical evidence for their named APKs.
 
-After a successful UI-branch run, Actions provides **`Astravar-2.0-UI-Rebuild-apk`** containing `Astravar-2.0-UI-Rebuild-debug.apk`, SHA-256, APK metadata, signature/alignment checks and source commit. The separate `android-verification` artifact contains reports and native UI captures. No production release or automatic PR merge occurs.
+After a successful UI-branch run, Actions provides **`Astravar-2.0-Stat-Test-apk`** containing `Astravar-2.0-Stat-Test-debug.apk`, SHA-256, APK metadata, signature/alignment checks and source commit. The separate `android-verification` artifact contains reports and native UI captures. `RemoteStatLiveTest` requires explicit `ASTRAVAR_LIVE_REMOTE_STATS=true` (or the workflow's `remote_stat_live` input); it writes only a disposable proposal and its limited acknowledgement. It is a host test with simulated approval, not physical phone proof. No production release or automatic PR merge occurs.
 
 See [mechanics](docs/ASTRAVAR_RULES.md) and [decisions](docs/DECISIONS.md). Unofficial tabletop companion; not affiliated with Wizards of the Coast, D&D Beyond or Samsung.
