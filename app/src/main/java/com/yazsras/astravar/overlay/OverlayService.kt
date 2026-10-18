@@ -21,6 +21,8 @@ import com.yazsras.astravar.*
 import com.yazsras.astravar.data.*
 import com.yazsras.astravar.rules.*
 import com.yazsras.astravar.ui.elementTint
+import com.yazsras.astravar.ui.elementSelectionAfterChoice
+import com.yazsras.astravar.ui.payloadModeAfterSelection
 import com.yazsras.astravar.ui.rollFeedback
 import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.*
@@ -351,7 +353,7 @@ class OverlayService: Service() {
                 if(s.installed?.payloads.isNullOrEmpty()) content.addView(text("No stored spells. Charge the internal reservoir from Config."))
                 s.installed?.payloads?.forEach {p->content.addView(button("${if(p.id in selected) "✓ Selected" else "Stored"} · ${p.template.name} · L${p.template.castingLevel}") {
                     val ids=if(p.id in selected) selected-p.id else if(s.profile.releaseLimit==1) setOf(p.id) else (selected+p.id).toList().takeLast(s.profile.releaseLimit).toSet()
-                    run("Payload selected") {app.preferences.payloads(ids);app.preferences.mode(Ability.SPELL);if(s.profile.releaseLimit==1) panelPage="combat"}
+                    run("Payload selected") {app.preferences.payloads(ids);app.preferences.mode(payloadModeAfterSelection(prefs.mode));if(s.profile.releaseLimit==1) panelPage="combat"}
                 })}
                 content.addView(button("No payload · arcane shot") {run("Payload cleared") {app.preferences.payloads(emptySet());app.preferences.mode(Ability.ARCANE);panelPage="combat"}})
                 content.addView(button("Done") {panelPage="combat";render()})
@@ -376,7 +378,7 @@ class OverlayService: Service() {
                     elements=emptyList();app.preferences.elements(emptyList());if(prefs.mode==Ability.ELEMENTAL) app.preferences.mode(Ability.ARCANE);panelPage="combat"
                 }})
                 Engine.elements(s.profile).forEach {type->content.addView(button("${if(type in elements) "✓ " else ""}${type.name.lowercase()} · ${s.profile.selectorFor(type)}") {
-                    val next=if(s.profile.elementCapacity==1) listOf(type) else if(type in elements) elements-type else (elements+type).takeLast(s.profile.elementCapacity)
+                    val next=elementSelectionAfterChoice(s.profile,elements,type)
                     panelPage=if(s.profile.elementCapacity==1) "combat" else "elements";saveElements(next)
                 }.apply {
                     val ink=elementTint(type).toArgb();setTextColor(ink);compoundDrawablePadding=dp(8)
