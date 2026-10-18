@@ -19,6 +19,7 @@ internal fun supportedCampaignBackup(text: String): String {
 internal class CampaignBackup(private val db: CampaignLedgerDb) {
     private val items = db.ledgerDao()
     private val records = db.recordsDao()
+    private val party = db.partyDao()
 
     private suspend fun snapshot() = LedgerExport(exportedAt = 0, items = items.allItems(), events = items.allEvents(),
         records = CampaignRecordsRepository(db).snapshot())
@@ -31,11 +32,13 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
             supportedCampaignBackup(text)
             val header = campaignJson.parseToJsonElement(text).jsonObject
             require(header["format"]?.jsonPrimitive?.content == "astravar-campaign-items" &&
-                (header["schema"]?.jsonPrimitive?.intOrNull ?: -1) in 1..2) { "Backup must declare its format and supported schema." }
+                (header["schema"]?.jsonPrimitive?.intOrNull ?: -1) in 1..3) { "Backup must declare its format and supported schema." }
             val incoming = campaignJson.decodeFromString<LedgerExport>(text)
             val conflicts = validate(incoming, current)
             ImportPreview(conflicts.isEmpty(), "${incoming.items.size} items, ${incoming.events.size} inventory events, " +
-                "${incoming.records.projects.size} inventions, ${incoming.records.entities.size} connections; existing different records will never be replaced.",
+                "${incoming.records.projects.size} inventions, ${incoming.records.entities.size} connections, " +
+                "${incoming.records.partySheets.size} party sheets, ${incoming.records.placements.size} equipment placements, " +
+                "${incoming.records.wallets.size} wallets, ${incoming.records.checkpoints.size} checkpoints; existing different records will never be replaced.",
                 conflicts, hash(incoming), hash(current), incoming)
         } catch (e: Exception) {
             ImportPreview(false, "Backup could not be validated.", listOf(e.message ?: "Unsupported backup."), "", hash(current))
@@ -68,6 +71,11 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         merge(r.companionStates, c.companionStates, { it.companionId }) { records.put(it) }
         merge(r.characterProfiles, c.characterProfiles, { it.id }) { records.put(it) }
         merge(r.characterAbilities, c.characterAbilities, { it.id }) { records.put(it) }
+        merge(r.partySheets, c.partySheets, { it.profileId }) { party.put(it) }
+        merge(r.placements, c.placements, { it.itemId }) { party.put(it) }
+        merge(r.wallets, c.wallets, { it.id }) { party.put(it) }
+        merge(r.checkpoints, c.checkpoints, { it.id }) { party.put(it) }
+        merge(r.externalReferences, c.externalReferences, { it.id }) { party.put(it) }
         merge(r.stages, c.stages, { it.id }) { records.put(it) }
         merge(r.requirements, c.requirements, { it.id }) { records.put(it) }
         merge(r.facts, c.facts, { it.id }) { records.put(it) }
@@ -93,7 +101,7 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
 
     private fun validate(incoming: LedgerExport, current: LedgerExport): List<String> {
         val errors = mutableListOf<String>()
-        if (incoming.format != "astravar-campaign-items" || incoming.schema !in 1..2) {
+        if (incoming.format != "astravar-campaign-items" || incoming.schema !in 1..3) {
             return listOf("Unsupported backup format or schema. No data will be imported.")
         }
         if (incoming.schema == 1 && incoming.records != CampaignRecordsExport()) errors += "Schema 1 cannot contain v2 records."
@@ -111,6 +119,14 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         checkRows("Inventory event", incoming.events, current.events) { it.commandId }
         val r = incoming.records
         val c = current.records
+        if (incoming.schema < 3 && (r.partySheets.isNotEmpty() || r.placements.isNotEmpty() || r.wallets.isNotEmpty() || r.checkpoints.isNotEmpty() || r.externalReferences.isNotEmpty() || r.receipts.any { it.kind == "transaction" })) {
+            errors += "Legacy backup schemas cannot contain v3 party records."
+        }
+        checkRows("Party sheet", r.partySheets, c.partySheets) { it.profileId }
+        checkRows("Placement", r.placements, c.placements) { it.itemId }
+        checkRows("Wallet", r.wallets, c.wallets) { it.id }
+        checkRows("Checkpoint", r.checkpoints, c.checkpoints) { it.id }
+        checkRows("External reference", r.externalReferences, c.externalReferences) { it.id }
         checkRows("Invention", r.projects, c.projects) { it.id }
         checkRows("Stage", r.stages, c.stages) { it.id }
         checkRows("Requirement", r.requirements, c.requirements) { it.id }
@@ -178,6 +194,56 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         if (r.characterAbilities.any { it.profileId !in characterProfileIds || it.key !in setOf("STR", "DEX", "CON", "INT", "WIS", "CHA") ||
             (it.score != null && it.score !in 0..1000) || it.magicModifier !in -1000..1000 || !short(it.notes, 3000) ||
             !provenance(it.source) || it.revision < 1 }) errors += "Invalid manual ability score or character reference."
+        val partyRepository = PartyRecordsRepository(db)
+        r.partySheets.forEach { row ->
+            try {
+                require(row.profileId in characterProfileIds && row.revision >= 1 && provenance(row.source) && short(row.campaignId, 120, true))
+                partyRepository.validateSheet(row.sheet)
+            } catch (_: Exception) { errors += "Invalid party sheet ${row.profileId}; source, identity or typed values need review." }
+        }
+        val allItems = (current.items + incoming.items).distinctBy { it.id }
+        val allPlacements = (c.placements + r.placements).distinctBy { it.itemId }
+        val allProfiles = (c.characterProfiles + r.characterProfiles).distinctBy { it.id }
+        val allProjects = (c.projects + r.projects).distinctBy { it.id }
+        r.placements.forEach { row ->
+            try {
+                require(row.revision >= 1 && provenance(row.source))
+                validatePlacement(row, allPlacements, allItems, allProfiles, allProjects)
+                val item = allItems.first { it.id == row.itemId }
+                val expectedLocation = when {
+                    row.containerItemId != null -> "Item:${row.containerItemId}"
+                    row.installedProjectId != null -> "Project:${row.installedProjectId}"
+                    row.holderProfileId != null -> "Actor:${row.holderProfileId}"
+                    else -> "Unknown"
+                }
+                require(item.itemState == row.state && item.location == expectedLocation) { "Ownership mirror disagrees with the placement." }
+            } catch (_: Exception) { errors += "Invalid equipment placement ${row.itemId}; ownership, availability or containment conflicts." }
+        }
+        r.wallets.forEach { row ->
+            try { partyRepository.validateWallet(row); require(row.revision >= 1 && provenance(row.source) && (row.holderProfileId == null || row.holderProfileId in characterProfileIds)) }
+            catch (_: Exception) { errors += "Invalid wallet ${row.id}; unknown and negative balances must not be conflated." }
+        }
+        r.checkpoints.forEach { row ->
+            try { partyRepository.validateCheckpoint(row); require(row.revision >= 1 && provenance(row.source)) }
+            catch (_: Exception) { errors += "Invalid checkpoint ${row.id}." }
+        }
+        val externalKeys = (r.externalReferences + c.externalReferences).distinctBy { it.id }.map { it.namespace to it.externalId }
+        if (externalKeys.distinct().size != externalKeys.size) errors += "External source identity maps to multiple records."
+        r.externalReferences.forEach { row ->
+            try {
+                partyRepository.validateReference(row); require(row.revision >= 1 && provenance(row.source))
+                val exists = when (row.recordType) {
+                    "item" -> row.recordId in itemIds
+                    "character-profile" -> row.recordId in characterProfileIds
+                    "companion" -> row.recordId in companionIds
+                    "project" -> row.recordId in projectIds
+                    "connection" -> row.recordId in entityIds
+                    "checkpoint" -> (r.checkpoints + c.checkpoints).any { it.id == row.recordId }
+                    else -> false
+                }
+                require(exists)
+            } catch (_: Exception) { errors += "Invalid external reference ${row.id}." }
+        }
         if (r.itemDetails.any { it.itemId !in itemIds || it.revision < 1 || (it.weightGrams != null && it.weightGrams !in 0..1_000_000_000L) }) errors += "Invalid item details or reference."
         if (r.itemProperties.any { it.itemId !in itemIds || it.label.isBlank() || it.value.isBlank() || it.revision < 1 }) errors += "Invalid item property or reference."
         if (r.itemProperties.any { !short(it.label, 120, true) || !short(it.value, 6000, true) || !provenance(it.source) || it.evidenceStatus !in evidenceValues }) errors += "Invalid item property fields."
@@ -186,6 +252,7 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
             "project" -> id in projectIds
             "connection" -> id in entityIds
             "companion" -> id in companionIds
+            "character-profile" -> id in characterProfileIds
             else -> false
         }
         if (r.links.any { !endpoint(it.fromType, it.fromId) || !endpoint(it.toType, it.toId) || it.revision < 1 }) errors += "Links contain unresolved targets."
@@ -214,12 +281,18 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
             "character-ability" to (r.characterAbilities + c.characterAbilities).map { it.id }.toSet(),
             "item-details" to (r.itemDetails + c.itemDetails).map { it.itemId }.toSet(),
             "item-property" to (r.itemProperties + c.itemProperties).map { it.id }.toSet(),
-            "link" to (r.links + c.links).map { it.id }.toSet()
+            "link" to (r.links + c.links).map { it.id }.toSet(),
+            "party-sheet" to (r.partySheets + c.partySheets).map { it.profileId }.toSet(),
+            "item-placement" to (r.placements + c.placements).map { it.itemId }.toSet(),
+            "wallet" to (r.wallets + c.wallets).map { it.id }.toSet(),
+            "checkpoint" to (r.checkpoints + c.checkpoints).map { it.id }.toSet(),
+            "external-reference" to (r.externalReferences + c.externalReferences).map { it.id }.toSet(),
+            "transaction" to (r.receipts + c.receipts).filter { it.kind == "transaction" }.map { it.recordId }.toSet()
         )
         fun auditSnapshotMatches(event: CampaignAudit, value: String?, revision: Long): Boolean = try {
             if (value == null) false else {
                 val obj = campaignJson.parseToJsonElement(value).jsonObject
-                val key = when (event.recordType) { "companion" -> "companionId"; "item-details" -> "itemId"; else -> "id" }
+                val key = when (event.recordType) { "companion" -> "companionId"; "item-details", "item-placement" -> "itemId"; "party-sheet" -> "profileId"; else -> "id" }
                 val identity = if (event.recordType == "character-ability")
                     "${obj["profileId"]?.jsonPrimitive?.content}:${obj["key"]?.jsonPrimitive?.content}"
                 else obj[key]?.jsonPrimitive?.content
@@ -249,6 +322,20 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
             }
         }
 
+        r.receipts.filter { it.kind == "transaction" }.forEach { receipt ->
+            try {
+                val outcome = campaignJson.decodeFromString<PartyExchangeOutcome>(receipt.outcomeJson)
+                require(outcome.id == receipt.commandId && receipt.recordId == receipt.commandId && outcome.revision == 1L &&
+                    outcome.childReceipts.size in 1..100 && outcome.childReceipts.map { it.commandId }.distinct().size == outcome.childReceipts.size)
+                require(outcome.source.isNotBlank() && outcome.source.length <= 2000)
+                require(outcome.childReceipts.all { child ->
+                    child.commandId.startsWith("exchange-${campaignHash(receipt.commandId).take(40)}-") &&
+                        child.kind in setOf("CREATE", "TRANSFER", "QUANTITY", "wallet") && allReceipts[child.commandId] == child
+                })
+                require(audit[receipt.commandId]?.kind == "ATOMIC_EXCHANGE")
+            } catch (_: Exception) { errors += "Transaction ${receipt.commandId} has invalid or missing original child receipts." }
+        }
+
         // A merge may add genuinely missing historical rows, but cannot create a competing
         // history branch or claim a state newer than the retained final record.
         val finalRows = mutableMapOf<Pair<String, String>, Pair<Long, String>>()
@@ -267,6 +354,12 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         (r.itemDetails + c.itemDetails).forEach { finalRow("item-details", it.itemId, it.revision, campaignJson.encodeToString(it)) }
         (r.itemProperties + c.itemProperties).forEach { finalRow("item-property", it.id, it.revision, campaignJson.encodeToString(it)) }
         (r.links + c.links).forEach { finalRow("link", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.partySheets + c.partySheets).forEach { finalRow("party-sheet", it.profileId, it.revision, campaignJson.encodeToString(it)) }
+        (r.placements + c.placements).forEach { finalRow("item-placement", it.itemId, it.revision, campaignJson.encodeToString(it)) }
+        (r.wallets + c.wallets).forEach { finalRow("wallet", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.checkpoints + c.checkpoints).forEach { finalRow("checkpoint", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.externalReferences + c.externalReferences).forEach { finalRow("external-reference", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.receipts + c.receipts).filter { it.kind == "transaction" }.forEach { finalRow("transaction", it.recordId, it.resultingRevision, it.outcomeJson) }
         fun sameJson(a: String?, b: String?): Boolean = try {
             a != null && b != null && campaignJson.parseToJsonElement(a) == campaignJson.parseToJsonElement(b)
         } catch (_: Exception) { false }

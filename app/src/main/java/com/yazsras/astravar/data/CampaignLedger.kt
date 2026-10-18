@@ -77,7 +77,7 @@ data class LedgerDraft(
 @Serializable
 data class LedgerExport(
     val format: String = "astravar-campaign-items",
-    val schema: Int = 2,
+    val schema: Int = 3,
     val exportedAt: Long,
     val items: List<LedgerItem>,
     val events: List<LedgerEvent>,
@@ -120,21 +120,25 @@ interface LedgerDao {
     CompanionState::class, CompanionResource::class, ItemDetails::class, ItemProperty::class,
     CharacterProfile::class, CharacterAbility::class,
     CampaignLink::class, CampaignAudit::class, CommandReceipt::class,
-    CraftExecution::class, CraftConsumption::class], version = 2, exportSchema = true)
+    CraftExecution::class, CraftConsumption::class, PartySheetRecord::class, ItemPlacement::class,
+    PartyWallet::class, CampaignCheckpoint::class, ExternalRecordReference::class], version = 3, exportSchema = true)
+@TypeConverters(PartyConverters::class)
 abstract class CampaignLedgerDb : RoomDatabase() {
     abstract fun ledgerDao(): LedgerDao
     abstract fun recordsDao(): CampaignRecordsDao
+    abstract fun partyDao(): PartyRecordsDao
 
     companion object {
         fun open(context: Context): CampaignLedgerDb = Room.databaseBuilder(
             context.applicationContext, CampaignLedgerDb::class.java, "astravar-campaign-ledger.db"
-        ).addMigrations(CAMPAIGN_MIGRATION_1_2).build() // NEVER fallbackToDestructiveMigration()
+        ).addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3).build() // NEVER fallbackToDestructiveMigration()
     }
 }
 
 class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
     private val dao = db.ledgerDao()
     val records = CampaignRecordsRepository(db)
+    val party = PartyRecordsRepository(db)
     val items: Flow<List<LedgerItem>> = dao.observeItems()
     fun eventsForItem(itemId: String): Flow<List<LedgerEvent>> = dao.eventsForItem(itemId)
 
@@ -220,6 +224,14 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
         require(db.recordsDao().receipt(commandId) == null) { "Command ID collision; edit rejected." }
         val before = dao.getItem(itemId) ?: error("This item no longer exists.")
         check(before.revision == expectedRevision) { "Item changed since editing began. Reopen it before saving." }
+        db.partyDao().placement(itemId)?.let {
+            require(clean.owner == before.owner && clean.itemState == before.itemState && clean.location == before.location && clean.quantity == before.quantity) {
+                "This item has structured ownership. Use equipment transfer or quantity commands to change its owner, state, location or amount."
+            }
+        }
+        if (clean.archived || clean.itemState in setOf("Consumed", "Sold", "Lost") || clean.quantity == 0) {
+            require(db.partyDao().allPlacements().none { it.containerItemId == itemId }) { "Remove this container's contents before making it unavailable." }
+        }
         val after = before.copy(
             title = clean.title, category = clean.category, owner = clean.owner,
             itemState = clean.itemState, location = clean.location, evidenceStatus = clean.evidenceStatus,

@@ -171,7 +171,10 @@ data class CraftConsumption(
     val itemProperties: List<ItemProperty> = emptyList(), val audit: List<CampaignAudit> = emptyList(),
     val receipts: List<CommandReceipt> = emptyList(), val crafts: List<CraftExecution> = emptyList(),
     val consumptions: List<CraftConsumption> = emptyList(),
-    val characterProfiles: List<CharacterProfile> = emptyList(), val characterAbilities: List<CharacterAbility> = emptyList()
+    val characterProfiles: List<CharacterProfile> = emptyList(), val characterAbilities: List<CharacterAbility> = emptyList(),
+    val partySheets: List<PartySheetRecord> = emptyList(), val placements: List<ItemPlacement> = emptyList(),
+    val wallets: List<PartyWallet> = emptyList(), val checkpoints: List<CampaignCheckpoint> = emptyList(),
+    val externalReferences: List<ExternalRecordReference> = emptyList()
 )
 
 data class ImportPreview(
@@ -279,6 +282,7 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
         "project" -> dao.project(value) != null
         "connection" -> dao.entity(value) != null
         "companion" -> dao.companion(value) != null
+        "character-profile" -> dao.characterProfile(value) != null
         else -> false
     }
 
@@ -471,8 +475,9 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
             require(use.quantity > 0)
             val item = inventory.getItem(use.itemId) ?: error("Material no longer exists.")
             check(item.revision == use.expectedRevision) { "Material changed. Review quantities first." }
-            require(!item.archived && item.itemState !in setOf("Consumed", "Sold", "Lost")) { "Material is not available." }
+            require(!item.archived && item.itemState !in setOf("Consumed", "Sold", "Lost", "Installed")) { "Material is not available; detach installed components before consuming them." }
             require(item.quantity != null && item.quantity >= use.quantity) { "Material quantity is unknown or insufficient." }
+            require(item.quantity != use.quantity || db.partyDao().allPlacements().none { it.containerItemId == item.id }) { "Remove a container's contents before consuming it for crafting." }
             item
         }
         val now = System.currentTimeMillis()
@@ -481,12 +486,20 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
         dao.insert(CraftExecution(command.commandId, project.id, output.id, command.source, now))
         command.materials.zip(before).forEachIndexed { index, (use, item) ->
             val remaining = requireNotNull(item.quantity) - use.quantity
+            val priorPlacement = db.partyDao().placement(item.id)
+            val depleted = priorPlacement?.takeIf { remaining == 0 }?.let { depletedPlacement(it, command.source, now) }
             val after = item.copy(quantity = remaining, itemState = if (remaining == 0) "Consumed" else item.itemState,
-                revision = item.revision + 1, updatedAt = now)
+                revision = item.revision + 1, updatedAt = now, location = depleted?.let(::placementLocation) ?: item.location)
             inventory.updateItem(after)
             inventory.insertEvent(LedgerEvent(materialCommands[index], item.id,
                 "CRAFT_CONSUMPTION", "Confirmed", "Consumed ${use.quantity} for ${project.title}", command.source,
                 fp, item.revision, after.revision, now, campaignJson.encodeToString(item), campaignJson.encodeToString(after)))
+            if (depleted != null && priorPlacement != null) {
+                db.partyDao().put(depleted)
+                dao.insert(CampaignAudit("${command.commandId}:placement:$index", command.commandId, "item-placement", item.id,
+                    "CRAFT_CONSUMPTION", command.source, priorPlacement.revision, depleted.revision, now,
+                    campaignJson.encodeToString(priorPlacement), campaignJson.encodeToString(depleted)))
+            }
             dao.insert(CraftConsumption("${command.commandId}:$index", command.commandId, item.id, use.quantity,
                 requireNotNull(item.quantity), remaining, item.revision, after.revision))
             dao.insert(CampaignAudit("${command.commandId}:material:$index", command.commandId, "item", item.id,
@@ -507,7 +520,9 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
     internal suspend fun snapshot() = CampaignRecordsExport(dao.allProjects(), dao.allStages(), dao.allRequirements(),
         dao.allEntities(), dao.allFacts(), dao.allMilestones(), dao.allLinks(), dao.allCompanionStates(),
         dao.allCompanionResources(), dao.allItemDetails(), dao.allItemProperties(), dao.allAudit(), dao.allReceipts(),
-        dao.allCrafts(), dao.allConsumptions(), dao.allCharacterProfiles(), dao.allCharacterAbilities())
+        dao.allCrafts(), dao.allConsumptions(), dao.allCharacterProfiles(), dao.allCharacterAbilities(),
+        db.partyDao().allSheets(), db.partyDao().allPlacements(), db.partyDao().allWallets(),
+        db.partyDao().allCheckpoints(), db.partyDao().allReferences())
 }
 
 /** Explicit additive migration. All v1 item/event rows, values and Room schema remain intact. */
