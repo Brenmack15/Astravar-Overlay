@@ -9,8 +9,8 @@ android {
         applicationId = "com.yazsras.astravar"
         minSdk = 26
         targetSdk = 36
-        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(10)
-        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("1.7.0")
+        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(20)
+        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("2.0.0")
     }
     signingConfigs {
         create("owner") {
@@ -24,7 +24,7 @@ android {
         }
     }
     buildTypes {
-        debug { applicationIdSuffix = ".debug"; versionNameSuffix = "-inventory-beta" }
+        debug { applicationIdSuffix = ".v2debug"; versionNameSuffix = "-preview" }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
