@@ -35,9 +35,12 @@ class OwnerSyncTest {
         repo.queue(origin, campaign, "fixture-actor", revision, fields, "Synthetic confirmed test", true, id)
 
     @Test fun anonymous_worker_insecure_origins_and_real_campaigns_fail_closed() = runBlocking {
-        for (endpoint in listOf("http://service.example", "https://localhost", "https://127.0.0.1", "https://name:secret@service.example", PublicSandbox.DEFAULT_ORIGIN)) {
+        for (endpoint in listOf("http://service.example", "https://localhost", "https://LOCALHOST.", "https://device.localhost.",
+            "https://127.0.0.1", "https://127.0.0.1.", "https://[::1]", "https://[::ffff:127.0.0.1]",
+            "https://name:secret@service.example", PublicSandbox.DEFAULT_ORIGIN, PublicSandbox.DEFAULT_ORIGIN + ".")) {
             assertTrue(runCatching { OwnerSyncProtocol.origin(endpoint) }.isFailure)
         }
+        assertEquals("https://verified-owner-service.example", OwnerSyncProtocol.origin("https://VERIFIED-OWNER-SERVICE.EXAMPLE."))
         val remote = FakeRemote()
         assertTrue(runCatching { repository(remote).queue(origin, "real-campaign", "actor", 0, fields, "fixture", true) }.isFailure)
         assertEquals(0, remote.requests)
