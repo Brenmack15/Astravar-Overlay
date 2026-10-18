@@ -2,6 +2,8 @@
 
 Work continues from PR #4 head `28c890a9af83a5e83f33d639f0fed2734af35a0f`,
 on isolated branch `feat/astravar-2.1-player-first`. PR #4 stays draft/unmerged.
+The isolated upgrade is draft [PR #5](https://github.com/Brenmack15/Astravar-Overlay/pull/5),
+targeting the existing 2.0 development branch rather than the default branch.
 Read this document together with the current Git head, PR and exact-head Actions
 results; a historical checkpoint is not evidence that a later build passed.
 
@@ -59,10 +61,24 @@ inferred from those references.
 
 ## Verification ledger
 
-Initial integrated production Kotlin/Room/resource compilation passed. First
-test compilation identified a duplicate variable in a legacy fixture adaptation;
-it must be repaired and the current suite rerun. Python host checks and original
-handoff preparation checks pass; consult final build reports for exact totals.
+Measured local results before the final audit fixes: 124 Kotlin rules tests and
+41 Python checks passed; both Android variants compiled, both lint tasks passed
+without errors, and debug/optimized owner-signed APK assembly passed. The full
+rerun at local `7c64a37` executed 225 Android tests per variant and exposed one
+real Eek navigation failure in each variant (2 debug / 16 release tests skipped
+under their explicit optional-live/debug-only gates). The bounded native-sheet
+fix is committed as `31f7a23`; it and the subsequent audit corrections require
+their coordinated rerun. Do not report the preceding full run as green.
+
+The final audit also corrects advanced single-element selection with Dual
+Resonance, overlay payload mode preservation, modal validation/retry behavior,
+audit pagination, stable create-command identities and complete backup review.
+Consult the exact-head PR checks and final evidence for their actual outcomes;
+source implementation is not a test result. Initial lint reports contained
+45 debug / 46 release warnings, including retained dependency/artwork/tooling
+advice and new owner-sync advice about synchronous credential persistence.
+Those warnings are not all legacy findings, and none was suppressed to obtain
+a pass.
 The source gates retain original artwork and owner signing-block hashes, with
 explicit reviewed 2.1 source changes recorded separately.
 
@@ -72,6 +88,12 @@ with its previous pinned digest, current digest and reason (18 foundation and
 that the engine and campaign implementation are unchanged. The independent
 upgrade gate pins five old schema JSON files byte-for-byte and excludes private
 review, signing and distribution artifacts from source control.
+
+The cloud software API 36 emulator completed an actual Android boot. App runtime
+and in-place update acceptance remain separate from that boot result. The
+software rendering captures were reviewed for Armor, Combat, element alignment
+and Config. Standalone Party fixtures initially omitted the application's
+content-color Surface; they are being corrected before further visual claims.
 
 Required final checks: rules and Android unit/regression tests, Room 1→2→3,
 backup/restore, transactions/replay/conflicts, lint, optimized release assembly,

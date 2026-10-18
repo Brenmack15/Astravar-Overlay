@@ -10,7 +10,9 @@ cutover. The existing private Astravar DM Bridge and its database are unchanged.
 ## Implemented boundaries
 
 `OwnerSync.kt` is independent of the public disposable sandbox. It rejects that
-sandbox's origin and insecure, credential-bearing or loopback origins. No service
+sandbox's origin and insecure, credential-bearing or loopback literal origins.
+DNS names are lowercased and trailing root dots removed before origin policy and
+credential binding, so aliases cannot evade those same endpoint restrictions. No service
 address or credential is bundled. HTTPS uses the platform TLS verifier, bounded
 request/response sizes, timeouts, no redirects and a campaign-scoped URL. No cookie
 or token is placed in a URL. Diagnostics expose fixed issue codes rather than
@@ -39,10 +41,14 @@ The public Worker still accepts only its isolated fictional test messages, and
 real campaign adapters remain absent and fail closed. Permission to use HTTPS
 does not supply an owner service, device enrollment or verified connectivity.
 
-The native Config screen, `OwnerSyncConfigPage`, permits saving a fictional test
+Config → Owner connection opens the native `OwnerSyncConfigPage`. It permits saving a fictional test
 scope, preparing a fixed fictional offline change, inspecting queue/receipt
 states, manual authenticated send/refresh after service enrollment, and local
 disconnect. It has no password/token-paste flow. Real campaign IDs are rejected.
+An HTTPS address passing syntax checks is not evidence of owner authentication
+or trustworthy hosting. The authenticated enrollment service must establish that
+trust before any credential is provisioned; this candidate has no enrollment
+screen, browser-cookie bridge or automatic connection.
 
 ## Wire contract, version 1
 
@@ -104,7 +110,7 @@ python -m unittest scripts.tests.test_owner_sync_harness -v
 | Local service auth, write, original receipt, retry, independent readback, revocation | 11 Python tests passed, including actual loopback HTTP requests and a shared Unicode fingerprint fixture |
 | Durable service records/receipts/revocation after reopen | Covered by Python tests |
 | Concurrent stale revisions and changed-ID collisions | Covered by Python tests |
-| Android queue, receipt verification, history integrity, offline replay, credential scope, encrypted vault | 18 repository/vault and 2 native UI Robolectric tests added; current Android build results are recorded in the upgrade checkpoint |
+| Android queue, receipt verification, history integrity, offline replay, credential scope, encrypted vault | Flushed debug and release XML each show 18/18 repository/vault and 2/2 native Config UI tests passing; the final root-dot normalization regression awaits the coordinated rerun and overall build status belongs to the upgrade checkpoint |
 | AndroidKeyStore hardware behavior | Implementation present; crypto tests inject an AES key and do not constitute a physical device/TEE test |
 | Existing private DM Bridge read | Read-only tool call returned Sites verified identity, Sites D1, DEMO_ONLY, revision 4 / 3 milestones on 18 October 2026; no write performed |
 | New native Android client to an enrolled HTTPS service | Not verified; no production service or device enrollment available |
@@ -112,19 +118,50 @@ python -m unittest scripts.tests.test_owner_sync_harness -v
 | Native ChatGPT Android and new native Astravar round trip | Not verified for this upgrade; historical fictional public Worker evidence is separate |
 | Real campaign upload or canonical import | Disabled; not performed or approved |
 
-Before enabling real records, select a free hosting arrangement already available
-to the owner and review its security/cost limits; do not activate paid services.
-Use a supported owner-authenticated ChatGPT connection and owner-approved device
-enrollment, revocable short-lived scoped credentials, server-side authorization,
-player-known record filtering and a single authoritative event/receipt store.
-Treat all narrative/lore text as data, never executable tool instructions.
-Do not reuse a ChatGPT browser session cookie as an Android device credential.
+These are separate acceptance layers. The Python HTTP round trip exercises the
+local reference service with Python requests. Android repository tests use a fake
+transport to exercise actual Kotlin/Room code and restart persistence; the shared
+Unicode fixture verifies a wire fingerprint across languages. Config UI tests
+exercise native Compose on Robolectric, including a durable fictional offline
+queue and disabled send/read controls when no credential exists. None of those
+tests sends an Android HTTPS request to the reference service. Local service 403
+scope/read-only denial and durable revocation are tested independently; native
+tests exercise a simulated 401 revocation, explicit access-restored retry,
+local scope/expiry denial, 409 conflict, 429 quota and lost-response recovery.
 
-Then verify, using fictional records first: ChatGPT authenticated read; approved
-write; original receipt; native Astravar refresh; independent ChatGPT readback;
-native offline edit/retry; no duplicate commit after lost response; stale
-revision conflict; cross-campaign and read-only denial; credential revocation;
-restart/restore; persistent data across server deployment; and device large-font
-and offline feedback. Verify native ChatGPT Android separately from this Work
-session's tool access. Only after those gates, accepted backups, reviewed migration
-preview and separate owner approval may a real campaign adapter or cutover open.
+The private Sites DM Bridge read used its already installed ChatGPT tool and
+its separate synthetic D1 store. It is not a tool adapter for `OwnerSyncProtocol`
+or proof that ChatGPT and the new native connection share a record. No new
+ChatGPT write, native ChatGPT Android test, installed Astravar device test,
+owner enrollment or real service deployment was performed in this upgrade.
+
+The local SQLite harness is authoritative only for its own fictional fixtures.
+The Android queue/inbox is staging. There is no production authority switch,
+typed party/inventory/currency server command adapter, approval-policy service,
+cross-device canonical record store or real campaign replay migration here.
+The generic replacement command cannot stand in for those domain transactions.
+
+## Exact next actions
+
+1. Select an owner-controlled free hosting arrangement and review its security,
+   persistence and cost limits before deployment. Preserve the existing private
+   bridge/database; do not replace it or send records to the anonymous Worker.
+2. Implement and test owner authentication, explicit device enrollment, revocable
+   short-lived campaign-scoped credentials, player-known filtering, authorization
+   and one authoritative event/receipt store. Add secure re-enrollment and a
+   visible access-restored recovery action; local disconnect alone does not
+   revoke server access. Never reuse ChatGPT browser cookies as device tokens.
+3. Expose owner-authenticated ChatGPT tools and typed application adapters against
+   that same authority. Reuse the app's transactional actor/item/currency command
+   rules rather than replacing partial snapshots. Define confirmed-event approval
+   policy and treat narrative/lore text as data, never tool instructions.
+4. With fictional records, capture ChatGPT read → approved write → original
+   receipt → actual native Astravar HTTPS refresh → independent ChatGPT readback.
+   Then verify native offline edits, restart, lost-response replay, stale conflicts,
+   quota failures, cross-campaign/read-only denial, credential expiry/revocation,
+   server redeployment persistence and accessible device feedback. Verify native
+   ChatGPT Android separately from this Work session's tool access.
+5. Complete backup/restore and reviewed migration reconciliation acceptance.
+   Only separate owner approval may then enable a real campaign adapter/import
+   and change the authoritative source. Until that decision, retain the current
+   ledger and all installed application data.
