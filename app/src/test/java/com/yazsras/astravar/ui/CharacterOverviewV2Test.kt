@@ -14,6 +14,8 @@ import com.yazsras.astravar.rules.Campaign
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
 import org.junit.Assert.*
+import org.junit.Before
+import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -29,6 +31,23 @@ import org.robolectric.annotation.LooperMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class CharacterOverviewV2Test {
     @get:Rule val compose = createEmptyComposeRule()
+    private var previousRequestedSize: String? = null
+
+    @Before fun respectRequestedDialogSize() {
+        // Robolectric 4.16's ShadowWindowManagerGlobal ignores requested WRAP_CONTENT
+        // window sizes by default for compatibility. Respecting them models Android's
+        // real sizing and lets text-field dialogs settle without relaxing test idling.
+        // Scoped before Activity creation; a controlled run verified both a plain
+        // framework text-field dialog and these actual character editors.
+        previousRequestedSize = System.getProperty("robolectric.windowManager.useRequestedSize")
+        System.setProperty("robolectric.windowManager.useRequestedSize", "true")
+    }
+
+    @After fun restoreRequestedDialogSize() {
+        val previous = previousRequestedSize
+        if (previous == null) System.clearProperty("robolectric.windowManager.useRequestedSize")
+        else System.setProperty("robolectric.windowManager.useRequestedSize", previous)
+    }
     private fun database() = Room.inMemoryDatabaseBuilder(
         ApplicationProvider.getApplicationContext(), CampaignLedgerDb::class.java
     ).build()
