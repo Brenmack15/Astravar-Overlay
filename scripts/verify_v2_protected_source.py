@@ -1,4 +1,4 @@
-"""Verify the recovered engine, migrations, native overlay, fonts and original weapon art."""
+"""Verify pinned source evolution, historical migrations, fonts and original art."""
 import hashlib
 import json
 from pathlib import Path
@@ -12,4 +12,5 @@ for relative, expected in manifest['files'].items():
         failures.append(relative)
 if failures:
     raise SystemExit('Protected v1.7.0 sources changed: ' + ', '.join(failures))
-print(f"Preserved {len(manifest['files'])} protected files from {manifest['base']}")
+reviewed = len(manifest.get('authorized_player_first_source_changes', {}).get('files', {}))
+print(f"Verified {len(manifest['files'])} protected files ({reviewed} reviewed 2.1 source changes); historical baselines remain in provenance")
