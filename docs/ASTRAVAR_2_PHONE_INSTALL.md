@@ -1,0 +1,16 @@
+# Astravar 2.0 preview: phone installation
+
+This is a debug development preview, version **2.0.0-preview**, version code **20**, package **com.yazsras.astravar.v2debug**, label **Astravar 2.0 Preview**. It has a separate Android data sandbox from the release (`com.yazsras.astravar`) and Inventory Beta (`com.yazsras.astravar.debug`). Keep both working applications installed.
+
+1. Open the successful **Bounded Android verification** Actions run for `feat/astravar-2.0-integrated` in GitHub while signed in. Download the **Astravar-2.0-debug-apk** artifact. GitHub downloads a ZIP; extract it with Samsung My Files and open `Astravar-2.0-preview-debug.apk`. A source-code ZIP is not the application.
+2. If Samsung asks, allow installation from the browser or My Files for this installation, then return that permission to its previous setting. Install the preview. If Android offers to replace the release application, stop: the correct package has the `.v2debug` suffix. Never uninstall the working release to resolve a preview error.
+3. Launch **Astravar 2.0 Preview**. Inventory, Connections, Inventions and Eek start empty; character statistics remain unknown. No live campaign or Notion records are imported. Review/confirm your existing weapon profile explicitly before combat, or use the visibly labeled demo only for disposable testing.
+4. To transfer supported data, first export from the source app and preserve that original file. Campaign JSON and weapon JSON are separate formats and use separate backup pages. In the preview, export a current campaign backup, choose the source campaign file, inspect its preview and then explicitly confirm merge-only restore. Conflicting IDs are rejected; restore does not overwrite existing rows. Schema-1 inventory exports do not contain later campaign domains. The synthetic outbox is not part of campaign/weapon backups.
+5. To test the overlay, grant **Appear on top** to the preview when Android requests it, then start the overlay from the existing control room. Verify dragging, readability, attack confirmation and closing while a second app is visible. Test with disposable state first. Physical Galaxy S26 / D&D Beyond operation has not been established by host or CI tests.
+6. Under **More → Sync**, the optional public lab can read or append only its fixed fictional messages. It cannot upload your local campaign records. Do not enter private information in the public sandbox. Errors/conflicts stay visible; retry preserves command IDs and checks receipts.
+
+## Updates and data
+
+Use one preview APK channel consistently. An APK built locally and an APK built by a fresh Actions runner may have different debug certificates. Android may reject an update between them even though the package is the same. Export preview data before any switch; retain the original working apps and backups. Release signing is not changed, and this preview cannot update the owner-signed release.
+
+Installing alongside the release does not prove the preview is suitable for live campaign use. First verify layout/keyboard, manual data entry, export/restore, overlay and calculations on your phone. Expanded armor attack families and production/private synchronization remain separate work; the existing combat engine remains authoritative.

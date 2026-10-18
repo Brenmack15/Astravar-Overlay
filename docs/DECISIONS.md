@@ -106,3 +106,14 @@ The View-based overlay uses the same small texture resources and separately draw
 This release introduces no domain rule changes, Room schema increment, DataStore key migration or reset of resources/configuration. Current Nd12/Md8, 3N/21N explosions, selector/save/critical eligibility and resource spending are preserved. The persistent newest-20 cap and streaming legacy/backup cleanup remain storage responsibilities, independent of the redesigned History rendering.
 
 Visual acceptance uses screenshots of production Compose and native View components under the available Android rendering test environment. Comparisons and layout limitations belong in `VISUAL_ACCEPTANCE.md`; actual test/build/signing outcomes belong in `TEST_REPORT.md`. A rendered screenshot is not proof of physical Samsung overlay operation, D&D Beyond coexistence, or an installed update.
+
+
+## Astravar 2.0 isolated preview — 18 October 2026
+
+The owner's full implementation directive supersedes the earlier offline-only/no-Internet restriction for one debug-only public fictional connectivity lab. INTERNET is confined to the debug manifest; release signing identity and main manifest networking remain unchanged. No paid service is activated. The existing public Worker is reused, with separate public IDs, Room database/outbox and fixed fictional messages. Local campaign/weapon data have no upload path. Production authentication and real campaign import remain out of scope.
+
+The separate `.v2debug` package coexists with release and Inventory Beta. CampaignLedgerDb explicitly migrates1→2 additively, retaining legacy item/event tables, IDs, images, nulls and snapshots. AstravarDb schema3 and all original migrations/rules/overlay source remain unchanged. Campaign restore is validated, previewed, guarded against stale previews, and merge-only; conflicting IDs do not overwrite local records. Campaign and weapon backup formats stay separate. Full campaign backups have an explicit32-million-character safety limit.
+
+Manual character/ability/companion records start unknown; illustrative stat blocks and mockup numbers do not seed current resources. Separate magic modifiers are descriptive and not wired into the weapon engine. Inventions consume selected known materials and create an output only at explicit confirmed atomic commit. Connections record player-known facts and meaningful milestones without numerical trust scores.
+
+The approved expanded navigation uses Astravar/Inventory/Campaign/More primary destinations, with Armor/Combat/Systems inside Astravar and visible Inventions/Connections/Eek tabs inside Campaign. This preserves first-class campaign access without a crowded six-item bottom bar. Original armor and particle artwork are retained byte-for-byte; native fields and controls remain live. Existing weapon formulas take precedence over contradictory/pending armor mockup values.

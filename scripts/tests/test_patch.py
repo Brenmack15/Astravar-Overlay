@@ -59,9 +59,14 @@ class PatchTests(unittest.TestCase):
         for relative in mod.ADDITIONS:
             self.assertTrue((mod.BUNDLE_ROOT / relative).is_file(), relative)
 
-    def test_no_app_network_permission(self):
+    def test_v2_network_is_debug_only_and_explicit(self):
         manifest = (mod.BUNDLE_ROOT / 'app/src/debug/AndroidManifest.xml').read_text()
-        self.assertNotIn('INTERNET', manifest)
-        self.assertIn('Astravar Inventory Beta', manifest)
+        self.assertIn('android.permission.INTERNET', manifest)
+        self.assertIn('usesCleartextTraffic="false"', manifest)
+        self.assertIn('Astravar 2.0 Preview', manifest)
+        main = (mod.BUNDLE_ROOT / 'app/src/main/AndroidManifest.xml').read_text()
+        self.assertNotIn('android.permission.INTERNET', main)
+        gradle = (mod.BUNDLE_ROOT / FILENAME_GRADLE).read_text()
+        self.assertIn('applicationIdSuffix = ".v2debug"', gradle)
 
 if __name__ == "__main__": unittest.main()

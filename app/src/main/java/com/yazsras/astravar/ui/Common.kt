@@ -15,11 +15,11 @@ import com.yazsras.astravar.rules.Campaign
 import com.yazsras.astravar.rules.DamageType
 import kotlinx.coroutines.*
 
-val Gunmetal=Color(0xFF0B0E10)
-val Ready=Color(0xFF88D9B2)
-val Muted=Color(0xFFB6B9BC)
-val Brass=Color(0xFFE2C99B)
-val Frost=Color(0xFF9DCEF0)
+val Gunmetal=Color(0xFF000C21)
+val Ready=Color(0xFF35D5A3)
+val Muted=Color(0xFF8E9FB7)
+val Brass=Color(0xFFFAC71E)
+val Frost=Color(0xFFA1E8FB)
 fun elementTint(type: DamageType)=when(type) {
     DamageType.FIRE -> Color(0xFFFFA36A)
     DamageType.LIGHTNING -> Color(0xFF8FCEFF)
@@ -32,8 +32,8 @@ fun elementTint(type: DamageType)=when(type) {
 }
 @Composable fun AstravarTheme(content: @Composable ()->Unit) {
     MaterialTheme(colorScheme=darkColorScheme(primary=Brass,onPrimary=Color(0xFF241B10),secondary=Frost,
-        primaryContainer=Color(0xFF352C1C),onPrimaryContainer=Brass,secondaryContainer=Color(0xFF17323F),onSecondaryContainer=Frost,tertiary=Brass,tertiaryContainer=Color(0xFF352C1C),surfaceTint=Brass,background=Gunmetal,surface=Color(0xFF1C2126),surfaceVariant=Color(0xFF252B30),
-        onSurface=Color(0xFFF0ECE4),onSurfaceVariant=Muted,outline=Color(0xFF69665F),error=Color(0xFFF2A4A1)),
+        primaryContainer=Color(0xFF352C1C),onPrimaryContainer=Brass,secondaryContainer=Color(0xFF17323F),onSecondaryContainer=Frost,tertiary=Brass,tertiaryContainer=Color(0xFF352C1C),surfaceTint=Brass,background=Gunmetal,surface=Color(0xFF000F28),surfaceVariant=Color(0xFF011534),
+        onSurface=Color(0xFFF7F9FA),onSurfaceVariant=Muted,outline=Color(0xFF294769),error=Color(0xFFFF6578)),
         typography=arcaneTypography(),shapes=Shapes(small=androidx.compose.foundation.shape.CutCornerShape(5.dp),medium=androidx.compose.foundation.shape.CutCornerShape(10.dp),large=androidx.compose.foundation.shape.CutCornerShape(14.dp)),content=content)
 }
 class Actions(val repo: Repository,private val scope: CoroutineScope) {
@@ -55,19 +55,19 @@ class Actions(val repo: Repository,private val scope: CoroutineScope) {
         Column(Modifier.widthIn(max=900.dp).fillMaxWidth().verticalScroll(scroll).padding(horizontal=16.dp,vertical=14.dp),verticalArrangement=Arrangement.spacedBy(14.dp),content=content)
     }
 }
-@Composable fun Field(label: String,value: String,change: (String)->Unit,modifier: Modifier=Modifier,single: Boolean=true) {
-    OutlinedTextField(value,change,label={ Text(label) },modifier=modifier.fillMaxWidth(),singleLine=single,shape=androidx.compose.foundation.shape.CutCornerShape(6.dp),colors=OutlinedTextFieldDefaults.colors(focusedBorderColor=Brass,unfocusedBorderColor=Brass.copy(alpha=.3f),focusedContainerColor=Color(0xFF11161A),unfocusedContainerColor=Color(0xFF101417)))
+@Composable fun Field(label: String,value: String,change: (String)->Unit,modifier: Modifier=Modifier,single: Boolean=true,enabled: Boolean=true) {
+    OutlinedTextField(value,change,enabled=enabled,label={ Text(label) },modifier=modifier.fillMaxWidth(),singleLine=single,shape=androidx.compose.foundation.shape.CutCornerShape(6.dp),colors=OutlinedTextFieldDefaults.colors(focusedBorderColor=Brass,unfocusedBorderColor=Brass.copy(alpha=.3f),focusedContainerColor=Color(0xFF11161A),unfocusedContainerColor=Color(0xFF101417)))
 }
-@Composable fun Toggle(label: String,value: Boolean,change: (Boolean)->Unit) {
-    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) { Text(label,Modifier.weight(1f).padding(top=12.dp)); Switch(value,change) }
+@Composable fun Toggle(label: String,value: Boolean,enabled: Boolean=true,change: (Boolean)->Unit) {
+    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) { Text(label,Modifier.weight(1f).padding(top=12.dp)); Switch(value,change,enabled=enabled) }
 }
-@Composable fun <T> Choices(label: String,values: List<T>,selected: T?,display: (T)->String={it.toString()},change: (T)->Unit) {
+@Composable fun <T> Choices(label: String,values: List<T>,selected: T?,display: (T)->String={it.toString()},enabled: Boolean=true,change: (T)->Unit) {
     var expanded by remember {mutableStateOf(false)}
     if(label.isNotBlank()) Text(label,style=MaterialTheme.typography.labelLarge)
     Box {
-        MetalButton(selected?.let(display) ?: "Choose…",modifier=Modifier.fillMaxWidth()) {expanded=true}
-        DropdownMenu(expanded,onDismissRequest={expanded=false},modifier=Modifier.heightIn(max=360.dp)) {
-            values.forEach {v->DropdownMenuItem(text={Text(display(v))},onClick={change(v);expanded=false})}
+        MetalButton(selected?.let(display) ?: "Choose…",enabled=enabled,modifier=Modifier.fillMaxWidth()) {expanded=true}
+        DropdownMenu(expanded && enabled,onDismissRequest={expanded=false},modifier=Modifier.heightIn(max=360.dp)) {
+            values.forEach {v->DropdownMenuItem(text={Text(display(v))},enabled=enabled,onClick={change(v);expanded=false})}
         }
     }
 }

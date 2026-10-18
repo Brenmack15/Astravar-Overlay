@@ -54,7 +54,7 @@ fun arcaneTypography() = Typography(
     return drawWithCache {
         val texture=ShaderBrush(ImageShader(grain,TileMode.Repeated,TileMode.Repeated))
         val light=Brush.radialGradient(listOf(Frost.copy(alpha=.07f),Color.Transparent),Offset(size.width*.8f,0f),size.height.coerceAtLeast(1f)*.75f)
-        onDrawBehind {drawRect(Color(0xFF0B0E10));drawRect(texture,alpha=.72f);drawRect(light)}
+        onDrawBehind {drawRect(Color(0xFF000510));drawRect(texture,alpha=.04f);drawRect(light)}
     }
 }
 private fun framePath(w:Float,h:Float,inset:Float,cut:Float)=Path().apply {
@@ -65,15 +65,15 @@ private fun framePath(w:Float,h:Float,inset:Float,cut:Float)=Path().apply {
 @Composable fun Modifier.metalSurface(accent:Color=Brass,lit:Boolean=false,pressed:Boolean=false):Modifier {
     val grain=ImageBitmap.imageResource(R.drawable.metal_texture)
     return drawWithCache {
-        val edge=framePath(size.width,size.height,1.dp.toPx(),10.dp.toPx())
+        val edge=framePath(size.width,size.height,1.dp.toPx(),16.dp.toPx())
         val inner=framePath(size.width,size.height,5.dp.toPx(),8.dp.toPx())
         val etched=framePath(size.width,size.height,8.dp.toPx(),6.dp.toPx())
         val texture=ShaderBrush(ImageShader(grain,TileMode.Repeated,TileMode.Repeated))
-        val base=Brush.verticalGradient(if(pressed) listOf(Color(0xFF242322),Color(0xFF090C0E)) else listOf(Color(0xFF20262A),Color(0xFF101518),Color(0xFF0D1012)))
+        val base=Brush.verticalGradient(if(pressed) listOf(Color(0xFF011D49),Color(0xFF000F28)) else listOf(Color(0xFF011534),Color(0xFF000F28),Color(0xFF000C21)))
         val metallic=Brush.linearGradient(listOf(accent.copy(alpha=.85f),Color(0xFF615140),accent.copy(alpha=.38f),accent.copy(alpha=.9f)))
         val glow=Brush.radialGradient(listOf(accent.copy(alpha=if(lit) .23f else .06f),Color.Transparent),Offset(size.width*.5f,size.height),size.width.coerceAtLeast(1f)*.7f)
         onDrawBehind {
-            drawPath(edge,base);drawPath(edge,texture,alpha=.22f);drawPath(edge,glow)
+            drawPath(edge,base);drawPath(edge,texture,alpha=.05f);drawPath(edge,glow)
             drawPath(edge,metallic,style=Stroke(if(lit) 2.dp.toPx() else 1.dp.toPx()))
             drawPath(inner,accent.copy(alpha=if(lit) .65f else .3f),style=Stroke(.6.dp.toPx()))
             drawPath(etched,Color.Black.copy(alpha=.7f),style=Stroke(1.dp.toPx()))
@@ -87,7 +87,7 @@ private fun framePath(w:Float,h:Float,inset:Float,cut:Float)=Path().apply {
     }
 }
 @Composable fun ArcanePanel(accent:Color=Brass,modifier:Modifier=Modifier,content:@Composable ColumnScope.()->Unit) {
-    Column(modifier.fillMaxWidth().clip(CutCornerShape(10.dp)).metalSurface(accent).padding(17.dp),verticalArrangement=Arrangement.spacedBy(10.dp),content=content)
+    Column(modifier.fillMaxWidth().clip(CutCornerShape(16.dp)).metalSurface(accent).padding(17.dp),verticalArrangement=Arrangement.spacedBy(10.dp),content=content)
 }
 
 @Composable fun ArcaneIcon(kind:String,modifier:Modifier=Modifier,tint:Color=Brass) {
@@ -148,7 +148,7 @@ private fun framePath(w:Float,h:Float,inset:Float,cut:Float)=Path().apply {
             InstrumentMedallion("Emblem",Modifier.size(48.dp),Brass)
             Column(Modifier.weight(1f)) {
                 Text("ASTRAVAR",fontFamily=DisplayFace,fontSize=23.sp,letterSpacing=3.sp,color=Color(0xFFF0E4CA))
-                Text("O V E R L A Y",style=MaterialTheme.typography.labelSmall,color=Brass)
+                Text("A R M O R   ·   2 . 0",style=MaterialTheme.typography.labelSmall,color=Brass)
             }
             if(demo)StatusPill("DEMO",false)
             if(onSettings!=null)IconButton(onClick=onSettings,modifier=Modifier.size(48.dp).semantics {contentDescription="Settings"}) {ArcaneIcon("Settings",tint=Brass)}
@@ -192,7 +192,7 @@ val weaponDestinations=listOf("Weapon","Cores & Payloads","History","More")
     values.chunked(3).forEach {row->Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
         row.forEach {type->val active=type in selected;val tint=elementTint(type)
             Row(Modifier.weight(1f).heightIn(min=48.dp).semantics {this.selected=active}.clip(CutCornerShape(7.dp)).metalSurface(if(active) tint else tint.copy(alpha=.4f),active).clickable(role=Role.Checkbox) {change(type)}.padding(horizontal=8.dp,vertical=10.dp),horizontalArrangement=Arrangement.Center,verticalAlignment=Alignment.CenterVertically) {
-                ArcaneIcon(type.name,Modifier.size(18.dp),tint);Spacer(Modifier.width(6.dp));Text(type.name.lowercase().replaceFirstChar(Char::titlecase),fontSize=11.sp,color=if(active) Color.White else Muted)
+                ElementParticle(type,Modifier.size(30.dp));Spacer(Modifier.width(6.dp));Text(type.name.lowercase().replaceFirstChar(Char::titlecase),fontSize=11.sp,color=if(active) Color.White else Muted)
             }
         };repeat(3-row.size){Spacer(Modifier.weight(1f))}
     }}
