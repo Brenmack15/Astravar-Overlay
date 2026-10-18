@@ -23,7 +23,8 @@ class HistoryRepositoryTest {
         profile=Profile(baseDamageDiceCount=5,elementalSelectorDiceCount=7),notes="Campaign 🦉 survives",slots=mapOf(2 to 3),gameSeconds=600)
     private fun shot(i: Int,n: Int=4,blast: Boolean=false): PendingShot {
         val s=seed().copy(revision=i.toLong(),profile=Profile(baseDamageDiceCount=n))
-        val p=Engine.plan(s,"roll-$i",if(blast) Ability.SHATTER else Ability.ELEMENTAL,elements=listOf(DamageType.LIGHTNING),point="Gate")
+        val p=if(blast) ShotPlan("roll-$i",s.revision,Ability.SHATTER,"core",s.profile,emptyList(),elements=listOf(DamageType.LIGHTNING),targetPoint="Gate")
+            else Engine.plan(s,"roll-$i",Ability.ELEMENTAL,elements=listOf(DamageType.LIGHTNING),point="Gate")
         val r=DiceRoller.roll(p,die={if(it==20) 14 else 7},atMillis=i.toLong())
         return PendingShot(p,DiceRoller.resolution(p,r,targets=if(blast) listOf(TargetSave("Target",false)) else emptyList()),r)
     }

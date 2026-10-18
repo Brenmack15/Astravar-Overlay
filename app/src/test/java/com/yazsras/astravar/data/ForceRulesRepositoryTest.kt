@@ -52,7 +52,7 @@ class ForceRulesRepositoryTest {
             assertEquals(5,reopened.profile.baseDamageDiceCount);assertEquals(7,reopened.profile.elementalSelectorDiceCount)
             assertEquals(2,reopened.profile.forceRulesVersion);assertEquals(300L,reopened.gameSeconds)
             assertEquals(listOf(DamageType.FIRE),Preferences(context).flow.first().elements)
-            assertEquals(Ability.SHATTER,Preferences(context).flow.first().mode)
+            assertEquals(Ability.ARCANE,Preferences(context).flow.first().mode)
             val backup=main.export();main.import(backup,"restore")
             assertTrue(BackupCodec.decodeHistoryEntry(db.dao().event(event.id)!!.body).after.pending.isEmpty());assertTrue(db.dao().archives().isEmpty())
             // Undo into a historical pre-upgrade profile must still restore current active Force rules.
@@ -63,13 +63,16 @@ class ForceRulesRepositoryTest {
         } finally {scope.coroutineContext[Job]!!.cancelAndJoin();db.close()}
     }
 
-    @Test fun maximumShatterPersistsAllFacesAndSharedStateWithoutLosingSelectors()=runBlocking {
+    @Test fun historicalMaximumShatterPersistsAllFacesAndSharedStateWithoutLosingSelectors()=runBlocking {
         val db=Room.inMemoryDatabaseBuilder(context,AstravarDb::class.java).build()
         val scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);val main=Repository(db,scope)
         try {
             val before=main.mutate(label="Prepare") {old().copy(profile=Profile(baseDamageDiceCount=10,elementalSelectorDiceCount=8))}
-            val p=Engine.plan(before,"maximum",Ability.SHATTER,elements=listOf(DamageType.LIGHTNING),point="Gate")
-            val after=main.mutate(p.id,"Roll maximum Shatter") {DiceRoller.fire(it,p,die={it})}
+            val p=ShotPlan("maximum",before.revision,Ability.SHATTER,"core",before.profile,emptyList(),elements=listOf(DamageType.LIGHTNING),targetPoint="Gate")
+            val historicalRoll=DiceRoller.roll(p,die={it}).copy(coreName="Historical fixture")
+            val saved=PendingShot(p,rolled=historicalRoll)
+            // Restore an already executed historical snapshot. New Shatter execution remains prohibited.
+            val after=main.mutate(p.id,"Restore historical Shatter fixture") {it.replace(it.core("core").copy(destroyed=true,payloads=emptyList())).copy(installedId=null,postShatter=true,pending=listOf(saved))}
             val overlay=Repository(db,scope)
             assertEquals(after,withTimeout(10000) {overlay.state.first {it?.revision==after.revision}!!})
             val backup=main.export();main.import(backup,"restore-large")
