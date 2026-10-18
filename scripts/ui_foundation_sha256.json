@@ -10,9 +10,9 @@
     "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": "334842742182ceaf538616509d8ee6028f810b40ba3e78a7eee0f679d8bfb013",
     "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": "ba147dddd03c46773384c4323d47854c5ef4edcb5d97fc658cc0cb05f8feabe5",
     "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": "6f53990746acf85f474ea6c5fcdc4a9162cef331cd2c52e69e19fa501011dc54",
-    "app/src/main/java/com/yazsras/astravar/data/HistoryStorage.kt": "62c5c6412de5e5fd6ff12c1083c1fe3c793e5d3d4cfe56ce080c704eb2371c54",
+    "app/src/main/java/com/yazsras/astravar/data/HistoryStorage.kt": "c7968f73293f5d8f46fa148be3fbbb74352565e914ef3b1762f88800104dbb62",
     "app/src/main/java/com/yazsras/astravar/data/SandboxSync.kt": "25f71e8aac585b24f83975796e9a4a7aa01b7c6a8c6f94607544bdf8775f5cf9",
-    "app/src/main/java/com/yazsras/astravar/data/Store.kt": "61dc33220fec3d279b93047bc14e53d4101c62431fc2087c95c41a6501e02fc6",
+    "app/src/main/java/com/yazsras/astravar/data/Store.kt": "17c00ac0996007b028b99af360205c59f0694b258e7184b267067ffa038ed3be",
     "app/src/main/java/com/yazsras/astravar/overlay/ArcaneSurface.kt": "e73af0007da85e7807f1e8d3245347eb6256d507c17b67bbb4dd456285669cbb",
     "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": "355b4b5bf6e8fa934eba59c453ddb83d0d11ca1001d34bbf72fa38f032141153",
     "app/src/main/res/drawable-nodpi/astravar_armor_front.png": "25d225393ba934260690d184a5993805add290bdfdb76e05bcb7ff8486b355b3",
@@ -64,11 +64,11 @@
     "app/src/main/res/values/styles.xml": "1325c6db46c862140d9d93f9087fb933451d94190efb8c9d7d0e94289bdccd45",
     "app/src/main/res/xml/data_extraction_rules.xml": "9b63470201d0d30ddd34354d78b9e6b5745f77e19f223762f80f79babf32c969",
     "rules/build.gradle.kts": "25d6eac2ed7ca251ffc432e18d6e8f44a94211a54e2768623c7f102cc875fa7b",
-    "rules/src/main/kotlin/com/yazsras/astravar/rules/BackupCodec.kt": "1090f801d99c3acde1af9437fe470d60bb10812384f8726e43ec408048282b1c",
+    "rules/src/main/kotlin/com/yazsras/astravar/rules/BackupCodec.kt": "0549c5fdf4766ad88a81e3d58f5ac8d16dbb6e781859c18e72097c042412a4e1",
     "rules/src/main/kotlin/com/yazsras/astravar/rules/DiceRoller.kt": "c3ab14fe38139e85630e7ccbf2f7c07bc983254ca3da2dfb52bb3957be283899",
     "rules/src/main/kotlin/com/yazsras/astravar/rules/Engine.kt": "7228b65f1b492266a1a0fd97f8e0534a89cce87f2ace3f1a1c3bb690ad30d7df",
     "rules/src/main/kotlin/com/yazsras/astravar/rules/HistoryJson.kt": "82a94a6275e539237357c53677488a263f3d006ffe2ad6fd4a49eeb8f08b4a1f",
-    "rules/src/main/kotlin/com/yazsras/astravar/rules/HistoryRetention.kt": "af2bcb67a804f92b07cfb593f595c465bae131d4c6014cd55f471c800555399d",
+    "rules/src/main/kotlin/com/yazsras/astravar/rules/HistoryRetention.kt": "ff179553fdd944ffa020211589a47cdf13d387ed5a2217b67131e7c66f1d97e9",
     "rules/src/main/kotlin/com/yazsras/astravar/rules/Model.kt": "0c17dde66699844d0a87c32506e9a61eb48f1f4de98b10e3f3355e06c990618d",
     "rules/src/test/kotlin/com/yazsras/astravar/rules/BackupCodecTest.kt": "76ad5eea212aff956648d1e636817a56dc816387c074b085490e2ef74971a8d6",
     "rules/src/test/kotlin/com/yazsras/astravar/rules/DiceRollerTest.kt": "d815341ebed13c7eff66afc13dca59164996fd0c715687b57715f5f91edd8f44",
@@ -122,8 +122,16 @@
       },
       "app/src/main/java/com/yazsras/astravar/data/Store.kt": {
         "previous_pinned_sha256": "c6602445a62cc9b23df11bb663f54cb8b5d06011db05dcb82ada704d647cf03d",
-        "reviewed_sha256": "61dc33220fec3d279b93047bc14e53d4101c62431fc2087c95c41a6501e02fc6",
-        "reason": "Selectively retire stale Shatter preference; preserve other preferences and immutable history."
+        "reviewed_sha256": "17c00ac0996007b028b99af360205c59f0694b258e7184b267067ffa038ed3be",
+        "reason": "Selectively retire stale Shatter preference; preserve other preferences and immutable history. Preserve original history before mutations/imports, retain omitted shots without duplicate dice graphs, and deduplicate old command IDs beyond the recent window; expose complete streaming backup hooks.",
+        "additional_reviews": [
+          {
+            "previous_reviewed_sha256": "61dc33220fec3d279b93047bc14e53d4101c62431fc2087c95c41a6501e02fc6",
+            "reviewed_sha256": "17c00ac0996007b028b99af360205c59f0694b258e7184b267067ffa038ed3be",
+            "reason": "Preserve original history before mutations/imports, retain omitted shots without duplicate dice graphs, and deduplicate old command IDs beyond the recent window; expose complete streaming backup hooks.",
+            "source_commit": "ddf1a50"
+          }
+        ]
       },
       "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": {
         "previous_pinned_sha256": "30f890627065eee06373db12499118b2107176cedd1abe9d92fa02c7b8d09576",
@@ -132,8 +140,16 @@
       },
       "rules/src/main/kotlin/com/yazsras/astravar/rules/BackupCodec.kt": {
         "previous_pinned_sha256": "c0dee331adc50ac4a042379203d4b0e4b459e81046bf873bdcdd7b099feb0fbc",
-        "reviewed_sha256": "1090f801d99c3acde1af9437fe470d60bb10812384f8726e43ec408048282b1c",
-        "reason": "Validate added sourced profiles/adoption while preserving historical Shatter decoding."
+        "reviewed_sha256": "0549c5fdf4766ad88a81e3d58f5ac8d16dbb6e781859c18e72097c042412a4e1",
+        "reason": "Validate added sourced profiles/adoption while preserving historical Shatter decoding. Document the unchanged bounded codec as a working-view compatibility API; complete Android history backup uses the separately tested streaming archive transport.",
+        "additional_reviews": [
+          {
+            "previous_reviewed_sha256": "1090f801d99c3acde1af9437fe470d60bb10812384f8726e43ec408048282b1c",
+            "reviewed_sha256": "0549c5fdf4766ad88a81e3d58f5ac8d16dbb6e781859c18e72097c042412a4e1",
+            "reason": "Document the unchanged bounded codec as a working-view compatibility API; complete Android history backup uses the separately tested streaming archive transport.",
+            "source_commit": "ddf1a50"
+          }
+        ]
       },
       "rules/src/main/kotlin/com/yazsras/astravar/rules/DiceRoller.kt": {
         "previous_pinned_sha256": "24f613cf445f16e1c6dbe6cfa67576cb4e3f3b52a04c1528d10e52c670d3b257",
@@ -189,6 +205,18 @@
         "previous_pinned_sha256": "d50c4329e34a2e31922d9d37db3867d63c732e362b3ce579c72dc1c615967662",
         "reviewed_sha256": "f7f8c9339d4250c53b194aa9aaf570d302b2146ecc8b47e0498a3fd58b7e5d21",
         "reason": "Keep historical combat fixtures explicit after retiring their execution for new play; assertions retain old results."
+      },
+      "app/src/main/java/com/yazsras/astravar/data/HistoryStorage.kt": {
+        "previous_pinned_sha256": "62c5c6412de5e5fd6ff12c1083c1fe3c793e5d3d4cfe56ce080c704eb2371c54",
+        "reviewed_sha256": "c7968f73293f5d8f46fa148be3fbbb74352565e914ef3b1762f88800104dbb62",
+        "reason": "Supersede destructive retention with transactional raw preservation before recent-view normalization; retain legacy archives and separate malformed decoding from SQLite failures.",
+        "source_commit": "ddf1a50"
+      },
+      "rules/src/main/kotlin/com/yazsras/astravar/rules/HistoryRetention.kt": {
+        "previous_pinned_sha256": "af2bcb67a804f92b07cfb593f595c465bae131d4c6014cd55f471c800555399d",
+        "reviewed_sha256": "ff179553fdd944ffa020211589a47cdf13d387ed5a2217b67131e7c66f1d97e9",
+        "reason": "Clarify that the unchanged twenty-entry limit applies to the working/undo projection, not destruction of immutable history or complete backups.",
+        "source_commit": "ddf1a50"
       }
     }
   }
