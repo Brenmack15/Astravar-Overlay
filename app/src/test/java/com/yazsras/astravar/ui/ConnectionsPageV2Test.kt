@@ -15,6 +15,8 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
+import org.junit.Before
+import org.junit.After
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
@@ -28,6 +30,15 @@ import org.robolectric.annotation.LooperMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ConnectionsPageV2Test {
     @get:Rule val compose = createEmptyComposeRule()
+    private var oldRequestedSize: String? = null
+    @Before fun useRequestedDialogSize() {
+        oldRequestedSize = System.getProperty("robolectric.windowManager.useRequestedSize")
+        System.setProperty("robolectric.windowManager.useRequestedSize", "true")
+    }
+    @After fun restoreDialogSize() {
+        oldRequestedSize?.let { System.setProperty("robolectric.windowManager.useRequestedSize", it) }
+            ?: System.clearProperty("robolectric.windowManager.useRequestedSize")
+    }
 
     private fun database() = Room.inMemoryDatabaseBuilder(
         ApplicationProvider.getApplicationContext(), CampaignLedgerDb::class.java
@@ -38,22 +49,25 @@ class ConnectionsPageV2Test {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { AstravarTheme { ConnectionsPageV2(CampaignLedgerRepository(db)) } }
+            compose.onNodeWithText("Connection name").assertDoesNotExist()
+            compose.onNodeWithContentDescription("Add connection").performClick()
             compose.onNodeWithText("Connection name").performScrollTo().performTextInput("Synthetic archivist")
-            compose.onNodeWithText("Save new connection").performScrollTo().assertIsNotEnabled()
+            compose.onNodeWithText("Save new connection").assertIsDisplayed().assertIsNotEnabled()
             compose.onNodeWithText("Profile source / scene / checkpoint (required)").performScrollTo()
                 .performTextInput("Synthetic resolved introduction")
-            compose.onNodeWithText("Save new connection").performScrollTo().performClick()
+            compose.onNodeWithText("Save new connection").assertIsDisplayed().assertIsEnabled().performClick()
             compose.waitUntil(10_000) { runBlocking { db.recordsDao().allEntities().size == 1 } }
             val entity = runBlocking { db.recordsDao().allEntities().single() }
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithText("Meaningful milestones").fetchSemanticsNodes().isNotEmpty()
             }
             compose.onNodeWithText("Meaningful milestones").performScrollTo().performClick()
+            compose.onNodeWithText("Add milestone").performScrollTo().performClick()
             compose.onNodeWithText("Milestone title").performScrollTo().performTextInput("Returned the borrowed map")
-            compose.onNodeWithText("Append milestone").performScrollTo().assertIsNotEnabled()
+            compose.onNode(hasText("Append milestone") and hasClickAction()).assertIsNotEnabled()
             compose.onNodeWithText("Milestone source (required)").performScrollTo()
                 .performTextInput("Synthetic resolved conversation")
-            compose.onNodeWithText("Append milestone").performScrollTo().performClick()
+            compose.onNode(hasText("Append milestone") and hasClickAction()).performClick()
             compose.waitUntil(10_000) { runBlocking { db.recordsDao().allMilestones().size == 1 } }
             runBlocking {
                 val after = db.recordsDao().allEntities().single()
@@ -78,15 +92,18 @@ class ConnectionsPageV2Test {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { AstravarTheme { ConnectionsPageV2(CampaignLedgerRepository(db)) } }
+            compose.onNodeWithContentDescription("Add connection").performClick()
             compose.onNodeWithText("Connection name").performScrollTo().performTextInput("Unsaved person")
-            compose.onNodeWithText("New connection").performScrollTo().performClick()
-            compose.onNodeWithText("Leave unsaved connection notes?").assertExists()
+            compose.onNodeWithText("Cancel").performClick()
+            compose.onNodeWithText("Discard changes?").assertExists()
             compose.onNodeWithText("Keep editing").performClick()
             compose.onNodeWithText("Connection name").performScrollTo().assert(
                 SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("Unsaved person"))
             )
-            compose.onNodeWithText("New connection").performScrollTo().performClick()
-            compose.onNodeWithText("Discard edits").performClick()
+            compose.onNodeWithText("Cancel").performClick()
+            compose.onNodeWithText("Discard").performClick()
+            compose.onNodeWithText("Connection name").assertDoesNotExist()
+            compose.onNodeWithContentDescription("Add connection").performClick()
             compose.onNodeWithText("Connection name").performScrollTo().assert(
                 SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString(""))
             )
@@ -121,6 +138,37 @@ class ConnectionsPageV2Test {
                 assertEquals(before, db.recordsDao().allEntities())
                 assertEquals(2, db.recordsDao().allAudit().size)
                 assertTrue(db.ledgerDao().allItems().isEmpty())
+            }
+        } finally { activity.pause().stop().destroy(); db.close() }
+    }
+
+    @Test fun learnedInformationAppendsToSameConnectionWithEvidenceAndNoOwnershipChange() {
+        val db = database()
+        val repo = CampaignLedgerRepository(db)
+        val entity = ConnectionEntity(name = "Synthetic keeper", relationship = "Confirmed map loan")
+        runBlocking { repo.records.saveEntity(entity, source = "Synthetic introduction") }
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { AstravarTheme { ConnectionsPageV2(repo) } }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText(entity.name).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(entity.name).performClick()
+            compose.onNodeWithText("Connection name").assertDoesNotExist()
+            compose.onNodeWithText("Add learned information").performScrollTo().performClick()
+            compose.onNodeWithText("Known context / agreement / promise").performScrollTo().performTextInput("Knows the western road")
+            compose.onNodeWithText("Append relationship context").assertIsNotEnabled()
+            compose.onNodeWithText("Context source (required)").performScrollTo().performTextInput("Synthetic resolved conversation")
+            compose.onNodeWithText("Append relationship context").performClick()
+            compose.waitUntil(10_000) { runBlocking { db.recordsDao().allFacts().size == 1 } }
+            runBlocking {
+                val fact = db.recordsDao().allFacts().single()
+                assertEquals(entity.id, fact.entityId)
+                assertEquals("Unverified", fact.evidenceStatus)
+                assertEquals("Knows the western road", fact.detail)
+                assertEquals("Synthetic resolved conversation", fact.source)
+                assertEquals(1L, db.recordsDao().allEntities().single().revision)
+                assertTrue(db.ledgerDao().allItems().isEmpty())
+                assertTrue(db.recordsDao().allMilestones().isEmpty())
+                assertEquals(2, db.recordsDao().allAudit().size)
             }
         } finally { activity.pause().stop().destroy(); db.close() }
     }

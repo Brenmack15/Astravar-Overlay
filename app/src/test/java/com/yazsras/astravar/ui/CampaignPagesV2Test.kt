@@ -11,6 +11,8 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
+import org.junit.Before
+import org.junit.After
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
@@ -24,6 +26,15 @@ import org.robolectric.annotation.LooperMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class CampaignPagesV2Test {
     @get:Rule val compose = createEmptyComposeRule()
+    private var oldRequestedSize: String? = null
+    @Before fun useRequestedDialogSize() {
+        oldRequestedSize = System.getProperty("robolectric.windowManager.useRequestedSize")
+        System.setProperty("robolectric.windowManager.useRequestedSize", "true")
+    }
+    @After fun restoreDialogSize() {
+        oldRequestedSize?.let { System.setProperty("robolectric.windowManager.useRequestedSize", it) }
+            ?: System.clearProperty("robolectric.windowManager.useRequestedSize")
+    }
 
     private fun database() = Room.inMemoryDatabaseBuilder(
         ApplicationProvider.getApplicationContext(), CampaignLedgerDb::class.java
@@ -34,9 +45,12 @@ class CampaignPagesV2Test {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { AstravarTheme { EekPageV2(CampaignLedgerRepository(db)) } }
-            compose.onNodeWithText("Current condition unknown").assertExists()
-            compose.onNodeWithText("Save Eek status").performScrollTo().assertIsNotEnabled()
-            compose.onNodeWithText("No current resource values have been entered.").performScrollTo().assertExists()
+            compose.onNodeWithText("Condition unknown").assertExists()
+            compose.onNodeWithText("No confirmed resource values").assertExists()
+            compose.onNodeWithText("Save Eek status").assertDoesNotExist()
+            compose.onNodeWithText("Edit status").performClick()
+            compose.onNodeWithText("Save Eek status").assertIsNotEnabled()
+            compose.onNodeWithText("Close").performClick()
             runBlocking {
                 assertTrue(db.recordsDao().allCompanionStates().isEmpty())
                 assertTrue(db.recordsDao().allCompanionResources().isEmpty())
@@ -51,10 +65,12 @@ class CampaignPagesV2Test {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { AstravarTheme { InventionsPageV2(repo) } }
+            compose.onNodeWithText("Invention name").assertDoesNotExist()
+            compose.onNodeWithText("Add Invention").performClick()
             compose.onNodeWithText("Invention name").performScrollTo().performTextInput("Fictional test blueprint")
-            compose.onNodeWithText("Save invention").performScrollTo().assertIsNotEnabled()
+            compose.onNodeWithText("Save invention").assertIsNotEnabled()
             compose.onNodeWithText("Source / resolved scene / checkpoint").performScrollTo().performTextInput("Synthetic resolved design notes")
-            compose.onNodeWithText("Save invention").performScrollTo().performClick()
+            compose.onNodeWithText("Save invention").performClick()
             compose.waitUntil(10_000) { runBlocking { db.recordsDao().allProjects().size == 1 } }
             runBlocking {
                 val project = db.recordsDao().allProjects().single()
@@ -81,12 +97,17 @@ class CampaignPagesV2Test {
             activity.get().setContent { AstravarTheme { InventionsPageV2(repo) } }
             compose.waitUntil(10_000) { compose.onAllNodesWithText("Synthetic workshop").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Synthetic workshop").performScrollTo().performClick()
+            compose.onNodeWithText("Physical output").performScrollTo().performClick()
             compose.onNodeWithText("Confirm a resolved craft").performScrollTo().performClick()
             compose.onNode(isToggleable()).performScrollTo().performClick()
             compose.onNodeWithText("Crafted item name").performScrollTo().performTextInput("Synthetic output")
-            compose.onNodeWithText("Review material consumption").performScrollTo().performClick()
+            compose.onNodeWithText("Review material consumption").performClick()
             compose.onNodeWithText("Commit confirmed craft?").assertExists()
             compose.onNodeWithText("Cancel").performClick()
+            compose.onNodeWithText("Crafted item name").assert(
+                SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.EditableText,
+                    androidx.compose.ui.text.AnnotatedString("Synthetic output"))
+            )
             runBlocking {
                 assertEquals(5, db.ledgerDao().allItems().single().quantity)
                 assertEquals("Test copper", db.ledgerDao().allItems().single().title)
@@ -111,10 +132,11 @@ class CampaignPagesV2Test {
             activity.get().setContent { AstravarTheme { InventionsPageV2(repo) } }
             compose.waitUntil(10_000) { compose.onAllNodesWithText("Synthetic stale workshop").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Synthetic stale workshop").performScrollTo().performClick()
+            compose.onNodeWithText("Physical output").performScrollTo().performClick()
             compose.onNodeWithText("Confirm a resolved craft").performScrollTo().performClick()
             compose.onNode(isToggleable()).performScrollTo().performClick()
             compose.onNodeWithText("Crafted item name").performScrollTo().performTextInput("Must not be created")
-            compose.onNodeWithText("Review material consumption").performScrollTo().performClick()
+            compose.onNodeWithText("Review material consumption").performClick()
             compose.onNodeWithText("Commit confirmed craft?").assertExists()
             runBlocking {
                 repo.update(material.id, material.revision,
@@ -145,11 +167,13 @@ class CampaignPagesV2Test {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { AstravarTheme { EekPageV2(repo) } }
-            compose.waitUntil(10_000) { compose.onAllNodesWithText("Synthetic fixture").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("Choose…").performScrollTo().performClick()
+            compose.onNodeWithText("Equipment & upgrades").performScrollTo().performClick()
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("Link equipment") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Link equipment").performClick()
+            compose.onNodeWithText("Choose an existing record").performScrollTo().performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithText("Test lens").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Test lens").performClick()
-            compose.onNodeWithText("Link existing item to Eek").performScrollTo().performClick()
+            compose.onNodeWithText("Link existing item to Eek").assertIsDisplayed().assertIsEnabled().performClick()
             compose.waitUntil(10_000) { runBlocking { db.recordsDao().allLinks().isNotEmpty() } }
             runBlocking {
                 val link = db.recordsDao().allLinks().single()
@@ -158,6 +182,31 @@ class CampaignPagesV2Test {
                 assertEquals("eek", link.toId)
                 assertEquals(item, db.ledgerDao().allItems().single())
                 assertTrue(db.recordsDao().allCompanionResources().isEmpty())
+            }
+        } finally { activity.pause().stop().destroy(); db.close() }
+    }
+
+    @Test fun eekResourceEditorKeepsUnknownCurrentValueAndDoesNotRecoverCondition() {
+        val db = database()
+        val repo = CampaignLedgerRepository(db)
+        runBlocking { repo.records.saveCompanionState(CompanionState(condition = "Disabled"), source = "Synthetic confirmed status") }
+        val stateBefore = runBlocking { db.recordsDao().allCompanionStates().single() }
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { AstravarTheme { EekPageV2(repo) } }
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("Add resource") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Add resource").performClick()
+            compose.onNodeWithText("Resource name").performScrollTo().performTextInput("HP")
+            compose.onNodeWithText("Confirmed maximum (blank = unknown)").performScrollTo().performTextInput("30")
+            compose.onNodeWithText("Save known resource").performClick()
+            compose.waitUntil(10_000) { runBlocking { db.recordsDao().allCompanionResources().size == 1 } }
+            runBlocking {
+                val resource = db.recordsDao().allCompanionResources().single()
+                assertNull(resource.current)
+                assertEquals(30, resource.maximum)
+                assertEquals("Synthetic confirmed status", resource.source)
+                assertEquals(stateBefore, db.recordsDao().allCompanionStates().single())
+                assertTrue(db.ledgerDao().allItems().isEmpty())
             }
         } finally { activity.pause().stop().destroy(); db.close() }
     }
