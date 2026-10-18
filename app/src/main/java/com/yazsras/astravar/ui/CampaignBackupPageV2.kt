@@ -33,7 +33,7 @@ import kotlinx.coroutines.withContext
     // Recreating the Activity safely requires a fresh file review instead of restoring stale authorization.
     LaunchedEffect(Unit) {
         if (reviewWasOpen && preview == null) {
-            status = "Choose the backup again to review it. Nothing was restored."
+            status = "This preview was not retained. Choose the backup again to review it. If a confirmed restore was in progress, check saved records and the audit history before retrying."
             reviewWasOpen = false
         }
     }
