@@ -1,6 +1,7 @@
 package com.yazsras.astravar
 
 import android.graphics.Point
+import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.*
@@ -47,10 +48,42 @@ class OverlayInstrumentationTest {
         }
         error("Missing product control: $text")
     }
+    private fun panelControl(text: String): UiObject2 {
+        val selector = By.text(text).pkg(appPackage).enabled(true).clickable(true)
+        val deadline = SystemClock.uptimeMillis() + 30_000
+        val minimumTap = (48 * instrumentation.targetContext.resources.displayMetrics.density).toInt()
+        // Drag persistence and preference commits replace the overlay's window.
+        // Requery fresh nodes across that handoff, and never use UiScrollable's
+        // active-window search: the controlled underlying app owns input focus.
+        for (direction in listOf(Direction.DOWN, Direction.UP)) {
+            repeat(8) {
+                val remaining = deadline - SystemClock.uptimeMillis()
+                if (remaining <= 0) error("Missing enabled overlay control after fresh-window search: $text")
+                device.wait(Until.findObject(selector), minOf(1_500L, remaining))
+                try {
+                    val header = device.findObject(By.desc("Drag or collapse Astravar panel").pkg(appPackage))
+                    val panel = header?.parent
+                    panel?.findObject(selector)?.let { control ->
+                        val bounds = control.visibleBounds
+                        if (bounds.width() >= minimumTap && bounds.height() >= minimumTap) return control
+                    }
+                    val scroll = panel?.findObject(By.clazz("android.widget.ScrollView").pkg(appPackage))
+                    scroll?.scroll(direction, .6f)
+                } catch (_: StaleObjectException) {
+                    // Only lookup/scroll is retried. A resource-spending click is
+                    // performed once, after its fresh enabled node is returned.
+                }
+                device.waitForIdle()
+            }
+        }
+        error("Missing enabled overlay control: $text")
+    }
     private fun tapPanel(text:String) {
-        if(device.findObject(By.text(text).pkg(appPackage))==null) UiScrollable(UiSelector().className("android.widget.ScrollView")).scrollTextIntoView(text)
-        val control=device.wait(Until.findObject(By.text(text).pkg(appPackage)),30000) ?: error("Missing overlay control: $text")
-        control.click();device.waitForIdle()
+        val control = panelControl(text)
+        val minimumTap = (48 * instrumentation.targetContext.resources.displayMetrics.density).toInt()
+        assertTrue("Overlay control must retain a visible 48 dp touch target: $text", control.visibleBounds.width() >= minimumTap && control.visibleBounds.height() >= minimumTap)
+        control.click()
+        device.waitForIdle()
     }
     private fun targetText(text:String):UiObject2 = device.wait(
         Until.findObject(By.text(text).pkg(targetPackage)),30000
@@ -85,15 +118,22 @@ class OverlayInstrumentationTest {
         val panel=(device.wait(Until.findObject(By.desc("Drag or collapse Astravar panel")),10000)
             ?: error("Dragged panel did not return after its saved-position refresh")).visibleBounds
         assertTrue(panel.left>=0 && panel.right<=device.displayWidth)
-        tapPanel("Adv");tapPanel("Roll attack")
+        screenshot("dragged")
+        tapPanel("Adv")
+        assertTrue("Advantage selection must be visibly committed before rolling", device.wait(Until.hasObject(By.text("✓ Adv").pkg(appPackage)),30000))
+        tapPanel("Roll attack")
         assertTrue(device.wait(Until.hasObject(By.text("ATTACK ROLL")),30000))
         val formula=device.findObject(By.textStartsWith("d20 ")).text
         assertTrue("Two visible d20s must be preserved",formula.contains(" / ") && formula.contains("advantage"))
+        File(files,"saved-first-roll.txt").writeText(formula)
         assertFalse("No manual damage entry in normal combat",device.hasObject(By.clazz("android.widget.EditText").pkg(appPackage)))
         screenshot("automatic-result")
         tapPanel("Roll again")
-        assertTrue(device.wait(Until.hasObject(By.text("ATTACK ROLL")),30000))
-        File(files,"saved-roll.txt").writeText(device.findObject(By.textStartsWith("d20 ")).text)
+        val normalFormula = device.wait(Until.findObject(By.text(Pattern.compile("d20 [0-9]+ \\+ -?[0-9]+ = -?[0-9]+")).pkg(appPackage)),30000)
+            ?: error("The second committed roll did not show its normal single-d20 result")
+        assertFalse("One-shot advantage must reset for the next attack",normalFormula.text.contains(" / ") || normalFormula.text.contains("advantage"))
+        File(files,"saved-roll.txt").writeText(normalFormula.text)
+        screenshot("automatic-normal-result")
         tapPanel("Collapse")
         val edit=device.findObject(By.desc("Keyboard focus test"));edit.click();edit.text="typed under Astravar"
         assertEquals("typed under Astravar",device.findObject(By.desc("Keyboard focus test")).text)
@@ -130,7 +170,12 @@ class OverlayInstrumentationTest {
         screenshot("restored-main-result")
         navigate("Config");findText("Roll history").click();device.waitForIdle()
         assertTrue(device.wait(Until.hasObject(By.text("Recent rolls")),30000))
-        assertEquals("Exactly two attacks appear in history",2,device.findObjects(By.text(Pattern.compile("d20 .*advantage.*"))).size)
+        val firstFormula=File(files,"saved-first-roll.txt").readText()
+        val historyFormulas=device.findObjects(By.text(Pattern.compile("d20 .*")).pkg(appPackage)).map {it.text}
+        assertEquals("Exactly two immutable attacks appear in history",2,historyFormulas.size)
+        assertEquals("History preserves both original raw rolls and their advantage/normal modes",listOf(firstFormula,formula).sorted(),historyFormulas.sorted())
+        assertEquals("Only the first attack used the one-shot advantage selection",1,historyFormulas.count {it.contains("advantage")})
+        assertEquals("The second attack retained its normal single-d20 result",1,historyFormulas.count {!it.contains(" / ") && !it.contains("advantage")})
         screenshot("recent-history")
         startOverlay();shell("am start -W -n com.yazsras.astravar.target/.TargetActivity")
         shell("appops set $appPackage SYSTEM_ALERT_WINDOW deny")

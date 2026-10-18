@@ -36,9 +36,16 @@ class UpdatePreservationInstrumentationTest {
         device.findObjects(By.text("Config").pkg(product)).last().click()
         find("Roll history").click()
         find("Recent rolls")
-        assertEquals("Both committed attacks survive the APK update", 2,
-            device.findObjects(By.text(Pattern.compile("d20 .*advantage.*")).pkg(product)).size)
+        val firstFormula = File(files, "saved-first-roll.txt").readText()
         val savedFormula = File(files, "saved-roll.txt").readText()
+        val historyFormulas = device.findObjects(By.text(Pattern.compile("d20 .*")).pkg(product)).map { it.text }
+        assertEquals("Both committed attacks survive the APK update", 2, historyFormulas.size)
+        assertEquals("The APK update preserves both original raw rolls and their modes",
+            listOf(firstFormula, savedFormula).sorted(), historyFormulas.sorted())
+        assertEquals("The first attack retains its one-shot advantage", 1,
+            historyFormulas.count { it.contains("advantage") })
+        assertEquals("The second attack retains its normal single-d20 result", 1,
+            historyFormulas.count { !it.contains(" / ") && !it.contains("advantage") })
         find(savedFormula)
         assertTrue(device.takeScreenshot(File(files, "same-key-update-history.png")))
         find("Close").click()
