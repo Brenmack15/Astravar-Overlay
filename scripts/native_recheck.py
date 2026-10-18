@@ -30,6 +30,8 @@ ALLOWED_FILES = {
     "scripts/native_recheck.py",
     "scripts/tests/test_native_recheck.py",
     "docs/ASTRAVAR_2_1_NATIVE_RECHECK.md",
+    # Controlled second-app keyboard/protection fixture, never the product app.
+    "overlay-target/src/main/java/com/yazsras/astravar/target/TargetActivity.kt",
 }
 
 
