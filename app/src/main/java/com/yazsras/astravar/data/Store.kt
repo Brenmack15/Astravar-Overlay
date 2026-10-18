@@ -122,15 +122,25 @@ internal object RetireTargetAc: androidx.datastore.core.DataMigration<androidx.d
     override suspend fun migrate(currentData: androidx.datastore.preferences.core.Preferences)=currentData.toMutablePreferences().apply {remove(key)}.toPreferences()
     override suspend fun cleanUp() {}
 }
-val Context.overlayPreferences by preferencesDataStore("overlay",produceMigrations={listOf(RetireTargetAc)})
+/** Only the current mode preference changes; historical Ability.SHATTER snapshots remain untouched. */
+internal object RetireShatterMode: androidx.datastore.core.DataMigration<androidx.datastore.preferences.core.Preferences> {
+    private val key=stringPreferencesKey("mode")
+    override suspend fun shouldMigrate(currentData: androidx.datastore.preferences.core.Preferences)=currentData[key]==Ability.SHATTER.name
+    override suspend fun migrate(currentData: androidx.datastore.preferences.core.Preferences)=currentData.toMutablePreferences().apply {
+        if(this[key]==Ability.SHATTER.name) this[key]=Ability.ARCANE.name
+    }.toPreferences()
+    override suspend fun cleanUp() {}
+}
+private fun currentMode(value: Ability)=if(value==Ability.SHATTER) Ability.ARCANE else value
+val Context.overlayPreferences by preferencesDataStore("overlay",produceMigrations={listOf(RetireTargetAc,RetireShatterMode)})
 data class OverlayPrefs(val portraitX: Int=0,val portraitY: Int=160,val landscapeX: Int=0,val landscapeY: Int=80,val scale: Float=1f,val image: String="",val elements: List<DamageType> = emptyList(),val mode: Ability=Ability.ARCANE,val selectedPayloads: Set<String> = emptySet(),val advantage: Boolean=false,val disadvantage: Boolean=false,val haptics: Boolean=true,val manualOverrides: Boolean=false,val distance: Int=30,val targetPoint: String="",val directImpact: Boolean=false,val immediateId: String?=null,val manualSlot: Boolean=false)
 class Preferences(private val context: Context) {
-    val flow=context.overlayPreferences.data.map { p -> OverlayPrefs(p[intPreferencesKey("portrait_x")] ?: 0,p[intPreferencesKey("portrait_y")] ?: 160,p[intPreferencesKey("landscape_x")] ?: 0,p[intPreferencesKey("landscape_y")] ?: 80,p[floatPreferencesKey("scale")] ?: 1f,p[stringPreferencesKey("image")] ?: "",p[stringPreferencesKey("elements")]?.split(',')?.mapNotNull {runCatching {DamageType.valueOf(it)}.getOrNull()} ?: emptyList(),runCatching {Ability.valueOf(p[stringPreferencesKey("mode")] ?: "ARCANE")}.getOrDefault(Ability.ARCANE),p[stringSetPreferencesKey("selected_payloads")] ?: emptySet(),p[booleanPreferencesKey("advantage")] ?: false,p[booleanPreferencesKey("disadvantage")] ?: false,p[booleanPreferencesKey("haptics")] ?: true,p[booleanPreferencesKey("manual_overrides")] ?: false,p[intPreferencesKey("distance")] ?: 30,p[stringPreferencesKey("target_point")] ?: "",p[booleanPreferencesKey("direct_impact")] ?: false,p[stringPreferencesKey("immediate_id")],p[booleanPreferencesKey("manual_slot")] ?: false) }
+    val flow=context.overlayPreferences.data.map { p -> OverlayPrefs(p[intPreferencesKey("portrait_x")] ?: 0,p[intPreferencesKey("portrait_y")] ?: 160,p[intPreferencesKey("landscape_x")] ?: 0,p[intPreferencesKey("landscape_y")] ?: 80,p[floatPreferencesKey("scale")] ?: 1f,p[stringPreferencesKey("image")] ?: "",p[stringPreferencesKey("elements")]?.split(',')?.mapNotNull {runCatching {DamageType.valueOf(it)}.getOrNull()} ?: emptyList(),currentMode(runCatching {Ability.valueOf(p[stringPreferencesKey("mode")] ?: "ARCANE")}.getOrDefault(Ability.ARCANE)),p[stringSetPreferencesKey("selected_payloads")] ?: emptySet(),p[booleanPreferencesKey("advantage")] ?: false,p[booleanPreferencesKey("disadvantage")] ?: false,p[booleanPreferencesKey("haptics")] ?: true,p[booleanPreferencesKey("manual_overrides")] ?: false,p[intPreferencesKey("distance")] ?: 30,p[stringPreferencesKey("target_point")] ?: "",p[booleanPreferencesKey("direct_impact")] ?: false,p[stringPreferencesKey("immediate_id")],p[booleanPreferencesKey("manual_slot")] ?: false) }
     suspend fun position(landscape: Boolean,x: Int,y: Int) { context.overlayPreferences.edit { val key=if(landscape) "landscape" else "portrait"; it[intPreferencesKey("${key}_x")]=x; it[intPreferencesKey("${key}_y")]=y } }
     suspend fun scale(scale: Float) { context.overlayPreferences.edit { it[floatPreferencesKey("scale")]=scale.coerceIn(.85f,1.3f) } }
     suspend fun image(uri: String) { context.overlayPreferences.edit { it[stringPreferencesKey("image")]=uri } }
     suspend fun elements(values: List<DamageType>) { context.overlayPreferences.edit {it[stringPreferencesKey("elements")]=values.distinct().joinToString(",") {x->x.name}} }
-    suspend fun mode(value: Ability) { context.overlayPreferences.edit {it[stringPreferencesKey("mode")]=value.name} }
+    suspend fun mode(value: Ability) { context.overlayPreferences.edit {it[stringPreferencesKey("mode")]=currentMode(value).name} }
     suspend fun payloads(ids: Set<String>) {context.overlayPreferences.edit {it[stringSetPreferencesKey("selected_payloads")]=ids}}
     suspend fun haptics(enabled: Boolean) {context.overlayPreferences.edit {it[booleanPreferencesKey("haptics")]=enabled}}
     suspend fun manualOverrides(enabled: Boolean) {context.overlayPreferences.edit {it[booleanPreferencesKey("manual_overrides")]=enabled}}
