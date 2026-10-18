@@ -29,7 +29,7 @@ import java.security.SecureRandom
     val natural get() = when(mode) { RollMode.ADVANTAGE -> attackFaces.maxOrNull(); RollMode.DISADVANTAGE -> attackFaces.minOrNull(); RollMode.NORMAL -> attackFaces.firstOrNull() }
     val critical get() = natural == 20
     fun attackDescription(p: ShotPlan): String = if(attackTotal == null) "Point-targeted blast · no attack roll" else
-        "d20 ${attackFaces.joinToString(" / ")} + ${p.profile.attack} = $attackTotal" + if(mode != RollMode.NORMAL) " · ${mode.name.lowercase()}" else ""
+        "d20 ${attackFaces.joinToString(" / ")} + ${p.attackBonus} = $attackTotal" + if(mode != RollMode.NORMAL) " · ${mode.name.lowercase()}" else ""
 }
 
 /** Explicit player rolls. No clock, renderer, service lifecycle, or retry calls this. */
@@ -44,7 +44,7 @@ object DiceRoller {
         val mode = options.mode(p)
         val faces = if(attack) List(if(mode == RollMode.NORMAL) 1 else 2) { draw(20) } else emptyList()
         val natural = when(mode) { RollMode.ADVANTAGE -> faces.maxOrNull(); RollMode.DISADVANTAGE -> faces.minOrNull(); RollMode.NORMAL -> faces.firstOrNull() }
-        val total = natural?.plus(p.profile.attack)
+        val total = natural?.plus(p.attackBonus)
         val outcome = when {
             !attack -> Outcome.POINT
             natural == 1 -> Outcome.MISS
@@ -64,7 +64,7 @@ object DiceRoller {
         val attack = !p.blast || p.directImpact
         require(r.attackFaces.size == if(attack) { if(r.mode == RollMode.NORMAL) 1 else 2 } else 0)
         require(r.attackFaces.all { it in 1..20 })
-        require(r.attackTotal == r.natural?.plus(p.profile.attack))
+        require(r.attackTotal == r.natural?.plus(p.attackBonus))
         val expected = when {
             !attack -> Outcome.POINT
             r.natural == 1 -> Outcome.MISS
@@ -102,7 +102,7 @@ object DiceRoller {
     }
 }
 
-val Ability.title: String get() = when(this) { Ability.ARCANE -> "Arcane shot"; Ability.ELEMENTAL -> "Elemental shot"; Ability.SPELL -> "Spell shot"; Ability.DISCHARGE -> "Discharge"; Ability.SHATTER -> "Shatter" }
+val Ability.title: String get() = when(this) { Ability.ARCANE -> "Arcane shot"; Ability.ELEMENTAL -> "Elemental shot"; Ability.SPELL -> "Spell shot"; Ability.DISCHARGE -> "Discharge"; Ability.SHATTER -> "Shatter (archived)"; Ability.GAUNTLET -> "Gauntlet Strike"; Ability.SPELL_GAUNTLET -> "Spell-Imbued Gauntlet"; Ability.GUARDIAN -> "Guardian Thunder Gauntlet" }
 fun Map<DamageType,Int>.damageText() = entries.filter { it.value != 0 }.joinToString(" + ") { "${it.value} ${it.key.name.lowercase()}" }.ifBlank { "0 damage" }
 
 fun shotSummary(shot: PendingShot): String = buildString {
@@ -113,6 +113,8 @@ fun shotSummary(shot: PendingShot): String = buildString {
         Engine.components(p,it.critical).forEach {c->appendLine("${c.label}: ${c.damage.dice} [${it.damage.getValue(c.id).detail()}] ${c.damage.type.name.lowercase()}")}
         appendLine("Core: ${it.coreName.ifBlank {p.coreId}}")
     }
+    if(p.chargedGauntlet != null) appendLine("Charged Gauntlet: Bonus Action spent before this attack; +${p.chargedGauntlet.profile.chargedBonus} flat damage consumed on attempt. On a hit, DM records Dexterity save DC ${p.profile.saveDc}: failure pushes 10 ft; no automatic collision damage.")
+    if(p.melee) appendLine("Guardian Thunder Gauntlet rider applies under the accepted class feature. The DM adjudicates the target's actions.")
     appendLine("Used: ${p.actionCost}${p.immediate?.let {", level-${it.castingLevel} slot"} ?: ""}")
     if(p.selectedPayloads.isNotEmpty()) appendLine("Stored spells used: ${p.selectedPayloads.joinToString {it.template.name}}")
     if(p.ability==Ability.DISCHARGE) appendLine("Core exhausted for 600 game seconds")

@@ -108,6 +108,15 @@ object BackupCodec {
     fun validate(s: Campaign) {
         require(s.schema==1 && s.revision>=0 && s.gameSeconds in 0..315360000000L)
         s.profile.validate()
+        s.gauntletCharge?.let { require(it.turnNumber > 0); it.profile.validate() }
+        s.nexusAdoption?.let { adoption ->
+            require(adoption.coreId.length in 1..100 && adoption.source.isNotBlank() && adoption.source.length <= 2000)
+            require(adoption.priorRevision in 0..s.revision && adoption.recordedAtGameSeconds in 0..s.gameSeconds)
+            require(s.installedId == adoption.coreId && !s.postShatter && s.installation == null &&
+                s.cores.any { it.id == adoption.coreId && !it.destroyed }) { "Permanent nexus adoption no longer matches the active record." }
+            require(adoption.legacyInstalledId == null || s.cores.any { it.id == adoption.legacyInstalledId })
+            adoption.legacyInstallation?.let { require(it.coreId.length in 1..100 && it.completeAt in 0..315360000000L) }
+        }
         fun ids(v: List<String>) { require(v.all { it.length in 1..100 } && v.distinct().size==v.size) { "Duplicate or invalid IDs" } }
         ids(s.cores.map { it.id }); ids(s.templates.map { it.id }); ids(s.scrolls.map { it.id }); ids(s.pending.map { it.plan.id }); ids(s.projects.map { it.id })
         ids(s.cores.flatMap { it.payloads }.map { it.id })
@@ -141,8 +150,11 @@ object BackupCodec {
             if(p.ability==Ability.ELEMENTAL) require(p.elements.isNotEmpty())
             require(p.elements.all { t -> t in Engine.elements(p.profile) })
             if(p.elements.size>1 && p.profile.elementCapacityOverride==null) require(p.elements.all { it in Engine.basic })
-            if(p.ability==Ability.SPELL) require(p.hasSpell)
-            if(p.ability in listOf(Ability.ARCANE,Ability.ELEMENTAL)) require(!p.hasSpell)
+            if(p.ability in listOf(Ability.SPELL,Ability.SPELL_GAUNTLET)) require(p.hasSpell)
+            if(p.ability in listOf(Ability.ARCANE,Ability.ELEMENTAL,Ability.GAUNTLET,Ability.GUARDIAN)) require(!p.hasSpell)
+            if(p.melee) { require(p.profile.melee?.approved == true); p.profile.melee!!.validate() }
+            if(p.ability == Ability.GUARDIAN) require(p.profile.melee?.guardianAttackBonus != null)
+            p.chargedGauntlet?.let { charge -> require(p.enhancedMelee && charge.turnNumber > 0 && charge.profile.chargedDamageType != null); charge.profile.validate() }
             it.result?.let { r -> Engine.validateResult(p,r) }
             it.rolled?.let { r -> DiceRoller.validate(p,r) }
     }
