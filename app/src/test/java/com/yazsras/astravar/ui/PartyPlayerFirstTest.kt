@@ -69,6 +69,14 @@ class PartyPlayerFirstTest {
         compose.waitForIdle()
         compose.runOnIdle { captureNativeTestWindows(name, activity, modal) }
     }
+    private fun waitForText(text: String) {
+        compose.waitUntil(10_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+    }
+    private fun waitForEnabledAction(text: String) {
+        compose.waitUntil(10_000) {
+            compose.onAllNodes(hasText(text) and hasClickAction() and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+        }
+    }
     private fun database() = Room.inMemoryDatabaseBuilder(
         ApplicationProvider.getApplicationContext(), CampaignLedgerDb::class.java).build()
 
@@ -113,6 +121,7 @@ class PartyPlayerFirstTest {
         try {
             activity.get().setContent { PartyTestTheme { Page { PartyTypedSheetV2(repo, "korr", "Korr") } } }
             compose.onNodeWithText("Features, actions & capabilities").performScrollTo().performClick()
+            waitForText("Test trait")
             compose.onNodeWithText("Edit Features, actions & capabilities").performScrollTo().performClick()
             compose.onNodeWithText("Feature details 1").performScrollTo().performTextReplacement("Confirmed fictional upgrade")
             compose.onNodeWithText("Change source / resolved event (required)").performScrollTo().performTextReplacement("Synthetic second session")
@@ -143,7 +152,9 @@ class PartyPlayerFirstTest {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { PartyTestTheme { Page { PartyEquipmentV2(repo, "korr") {} } } }
+            waitForEnabledAction("Give / take / move item")
             compose.onNodeWithText("Give / take / move item").performScrollTo().performClick()
+            waitForText("Synthetic harness")
             compose.onNodeWithText("Synthetic harness").performScrollTo().performClick()
             compose.onNodeWithText("Zerg Hasma ▾").performScrollTo().performClick()
             compose.onNodeWithText("Korr", useUnmergedTree = true).performClick()
@@ -172,12 +183,14 @@ class PartyPlayerFirstTest {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { PartyTestTheme { Page { PartyWalletV2(repo, "korr") } } }
+            waitForEnabledAction("Add wallet")
             compose.onNodeWithText("Add wallet").performScrollTo().performClick()
             compose.onNodeWithText("Wallet name").performScrollTo().performTextInput("Synthetic purse")
             compose.onNodeWithText("Gold · blank = unknown").performScrollTo().performTextInput("5")
             compose.onNodeWithText("Currency event source (required)").performScrollTo().performTextInput("Synthetic opening count")
             compose.onNodeWithText("Save currency record").performClick()
             compose.waitUntil(10_000) { runBlocking { db.partyDao().allWallets().size == 1 } }
+            waitForText("Record income / expense")
             compose.onNodeWithText("Record income / expense").performScrollTo().performClick()
             compose.onNodeWithText("Gold · + gained / − spent").performScrollTo().performTextInput("-2")
             compose.onNodeWithText("Currency event source (required)").performScrollTo().performTextInput("Synthetic purchase")
@@ -258,6 +271,7 @@ class PartyPlayerFirstTest {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { PartyTestTheme { Page { PartyEquipmentV2(repo, "korr") {} } } }
+            waitForEnabledAction("Item & currency exchange")
             compose.onNodeWithText("Item & currency exchange").performScrollTo().performClick()
             compose.onNodeWithText("Acquired item name").performScrollTo().performTextInput("Synthetic purchased tool")
             compose.onNodeWithText("Exchange gold change").performScrollTo().performTextInput("-2")
@@ -341,6 +355,9 @@ class PartyPlayerFirstTest {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { PartyTestTheme { Page { PartyCompanionEditorV2(repo, "korr", "Korr") } } }
+            // Room emits state/resources on independent IO queries after the initial empty UI.
+            waitForText("Synthetic counter")
+            waitForText("Active")
             compose.onNodeWithText("Synthetic counter").performScrollTo().performClick()
             compose.onNodeWithText("Close").performClick()
             compose.onNodeWithText("Discard changes?").assertDoesNotExist()
@@ -375,11 +392,12 @@ class PartyPlayerFirstTest {
         } finally { fixture.recycle() }
         runBlocking {
             repo.records.saveProfile(CharacterProfile(id = "korr", name = "Synthetic portrait owner"), source = "Synthetic fixture")
-            repo.party.saveSheet("korr", PartySheetData(), source = "Synthetic fixture")
+            repo.party.saveSheet("korr", PartySheetData(role = "Synthetic portrait role"), source = "Synthetic fixture")
         }
         try {
             activity.get().setContent { PartyTestTheme { Page { PartyTypedSheetV2(repo, "korr", "Korr") } } }
             compose.onNodeWithText("Identity & progression").performScrollTo().performClick()
+            waitForText("Synthetic portrait role")
             compose.onNodeWithText("Edit Identity & progression").performScrollTo().performClick()
             compose.onNodeWithText("Choose portrait").performScrollTo().performClick()
             val launched = requireNotNull(shadowOf(activity.get()).nextStartedActivityForResult)

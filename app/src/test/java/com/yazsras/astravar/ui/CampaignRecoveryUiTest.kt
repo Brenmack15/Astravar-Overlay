@@ -1,11 +1,9 @@
 package com.yazsras.astravar.ui
 
+import android.os.Bundle
+import android.os.Parcel
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
-import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.room.Room
@@ -21,6 +19,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.annotation.LooperMode
+import org.robolectric.android.controller.ActivityController
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w400dp-h1000dp")
@@ -30,29 +29,42 @@ class CampaignRecoveryUiTest {
     @get:Rule val compose = createEmptyComposeRule()
     private fun database() = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), CampaignLedgerDb::class.java).build()
 
+    /** Android saves a parcelled Bundle, not a registry map retaining live in-process objects. */
+    private fun precommitActivityState(controller: ActivityController<ComponentActivity>): Bundle {
+        val state = Bundle()
+        controller.pause().saveInstanceState(state).resume()
+        val writer = Parcel.obtain()
+        val bytes = try { state.writeToParcel(writer, 0); writer.marshall() } finally { writer.recycle() }
+        val reader = Parcel.obtain()
+        return try {
+            reader.unmarshall(bytes, 0, bytes.size); reader.setDataPosition(0)
+            Bundle.CREATOR.createFromParcel(reader).also { it.classLoader = ComponentActivity::class.java.classLoader }
+        } finally { reader.recycle() }
+    }
+
     @Test fun itemCreateReplayFromPrecommitSavedActivityStateReturnsOriginalItemAndReceipt() {
         val db = database(); val repo = CampaignLedgerRepository(db)
-        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
-        var registry = SaveableStateRegistry(restoredValues = null, canBeSaved = { true })
-        val visible = mutableStateOf(true)
+        var activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        // Reuse one composable call site so generated saveable keys survive the new Activity.
+        fun mount() { activity.get().setContent { AstravarTheme { CampaignLedgerPage(repo) } } }
         try {
-            activity.get().setContent { if (visible.value) CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
-                AstravarTheme { CampaignLedgerPage(repo) }
-            } }
+            mount()
             compose.onNodeWithText("Add Item").performClick()
             compose.onNodeWithText("Item name").performScrollTo().performTextInput("Synthetic crash-retry lens")
             compose.onNodeWithText("Source / checkpoint").performScrollTo().performTextInput("Synthetic confirmed acquisition")
-            var beforeCommit: Map<String, List<Any?>> = emptyMap()
-            compose.runOnIdle { beforeCommit = registry.performSave() }
+            val beforeCommit = precommitActivityState(activity)
             compose.onNodeWithText("Save new item").performClick()
             compose.waitUntil(10_000) { runBlocking { db.ledgerDao().allItems().size == 1 } }
             compose.waitForIdle()
             val original = runBlocking { db.ledgerDao().allItems().single() }
             val receipt = runBlocking { db.recordsDao().allReceipts().single() }
-            compose.runOnIdle { visible.value = false }; compose.waitForIdle()
-            compose.runOnIdle { registry = SaveableStateRegistry(beforeCommit, canBeSaved = { true }); visible.value = true }
+            activity.pause().stop().destroy()
+            activity = Robolectric.buildActivity(ComponentActivity::class.java).create(beforeCommit).start().resume().visible()
+            mount()
             compose.waitForIdle()
-            compose.onNodeWithText("Save new item").performClick()
+            compose.onNodeWithText("Item name").performScrollTo().assertTextContains("Synthetic crash-retry lens")
+            compose.onNodeWithText("Source / checkpoint").performScrollTo().assertTextContains("Synthetic confirmed acquisition")
+            compose.onNodeWithText("Save new item").assertIsEnabled().performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithText("Save new item").fetchSemanticsNodes().isEmpty() }
             runBlocking {
                 assertEquals(listOf(original), db.ledgerDao().allItems())
@@ -64,27 +76,26 @@ class CampaignRecoveryUiTest {
 
     @Test fun inventionCreateReplayFromPrecommitSavedStateDoesNotCreateSecondProject() {
         val db = database(); val repo = CampaignLedgerRepository(db)
-        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
-        var registry = SaveableStateRegistry(restoredValues = null, canBeSaved = { true })
-        val visible = mutableStateOf(true)
+        var activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        fun mount() { activity.get().setContent { AstravarTheme { InventionsPageV2(repo) } } }
         try {
-            activity.get().setContent { if (visible.value) CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
-                AstravarTheme { InventionsPageV2(repo) }
-            } }
+            mount()
             compose.onNodeWithText("Add Invention").performClick()
             compose.onNodeWithText("Invention name").performScrollTo().performTextInput("Synthetic crash-retry blueprint")
             compose.onNodeWithText("Source / resolved scene / checkpoint").performScrollTo().performTextInput("Synthetic accepted design")
-            var beforeCommit: Map<String, List<Any?>> = emptyMap()
-            compose.runOnIdle { beforeCommit = registry.performSave() }
+            val beforeCommit = precommitActivityState(activity)
             compose.onNodeWithText("Save invention").performClick()
             compose.waitUntil(10_000) { runBlocking { db.recordsDao().allProjects().size == 1 } }
             compose.waitForIdle()
             val original = runBlocking { db.recordsDao().allProjects().single() }
             val receipt = runBlocking { db.recordsDao().allReceipts().single() }
-            compose.runOnIdle { visible.value = false }; compose.waitForIdle()
-            compose.runOnIdle { registry = SaveableStateRegistry(beforeCommit, canBeSaved = { true }); visible.value = true }
+            activity.pause().stop().destroy()
+            activity = Robolectric.buildActivity(ComponentActivity::class.java).create(beforeCommit).start().resume().visible()
+            mount()
             compose.waitForIdle()
-            compose.onNodeWithText("Save invention").performClick()
+            compose.onNodeWithText("Invention name").performScrollTo().assertTextContains("Synthetic crash-retry blueprint")
+            compose.onNodeWithText("Source / resolved scene / checkpoint").performScrollTo().assertTextContains("Synthetic accepted design")
+            compose.onNodeWithText("Save invention").assertIsEnabled().performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithText("Save invention").fetchSemanticsNodes().isEmpty() }
             runBlocking {
                 assertEquals(listOf(original), db.recordsDao().allProjects())
