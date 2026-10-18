@@ -409,9 +409,10 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
             Text("HB-01 · Dedicated companion infusion slot. Eek remains Zerg's Homunculus Servant, not a generic familiar or Steel Defender.", style = MaterialTheme.typography.bodySmall)
             Text("HB-03 · Eek acts immediately after Zerg; commands do not cost Zerg a Bonus Action. This screen does not automate turns or dice.", style = MaterialTheme.typography.bodySmall)
             Text("HB-04 · Maximum HP = 6 + 4 × Artificer level. AC = 13 + PB. Force Strike = 1d6 + PB force; attack uses Zerg's base spell attack modifier. Evasion follows the accepted Dexterity-save rule.", style = MaterialTheme.typography.bodySmall)
-            Text("HB-05 · One Reaction per round. Channel Magic requires the established touch-spell range and reach. Protective Deflection requires Eek within 5 ft. and reduces damage by PB.", style = MaterialTheme.typography.bodySmall)
+            Text("HB-05 · One shared Reaction per round. Channel Magic delivers Zerg's Touch-range spell when Eek is within 120 ft. of Zerg and can reach the target. Protective Deflection can reduce an attack's damage by Zerg's PB when Zerg is hit, Eek can perceive that attack and Eek is within 5 ft. of Zerg.", style = MaterialTheme.typography.bodySmall)
             Text("HB-06 · At 0 HP Eek folds into a Disabled sphere. Active Mending Repairs: 2d6 HP up to maximum, once per Short Rest. Disabled Reconstruction: 10 minutes with Tinker's Tools and Mending, once per Long Rest. Time or a rest alone does not automatically reactivate or refill Eek.", style = MaterialTheme.typography.bodySmall)
             Text("Reference: accepted 06_HOMEBREW_AND_EEK.md. Historical example levels do not establish the current build. Later accepted amendments take precedence.", color = Muted, style = MaterialTheme.typography.bodySmall)
+            Text("This is a manual known-state ledger. Update HP, condition and separate resource counters explicitly; this screen does not enforce companion combat, rest timing or automatic state transitions.", color = Muted, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
