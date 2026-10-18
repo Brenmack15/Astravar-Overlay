@@ -3,16 +3,20 @@ package com.yazsras.astravar.ui
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yazsras.astravar.R
@@ -45,7 +49,19 @@ val campaignDestinationsV2 = listOf("Astravar", "Inventory", "Campaign", "More")
 
 @Composable fun V2SectionTabs(labels: List<String>, selected: String, change: (String) -> Unit) {
     Box(Modifier.fillMaxWidth().instrumentSurface().padding(horizontal = 16.dp, vertical = 6.dp)) {
-        InstrumentTabs(labels, selected, change)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            labels.forEach { label ->
+                val active = selected == label
+                Box(Modifier.weight(1f).heightIn(min = 52.dp).clip(CutCornerShape(10.dp))
+                    .metalSurface(if (active) Brass else Muted, lit = active)
+                    .semantics { this.selected = active }
+                    .clickable(role = Role.Tab) { change(label) }
+                    .padding(horizontal = 6.dp, vertical = 12.dp), contentAlignment = Alignment.Center) {
+                    Text(label, fontFamily = InterfaceFace, fontSize = 13.sp, color = if (active) Brass else Frost,
+                        textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
     }
 }
 
