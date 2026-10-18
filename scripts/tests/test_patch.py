@@ -63,10 +63,12 @@ class PatchTests(unittest.TestCase):
         manifest = (mod.BUNDLE_ROOT / 'app/src/debug/AndroidManifest.xml').read_text()
         self.assertIn('android.permission.INTERNET', manifest)
         self.assertIn('usesCleartextTraffic="false"', manifest)
-        self.assertIn('Astravar 2.0 UI Rebuild', manifest)
+        self.assertIn('android:label="${astravarDebugLabel}"', manifest)
         main = (mod.BUNDLE_ROOT / 'app/src/main/AndroidManifest.xml').read_text()
         self.assertNotIn('android.permission.INTERNET', main)
         gradle = (mod.BUNDLE_ROOT / FILENAME_GRADLE).read_text()
         self.assertIn('applicationIdSuffix = ".v2uidebug"', gradle)
+        self.assertIn('applicationIdSuffix = ".v2statdebug"', gradle)
+        self.assertIn('Astravar 2.0 Stat Test', gradle)
 
 if __name__ == "__main__": unittest.main()
