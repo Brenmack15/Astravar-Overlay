@@ -51,19 +51,23 @@ private fun optionalNumber(text: String, label: String): Int? = text.trim().take
 
 /** The manual character record remains separate from the accepted weapon engine. */
 @Composable
-fun CharacterOverviewV2(repository: CampaignLedgerRepository, campaign: Campaign? = null) {
+fun CharacterOverviewV2(repository: CampaignLedgerRepository, campaign: Campaign? = null,
+    profileId: String = "local-player", onEditorVisibilityChanged: (Boolean) -> Unit = {}) {
     val records = repository.records
     val profiles by records.characterProfiles.collectAsState(initial = emptyList())
     val abilities by records.characterAbilities.collectAsState(initial = emptyList())
-    val profile = profiles.firstOrNull { it.id == "local-player" }
-    var profileEditorOpen by rememberSaveable { mutableStateOf(false) }
-    var profileSnapshotJson by rememberSaveable { mutableStateOf<String?>(null) }
-    var abilityEditorKey by rememberSaveable { mutableStateOf<String?>(null) }
-    var abilitySnapshotJson by rememberSaveable { mutableStateOf<String?>(null) }
-    var notice by rememberSaveable { mutableStateOf("") }
-    val confirmedWeapon = campaign?.takeIf { it.onboarded }?.profile
-    val name = profile?.name?.takeIf { it.isNotBlank() } ?: confirmedWeapon?.character ?: "Your character"
+    val profile = profiles.firstOrNull { it.id == profileId }
+    var profileEditorOpen by rememberSaveable(profileId) { mutableStateOf(false) }
+    var profileSnapshotJson by rememberSaveable(profileId) { mutableStateOf<String?>(null) }
+    var abilityEditorKey by rememberSaveable(profileId) { mutableStateOf<String?>(null) }
+    var abilitySnapshotJson by rememberSaveable(profileId) { mutableStateOf<String?>(null) }
+    var notice by rememberSaveable(profileId) { mutableStateOf("") }
+    // A disposable test profile must never borrow a real character's identity or values.
+    val confirmedWeapon = campaign?.takeIf { it.onboarded && profileId == "local-player" }?.profile
+    val name = profile?.name?.takeIf { it.isNotBlank() } ?: confirmedWeapon?.character
+        ?: if (profileId == "local-player") "Your character" else "Disposable stat test"
     val level = profile?.level ?: confirmedWeapon?.level
+    SideEffect { onEditorVisibilityChanged(profileEditorOpen || abilityEditorKey != null) }
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -96,7 +100,7 @@ fun CharacterOverviewV2(repository: CampaignLedgerRepository, campaign: Campaign
             abilityNames.entries.chunked(3).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     row.forEach { (key, fullName) ->
-                        val ability = abilities.firstOrNull { it.profileId == "local-player" && it.key == key }
+                        val ability = abilities.firstOrNull { it.profileId == profileId && it.key == key }
                         AbilityTile(key, fullName, ability?.score, ability?.totalModifier,
                             modifier = Modifier.weight(1f).testTag("ability-$key").semantics(mergeDescendants = true) {
                                 contentDescription = "$fullName score ${ability?.score ?: "unknown"}; base modifier ${signedModifier(ability?.baseModifier)}; magical modifier ${ability?.magicModifier?.let { signedModifier(it) } ?: "unknown"}; total ${signedModifier(ability?.totalModifier)}"
@@ -111,12 +115,13 @@ fun CharacterOverviewV2(repository: CampaignLedgerRepository, campaign: Campaign
     }
     if (profileEditorOpen) CharacterProfileDialog(
         snapshot = profileSnapshotJson?.let { Json.decodeFromString<CharacterProfile>(it) }, latest = profile, records = records,
+        profileId = profileId,
         onDismiss = { profileEditorOpen = false }, onSaved = { profileEditorOpen = false; notice = "Character status saved" }
     )
     val editingKey = abilityEditorKey
     if (editingKey != null) CharacterAbilityDialog(
         key = editingKey, snapshot = abilitySnapshotJson?.let { Json.decodeFromString<CharacterAbility>(it) },
-        latest = abilities.firstOrNull { it.profileId == "local-player" && it.key == editingKey },
+        latest = abilities.firstOrNull { it.profileId == profileId && it.key == editingKey }, profileId = profileId,
         profileExists = profile != null, records = records, onDismiss = { abilityEditorKey = null },
         onSaved = { abilityEditorKey = null; notice = "Ability saved" }
     )
@@ -165,7 +170,7 @@ private fun CharacterNumberField(label: String, value: String, change: (String) 
 
 @Composable
 private fun CharacterProfileDialog(snapshot: CharacterProfile?, latest: CharacterProfile?, records: CampaignRecordsRepository,
-    onDismiss: () -> Unit, onSaved: () -> Unit) {
+    profileId: String, onDismiss: () -> Unit, onSaved: () -> Unit) {
     var name by rememberSaveable { mutableStateOf(snapshot?.name.orEmpty()) }
     var hp by rememberSaveable { mutableStateOf(snapshot?.currentHp?.toString().orEmpty()) }
     var maximum by rememberSaveable { mutableStateOf(snapshot?.maximumHp?.toString().orEmpty()) }
@@ -182,7 +187,7 @@ private fun CharacterProfileDialog(snapshot: CharacterProfile?, latest: Characte
         if (!dirty) PlayerTextButton(onClick = LocalPlayerDismiss.current, enabled = !actions.busy) { Text("Cancel") }
         PlayerButton(onClick = {
             actions.run {
-                val model = (snapshot ?: CharacterProfile()).copy(name = name.trim(), currentHp = optionalNumber(hp, "Current HP"),
+                val model = (snapshot ?: CharacterProfile(id = profileId)).copy(name = name.trim(), currentHp = optionalNumber(hp, "Current HP"),
                     maximumHp = optionalNumber(maximum, "Maximum HP"), temporaryHp = optionalNumber(temporary, "Temporary HP"),
                     armorClass = optionalNumber(ac, "Armor class"), level = optionalNumber(level, "Level"))
                 records.saveProfile(model, snapshot?.revision, source.trim()); onSaved(); "Saved locally."
@@ -206,7 +211,7 @@ private fun CharacterProfileDialog(snapshot: CharacterProfile?, latest: Characte
 
 @Composable
 private fun CharacterAbilityDialog(key: String, snapshot: CharacterAbility?, latest: CharacterAbility?, profileExists: Boolean,
-    records: CampaignRecordsRepository, onDismiss: () -> Unit, onSaved: () -> Unit) {
+    profileId: String, records: CampaignRecordsRepository, onDismiss: () -> Unit, onSaved: () -> Unit) {
     var score by rememberSaveable(key) { mutableStateOf(snapshot?.score?.toString().orEmpty()) }
     var magic by rememberSaveable(key) { mutableStateOf(snapshot?.magicModifier?.toString() ?: "0") }
     var notes by rememberSaveable(key) { mutableStateOf(snapshot?.notes.orEmpty()) }
@@ -226,7 +231,7 @@ private fun CharacterAbilityDialog(key: String, snapshot: CharacterAbility?, lat
             actions.run {
                 val raw = optionalNumber(score, "Ability score")
                 val magical = magic.toIntOrNull() ?: error("Magical modifier must be a whole number.")
-                val model = (snapshot ?: CharacterAbility(key = key)).copy(score = raw, magicModifier = magical, notes = notes)
+                val model = (snapshot ?: CharacterAbility(key = key, profileId = profileId)).copy(score = raw, magicModifier = magical, notes = notes)
                 records.saveAbility(model, snapshot?.revision, source.trim()); onSaved(); "Saved locally."
             }
         }, enabled = !actions.busy && !stale && profileExists && source.isNotBlank()) { Text("Save ability") }

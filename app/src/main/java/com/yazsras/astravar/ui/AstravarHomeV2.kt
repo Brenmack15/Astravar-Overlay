@@ -67,11 +67,14 @@ val campaignDestinationsV2 = listOf("Astravar", "Inventory", "Campaign", "More")
 
 @Composable fun ArmorOverviewV2(
     state: Campaign, ledger: CampaignLedgerRepository, combat: () -> Unit, systems: () -> Unit,
-    eek: () -> Unit, inventory: () -> Unit, elements: List<DamageType> = emptyList(), selectElement: () -> Unit = combat
+    eek: () -> Unit, inventory: () -> Unit, elements: List<DamageType> = emptyList(), selectElement: () -> Unit = combat,
+    characterProfileId: String = "local-player", onOverlayVisibilityChanged: (Boolean) -> Unit = {}
 ) {
     var capabilitiesOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var characterEditorOpen by remember { mutableStateOf(false) }
+    SideEffect { onOverlayVisibilityChanged(capabilitiesOpen || characterEditorOpen) }
     Page {
-        CharacterOverviewV2(ledger, state)
+        CharacterOverviewV2(ledger, state, characterProfileId) { characterEditorOpen = it }
         val cardRatio = if (androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.15f) .85f else 1f
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             PlayerCard(modifier = Modifier.weight(1f).aspectRatio(cardRatio), onClick = selectElement, padding = 12.dp, spacing = 0.dp) {

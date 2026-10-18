@@ -78,6 +78,9 @@ val rebuildDestinations = listOf("Armor", "Combat", "Campaign", "Config")
         PlayerEntry("Campaign backup", "Items, projects, connections & companion", "History", { open("Campaign backup") })
         PlayerEntry("Weapon backup", "Separate combat save", "History", { open("Weapon backup") })
         PlayerEntry("Fictional sync", "Public disposable test records", "More", { open("Fictional sync") })
+        if (com.yazsras.astravar.BuildConfig.DEBUG) {
+            PlayerEntry("Remote Updates", "Opt-in disposable ability test", "Settings", { open("Remote Updates") })
+        }
         PlayerEntry("Help & diagnostics", "Device & build information", "More", { open("Help & diagnostics") })
     }
 }
