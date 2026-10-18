@@ -69,6 +69,6 @@ class PatchTests(unittest.TestCase):
         gradle = (mod.BUNDLE_ROOT / FILENAME_GRADLE).read_text()
         self.assertIn('applicationIdSuffix = ".v2uidebug"', gradle)
         self.assertIn('applicationIdSuffix = ".v2statdebug"', gradle)
-        self.assertIn('Astravar 2.0 Stat Test', gradle)
+        self.assertEqual(2, gradle.count('manifestPlaceholders["astravarDebugLabel"] = "Astravar"'))
 
 if __name__ == "__main__": unittest.main()
