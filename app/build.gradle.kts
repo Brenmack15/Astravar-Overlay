@@ -29,10 +29,10 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".v2uidebug"; versionNameSuffix = "-ui-rebuild"
-            manifestPlaceholders["astravarDebugLabel"] = "Astravar 2.0 UI Rebuild"
+            manifestPlaceholders["astravarDebugLabel"] = "Astravar"
             if (remoteStatTest) {
                 applicationIdSuffix = ".v2statdebug"; versionNameSuffix = "-remote-stat-test"
-                manifestPlaceholders["astravarDebugLabel"] = "Astravar 2.0 Stat Test"
+                manifestPlaceholders["astravarDebugLabel"] = "Astravar"
             }
         }
         release {
