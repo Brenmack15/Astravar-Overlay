@@ -1,6 +1,7 @@
 package com.yazsras.astravar
 
 import android.graphics.Point
+import android.graphics.Rect
 import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -48,7 +49,22 @@ class OverlayInstrumentationTest {
         }
         error("Missing product control: $text")
     }
-    private fun panelControl(text: String): UiObject2 {
+    private fun <T> freshSnapshot(selector: BySelector, description: String, timeoutMs: Long = 30_000, read: (UiObject2) -> T): T {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        while (true) {
+            val remaining = deadline - SystemClock.uptimeMillis()
+            if (remaining <= 0) break
+            try {
+                device.wait(Until.findObject(selector), minOf(1_000L, remaining))?.let { return read(it) }
+            } catch (_: StaleObjectException) {
+                // Only an observation is retried; its detached value survives a
+                // subsequent window replacement without retaining a stale node.
+            }
+            device.waitForIdle()
+        }
+        error("No fresh accessibility snapshot: $description")
+    }
+    private fun panelControlBounds(text: String): Rect {
         val selector = By.text(text).pkg(appPackage).enabled(true).clickable(true)
         val deadline = SystemClock.uptimeMillis() + 30_000
         val minimumTap = (48 * instrumentation.targetContext.resources.displayMetrics.density).toInt()
@@ -64,14 +80,14 @@ class OverlayInstrumentationTest {
                     val header = device.findObject(By.desc("Drag or collapse Astravar panel").pkg(appPackage))
                     val panel = header?.parent
                     panel?.findObject(selector)?.let { control ->
-                        val bounds = control.visibleBounds
-                        if (bounds.width() >= minimumTap && bounds.height() >= minimumTap) return control
+                        val bounds = Rect(control.visibleBounds)
+                        if (bounds.width() >= minimumTap && bounds.height() >= minimumTap) return bounds
                     }
                     val scroll = panel?.findObject(By.clazz("android.widget.ScrollView").pkg(appPackage))
                     scroll?.scroll(direction, .6f)
                 } catch (_: StaleObjectException) {
                     // Only lookup/scroll is retried. A resource-spending click is
-                    // performed once, after its fresh enabled node is returned.
+                    // performed once, from the verified detached bounds.
                 }
                 device.waitForIdle()
             }
@@ -79,10 +95,10 @@ class OverlayInstrumentationTest {
         error("Missing enabled overlay control: $text")
     }
     private fun tapPanel(text:String) {
-        val control = panelControl(text)
+        val bounds = panelControlBounds(text)
         val minimumTap = (48 * instrumentation.targetContext.resources.displayMetrics.density).toInt()
-        assertTrue("Overlay control must retain a visible 48 dp touch target: $text", control.visibleBounds.width() >= minimumTap && control.visibleBounds.height() >= minimumTap)
-        control.click()
+        assertTrue("Overlay control must retain a visible 48 dp touch target: $text", bounds.width() >= minimumTap && bounds.height() >= minimumTap)
+        assertTrue("Touch must be dispatched once to the observed overlay control: $text", device.click(bounds.centerX(), bounds.centerY()))
         device.waitForIdle()
     }
     private fun targetText(text:String):UiObject2 = device.wait(
@@ -115,31 +131,29 @@ class OverlayInstrumentationTest {
         expand();screenshot("expanded")
         device.findObject(By.desc("Drag or collapse Astravar panel")).drag(Point(device.displayWidth-20,160),500)
         device.waitForIdle()
-        val panel=(device.wait(Until.findObject(By.desc("Drag or collapse Astravar panel")),10000)
-            ?: error("Dragged panel did not return after its saved-position refresh")).visibleBounds
+        val panel=freshSnapshot(By.desc("Drag or collapse Astravar panel").pkg(appPackage), "dragged panel bounds", timeoutMs=10_000) { Rect(it.visibleBounds) }
         assertTrue(panel.left>=0 && panel.right<=device.displayWidth)
         screenshot("dragged")
         tapPanel("Adv")
         assertTrue("Advantage selection must be visibly committed before rolling", device.wait(Until.hasObject(By.text("✓ Adv").pkg(appPackage)),30000))
         tapPanel("Roll attack")
         assertTrue(device.wait(Until.hasObject(By.text("ATTACK ROLL")),30000))
-        val formula=device.findObject(By.textStartsWith("d20 ")).text
+        val formula=freshSnapshot(By.textStartsWith("d20 ").pkg(appPackage), "first committed attack formula") { it.text }
         assertTrue("Two visible d20s must be preserved",formula.contains(" / ") && formula.contains("advantage"))
         File(files,"saved-first-roll.txt").writeText(formula)
         assertFalse("No manual damage entry in normal combat",device.hasObject(By.clazz("android.widget.EditText").pkg(appPackage)))
         screenshot("automatic-result")
         tapPanel("Roll again")
-        val normalFormula = device.wait(Until.findObject(By.text(Pattern.compile("d20 [0-9]+ \\+ -?[0-9]+ = -?[0-9]+")).pkg(appPackage)),30000)
-            ?: error("The second committed roll did not show its normal single-d20 result")
-        assertFalse("One-shot advantage must reset for the next attack",normalFormula.text.contains(" / ") || normalFormula.text.contains("advantage"))
-        File(files,"saved-roll.txt").writeText(normalFormula.text)
+        val normalFormula = freshSnapshot(By.text(Pattern.compile("d20 [0-9]+ \\+ -?[0-9]+ = -?[0-9]+")).pkg(appPackage), "second committed normal attack formula") { it.text }
+        assertFalse("One-shot advantage must reset for the next attack",normalFormula.contains(" / ") || normalFormula.contains("advantage"))
+        File(files,"saved-roll.txt").writeText(normalFormula)
         screenshot("automatic-normal-result")
         tapPanel("Collapse")
         val edit=device.findObject(By.desc("Keyboard focus test"));edit.click();edit.text="typed under Astravar"
         assertEquals("typed under Astravar",device.findObject(By.desc("Keyboard focus test")).text)
         device.pressBack();device.setOrientationLeft();device.waitForIdle()
         assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))
-        val rotated=device.findObject(By.descStartsWith("Expand Astravar crystal")).visibleBounds
+        val rotated=freshSnapshot(By.descStartsWith("Expand Astravar crystal").pkg(appPackage), "rotated crystal bounds") { Rect(it.visibleBounds) }
         assertTrue(rotated.left>=0 && rotated.right<=device.displayWidth && rotated.bottom<=device.displayHeight)
         expand();screenshot("landscape-result");tapPanel("Collapse")
         device.setOrientationNatural();device.waitForIdle()
