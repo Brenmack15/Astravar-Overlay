@@ -342,4 +342,64 @@ class CampaignRecordsTest {
         assertTrue(repo.characterAbilities.first().isEmpty())
         assertEquals(1, repo.audit.first().size)
     }
+
+    @Test fun restoreRejectsFutureForkedOrContradictoryHistoryWithoutChangingLocalState() = runBlocking {
+        val item = ledger.create(LedgerDraft("Synthetic protected item"), "protected-create")
+        val originalEvent = db.ledgerDao().allEvents().single()
+        val future = originalEvent.copy(commandId = "forged-future", priorRevision = 98, resultingRevision = 99,
+            beforeJson = campaignJson.encodeToString(item.copy(revision = 98)),
+            afterJson = campaignJson.encodeToString(item.copy(revision = 99)))
+        val futureBackup = LedgerExport(schema = 1, exportedAt = 1, items = emptyList(), events = listOf(future))
+        val futurePreview = ledger.previewImport(campaignJson.encodeToString(futureBackup))
+        assertFalse(futurePreview.valid)
+        assertTrue(futurePreview.conflicts.any { it.contains("final saved state") })
+        val fork = originalEvent.copy(commandId = "forged-fork")
+        val forkPreview = ledger.previewImport(campaignJson.encodeToString(futureBackup.copy(events = listOf(fork))))
+        assertFalse(forkPreview.valid)
+        assertTrue(forkPreview.conflicts.any { it.contains("competing commands") })
+        val contradictory = originalEvent.copy(afterJson = campaignJson.encodeToString(item.copy(title = "Different snapshot")))
+        val target = Room.inMemoryDatabaseBuilder(context, CampaignLedgerDb::class.java).allowMainThreadQueries().build()
+        try {
+            val partial = LedgerExport(schema = 1, exportedAt = 1, items = listOf(item), events = listOf(contradictory))
+            val preview = CampaignLedgerRepository(target).previewImport(campaignJson.encodeToString(partial))
+            assertFalse(preview.valid)
+            assertTrue(preview.conflicts.any { it.contains("final saved state") })
+        } finally { target.close() }
+        fails { ledger.restore(futurePreview, "reject-contradictory-history") }
+        assertEquals(item, db.ledgerDao().getItem(item.id))
+        assertEquals(listOf(originalEvent), db.ledgerDao().allEvents())
+        assertEquals(1, repo.audit.first().size)
+    }
+
+    @Test fun restoreAllowsMissingOlderHistoryWithoutInventingIt() = runBlocking {
+        val item = LedgerItem("synthetic-gap-item", "Synthetic item with historical gap", createdAt = 1, updatedAt = 3, revision = 3)
+        val before = item.copy(updatedAt = 2, revision = 2)
+        val event = LedgerEvent("synthetic-gap-update", item.id, "UPDATE", "Player entry", "Preserved later update", "Test",
+            "legacy-fingerprint", 2, 3, 3, campaignJson.encodeToString(before), campaignJson.encodeToString(item))
+        val backup = LedgerExport(schema = 1, exportedAt = 1, items = listOf(item), events = listOf(event))
+        val preview = ledger.previewImport(campaignJson.encodeToString(backup))
+        assertTrue(preview.conflicts.toString(), preview.valid)
+        ledger.restore(preview, "restore-historical-gap")
+        assertEquals(item, db.ledgerDao().getItem(item.id))
+        assertEquals(listOf(event), db.ledgerDao().allEvents())
+    }
+
+    @Test fun restoreRejectsFutureAuditReceiptForExistingConnection() = runBlocking {
+        val entity = ConnectionEntity("Synthetic protected connection")
+        repo.saveEntity(entity, source = "Known scene", commandId = "protected-connection-create")
+        val current = repo.entities.first().single()
+        val afterJson = campaignJson.encodeToString(current.copy(notes = "Contradictory future state", revision = 99))
+        val forged = CampaignAudit("forged-connection-update", "forged-connection-update", "connection", current.id, "UPDATE", "Untrusted file",
+            98, 99, 1, campaignJson.encodeToString(current.copy(revision = 98)), afterJson)
+        val receipt = CommandReceipt(forged.commandId, "a".repeat(64), "connection", current.id, 99, 1, outcomeJson = afterJson)
+        val backup = LedgerExport(exportedAt = 1, items = emptyList(), events = emptyList(),
+            records = CampaignRecordsExport(audit = listOf(forged), receipts = listOf(receipt)))
+        val preview = ledger.previewImport(campaignJson.encodeToString(backup))
+        assertFalse(preview.valid)
+        assertTrue(preview.conflicts.any { it.contains("final saved state") })
+        fails { ledger.restore(preview, "reject-future-audit") }
+        assertEquals(current, repo.entities.first().single())
+        assertNull(repo.receipt(forged.commandId))
+        assertEquals(1, repo.audit.first().size)
+    }
 }
