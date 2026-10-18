@@ -20,11 +20,13 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 import org.robolectric.annotation.LooperMode
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w400dp-h1000dp")
 @LooperMode(LooperMode.Mode.PAUSED)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class CharacterOverviewV2Test {
     @get:Rule val compose = createEmptyComposeRule()
     private fun database() = Room.inMemoryDatabaseBuilder(
