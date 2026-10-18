@@ -18,8 +18,8 @@ import kotlin.math.sin
 
 /** Nine approved source particles surround neutral Force. Locks use the existing engine. */
 @Composable fun ElementWheelV2(profile: Profile, selected: List<DamageType>, close: () -> Unit, choose: (DamageType) -> Unit) {
-    val ring = listOf(DamageType.FIRE, DamageType.LIGHTNING, DamageType.THUNDER, DamageType.POISON,
-        DamageType.ACID, DamageType.COLD, DamageType.NECROTIC, DamageType.PSYCHIC, DamageType.RADIANT)
+    val ring = listOf(DamageType.FIRE, DamageType.COLD, DamageType.LIGHTNING, DamageType.ACID,
+        DamageType.POISON, DamageType.THUNDER, DamageType.NECROTIC, DamageType.PSYCHIC, DamageType.RADIANT)
     val allowed = if(profile.elementCapacity > 1 && profile.elementCapacityOverride == null) Engine.basic else Engine.elements(profile)
     AlertDialog(onDismissRequest = close, title = { Text("Choose an element") },
         text = {
