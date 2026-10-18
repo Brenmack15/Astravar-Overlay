@@ -59,6 +59,19 @@ passed. Use the milestone report and exact Actions run for actual results. Local
 Robolectric output is separate from real emulator instrumentation. Neither is a
 physical Galaxy S26 test.
 
+## History acceptance and complete backups
+
+The inherited delete-to-20 behavior is superseded by immutable raw preservation
+in the existing archives table. Recent display and Undo remain bounded. Complete
+weapon backups use the streaming ZIP contract; legacy JSON bytes, malformed
+history, original archives and old command identities remain recoverable. See
+[the format, limits and regressions](HISTORY_PRESERVATION.md). The final native
+fixture injects 62 fictional older rows into a stopped copied database with its
+old history triggers removed, then verifies every original hash after an actual
+APK update and startup. No fixture may operate on a phone or non-demo data.
+Focused cases pass in both variants; final clean-head build and native evidence
+remain separate gates.
+
 ## Permanent signing and safe delivery
 
 A successful CI test-signing run proves packaging and the tested update procedure

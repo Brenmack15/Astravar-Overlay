@@ -110,7 +110,7 @@ python -m unittest scripts.tests.test_owner_sync_harness -v
 | Local service auth, write, original receipt, retry, independent readback, revocation | 11 Python tests passed, including actual loopback HTTP requests and a shared Unicode fingerprint fixture |
 | Durable service records/receipts/revocation after reopen | Covered by Python tests |
 | Concurrent stale revisions and changed-ID collisions | Covered by Python tests |
-| Android queue, receipt verification, history integrity, offline replay, credential scope, encrypted vault | Flushed debug and release XML each show 18/18 repository/vault and 2/2 native Config UI tests passing; the final root-dot normalization regression awaits the coordinated rerun and overall build status belongs to the upgrade checkpoint |
+| Android queue, receipt verification, history integrity, offline replay, credential scope, encrypted vault | Verified exact-head CI e84a3df/run39158352867 XML shows 18/18 repository/vault tests and 2/2 Android/Robolectric Config UI tests passing in each variant, including root-dot normalization. That workflow later timed out in the separate build25 R8 pass; overall and later-source results belong to the upgrade checkpoint and final report. These are not native network or ChatGPT-to-device acceptance. |
 | AndroidKeyStore hardware behavior | Implementation present; crypto tests inject an AES key and do not constitute a physical device/TEE test |
 | Existing private DM Bridge read | Read-only tool call returned Sites verified identity, Sites D1, DEMO_ONLY, revision 4 / 3 milestones on 18 October 2026; no write performed |
 | New native Android client to an enrolled HTTPS service | Not verified; no production service or device enrollment available |

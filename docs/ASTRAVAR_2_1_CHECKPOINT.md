@@ -7,6 +7,34 @@ targeting the existing 2.0 development branch rather than the default branch.
 Read this document together with the current Git head, PR and exact-head Actions
 results; a historical checkpoint is not evidence that a later build passed.
 
+## Final audit correction: complete history preservation
+
+The inherited weapon repository pruned older rolls/events and deleted archives at
+startup; bounded backup decoding also discarded older history. The candidate
+built at local `5aa9f9f` / published `e84a3df` is superseded for delivery. Historical
+Shatter decoding alone did not satisfy the owner's preserve-all requirement.
+
+The correction is implemented: immutable original bodies, including malformed
+legacy records, are retained before normalization, replacement or pruning in the
+existing archives table. The interactive and Undo view remains at 20. Complete
+streaming ZIP export/restore retains all raw preservation records; confirmed
+legacy JSON imports retain their exact original bytes in deduplicated chunks.
+Old command IDs remain recognized outside the recent journal. See
+[the preservation contract and limits](HISTORY_PRESERVATION.md).
+
+Focused Android/Robolectric verification now passes 50 unique cases per variant,
+including 14 complete-backup, eight raw-preservation and three restore UI cases.
+The boundary fixture crosses both 64 KiB original-file chunks and 1 MiB database
+appends. A large legacy debug fixture timed out during concurrent-emulator memory
+pressure; without QEMU it passes in 46.086 seconds debug / 46.939 seconds release,
+with its original deadline unchanged. The release comparison also passed. No
+integrity assertion was relaxed and no production data was used.
+
+This checkpoint is written before the final clean full build. The final delivery
+report, embedded APK revision, matching published Git tree and exact-head Actions
+run must establish the actual final-source results. Do not reuse an earlier APK
+or infer native update/physical-device acceptance from these focused tests.
+
 ## Recovery and scope
 
 The supplied Player First handoff was inspected in full. Its 17 passing checks
@@ -61,45 +89,54 @@ inferred from those references.
 
 ## Verification ledger
 
-Measured local results before the final audit fixes: 124 Kotlin rules tests and
-41 Python checks passed; both Android variants compiled, both lint tasks passed
-without errors, and debug/optimized owner-signed APK assembly passed. The full
-rerun at local `7c64a37` executed 225 Android tests per variant and exposed one
-real Eek navigation failure in each variant (2 debug / 16 release tests skipped
-under their explicit optional-live/debug-only gates). The bounded native-sheet
-fix is committed as `31f7a23`; it and the subsequent audit corrections require
-their coordinated rerun. Do not report the preceding full run as green.
+The exact earlier published head `e84a3df692480526a0dfe6e000d01906981c1cf1`
+completed 41 Python checks, 124 rules tests and 239 Android tests per variant:
+debug 237 passed / two explicitly gated skips; release 223 passed / 16 explicitly
+gated skips; zero failures or errors. Both lints passed with zero errors (48 debug
+warnings / 50 release warnings and one hint each). The Eek navigation failure
+caught earlier was fixed before that independent full-suite pass.
 
-The final audit also corrects advanced single-element selection with Dual
-Resonance, overlay payload mode preservation, modal validation/retry behavior,
-audit pagination, stable create-command identities and complete backup review.
-Consult the exact-head PR checks and final evidence for their actual outcomes;
-source implementation is not a test result. Initial lint reports contained
-45 debug / 46 release warnings, including retained dependency/artwork/tooling
-advice and new owner-sync advice about synchronous credential persistence.
-Those warnings are not all legacy findings, and none was suppressed to obtain
-a pass.
-The source gates retain original artwork and owner signing-block hashes, with
-explicit reviewed 2.1 source changes recorded separately.
+Its workflow https://github.com/Brenmack15/Astravar-Overlay/actions/runs/39158352867
+ultimately failed at the 25-minute combined-step deadline during the separate
+code-25 R8 build, after the first full Gradle verification succeeded in 22m21s.
+The native stage did not run. The corrected workflow keeps every check and gives
+both optimized builds a bounded 40-minute step within an 80-minute job.
+CI APKs retain their conspicuous temporary-signer labels.
 
-The two historical source manifests now record each authorized 2.1 modification
-with its previous pinned digest, current digest and reason (18 foundation and
-14 recovered-source entries). This is an explicit source evolution, not a claim
-that the engine and campaign implementation are unchanged. The independent
-upgrade gate pins five old schema JSON files byte-for-byte and excludes private
-review, signing and distribution artifacts from source control.
+After the history correction, all 124 rules tests pass. The focused Android runs
+cover 50 unique cases per variant, including the 14-case complete-backup class,
+eight preservation cases, three narrow/large-font restore UI cases and affected
+repository/migration/formula regressions. All passed. The first test compilation
+exposed a missing Compose semantics extension import, fixed without weakening its
+assertions. The former memory-pressure timeout was rerun without the emulator and
+passes under its unchanged limit. Final full-suite results must come from the
+fresh clean-head verification, not a sum of stale XML files.
 
-The cloud software API 36 emulator completed an actual Android boot. App runtime
-and in-place update acceptance remain separate from that boot result. The
-software rendering captures were reviewed for Armor, Combat, element alignment
-and Config. Standalone Party fixtures initially omitted the application's
-content-color Surface; they are being corrected before further visual claims.
+The Python suite now contains 50 checks, including nine synthetic native-history
+fixture checks. Source gates verify 33 recovered files, 79 foundation files, 14
+launcher resources, ten original particle files and five byte-frozen historical
+schema JSON files. Explicit source evolution records 20 reviewed foundation and
+16 recovered-source entries, preserving their earlier pinned hashes and reasons.
+The original owner signing block remains unchanged. No blanket lint baseline or
+suppression was introduced; new OwnerSync synchronous-persistence/KTX advice is
+reported separately from inherited resource/dependency advice.
 
-Required final checks: rules and Android unit/regression tests, Room 1→2→3,
-backup/restore, transactions/replay/conflicts, lint, optimized release assembly,
-native emulator overlay/navigation/large-font/landscape, same-key two-version
-data-preserving update, and APK identity/certificate verification. A software
-rendering fixture is not a real Android emulator or physical Galaxy S26 test.
+Android UI captures and form tests use Robolectric native graphics. They do not
+prove external SAF chooser behavior, TalkBack traversal or physical Samsung use.
+Activity Bundle recovery is distinct from a force-stop-resistant unsaved-draft
+journal. The local software-emulator attempts encountered platform ANRs/startup
+and memory pressure; at this checkpoint no native overlay/update pass is claimed.
+The isolated final native path verifies an old owner24 to fixed-source25 update,
+compares persisted-store hashes before startup, then independently checks more
+than 20 old Shatter/event rows, malformed history, a legacy archive and current
+native readback. It also rechecks overlay notification/history/permission behavior
+on the updated source. The fixture is strictly fictional and emulator-only.
+
+Required remaining final checks: fresh full Android suites, both lints, optimized
+owner24/proof25 APKs and metadata, exact published-tree equality, exact-head CI,
+native runtime/update and visual review. Record their final outcomes in the
+external delivery report, draft PR and project documentation without changing a
+frozen artifact's source merely to append its results.
 
 ## Signing, connection and migration gates
 
