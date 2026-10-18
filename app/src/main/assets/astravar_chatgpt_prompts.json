@@ -1,0 +1,85 @@
+{
+  "version": "1.0.0",
+  "type": "astravar-reusable-prompt-catalog",
+  "storage": "LOCAL_APP_RESOURCE_ONLY",
+  "instructions": "Use as copyable reusable text; dynamically supply record/campaign references only when verified. Never embed private tokens or current one-off command IDs.",
+  "templates": [
+    {
+      "id": "dm-continuity",
+      "section": "Campaign",
+      "title": "Continue a campaign in a new chat",
+      "action": "Resume from verified checkpoint",
+      "body": "Act as DM for my established solo campaign. Read the current authoritative Astravar checkpoint and player-known records through the connected authorized integration when available, plus relevant campaign library/Notion source files and the latest accepted DM rules. Compare sources by revision and explicit player corrections. Identify the last resolved event, unresolved decision or dice roll, active resources and companions, then continue exactly there. Never invent actions, rolls, HP, currency, loot, hidden information, or a new starting scene. If Astravar is unavailable or sources disagree, report that and ask only for the missing verified checkpoint."
+    },
+    {
+      "id": "dev-continuity",
+      "section": "Development",
+      "title": "Continue Android development in a new Work/Codex chat",
+      "action": "Recover current repository truth",
+      "body": "Resume existing Astravar Android development; do not create a new project. Inspect Brenmack15/Astravar-Overlay, its latest development branches and draft PRs, the latest verified commit, Actions results and Astravar project handoff docs. Recover unfinished changes before touching code. Preserve accepted mechanics, native Kotlin/Compose, Room migrations, artwork, application IDs and signing. List verified status and blockers; do not force-push, merge, rotate keys, claim tests passed, or touch real campaign records without explicit authority."
+    },
+    {
+      "id": "sync-reconcile",
+      "section": "Recovery",
+      "title": "Audit app / Notion records",
+      "action": "Compare without overwriting",
+      "body": "Read the authoritative Astravar campaign checkpoint and relevant Notion player-known records through available authorized tools. Do a read-only comparison by stable external IDs, revisions, event receipts and provenance. List records missing on either side, conflicts, stale revisions, and unresolved game facts. Do not infer that Unknown means zero; do not import, merge or modify either side until I approve a precise reconciliation plan."
+    },
+    {
+      "id": "level-up",
+      "section": "Party",
+      "title": "Review a party member level-up",
+      "action": "Prepare approved changes",
+      "body": "For the party member I identify, read their current approved character/companion sheet, inventory, accepted homebrew, latest campaign checkpoint and past level changes. Separate level-derived formulas from granted upgrades and equipment bonuses. Propose an exact before/after diff, required rolls/choices, and source citations. Do not invent HP rolls, spells, features or upgrade choices. Only after player and DM confirmation, submit a version-checked update through the authorized Astravar integration and verify its committed receipt; if write access is unavailable provide a review-only plan."
+    },
+    {
+      "id": "inventory-event",
+      "section": "Campaign",
+      "title": "Record an acquisition, transfer or discovery",
+      "action": "Protect item identities",
+      "body": "Record a player-confirmed and DM-resolved inventory event. Identify the existing item by stable ID, not name alone, and determine its owner, location, item state, quantity and affected party member. A transfer must move an item without duplicating it; an unconfirmed invention must not consume material. Validate source and expected revisions. If an authorized Astravar write tool exists, request confirmation where needed, commit atomically and read the original receipt. Otherwise, prepare a proposed event only."
+    },
+    {
+      "id": "checkpoint",
+      "section": "Campaign",
+      "title": "Save session handoff",
+      "action": "Preserve unresolved scene",
+      "body": "Produce a player-safe campaign checkpoint from the latest resolved gameplay and connected Astravar/Notion sources, including scene, location and time when verified, current resources, companions, quests, inventory changes, latest committed event, pending dice/decisions and rules versions. Preserve explicit unknowns. If authorized, version-check and store the checkpoint in Astravar, then read it back; otherwise provide a copyable checkpoint and do not claim it was saved."
+    },
+    {
+      "id": "gear-audit",
+      "section": "Party",
+      "title": "Audit party equipment and abilities",
+      "action": "Reconcile installed items",
+      "body": "Read verified Astravar party sheets for Zerg, Eek, Korr and Veyrath, and read the shared inventory and equipment links. Check attunement, ownership, installed modules, equipment-conditioned AC/damage, charges and capabilities without duplicating items or adding bonuses twice. Compare only player-known confirmed details. Present conflicts and a proposed fix; do not auto-apply unresolved mechanics."
+    },
+    {
+      "id": "research",
+      "section": "Campaign",
+      "title": "Track an invention and research",
+      "action": "Keep proposed vs constructed separate",
+      "body": "Read an existing Astravar invention and linked item/research records. Record the current hypothesis, accepted test, required roll or crafting step and confirmed findings with provenance. Do not grant a new mechanic, consume materials, advance time or create a completed item unless the DM has adjudicated it and I have confirmed the action. When authorized, use a versioned atomic event and verify the receipt."
+    },
+    {
+      "id": "backup-recovery",
+      "section": "Recovery",
+      "title": "Recover or verify backups",
+      "action": "No destructive restore",
+      "body": "Inspect Astravar backup schema/version, source identity, image and event integrity, party/campaign records, weapon save and pending synchronization receipts. Run a read-only restore preview and report every conflict, missing component or incompatible version. Do not uninstall the app, overwrite existing data, import automatically, or claim a backup works without a verified restoration test."
+    },
+    {
+      "id": "source-of-truth",
+      "section": "Recovery",
+      "title": "Check source-of-truth readiness",
+      "action": "Gate real campaign cutover",
+      "body": "Audit whether Astravar is technically ready to become the sole player-known campaign source: complete data model, import/export fidelity, authenticated mobile+ChatGPT read/write, receipts/idempotency, revocation, offline conflict handling, DM-only information separation, checkpoint recovery and secure backups. Report each verified, failed or untested gate with links; request explicit cutover authorization instead of silently moving Notion records."
+    },
+    {
+      "id": "release",
+      "section": "Development",
+      "title": "Validate a new signed APK",
+      "action": "Protect update chain",
+      "body": "Inspect current Astravar repository head, build logs and test reports. Confirm expected permanent applicationId com.yazsras.astravar, exact owner signing certificate, monotonic version code, approved launcher artwork, Room schema migrations, and core/element/party regressions. Build and verify an APK in an authorized secure environment without exposing signing secrets. Test update and data retention on a disposable emulator. Do not merge a draft PR or install over my live phone without authorization."
+    }
+  ]
+}
