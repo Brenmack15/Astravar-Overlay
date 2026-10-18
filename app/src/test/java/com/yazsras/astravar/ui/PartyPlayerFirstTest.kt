@@ -1,11 +1,25 @@
 package com.yazsras.astravar.ui
 
+import android.app.Activity
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.util.Base64
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
+import android.content.res.Configuration
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -19,9 +33,19 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.annotation.LooperMode
+
+
+/** Reproduce the app Scaffold's ambient text color when testing a standalone native page. */
+@Composable private fun PartyTestTheme(content: @Composable () -> Unit) {
+    AstravarTheme {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background,
+            contentColor = MaterialTheme.colorScheme.onBackground, content = content)
+    }
+}
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w400dp-h1000dp")
@@ -53,7 +77,7 @@ class PartyPlayerFirstTest {
         val repo = CampaignLedgerRepository(db)
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
-            activity.get().setContent { AstravarTheme { PartyPageV2(repo, null) {} } }
+            activity.get().setContent { PartyTestTheme { PartyPageV2(repo, null) {} } }
             listOf("Zerg Hasma", "Eek", "Korr", "Veyrath").forEach {
                 compose.onNodeWithText(it).performScrollTo().assertExists()
             }
@@ -87,7 +111,7 @@ class PartyPlayerFirstTest {
         val ability = runBlocking { db.recordsDao().characterAbility("korr", "STR") }
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
-            activity.get().setContent { AstravarTheme { Page { PartyTypedSheetV2(repo, "korr", "Korr") } } }
+            activity.get().setContent { PartyTestTheme { Page { PartyTypedSheetV2(repo, "korr", "Korr") } } }
             compose.onNodeWithText("Features, actions & capabilities").performScrollTo().performClick()
             compose.onNodeWithText("Edit Features, actions & capabilities").performScrollTo().performClick()
             compose.onNodeWithText("Feature details 1").performScrollTo().performTextReplacement("Confirmed fictional upgrade")
@@ -118,7 +142,7 @@ class PartyPlayerFirstTest {
         }
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
-            activity.get().setContent { AstravarTheme { Page { PartyEquipmentV2(repo, "korr") {} } } }
+            activity.get().setContent { PartyTestTheme { Page { PartyEquipmentV2(repo, "korr") {} } } }
             compose.onNodeWithText("Give / take / move item").performScrollTo().performClick()
             compose.onNodeWithText("Synthetic harness").performScrollTo().performClick()
             compose.onNodeWithText("Zerg Hasma ▾").performScrollTo().performClick()
@@ -147,7 +171,7 @@ class PartyPlayerFirstTest {
         runBlocking { repo.records.saveProfile(CharacterProfile(id = "korr", name = "Fictional wallet owner"), source = "Synthetic fixture") }
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
-            activity.get().setContent { AstravarTheme { Page { PartyWalletV2(repo, "korr") } } }
+            activity.get().setContent { PartyTestTheme { Page { PartyWalletV2(repo, "korr") } } }
             compose.onNodeWithText("Add wallet").performScrollTo().performClick()
             compose.onNodeWithText("Wallet name").performScrollTo().performTextInput("Synthetic purse")
             compose.onNodeWithText("Gold · blank = unknown").performScrollTo().performTextInput("5")
@@ -173,7 +197,7 @@ class PartyPlayerFirstTest {
         val repo = CampaignLedgerRepository(db)
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
-            activity.get().setContent { AstravarTheme { CampaignCheckpointPanel(repo) } }
+            activity.get().setContent { PartyTestTheme { CampaignCheckpointPanel(repo) } }
             compose.onNodeWithText("Add local checkpoint").performScrollTo().performClick()
             compose.onNodeWithText("Checkpoint title").performScrollTo().performTextInput("Fictional paused scene")
             compose.onNodeWithText("Current scene / location").performScrollTo().performTextInput("Synthetic workshop")
@@ -205,7 +229,7 @@ class PartyPlayerFirstTest {
             activity.get().setContent {
                 val density = LocalDensity.current
                 CompositionLocalProvider(LocalDensity provides Density(density.density, 2f)) {
-                    AstravarTheme { Page { PartyTypedSheetV2(repo, "veyrath", "Veyrath") } }
+                    PartyTestTheme { Page { PartyTypedSheetV2(repo, "veyrath", "Veyrath") } }
                 }
             }
             compose.onNodeWithText("Identity & progression").performScrollTo().performClick()
@@ -233,7 +257,7 @@ class PartyPlayerFirstTest {
         val originalReceipts = runBlocking { db.recordsDao().allReceipts() }
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
-            activity.get().setContent { AstravarTheme { Page { PartyEquipmentV2(repo, "korr") {} } } }
+            activity.get().setContent { PartyTestTheme { Page { PartyEquipmentV2(repo, "korr") {} } } }
             compose.onNodeWithText("Item & currency exchange").performScrollTo().performClick()
             compose.onNodeWithText("Acquired item name").performScrollTo().performTextInput("Synthetic purchased tool")
             compose.onNodeWithText("Exchange gold change").performScrollTo().performTextInput("-2")
@@ -273,6 +297,123 @@ class PartyPlayerFirstTest {
                 assertEquals(1, db.recordsDao().allAudit().count { it.kind == "ATOMIC_EXCHANGE" })
             }
         } finally { activity.pause().stop().destroy(); db.close() }
+    }
+
+    @Test @Config(qualifiers = "w360dp-h760dp")
+    fun eekToolsFromPartyHaveBoundedScrollableViewportAtLargeFontWithoutWrites() {
+        val db = database()
+        val repo = CampaignLedgerRepository(db)
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent {
+                val density = LocalDensity.current
+                val configuration = Configuration(LocalConfiguration.current).apply { fontScale = 2f }
+                CompositionLocalProvider(LocalDensity provides Density(density.density, 2f), LocalConfiguration provides configuration) {
+                    PartyTestTheme { PartyPageV2(repo, null) {} }
+                }
+            }
+            compose.onNodeWithText("Eek").performScrollTo().performClick()
+            compose.onNodeWithText("Eek's specialized companion tools").performScrollTo().performClick()
+            compose.onNodeWithText("Condition unknown").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Resources").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Equipment & upgrades").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Capabilities").performScrollTo().assertIsDisplayed()
+            capture("party-eek-tools-360-font200", activity.get(), modal = true)
+            compose.onNodeWithText("Close").assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
+            compose.onNodeWithText("Eek's specialized companion tools").assertExists()
+            runBlocking {
+                assertTrue(db.recordsDao().allCompanionStates().isEmpty())
+                assertTrue(db.recordsDao().allCompanionResources().isEmpty())
+                assertTrue(db.recordsDao().allCharacterProfiles().isEmpty())
+                assertTrue(db.partyDao().allSheets().isEmpty())
+                assertTrue(db.recordsDao().allAudit().isEmpty())
+            }
+        } finally { activity.pause().stop().destroy(); db.close() }
+    }
+
+    @Test fun unchangedCompanionResourceClosesDirectlyAndInvalidSaveShowsVisibleRetainedDraft() {
+        val db = database()
+        val repo = CampaignLedgerRepository(db)
+        runBlocking {
+            repo.records.saveCompanionState(CompanionState(companionId = "korr", name = "Synthetic companion", condition = "Active"), source = "Synthetic fixture")
+            repo.records.saveCompanionResource(CompanionResource(id = "synthetic-counter", companionId = "korr", name = "Synthetic counter", current = 2, maximum = 3), source = "Synthetic fixture")
+        }
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { PartyTestTheme { Page { PartyCompanionEditorV2(repo, "korr", "Korr") } } }
+            compose.onNodeWithText("Synthetic counter").performScrollTo().performClick()
+            compose.onNodeWithText("Close").performClick()
+            compose.onNodeWithText("Discard changes?").assertDoesNotExist()
+            compose.onNodeWithText("Synthetic counter").performScrollTo().performClick()
+            compose.onNodeWithText("Current amount · blank = unknown").performScrollTo().performTextReplacement("4")
+            compose.onNodeWithText("Save resource").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Not saved: Current amount cannot exceed maximum.").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Not saved: Current amount cannot exceed maximum.").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Current amount · blank = unknown").performScrollTo().assertTextContains("4")
+            runBlocking { assertEquals(2, db.recordsDao().resource("synthetic-counter")?.current) }
+            compose.onNodeWithText("Current amount · blank = unknown").performTextClearance()
+            compose.onNodeWithText("Save resource").performClick()
+            compose.waitUntil(10_000) { runBlocking { db.recordsDao().resource("synthetic-counter")?.revision == 2L } }
+            runBlocking {
+                val saved = db.recordsDao().resource("synthetic-counter")!!
+                assertNull(saved.current)
+                assertEquals(3, saved.maximum)
+            }
+        } finally { activity.pause().stop().destroy(); db.close() }
+    }
+
+    @Test fun portraitPickerCompressesLocalImageAndSourcedRemovalRetainsEarlierRevision() {
+        val db = database()
+        val repo = CampaignLedgerRepository(db)
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val file = java.io.File(context.filesDir, "synthetic-party-portrait.png")
+        val fixture = Bitmap.createBitmap(32, 24, Bitmap.Config.ARGB_8888)
+        try {
+            fixture.eraseColor(android.graphics.Color.BLUE)
+            file.outputStream().use { assertTrue(fixture.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+        } finally { fixture.recycle() }
+        runBlocking {
+            repo.records.saveProfile(CharacterProfile(id = "korr", name = "Synthetic portrait owner"), source = "Synthetic fixture")
+            repo.party.saveSheet("korr", PartySheetData(), source = "Synthetic fixture")
+        }
+        try {
+            activity.get().setContent { PartyTestTheme { Page { PartyTypedSheetV2(repo, "korr", "Korr") } } }
+            compose.onNodeWithText("Identity & progression").performScrollTo().performClick()
+            compose.onNodeWithText("Edit Identity & progression").performScrollTo().performClick()
+            compose.onNodeWithText("Choose portrait").performScrollTo().performClick()
+            val launched = requireNotNull(shadowOf(activity.get()).nextStartedActivityForResult)
+            assertEquals(Intent.ACTION_GET_CONTENT, launched.intent.action)
+            assertEquals("image/*", launched.intent.type)
+            compose.runOnIdle {
+                assertTrue(activity.get().activityResultRegistry.dispatchResult(launched.requestCode, Activity.RESULT_OK,
+                    Intent().setData(Uri.fromFile(file))))
+            }
+            compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("Draft portrait for Korr").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Change source / resolved event (required)").performScrollTo().performTextReplacement("Synthetic local portrait")
+            compose.onNodeWithText("Save sheet").performClick()
+            compose.waitUntil(10_000) { runBlocking { db.partyDao().sheet("korr")?.revision == 2L } }
+            val portrait = runBlocking { db.partyDao().sheet("korr")!!.sheet.portraitBase64!! }
+            val bytes = Base64.decode(portrait, Base64.DEFAULT)
+            val decoded = requireNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+            assertTrue(decoded.width <= 448 && decoded.height <= 448)
+            decoded.recycle()
+            compose.onNodeWithContentDescription("Portrait for Korr").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Edit Identity & progression").performScrollTo().performClick()
+            compose.onNodeWithText("Remove custom portrait").performScrollTo().performClick()
+            compose.onNodeWithText("Close").performClick()
+            compose.onNodeWithText("Discard changes?").assertIsDisplayed()
+            compose.onNodeWithText("Discard").performClick()
+            runBlocking { assertEquals(portrait, db.partyDao().sheet("korr")!!.sheet.portraitBase64) }
+            compose.onNodeWithText("Edit Identity & progression").performScrollTo().performClick()
+            compose.onNodeWithText("Remove custom portrait").performScrollTo().performClick()
+            compose.onNodeWithText("Save sheet").performClick()
+            compose.waitUntil(10_000) { runBlocking { db.partyDao().sheet("korr")?.revision == 3L } }
+            runBlocking {
+                assertNull(db.partyDao().sheet("korr")!!.sheet.portraitBase64)
+                assertTrue(db.recordsDao().allAudit().any { it.recordType == "party-sheet" && it.beforeJson?.contains(portrait) == true })
+            }
+        } finally { activity.pause().stop().destroy(); file.delete(); db.close() }
     }
 
 }

@@ -83,6 +83,7 @@ class NavigationV2Test {
             listOf("Zerg Hasma", "Eek", "Korr", "Veyrath").forEach { compose.onNodeWithText(it).assertExists() }
             capture("v2-party", activity.get())
             compose.onNodeWithText("Eek").performClick()
+            capture("v2-eek-sheet", activity.get())
             compose.onNodeWithText("Eek's specialized companion tools").performScrollTo().performClick()
             compose.onNodeWithText("Condition unknown").assertExists()
             compose.runOnIdle { captureNativeTestWindows("v2-eek", activity.get(), modal = true) }
