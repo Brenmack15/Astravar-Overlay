@@ -164,11 +164,14 @@ import java.util.UUID
                     runCatching { historyJson.decodeFromString<ItemPlacement>(snapshot).holderProfileId == memberId }.getOrDefault(false)
                 }))
     }
+    var historyLimit by rememberSaveable(memberId) { mutableIntStateOf(40) }
     PlayerHeading("Sourced history")
     Text("Earlier values, sources and command receipts stay available after a sheet edit or equipment transaction.",
         color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
     if (rows.isEmpty()) PlayerEmpty("No local history yet", "Opening a sheet never seeds statistics or imports campaign review documents.")
-    rows.forEach { row ->
+    if (rows.isNotEmpty()) Text("${rows.size} changes · showing ${minOf(rows.size, historyLimit)}", color = RebuildPalette.Muted,
+        style = MaterialTheme.typography.bodySmall)
+    rows.take(historyLimit).forEach { row ->
         PlayerDisclosure("${row.kind} · revision ${row.resultingRevision}") {
             RecordValue("Record", "${row.recordType} · ${row.recordId}")
             RecordValue("Source", row.source)
@@ -178,6 +181,7 @@ import java.util.UUID
             row.afterJson?.let { RecordValue("Saved snapshot", it) }
         }
     }
+    if (rows.size > historyLimit) PlayerTextButton(onClick = { historyLimit += 40 }) { Text("Show more party history") }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
