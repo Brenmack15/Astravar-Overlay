@@ -77,6 +77,7 @@ jobs:
             if [[ "${{ github.head_ref || github.ref_name }}" == 'feat/astravar-2.0-ui-rebuild' ]]; then
               python3 scripts/verify_ui_foundation.py
               python3 scripts/verify_branding.py
+              export ASTRAVAR_VERSION_CODE=23
               stat_args+=('-PastravarRemoteStatTest=true')
             fi
             timeout -k 10s 1140s ./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug "${stat_args[@]}" -PastravarScreenshots="$GITHUB_WORKSPACE/validation/screenshots"
@@ -140,7 +141,7 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs validation/Astravar-2.0-Stat-Test-debug.apk > validation/apk-signature.txt
           "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 -v 4 validation/Astravar-2.0-Stat-Test-debug.apk > validation/apk-alignment.txt
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging validation/Astravar-2.0-Stat-Test-debug.apk > validation/apk-badging.txt
-          python3 scripts/verify_branding.py --badging validation/apk-badging.txt --package com.yazsras.astravar.v2statdebug --version-name 2.0.2-remote-stat-test --version-code 22
+          python3 scripts/verify_branding.py --badging validation/apk-badging.txt --package com.yazsras.astravar.v2statdebug --version-name 2.0.2-remote-stat-test --version-code 23
           sha256sum validation/Astravar-2.0-Stat-Test-debug.apk > validation/SHA256SUMS.txt
           git rev-parse HEAD > validation/SOURCE_COMMIT.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
