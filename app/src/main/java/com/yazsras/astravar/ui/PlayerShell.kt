@@ -12,6 +12,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -31,19 +34,44 @@ val rebuildDestinations = listOf("Armor", "Combat", "Party", "Campaign", "Config
 }
 
 @Composable fun RebuildPrimaryNavigation(selected: String, change: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth().background(RebuildPalette.Void).navigationBarsPadding().padding(horizontal = 8.dp)) {
-        rebuildDestinations.forEach { name ->
-            val active = name == selected
-            Column(Modifier.weight(1f).heightIn(min = 68.dp).semantics { this.selected = active }
-                .clickable(role = Role.Tab) { change(name) }.padding(vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Box(Modifier.width(56.dp).height(28.dp).background(if (active) RebuildPalette.Active else Color.Transparent,
-                    RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
-                    if (name == "Combat") ApprovedAttackMedallion(ApprovedAttackArt.ELEMENTAL, Modifier.size(24.dp))
-                    else ArcaneIcon(when (name) { "Armor" -> "Emblem"; "Party" -> "Emblem"; "Campaign" -> "History"; else -> "Settings" },
-                        Modifier.size(24.dp), if (active) RebuildPalette.Cyan else Muted)
+    val labelStyle = MaterialTheme.typography.labelLarge
+    val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val labelWidths = rebuildDestinations.associateWith { name ->
+        textMeasurer.measure(name, style = labelStyle, softWrap = false, maxLines = 1).size.width
+    }
+    BoxWithConstraints(Modifier.fillMaxWidth().background(RebuildPalette.Void)
+        .navigationBarsPadding().padding(horizontal = 8.dp)) {
+        val iconWidth = with(density) { 56.dp.toPx() }
+        val labelPadding = with(density) { 4.dp.toPx() }
+        fun fits(rows: List<List<String>>) = rows.all { row ->
+            row.all { name -> maxOf(iconWidth, labelWidths.getValue(name).toFloat()) + labelPadding <= constraints.maxWidth.toFloat() / row.size }
+        }
+        // Preserve the compact row when the actual scaled text fits. Otherwise
+        // keep all five labels readable, normally in balanced rows of three/two.
+        val rows = listOf(rebuildDestinations).takeIf(::fits)
+            ?: (3 downTo 1).map { rebuildDestinations.chunked(it) }.firstOrNull(::fits)
+            ?: rebuildDestinations.map { listOf(it) }
+        Column {
+            rows.forEach { row ->
+                Row(Modifier.fillMaxWidth()) {
+                    row.forEach { name ->
+                        val active = name == selected
+                        Column(Modifier.weight(1f).heightIn(min = 68.dp).semantics { this.selected = active }
+                            .clickable(role = Role.Tab) { change(name) }.padding(horizontal = 2.dp, vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Box(Modifier.width(56.dp).height(28.dp).background(if (active) RebuildPalette.Active else Color.Transparent,
+                                RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+                                if (name == "Combat") ApprovedAttackMedallion(ApprovedAttackArt.ELEMENTAL, Modifier.size(24.dp))
+                                else ArcaneIcon(when (name) { "Armor" -> "Emblem"; "Party" -> "Emblem"; "Campaign" -> "History"; else -> "Settings" },
+                                    Modifier.size(24.dp), if (active) RebuildPalette.Cyan else Muted)
+                            }
+                            Text(name, Modifier.fillMaxWidth(), style = labelStyle,
+                                color = if (active) Frost else Muted, textAlign = TextAlign.Center,
+                                maxLines = 1, softWrap = false)
+                        }
+                    }
                 }
-                Text(name, style = MaterialTheme.typography.labelLarge, color = if (active) Frost else Muted)
             }
         }
     }
