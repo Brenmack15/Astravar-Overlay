@@ -51,15 +51,21 @@ class OverlayInstrumentationTest {
         Until.findObject(By.text(text).pkg(targetPackage)),30000
     ) ?: error("Missing controlled target control: $text")
     private fun expand() {device.wait(Until.findObject(By.descStartsWith("Expand Astravar crystal")),30000).click();assertTrue(device.wait(Until.hasObject(By.desc("Drag or collapse Astravar panel")),30000))}
-    private fun startOverlay() {shell("am force-stop $appPackage");openMain();findText("Floating controls").click();assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))}
+    private fun navigate(name:String) {
+        device.findObjects(By.text(name).pkg(appPackage)).lastOrNull()?.click() ?: findText(name).click()
+        device.waitForIdle()
+    }
+    private fun overlaySettings() { navigate("Config");findText("Overlay & appearance").click();device.waitForIdle() }
+    private fun startOverlay() {shell("am force-stop $appPackage");openMain();overlaySettings();findText("Start overlay session").click();assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))}
     private fun stopPanel() {tapPanel("More");tapPanel("Stop session");assertTrue(device.wait(Until.gone(By.desc("Drag or collapse Astravar panel")),30000));assertFalse(device.hasObject(By.descStartsWith("Expand Astravar crystal")))}
 
     @Test fun aAutomaticRollingOutsideTouchKeyboardRotationAndProtection() {
         Configurator.getInstance().setWaitForIdleTimeout(1000).setWaitForSelectorTimeout(30000)
         shell("appops set $appPackage SYSTEM_ALERT_WINDOW allow")
         shell("pm grant $appPackage android.permission.POST_NOTIFICATIONS")
-        openMain();findText("Explore separate demo campaign").click();device.waitForIdle()
-        val floatingControls=findText("Floating controls")
+        openMain();navigate("Combat");findText("Start labeled demo").click();device.waitForIdle()
+        overlaySettings()
+        val floatingControls=findText("Start overlay session")
         screenshot("combat")
         floatingControls.click()
         assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))
@@ -113,24 +119,24 @@ class OverlayInstrumentationTest {
         assertTrue(device.wait(Until.gone(By.descStartsWith("Expand Astravar crystal")),30000))
     }
     @Test fun cRollRestorationMainHistoryAndLivePermissionRecovery() {
-        shell("am force-stop $appPackage");openMain()
+        shell("am force-stop $appPackage");openMain();navigate("Combat")
         val formula=File(files,"saved-roll.txt").readText()
         assertEquals("Raw overlay dice survive force-stop and are shared with Compose",formula,findText(formula).text)
         screenshot("restored-main-result")
-        findText("History").click();device.waitForIdle()
+        navigate("Config");findText("Roll history").click();device.waitForIdle()
         assertTrue(device.wait(Until.hasObject(By.text("Recent rolls")),30000))
         assertEquals("Exactly two attacks appear in history",2,device.findObjects(By.text(Pattern.compile("d20 .*advantage.*"))).size)
         screenshot("recent-history")
         startOverlay();shell("am start -W -n com.yazsras.astravar.target/.TargetActivity")
         shell("appops set $appPackage SYSTEM_ALERT_WINDOW deny")
         assertTrue(device.wait(Until.gone(By.descStartsWith("Expand Astravar crystal")),30000))
-        shell("am force-stop $appPackage");openMain();findText("Floating controls").click();device.waitForIdle()
+        shell("am force-stop $appPackage");openMain();overlaySettings();findText("Start overlay session").click();device.waitForIdle()
         assertFalse(device.hasObject(By.descStartsWith("Expand Astravar crystal")))
         assertTrue("Denied permission should open Android's overlay settings",device.wait(Until.hasObject(By.text("Display over other apps").pkg("com.android.settings")),30000))
         shell("appops set $appPackage SYSTEM_ALERT_WINDOW allow")
         device.pressBack();device.waitForIdle()
         assertTrue(device.wait(Until.hasObject(By.text("ASTRAVAR").pkg(appPackage)),30000))
-        findText("Floating controls").click()
+        findText("Start overlay session").click()
         assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))
         expand();stopPanel()
         checkpoint("Identical saved dice restored in main app and history; live permission revocation and recovery exercised")
