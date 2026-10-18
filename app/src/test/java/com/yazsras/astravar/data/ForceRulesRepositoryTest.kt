@@ -54,7 +54,11 @@ class ForceRulesRepositoryTest {
             assertEquals(listOf(DamageType.FIRE),Preferences(context).flow.first().elements)
             assertEquals(Ability.ARCANE,Preferences(context).flow.first().mode)
             val backup=main.export();main.import(backup,"restore")
-            assertTrue(BackupCodec.decodeHistoryEntry(db.dao().event(event.id)!!.body).after.pending.isEmpty());assertTrue(db.dao().archives().isEmpty())
+            assertTrue(BackupCodec.decodeHistoryEntry(db.dao().event(event.id)!!.body).after.pending.isEmpty());run {
+                val sha=java.security.MessageDigest.getInstance("SHA-256").digest(oldArchive.toByteArray(Charsets.UTF_8)).joinToString("") {"%02x".format(it)}
+                val original=HistoryPreservation.openBody(db.openHelper.readableDatabase,HistoryPreservation.id("archives",archive.id,sha)).use {it.readBytes().toString(Charsets.UTF_8)}
+                assertEquals(oldArchive,original)
+            }
             // Undo into a historical pre-upgrade profile must still restore current active Force rules.
             main.undo();main.undo();main.undo()
             val undone=BackupCodec.decode(main.export()).campaign

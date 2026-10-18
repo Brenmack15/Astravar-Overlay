@@ -92,12 +92,14 @@ class HistoryRepositoryTest {
             val migrated=withTimeout(60000) {repo.state.first {it!=null}!!}
             assertEquals((9981..10000).map {"roll-$it"},migrated.pending.map {it.plan.id})
             assertEquals(seed().profile,migrated.profile);assertEquals(seed().cores,migrated.cores);assertEquals(seed().notes,migrated.notes);assertEquals(seed().slots,migrated.slots)
-            assertEquals(20,db.dao().rollCount());assertEquals(20,db.dao().eventCount());assertTrue(db.dao().archives().isEmpty())
+            assertEquals(20,db.dao().rollCount());assertEquals(20,db.dao().eventCount());assertTrue(HistoryPreservation.stats(db.openHelper.readableDatabase).records>=1002)
+            val originalHash=java.security.MessageDigest.getInstance("SHA-256").digest(body.toByteArray(Charsets.UTF_8)).joinToString("") {"%02x".format(it)}
+            assertEquals(originalHash,HistoryPreservation.bodySha256(db.openHelper.readableDatabase,"archives",HistoryPreservation.id("campaign","1",originalHash)))
             assertEquals((981..1000).reversed().map {"event-$it"},db.dao().events().map {it.id})
             assertTrue(db.dao().events().all {it.body.length<10000});assertTrue(db.dao().state()!!.body.length<10000)
             val retainedBytes=db.dao().events().sumOf {it.body.length}+db.dao().rolls().sumOf {it.body.length}+db.dao().state()!!.body.length
             assertTrue(retainedBytes<512*1024)
-            println("Legacy fixture: 10000 rolls, 1000 duplicated events; campaign JSON ${body.length} chars, event JSON ${event.length} chars each. Retained total: $retainedBytes chars.")
+            println("Legacy fixture: 10000 rolls, 1000 duplicated events; campaign JSON ${body.length} chars, event JSON ${event.length} chars each. Recent working view: $retainedBytes chars; original history preserved in immutable archives.")
             val indexPlan=db.openHelper.readableDatabase.query("EXPLAIN QUERY PLAN SELECT id FROM events ORDER BY revision DESC,id DESC LIMIT ${HistoryRetention.MAX_HISTORY_ENTRIES}").use {c->buildString {while(c.moveToNext()) append(c.getString(3))}}
             assertTrue(indexPlan.contains("index_events_revision_id"))
             val after=repo.fire(Engine.plan(migrated,"new-after-migration",Ability.ARCANE),RollOptions(),"test")
