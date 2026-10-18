@@ -30,8 +30,10 @@ class PartyMigrationTest {
             val tableName = entity.getString("tableName")
             fun sql(value: String) = value.replace("\${TABLE_NAME}", tableName)
             old.execSQL(sql(entity.getString("createSql")))
-            val indices = entity.getJSONArray("indices")
-            for (i in 0 until indices.length()) old.execSQL(sql(indices.getJSONObject(i).getString("createSql")))
+            val indices = entity.optJSONArray("indices")
+            if (indices != null) for (i in 0 until indices.length()) {
+                old.execSQL(sql(indices.getJSONObject(i).getString("createSql")))
+            }
         }
         old.execSQL("CREATE TABLE room_master_table (id INTEGER PRIMARY KEY, identity_hash TEXT)")
         old.execSQL("INSERT INTO room_master_table VALUES(42,?)", arrayOf(schema.getString("identityHash")))
