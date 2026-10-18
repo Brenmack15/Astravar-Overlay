@@ -34,8 +34,9 @@ object OwnerSyncProtocol {
     fun id(value: String): String = value.also { require(identifier.matches(it)) { "Invalid scoped record ID." } }
     fun origin(value: String): String {
         val u = URI(value.trim())
-        val host = u.host?.lowercase() ?: error("A verified HTTPS service origin is required.")
-        require(u.scheme == "https" && u.port == -1 && u.rawUserInfo == null && u.rawQuery == null &&
+        // A trailing DNS root dot is the same host; normalize before policy checks and credential binding.
+        val host = u.host?.lowercase()?.trimEnd('.') ?: error("A verified HTTPS service origin is required.")
+        require(host.isNotBlank() && u.scheme == "https" && u.port == -1 && u.rawUserInfo == null && u.rawQuery == null &&
             u.rawFragment == null && (u.rawPath.isNullOrEmpty() || u.rawPath == "/") &&
             host != "localhost" && !host.endsWith(".localhost") && !host.matches(Regex("[0-9.]+")) &&
             !host.contains(":") && host != "astravar-public-disposable.fantasy-layer.workers.dev") {
