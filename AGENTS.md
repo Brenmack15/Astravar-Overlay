@@ -11,3 +11,35 @@ The owner's 17 October 2026 implementation directive authorizes a debug-only HTT
 The original Astravar 2.0 Preview uses com.yazsras.astravar.v2debug. The UI reconstruction branch deliberately uses com.yazsras.astravar.v2uidebug (2.0.1-ui-rebuild, code21) because the old Preview debug signing key is unavailable; preserve this separate-install identity to keep release, Inventory Beta and the working Preview installed with their data intact. Local data does not cross application sandboxes automatically; restore requires a validated user-selected backup. Keep main/recovery/PRs #1, #2 and #3 unchanged and unmerged. Use original approved artwork and live native text; illustration values and proposed armor formulas never override accepted engine rules.
 
 The owner's 18 October 2026 Remote-Control Test explicitly extends PR #4 with a debug-only, opt-in ability command carried by that same fictional public event channel. This is a narrow exception to fixed-template-only messages: strict versioned commands target only the fixed disposable profile and current installation test session, and limited outcome receipts contain no character sheet. Never target `local-player`/Zerg, initialize unknown abilities, authenticate a sender by its display label, auto-apply an unreviewed command, or upload real records. Apply only after player confirmation through `CampaignRecords.saveAbility`, retaining optimistic revisions, immutable audit and durable deduplication. No existing Room schema or combat logic may change. The explicit `-PastravarRemoteStatTest=true` build uses `com.yazsras.astravar.v2statdebug` (2.0.2-remote-stat-test, code22) to coexist with the previously delivered UI APK whose ephemeral CI signer is unavailable. Keep both existing installations and all their data; never require uninstalling them. Release signing configuration remains untouched.
+
+## Permanent-app adoption (owner correction, 18 October 2026)
+
+The owner reports that the older experimental Android installations were already
+uninstalled and contained no data requiring migration. This updates ONLY the
+prior handset-installation-preservation assumption; do not touch currently
+installed Astravar instances without explicit authorization. Retain historical
+commits and draft PRs. Build on the tested 2.0 UI code, with the original
+permanent package `com.yazsras.astravar` and the **existing owner release key**.
+CI/debug APKs have one-run ephemeral signers and cannot become a reliable update
+channel. Never treat uninstalling old versions as authorization to create a new
+signing key, copy production data to GitHub, sync Notion automatically, or alter
+confirmed D&D rules. Keep campaign-records onboarding read-only/test-only until
+backup/restore, scope authorization, and source reconciliation pass.
+
+## Astravar 2.1 implementation authorization
+
+The owner's 18 October master upgrade authorizes an isolated 2.1 feature branch,
+additive tested campaign-schema migrations, editable sourced Party profiles,
+transactional equipment and approved rules changes. Earlier schema/mechanics
+freezes applied to the disposable connectivity experiments, not this upgrade.
+Retire Shatter and spare-core operations for new play while retaining historical
+decoding, audits and backups. Preserve unknown values and unresolved source
+conflicts. Never commit private handoff review JSON, campaign exports or PDFs.
+Owner-authenticated sync must fail closed until an authorized backend, device
+credentials and acceptance evidence exist. Real import and source-of-truth
+cutover still require separate owner approval. Owner signing identity remains
+unchanged; temporary test certificates must be identified as such.
+The 2.1 owner directive also authorizes HTTPS Internet access in the permanent
+application for the authenticated connection architecture. Cleartext remains
+disabled. This does not authorize any real campaign path to the anonymous lab;
+the synthetic protocol and private bridge remain distinct.
