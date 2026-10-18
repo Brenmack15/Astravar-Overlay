@@ -84,7 +84,7 @@ class OverlayInstrumentationTest {
         ui.tap(By.descStartsWith("Expand Astravar crystal").pkg(appPackage), "Expand Astravar crystal")
         assertTrue(device.wait(Until.hasObject(By.desc("Drag or collapse Astravar panel").pkg(appPackage)),30000))
     }
-    private fun navigate(name:String) = tapMain(name, preferLast=true)
+    private fun navigate(name:String) = ui.ensurePrimaryTab(appPackage,name)
     private fun overlaySettings() { navigate("Config");tapMain("Overlay & appearance") }
     private fun startOverlay() {shell("am force-stop $appPackage");openMain();overlaySettings();tapMain("Start overlay session");assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))}
     private fun stopPanel() {tapPanel("More");tapPanel("Stop session");assertTrue(device.wait(Until.gone(By.desc("Drag or collapse Astravar panel")),30000));assertFalse(device.hasObject(By.descStartsWith("Expand Astravar crystal")))}

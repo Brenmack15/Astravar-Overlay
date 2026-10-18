@@ -25,7 +25,10 @@ class UpdatePreservationInstrumentationTest {
         val files = instrumentation.targetContext.getExternalFilesDir(null)!!
         val ui = ObservedUi(device)
         fun find(text: String): Rect = ui.textBounds(text, product, scrollAttempts = 14)
-        fun tap(text: String, preferLast: Boolean = false) = ui.tapText(text, product, scrollAttempts = 14, preferLast = preferLast)
+        fun tap(text: String, preferLast: Boolean = false) {
+            if (preferLast) ui.ensurePrimaryTab(product, text)
+            else ui.tapText(text, product, scrollAttempts = 14)
+        }
         fun captureArmor(name: String) = ui.captureStablePage(File(files, name), product, "Armor",
             listOf(By.textStartsWith("Weapon profile ·").pkg(product), By.text("Ability scores").pkg(product)))
         fun captureParty(name: String) = ui.captureStablePage(File(files, name), product, "Party",

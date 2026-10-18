@@ -3,6 +3,7 @@ package com.yazsras.astravar
 import android.graphics.Rect
 import android.graphics.Bitmap
 import android.os.SystemClock
+import android.os.Build
 import android.view.KeyEvent
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.*
@@ -27,12 +28,19 @@ class NativeFailureEvidence : TestWatcher() {
 
 /** Test-only observations survive Activity/window recreation; actions are never retried. */
 internal class ObservedUi(private val device: UiDevice) {
-    fun <T : Any> snapshot(selector: BySelector, description: String, timeoutMs: Long = 30_000, read: (UiObject2) -> T?): T {
+    private fun clearObservationCache() {
+        require(Build.VERSION.SDK_INT >= 34) { "Fresh native tab acceptance requires Android API34 or later" }
+        assertTrue("The native accessibility observation cache must be cleared",
+            InstrumentationRegistry.getInstrumentation().uiAutomation.clearCache())
+    }
+
+    fun <T : Any> snapshot(selector: BySelector, description: String, timeoutMs: Long = 30_000, refreshCache: Boolean = false, read: (UiObject2) -> T?): T {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         while (true) {
             val remaining = deadline - SystemClock.uptimeMillis()
             if (remaining <= 0) break
             try {
+                if (refreshCache) clearObservationCache()
                 val node = device.wait(Until.findObject(selector), minOf(1_000L, remaining))
                 if (node != null) read(node)?.let { return it }
             } catch (_: StaleObjectException) {
@@ -119,15 +127,47 @@ internal class ObservedUi(private val device: UiDevice) {
     fun texts(selector: BySelector, description: String): List<String> =
         snapshot(selector, description) { device.findObjects(selector).map { node -> node.text } }
 
-    private fun selectedTabBounds(node: UiObject2): Rect? {
+    private data class PrimaryTabState(val bounds: Rect, val enabled: Boolean, val selected: Boolean, val clickable: Boolean)
+
+    private fun primaryTabState(node: UiObject2): PrimaryTabState? {
         var current: UiObject2? = node
         repeat(12) {
             val observed = current ?: return null
-            if (observed.isEnabled && observed.isClickable && observed.isSelected)
-                return Rect(observed.visibleBounds).takeUnless { it.isEmpty }
+            if (observed.isClickable || observed.isSelected) {
+                val bounds = Rect(observed.visibleBounds)
+                if (!bounds.isEmpty) return PrimaryTabState(bounds, observed.isEnabled, observed.isSelected, observed.isClickable)
+            }
             current = observed.parent
         }
         return null
+    }
+
+    private fun selectedTabBounds(node: UiObject2): Rect? =
+        primaryTabState(node)?.takeIf { it.enabled && it.selected }?.bounds
+
+    fun ensurePrimaryTab(packageName: String, tab: String) {
+        require(tab in listOf("Armor", "Combat", "Party", "Campaign", "Config")) { "Only primary tabs use tab-selection semantics" }
+        val deadline = SystemClock.uptimeMillis() + 30_000
+        fun remaining() = (deadline - SystemClock.uptimeMillis()).coerceAtLeast(0)
+        val selector = By.text(tab).pkg(packageName)
+        val before = snapshot(selector, "$tab tab state", timeoutMs = remaining(), refreshCache = true) {
+            device.findObjects(selector).lastOrNull()?.let(::primaryTabState)
+                ?.takeIf { state -> state.enabled && (state.selected || state.clickable) }
+        }
+        assertTrue("Primary tab must be enabled: $tab", before.enabled)
+        // Compose deliberately omits the AX click action for a selected tab.
+        // Observe its selection; only a different destination needs one touch.
+        if (!before.selected) {
+            assertTrue("An unselected primary tab must expose its click action: $tab", before.clickable)
+            val budget = remaining()
+            assertTrue("Primary navigation must stay within its 30-second budget", budget > 0)
+            touch(before.bounds, "$tab primary tab", idleTimeoutMs = minOf(1_000L, budget))
+        }
+        val budget = remaining()
+        assertTrue("Primary selection must settle within its 30-second budget", budget > 0)
+        snapshot(selector, "fresh selected $tab tab", timeoutMs = budget, refreshCache = true) {
+            device.findObjects(selector).lastOrNull()?.let(::selectedTabBounds)
+        }
     }
 
     fun captureStablePage(file: File, packageName: String, tab: String, markers: List<BySelector>) {
@@ -139,6 +179,7 @@ internal class ObservedUi(private val device: UiDevice) {
             while (SystemClock.uptimeMillis() < deadline) {
                 var sample: Bitmap? = null
                 try {
+                    clearObservationCache()
                     val tabBounds = device.findObjects(By.text(tab).pkg(packageName)).lastOrNull()?.let(::selectedTabBounds)
                     val bodyBounds = markers.map { selector -> device.findObject(selector)?.let { Rect(it.visibleBounds) } }
                     val geometry = listOfNotNull(tabBounds) + bodyBounds.filterNotNull()
@@ -153,6 +194,8 @@ internal class ObservedUi(private val device: UiDevice) {
                             FileOutputStream(file).use { output ->
                                 assertTrue("Stable $tab frame must be saved", frame.compress(Bitmap.CompressFormat.PNG, 100, output))
                             }
+                            clearObservationCache()
+                            device.dumpWindowHierarchy(File(file.parentFile, file.nameWithoutExtension + ".xml"))
                             return
                         }
                         previousFrame?.recycle()

@@ -20,7 +20,10 @@ class UpdateFixtureInstrumentationTest {
         val product = InstrumentationRegistry.getArguments().getString("astravarPackage") ?: "com.yazsras.astravar"
         val ui = ObservedUi(device)
         fun find(text: String) = ui.textBounds(text, product, scrollAttempts = 14)
-        fun tap(text: String, preferLast: Boolean = false) = ui.tapText(text, product, scrollAttempts = 14, preferLast = preferLast)
+        fun tap(text: String, preferLast: Boolean = false) {
+            if (preferLast) ui.ensurePrimaryTab(product, text)
+            else ui.tapText(text, product, scrollAttempts = 14)
+        }
         fun enter(label: String, value: String) {
             tap(label)
             assertNotNull("Focused field for $label", ui.bounds(By.clazz("android.widget.EditText").focused(true).pkg(product), label, timeoutMs = 10_000))
