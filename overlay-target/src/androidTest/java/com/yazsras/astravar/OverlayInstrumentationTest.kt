@@ -1,6 +1,5 @@
 package com.yazsras.astravar
 
-import android.graphics.Point
 import android.graphics.Rect
 import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -32,6 +31,7 @@ class OverlayInstrumentationTest {
     private val appPackage get()=InstrumentationRegistry.getArguments().getString("astravarPackage") ?: "com.yazsras.astravar"
     private val targetPackage get()="com.yazsras.astravar.target"
     private val files get()=instrumentation.targetContext.getExternalFilesDir(null)!!
+    private val ui get()=ObservedUi(device)
     private fun shell(command:String)=device.executeShellCommand(command)
     private fun checkpoint(message:String) {instrumentation.sendStatus(0,android.os.Bundle().apply {putString("stream","\nCHECKPOINT: $message\n")})}
     private fun screenshot(name:String) {assertTrue(device.takeScreenshot(File(files,"api${android.os.Build.VERSION.SDK_INT}-$name.png")))}
@@ -39,31 +39,10 @@ class OverlayInstrumentationTest {
         shell("am start -W -n $appPackage/com.yazsras.astravar.MainActivity")
         assertTrue(device.wait(Until.hasObject(By.text("ASTRAVAR").pkg(appPackage)),60000))
         // Saved native tool dialogs may legitimately survive activity recreation.
-        repeat(3) { device.findObject(By.text("Close").pkg(appPackage))?.let { it.click(); device.waitForIdle() } }
+        repeat(3) { if (device.hasObject(By.text("Close").pkg(appPackage))) tapMain("Close") }
     }
-    private fun findText(text:String):UiObject2 {
-        for(direction in listOf(Direction.DOWN,Direction.UP)) repeat(12) {
-            device.findObject(By.text(text).pkg(appPackage))?.let {return it}
-            device.findObject(By.scrollable(true).pkg(appPackage))?.scroll(direction,.6f)
-            device.waitForIdle()
-        }
-        error("Missing product control: $text")
-    }
-    private fun <T> freshSnapshot(selector: BySelector, description: String, timeoutMs: Long = 30_000, read: (UiObject2) -> T): T {
-        val deadline = SystemClock.uptimeMillis() + timeoutMs
-        while (true) {
-            val remaining = deadline - SystemClock.uptimeMillis()
-            if (remaining <= 0) break
-            try {
-                device.wait(Until.findObject(selector), minOf(1_000L, remaining))?.let { return read(it) }
-            } catch (_: StaleObjectException) {
-                // Only an observation is retried; its detached value survives a
-                // subsequent window replacement without retaining a stale node.
-            }
-            device.waitForIdle()
-        }
-        error("No fresh accessibility snapshot: $description")
-    }
+    private fun findText(text:String):Rect = ui.textBounds(text, appPackage)
+    private fun tapMain(text:String, preferLast:Boolean=false) = ui.tapText(text, appPackage, preferLast=preferLast)
     private fun panelControlBounds(text: String): Rect {
         val selector = By.text(text).pkg(appPackage).enabled(true).clickable(true)
         val deadline = SystemClock.uptimeMillis() + 30_000
@@ -101,59 +80,59 @@ class OverlayInstrumentationTest {
         assertTrue("Touch must be dispatched once to the observed overlay control: $text", device.click(bounds.centerX(), bounds.centerY()))
         device.waitForIdle()
     }
-    private fun targetText(text:String):UiObject2 = device.wait(
-        Until.findObject(By.text(text).pkg(targetPackage)),30000
-    ) ?: error("Missing controlled target control: $text")
-    private fun expand() {device.wait(Until.findObject(By.descStartsWith("Expand Astravar crystal")),30000).click();assertTrue(device.wait(Until.hasObject(By.desc("Drag or collapse Astravar panel")),30000))}
-    private fun navigate(name:String) {
-        device.findObjects(By.text(name).pkg(appPackage)).lastOrNull()?.click() ?: findText(name).click()
-        device.waitForIdle()
+    private fun tapTarget(text:String) = ui.tap(By.text(text).pkg(targetPackage), text)
+    private fun expand() {
+        ui.tap(By.descStartsWith("Expand Astravar crystal").pkg(appPackage), "Expand Astravar crystal")
+        assertTrue(device.wait(Until.hasObject(By.desc("Drag or collapse Astravar panel").pkg(appPackage)),30000))
     }
-    private fun overlaySettings() { navigate("Config");findText("Overlay & appearance").click();device.waitForIdle() }
-    private fun startOverlay() {shell("am force-stop $appPackage");openMain();overlaySettings();findText("Start overlay session").click();assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))}
+    private fun navigate(name:String) = tapMain(name, preferLast=true)
+    private fun overlaySettings() { navigate("Config");tapMain("Overlay & appearance") }
+    private fun startOverlay() {shell("am force-stop $appPackage");openMain();overlaySettings();tapMain("Start overlay session");assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))}
     private fun stopPanel() {tapPanel("More");tapPanel("Stop session");assertTrue(device.wait(Until.gone(By.desc("Drag or collapse Astravar panel")),30000));assertFalse(device.hasObject(By.descStartsWith("Expand Astravar crystal")))}
 
     @Test fun aAutomaticRollingOutsideTouchKeyboardRotationAndProtection() {
         Configurator.getInstance().setWaitForIdleTimeout(1000).setWaitForSelectorTimeout(30000)
         shell("appops set $appPackage SYSTEM_ALERT_WINDOW allow")
         shell("pm grant $appPackage android.permission.POST_NOTIFICATIONS")
-        openMain();navigate("Combat");findText("Start labeled demo").click();device.waitForIdle()
+        openMain();navigate("Combat");tapMain("Start labeled demo")
         overlaySettings()
-        val floatingControls=findText("Start overlay session")
+        findText("Start overlay session")
         screenshot("combat")
-        floatingControls.click()
+        tapMain("Start overlay session")
         assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))
         shell("am start -W -n com.yazsras.astravar.target/.TargetActivity")
-        device.wait(Until.findObject(By.desc("Outside tap counter")),30000).click(100)
+        ui.tap(By.desc("Outside tap counter").pkg(targetPackage), "Outside tap counter")
         val outsideWorked=device.wait(Until.hasObject(By.desc("Outside tap counter").text("Outside taps: 1")),5000)
-        assertTrue("Outside tap counter: ${device.findObject(By.desc("Outside tap counter"))?.text}",outsideWorked)
+        assertTrue("Outside tap counter: ${ui.snapshot(By.desc("Outside tap counter").pkg(targetPackage), "outside tap count") { it.text }}",outsideWorked)
         screenshot("collapsed")
         expand();screenshot("expanded")
-        device.findObject(By.desc("Drag or collapse Astravar panel")).drag(Point(device.displayWidth-20,160),500)
+        val dragStart=ui.controlBounds(By.desc("Drag or collapse Astravar panel").pkg(appPackage), "panel drag handle")
+        assertTrue("Panel drag must dispatch once", device.drag(dragStart.centerX(),dragStart.centerY(),device.displayWidth-20,160,100))
         device.waitForIdle()
-        val panel=freshSnapshot(By.desc("Drag or collapse Astravar panel").pkg(appPackage), "dragged panel bounds", timeoutMs=10_000) { Rect(it.visibleBounds) }
+        val panel=ui.snapshot(By.desc("Drag or collapse Astravar panel").pkg(appPackage), "dragged panel bounds", timeoutMs=10_000) { Rect(it.visibleBounds) }
         assertTrue(panel.left>=0 && panel.right<=device.displayWidth)
         screenshot("dragged")
         tapPanel("Adv")
         assertTrue("Advantage selection must be visibly committed before rolling", device.wait(Until.hasObject(By.text("✓ Adv").pkg(appPackage)),30000))
         tapPanel("Roll attack")
         assertTrue(device.wait(Until.hasObject(By.text("ATTACK ROLL")),30000))
-        val formula=freshSnapshot(By.textStartsWith("d20 ").pkg(appPackage), "first committed attack formula") { it.text }
+        val formula=ui.snapshot(By.textStartsWith("d20 ").pkg(appPackage), "first committed attack formula") { it.text }
         assertTrue("Two visible d20s must be preserved",formula.contains(" / ") && formula.contains("advantage"))
         File(files,"saved-first-roll.txt").writeText(formula)
         assertFalse("No manual damage entry in normal combat",device.hasObject(By.clazz("android.widget.EditText").pkg(appPackage)))
         screenshot("automatic-result")
         tapPanel("Roll again")
-        val normalFormula = freshSnapshot(By.text(Pattern.compile("d20 [0-9]+ \\+ -?[0-9]+ = -?[0-9]+")).pkg(appPackage), "second committed normal attack formula") { it.text }
+        val normalFormula = ui.snapshot(By.text(Pattern.compile("d20 [0-9]+ \\+ -?[0-9]+ = -?[0-9]+")).pkg(appPackage), "second committed normal attack formula") { it.text }
         assertFalse("One-shot advantage must reset for the next attack",normalFormula.contains(" / ") || normalFormula.contains("advantage"))
         File(files,"saved-roll.txt").writeText(normalFormula)
         screenshot("automatic-normal-result")
         tapPanel("Collapse")
-        val edit=device.findObject(By.desc("Keyboard focus test"));edit.click();edit.text="typed under Astravar"
-        assertEquals("typed under Astravar",device.findObject(By.desc("Keyboard focus test")).text)
+        ui.tap(By.desc("Keyboard focus test").pkg(targetPackage), "Keyboard focus test")
+        ui.enterEmptyFocusedField("typed under Astravar",targetPackage,"Keyboard focus test")
+        assertEquals("typed under Astravar",ui.snapshot(By.desc("Keyboard focus test").pkg(targetPackage), "typed keyboard text") { it.text })
         device.pressBack();device.setOrientationLeft();device.waitForIdle()
         assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))
-        val rotated=freshSnapshot(By.descStartsWith("Expand Astravar crystal").pkg(appPackage), "rotated crystal bounds") { Rect(it.visibleBounds) }
+        val rotated=ui.snapshot(By.descStartsWith("Expand Astravar crystal").pkg(appPackage), "rotated crystal bounds") { Rect(it.visibleBounds) }
         assertTrue(rotated.left>=0 && rotated.right<=device.displayWidth && rotated.bottom<=device.displayHeight)
         expand();screenshot("landscape-result");tapPanel("Collapse")
         device.setOrientationNatural();device.waitForIdle()
@@ -161,10 +140,10 @@ class OverlayInstrumentationTest {
         assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))
         expand();screenshot("large-text-result");tapPanel("Collapse")
         shell("settings put system font_scale 1.0");device.waitForIdle()
-        targetText("Toggle protected screen").click()
+        tapTarget("Toggle protected screen")
         assertTrue("Protected target button must reflect its secure state",device.wait(Until.hasObject(By.text("Protected screen ON").pkg(targetPackage)),10000))
         assertTrue(device.wait(Until.gone(By.descStartsWith("Expand Astravar crystal")),30000))
-        targetText("Protected screen ON").click()
+        tapTarget("Protected screen ON")
         assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))
         expand();tapPanel("Weapon");stopPanel();device.unfreezeRotation()
         checkpoint("Two automatic overlay attacks, raw dice, drag, outside touch, keyboard, rotation, large text and protected screen exercised")
@@ -172,20 +151,25 @@ class OverlayInstrumentationTest {
     @Test fun bNotificationStop() {
         assertTrue("This acceptance run requires real System UI",shell("pm path com.android.systemui").contains("package:"))
         startOverlay();device.openNotification()
-        if(!device.wait(Until.hasObject(By.text("Stop")),10000)) device.findObject(By.text("Astravar session active"))?.parent?.swipe(Direction.DOWN,1f)
-        val stop=device.wait(Until.findObject(By.text("Stop")),30000)
-        assertNotNull("Notification Stop action must be visible",stop);stop.click();device.pressBack();device.waitForIdle()
+        if(!device.wait(Until.hasObject(By.text("Stop")),10000)) {
+            val notification=ui.snapshot(By.text("Astravar session active"), "session notification") { Rect(it.parent.visibleBounds) }
+            assertTrue("Notification expansion must dispatch once", device.swipe(notification.centerX(),notification.top+notification.height()/5,notification.centerX(),notification.bottom-notification.height()/5,100))
+        }
+        assertTrue("Notification Stop action must be visible",device.wait(Until.hasObject(By.text("Stop")),30000))
+        ui.tap(By.text("Stop"), "Notification Stop")
+        device.pressBack();device.waitForIdle()
         assertTrue(device.wait(Until.gone(By.descStartsWith("Expand Astravar crystal")),30000))
     }
     @Test fun cRollRestorationMainHistoryAndLivePermissionRecovery() {
         shell("am force-stop $appPackage");openMain();navigate("Combat")
         val formula=File(files,"saved-roll.txt").readText()
-        assertEquals("Raw overlay dice survive force-stop and are shared with Compose",formula,findText(formula).text)
+        findText(formula)
+        assertEquals("Raw overlay dice survive force-stop and are shared with Compose",formula,ui.snapshot(By.text(formula).pkg(appPackage), "restored main formula") { it.text })
         screenshot("restored-main-result")
-        navigate("Config");findText("Roll history").click();device.waitForIdle()
+        navigate("Config");tapMain("Roll history")
         assertTrue(device.wait(Until.hasObject(By.text("Recent rolls")),30000))
         val firstFormula=File(files,"saved-first-roll.txt").readText()
-        val historyFormulas=device.findObjects(By.text(Pattern.compile("d20 .*")).pkg(appPackage)).map {it.text}
+        val historyFormulas=ui.texts(By.text(Pattern.compile("d20 .*")).pkg(appPackage), "saved history formulas")
         assertEquals("Exactly two immutable attacks appear in history",2,historyFormulas.size)
         assertEquals("History preserves both original raw rolls and their advantage/normal modes",listOf(firstFormula,formula).sorted(),historyFormulas.sorted())
         assertEquals("Only the first attack used the one-shot advantage selection",1,historyFormulas.count {it.contains("advantage")})
@@ -194,13 +178,16 @@ class OverlayInstrumentationTest {
         startOverlay();shell("am start -W -n com.yazsras.astravar.target/.TargetActivity")
         shell("appops set $appPackage SYSTEM_ALERT_WINDOW deny")
         assertTrue(device.wait(Until.gone(By.descStartsWith("Expand Astravar crystal")),30000))
-        shell("am force-stop $appPackage");openMain();overlaySettings();findText("Start overlay session").click();device.waitForIdle()
+        shell("am force-stop $appPackage");openMain();overlaySettings();tapMain("Start overlay session");device.waitForIdle()
         assertFalse(device.hasObject(By.descStartsWith("Expand Astravar crystal")))
         assertTrue("Denied permission should open Android's overlay settings",device.wait(Until.hasObject(By.text("Display over other apps").pkg("com.android.settings")),30000))
         shell("appops set $appPackage SYSTEM_ALERT_WINDOW allow")
         device.pressBack();device.waitForIdle()
-        assertTrue(device.wait(Until.hasObject(By.text("ASTRAVAR").pkg(appPackage)),30000))
-        findText("Start overlay session").click()
+        // The returned modal owns accessibility; its background header is hidden.
+        assertTrue("Permission settings must return to the existing overlay controls",device.wait(Until.hasObject(By.text("Overlay & appearance").pkg(appPackage)),30000))
+        val restartBounds=ui.controlBounds(By.text("Start overlay session").pkg(appPackage), "enabled overlay restart after permission grant")
+        assertFalse("The enabled overlay restart control must be visible",restartBounds.isEmpty)
+        tapMain("Start overlay session")
         assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))
         expand();stopPanel()
         checkpoint("Identical saved dice restored in main app and history; live permission revocation and recovery exercised")
