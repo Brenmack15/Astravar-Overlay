@@ -38,6 +38,13 @@ class PartyPlayerFirstTest {
         previousSize?.let { System.setProperty("robolectric.windowManager.useRequestedSize", it) }
             ?: System.clearProperty("robolectric.windowManager.useRequestedSize")
     }
+    private fun capture(name: String, activity: ComponentActivity, modal: Boolean = false) {
+        if (System.getProperty("astravar.screenshots") == null) return
+        compose.runOnIdle { invalidateNativeCaptureWindows() }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.runOnIdle { captureNativeTestWindows(name, activity, modal) }
+    }
     private fun database() = Room.inMemoryDatabaseBuilder(
         ApplicationProvider.getApplicationContext(), CampaignLedgerDb::class.java).build()
 
@@ -50,7 +57,9 @@ class PartyPlayerFirstTest {
             listOf("Zerg Hasma", "Eek", "Korr", "Veyrath").forEach {
                 compose.onNodeWithText(it).performScrollTo().assertExists()
             }
+            capture("party-roster-400", activity.get())
             compose.onNodeWithText("Korr").performClick()
+            capture("party-unknown-sheet-400", activity.get())
             compose.onNodeWithTag("ability-STR").performScrollTo()
                 .assert(hasContentDescription("Strength score unknown", substring = true))
             compose.onNodeWithText("Identity & progression").performScrollTo().performClick()
@@ -201,14 +210,15 @@ class PartyPlayerFirstTest {
             }
             compose.onNodeWithText("Identity & progression").performScrollTo().performClick()
             compose.onNodeWithText("Edit Identity & progression").performScrollTo().performClick()
-            compose.onNodeWithText("Class / role").performScrollTo().performTextInput("Fictional creature role")
+            compose.onNode(hasText("Class / role") and hasSetTextAction()).performScrollTo().performTextInput("Fictional creature role")
             compose.onNodeWithText("Change source / resolved event (required)").performScrollTo().assertIsDisplayed()
                 .performTextInput("Synthetic accessibility check")
+            capture("party-sheet-editor-360-font200", activity.get(), modal = true)
             compose.onNodeWithText("Save sheet").assertIsDisplayed().assertIsEnabled()
             compose.onNodeWithText("Close").performClick()
             compose.onNodeWithText("Discard changes?").assertIsDisplayed()
             compose.onNodeWithText("Keep editing").performClick()
-            compose.onNodeWithText("Class / role").performScrollTo().assertTextContains("Fictional creature role")
+            compose.onNode(hasText("Class / role") and hasSetTextAction()).performScrollTo().assertTextContains("Fictional creature role")
             runBlocking { assertTrue(db.partyDao().allSheets().isEmpty()) }
         } finally { activity.pause().stop().destroy(); db.close() }
     }
@@ -251,6 +261,7 @@ class PartyPlayerFirstTest {
             compose.onNodeWithText("Commit confirmed exchange").performClick()
             compose.waitUntil(10_000) { runBlocking { db.partyDao().wallet("synthetic-purse")?.gold == 0L } }
             compose.onNodeWithText("Exchange saved").performScrollTo().assertIsDisplayed()
+            capture("party-exchange-receipt-400", activity.get(), modal = true)
             runBlocking {
                 val item = db.ledgerDao().allItems().single()
                 assertEquals("Synthetic purchased tool", item.title)

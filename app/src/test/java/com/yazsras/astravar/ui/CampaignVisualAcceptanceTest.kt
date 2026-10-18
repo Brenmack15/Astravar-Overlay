@@ -339,7 +339,8 @@ class CampaignVisualAcceptanceTest {
                 RebuildConfigHub { tool = it }
                 if (tool == "Fictional sync") RebuildToolSheet("Fictional sync", { tool = null }) { SandboxSyncPage(sync) }
             }
-            compose.onNodeWithText("Core management").assertIsDisplayed()
+            compose.onNodeWithText("Spell reservoir").assertIsDisplayed()
+            compose.onNodeWithText("Core management").assertDoesNotExist()
             capture("rebuild-config-400", fixture.activity.get())
             compose.onNodeWithText("Fictional sync").performScrollTo().performClick()
             settle { compose.onAllNodesWithText("Offline").fetchSemanticsNodes().isNotEmpty() }

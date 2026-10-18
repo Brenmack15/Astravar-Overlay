@@ -105,7 +105,7 @@ class WeaponPresentationTest {
             capture("history",activity.get())
         } finally {activity.pause().stop().destroy();scope.coroutineContext[Job]!!.cancelAndJoin();db.close()}
     }
-    @Test(timeout=60000) fun coresUseActualNamesAndKeepSetupControlsCollapsed(): Unit = runBlocking {
+    @Test(timeout=60000) fun permanentNexusUsesActualNameAndHistoricalSparesStayOutOfLiveControls(): Unit = runBlocking {
         val context=ApplicationProvider.getApplicationContext<android.content.Context>()
         val db=Room.inMemoryDatabaseBuilder(context,AstravarDb::class.java).build();val scope=CoroutineScope(SupervisorJob()+Dispatchers.Default)
         val actions=Actions(Repository(db,scope),scope)
@@ -114,8 +114,14 @@ class WeaponPresentationTest {
         try {
             activity.get().setContent {AstravarTheme {Scaffold(topBar={AstravarHeader(false)},bottomBar={WeaponNavigation("Cores & Payloads") {}}) {padding->Column(Modifier.padding(padding)) {InventoryTabs("Cores") {};CoresPage(s,actions)}}}}
             compose.onNodeWithText("Resonant crystal").assertIsDisplayed()
-            compose.onNodeWithText("EQUIPPED").assertIsDisplayed();compose.onNodeWithText("READY").assertIsDisplayed()
-            compose.onNodeWithText("UNAVAILABLE").assertIsDisplayed()
+            compose.onNodeWithText("INTERNAL NEXUS").assertIsDisplayed()
+            compose.onNodeWithText("One permanent internal core").assertIsDisplayed()
+            compose.onNodeWithText("READY").assertIsDisplayed()
+            compose.onNodeWithText("Spare resonant core").assertDoesNotExist()
+            compose.onNodeWithText("EQUIPPED").assertDoesNotExist()
+            compose.onNodeWithText("UNAVAILABLE").assertDoesNotExist()
+            compose.onNodeWithText("Charge / overwrite payload").assertIsEnabled()
+            assertEquals("Viewing live controls must retain historical spare records", 2, s.cores.size)
             compose.onNodeWithText("Name of a completed core you actually own").assertDoesNotExist()
             compose.onNodeWithText("Storm Core").assertDoesNotExist()
             capture("cores",activity.get())

@@ -59,12 +59,19 @@ class CorePickerRebuildTest {
     }
 
     @Test fun historicalDestructionRemainsReadableWithoutOfferingReplacement() {
-        inspect(Campaign(onboarded = true, attuned = true, installedId = "core-a", postShatter = true,
-            cores = listOf(Core("core-a", "Historical fixture", destroyed = true)))) { repo ->
-            compose.onNodeWithText("Destroyed").assertIsDisplayed()
+        val plan = ShotPlan("historical-shatter", 0, Ability.SHATTER, "core-a", Profile(), emptyList(), targetPoint = "Synthetic historical point")
+        val roll = DiceRoller.roll(plan, die = { 1 })
+        val historical = PendingShot(plan, rolled = roll)
+        // Actual pre-retirement destruction removed the installed reference. Do not weaken validation to admit an impossible topology.
+        inspect(Campaign(onboarded = true, attuned = true, installedId = null, postShatter = true,
+            cores = listOf(Core("core-a", "Historical fixture", destroyed = true)), pending = listOf(historical))) { repo ->
+            compose.onNodeWithText("Destroy core & roll").assertDoesNotExist()
             val after = runBlocking { BackupCodec.decode(repo.export()).campaign }
             assertTrue(after.postShatter)
+            assertNull(after.installedId)
             assertTrue(after.core("core-a").destroyed)
+            assertEquals(historical, after.pending.single())
+            assertEquals(42, after.pending.single().rolled!!.damage.getValue("blast").faces.size)
             assertEquals(0L, after.gameSeconds)
         }
     }

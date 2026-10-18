@@ -79,9 +79,14 @@ class NavigationV2Test {
             compose.onNodeWithText("Inventions").performClick()
             compose.onNodeWithText("Add Invention").assertExists()
             compose.onNodeWithText("‹ Campaign").performClick()
+            compose.onNodeWithText("Party").performClick()
+            listOf("Zerg Hasma", "Eek", "Korr", "Veyrath").forEach { compose.onNodeWithText(it).assertExists() }
+            capture("v2-party", activity.get())
             compose.onNodeWithText("Eek").performClick()
+            compose.onNodeWithText("Eek's specialized companion tools").performScrollTo().performClick()
             compose.onNodeWithText("Condition unknown").assertExists()
-            capture("v2-eek", activity.get())
+            compose.runOnIdle { captureNativeTestWindows("v2-eek", activity.get(), modal = true) }
+            compose.onNodeWithText("Close").performClick()
             compose.onNodeWithText("Config").performClick()
             compose.onNodeWithText("Campaign backup").performScrollTo().performClick()
             compose.onNodeWithText("Export campaign backup").assertExists()
@@ -89,7 +94,10 @@ class NavigationV2Test {
             compose.onNodeWithText("Combat").performClick()
             compose.onNodeWithText("CONFIRM YOUR WEAPON PROFILE").assertExists()
             compose.onNodeWithText("Campaign").performClick()
-            compose.onNodeWithText("Condition unknown").assertExists()
+            compose.onNodeWithText("Inventory").assertExists()
+            compose.onNodeWithText("Checkpoints").assertExists()
+            compose.onNodeWithText("Party").performClick()
+            compose.onNodeWithText("Eek's specialized companion tools").performScrollTo().assertExists()
             compose.runOnIdle { assertEquals(before, app.repository.state.value) }
             assertEquals(0, overlayStarts)
             assertEquals(0, permissionRequests)
@@ -100,6 +108,8 @@ class NavigationV2Test {
             assertTrue(records.getValue("companionStates").jsonArray.isEmpty())
             assertTrue(records.getValue("projects").jsonArray.isEmpty())
             assertTrue(records.getValue("entities").jsonArray.isEmpty())
+            assertTrue(records.getValue("characterProfiles").jsonArray.isEmpty())
+            assertTrue(records.getValue("partySheets").jsonArray.isEmpty())
         } finally { activity.pause().stop().destroy() }
     }
 
@@ -112,11 +122,11 @@ class NavigationV2Test {
                 AstravarTheme { RebuildPrimaryNavigation(selected) { selected = it; visited += it } }
             }
             compose.onNodeWithText("Armor").assertIsSelected()
-            listOf("Combat", "Campaign", "Config", "Armor").forEach { destination ->
+            listOf("Combat", "Party", "Campaign", "Config", "Armor").forEach { destination ->
                 compose.onNodeWithText(destination).performClick()
                 compose.onNodeWithText(destination).assertIsSelected()
             }
-            assertEquals(listOf("Combat", "Campaign", "Config", "Armor"), visited)
+            assertEquals(listOf("Combat", "Party", "Campaign", "Config", "Armor"), visited)
         } finally { activity.pause().stop().destroy() }
     }
 }
