@@ -19,87 +19,80 @@ import com.yazsras.astravar.rules.*
     val prefs by app.preferences.flow.collectAsState(initial=com.yazsras.astravar.data.OverlayPrefs())
     val scope=rememberCoroutineScope()
     val actions=remember { Actions(app.repository,scope) }
-    var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("Astravar") }
-    var armorTab by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("Armor") }
-    var campaignTab by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("Connections") }
-    var inventoryTab by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("Cores") }
-    var morePage by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
-    var elementPicker by remember { mutableStateOf(false) }
+    var tab by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf("Armor")}
+    var campaignPage by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
+    var tool by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
+    var elementPicker by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf(false)}
+    val screenStates=androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     val snackbar=remember {SnackbarHostState()}
     LaunchedEffect(actions.message) {if(actions.message.isNotBlank()) {snackbar.showSnackbar(actions.message);actions.message=""}}
+    androidx.activity.compose.BackHandler(enabled=tab=="Campaign" && campaignPage!=null && tool==null) {campaignPage=null}
     AstravarTheme {
-        Scaffold(
+        Scaffold(containerColor=RebuildPalette.Canvas,
             snackbarHost={SnackbarHost(snackbar)},
-            topBar={AstravarHeader(s?.demo==true) {tab="More";morePage="Settings"}},
-            bottomBar={CampaignNavigationV2(tab) {tab=it;morePage=null}}
+            topBar={RebuildAppHeader(s?.demo==true)},
+            bottomBar={RebuildPrimaryNavigation(tab) {tab=it}}
         ) {insets->
             Column(Modifier.padding(insets).imePadding()) {
                 if(error!=null) Text(error!!,Modifier.padding(16.dp),color=MaterialTheme.colorScheme.error)
                 val current=s
                 if(current==null) {LinearProgressIndicator(Modifier.fillMaxWidth());return@Column}
                 if(actions.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                when(tab) {
-                    "Inventory" -> CampaignLedgerPage(app.campaignLedger)
-                    "Campaign" -> {
-                        V2SectionTabs(listOf("Inventions","Connections","Eek"),campaignTab) {campaignTab=it}
-                        when(campaignTab) {
-                            "Inventions" -> InventionsPageV2(app.campaignLedger)
-                            "Eek" -> EekPageV2(app.campaignLedger)
-                            else -> ConnectionsPageV2(app.campaignLedger)
-                        }
-                    }
-                    "Astravar" -> {
-                        V2SectionTabs(listOf("Armor","Combat","Systems"),armorTab) {armorTab=it}
-                        when {
-                            armorTab=="Armor" -> ArmorOverviewV2(current,app.campaignLedger,
-                                combat={armorTab="Combat"},systems={armorTab="Systems"},
-                                eek={tab="Campaign";campaignTab="Eek"},inventory={tab="Inventory"},
-                                elements=if(prefs.mode==Ability.ARCANE || prefs.mode==Ability.SPELL) emptyList() else prefs.elements,
-                                selectElement={elementPicker=true})
-                            !current.onboarded -> WeaponSetupV2(current,actions,
-                                rules={tab="More";morePage="Rules"},restore={tab="More";morePage="Backup"})
-                            armorTab=="Combat" -> Dashboard(current,actions,startOverlay,grantOverlay,stopOverlay,app.preferences,prefs)
-                            else -> {
-                                V2SectionTabs(listOf("Cores","Payloads","History"),inventoryTab) {inventoryTab=it}
-                                when(inventoryTab) {
-                                    "Cores" -> CoresPage(current,actions)
-                                    "Payloads" -> PayloadsPage(current,actions,app.preferences,prefs.selectedPayloads)
-                                    else -> CombatHistoryPage(current)
+                screenStates.SaveableStateProvider(tab) {
+                    when(tab) {
+                        "Armor" -> ArmorOverviewV2(current,app.campaignLedger,
+                            combat={tab="Combat"},systems={tool="Core management"},
+                            eek={tab="Campaign";campaignPage="Eek"},inventory={tab="Campaign";campaignPage="Inventory"},
+                            elements=if(prefs.mode==Ability.ARCANE || prefs.mode==Ability.SPELL) emptyList() else prefs.elements,
+                            selectElement={elementPicker=true})
+                        "Combat" -> if(current.onboarded) Dashboard(current,actions,startOverlay,grantOverlay,stopOverlay,app.preferences,prefs)
+                            else WeaponSetupV2(current,actions,{tool="Rules & profile"},{tool="Weapon backup"})
+                        "Campaign" -> {
+                            val page=campaignPage
+                            if(page==null) RebuildCampaignHub {campaignPage=it}
+                            else Column(Modifier.fillMaxSize()) {
+                                Row(Modifier.fillMaxWidth().padding(horizontal=8.dp),verticalAlignment=Alignment.CenterVertically) {
+                                    PlayerTextButton(onClick={campaignPage=null}) {Text("‹ Campaign")}
+                                    Spacer(Modifier.weight(1f))
                                 }
+                                Box(Modifier.weight(1f)) {screenStates.SaveableStateProvider("campaign-$page") {
+                                    when(page) {
+                                        "Inventory" -> CampaignLedgerPage(app.campaignLedger)
+                                        "Inventions" -> InventionsPageV2(app.campaignLedger)
+                                        "Eek" -> EekPageV2(app.campaignLedger)
+                                        else -> ConnectionsPageV2(app.campaignLedger)
+                                    }
+                                }}
                             }
                         }
-                    }
-                    else -> {
-                        if(morePage!=null) TextButton(onClick={morePage=null}) {Text("‹ More")}
-                        when(morePage) {
-                            "Sync" -> SandboxSyncPage(app.sandboxSync)
-                            "Campaign Backup" -> CampaignBackupPageV2(app.campaignLedger)
-                            "Resources" -> ResourcesPage(current,history,actions)
-                            "Rules" -> RulesPage(current,actions,if(prefs.mode in listOf(Ability.ARCANE,Ability.SPELL)) emptyList() else prefs.elements)
-                            "Backup" -> Page {BackupPage(current,actions)}
-                            "Settings" -> SettingsPage(app,current,actions,startOverlay,grantOverlay,stopOverlay)
-                            "Help" -> HelpPage()
-                            else -> V2ControlRoom {morePage=it}
-                        }
+                        else -> RebuildConfigHub {tool=it}
                     }
                 }
+                tool?.let {name->RebuildToolSheet(name,{tool=null}) {
+                    when(name) {
+                        "Fictional sync" -> SandboxSyncPage(app.sandboxSync)
+                        "Campaign backup" -> CampaignBackupPageV2(app.campaignLedger)
+                        "Weapon backup" -> Page {BackupPage(current,actions)}
+                        "Rules & profile" -> RulesPage(current,actions,if(prefs.mode in listOf(Ability.ARCANE,Ability.SPELL)) emptyList() else prefs.elements)
+                        "Resources & recovery" -> ResourcesPage(current,history,actions)
+                        "Core management" -> CoresPage(current,actions)
+                        "Spell library" -> PayloadsPage(current,actions,app.preferences,prefs.selectedPayloads)
+                        "Roll history" -> CombatHistoryPage(current)
+                        "Overlay & appearance" -> SettingsPage(app,current,actions,startOverlay,grantOverlay,stopOverlay)
+                        else -> HelpPage()
+                    }
+                }}
             }
         }
-        if(elementPicker && s!=null) ElementWheelV2(s!!.profile, prefs.elements, {elementPicker=false}) {type ->
+        if(elementPicker && s!=null) ElementWheelV2(s!!.profile,prefs.elements,{elementPicker=false}) {type->
             actions.run("") {
-                val blast = prefs.mode in listOf(Ability.DISCHARGE, Ability.SHATTER)
-                if(type==DamageType.FORCE) {
-                    app.preferences.elements(emptyList())
-                    if(!blast) app.preferences.mode(Ability.ARCANE)
-                } else {
-                    val selected=if(s!!.profile.elementCapacity==1) listOf(type)
-                        else if(type in prefs.elements) prefs.elements-type
-                        else (prefs.elements+type).takeLast(s!!.profile.elementCapacity)
-                    app.preferences.elements(selected)
+                val blast=prefs.mode in listOf(Ability.DISCHARGE,Ability.SHATTER)
+                if(type==DamageType.FORCE) {app.preferences.elements(emptyList());if(!blast) app.preferences.mode(Ability.ARCANE)}
+                else {
+                    app.preferences.elements(if(s!!.profile.elementCapacity==1) listOf(type) else if(type in prefs.elements) prefs.elements-type else (prefs.elements+type).takeLast(s!!.profile.elementCapacity))
                     if(!blast) app.preferences.mode(Ability.ELEMENTAL)
                 }
-            }
-            elementPicker=false
+            };elementPicker=false
         }
     }
 }

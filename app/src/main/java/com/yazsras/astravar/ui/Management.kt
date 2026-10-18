@@ -1,105 +1,326 @@
 package com.yazsras.astravar.ui
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.AstravarApp
 import com.yazsras.astravar.rules.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
 import java.util.UUID
 
-@Composable fun RulesPage(s: Campaign,a: Actions,elements: List<DamageType> = emptyList()) {
-    val p=s.profile
-    var level by remember(p.version) { mutableStateOf(p.level.toString()) }
-    var intelligence by remember(p.version) { mutableStateOf(p.intelligence.toString()) }
-    var proficiency by remember(p.version) { mutableStateOf(p.proficiency.toString()) }
-    var dc by remember(p.version) { mutableStateOf(p.saveDc.toString()) }
-    var calibration by remember(p.version) { mutableStateOf(p.calibration.toString()) }
-    var enabled by remember(p.version) { mutableStateOf(p.calibrationEnabled) }
-    var progression by remember(p.version) { mutableStateOf(p.proposedCalibrationProgression) }
-    var confirmed by remember(p.version) { mutableStateOf(p.confirmed) }
-    var capacity by remember(p.version) { mutableStateOf(p.capacityOverride?.toString() ?: "") }
-    var elementCapacity by remember(p.version) { mutableStateOf(p.elementCapacityOverride?.toString() ?: "") }
-    var release by remember(p.version) { mutableStateOf(p.releaseOverride?.toString() ?: "") }
-    var limit by remember(p.version) { mutableStateOf(p.spellShotsPerTurn.toString()) }
-    var replacement by remember(p.version) { mutableStateOf(p.fastReplacementLevel.toString()) }
-    var syntheticGp by remember(p.version) { mutableStateOf(p.syntheticGp?.toString() ?: "") }
-    var syntheticDays by remember(p.version) { mutableStateOf(p.syntheticDays?.toString() ?: "") }
+/** Compact entry points. The accepted engine and versioned profile remain authoritative. */
+@Composable fun RulesPage(s: Campaign, a: Actions, elements: List<DamageType> = emptyList()) {
+    val p = s.profile
+    var mode by rememberSaveable { mutableStateOf<String?>(null) }
+    var baselineJson by rememberSaveable { mutableStateOf<String?>(null) }
+    val baseline = remember(baselineJson) { baselineJson?.let { BackupCodec.json.decodeFromString<Profile>(it) } }
+    var level by rememberSaveable { mutableStateOf("") }
+    var intelligence by rememberSaveable { mutableStateOf("") }
+    var proficiency by rememberSaveable { mutableStateOf("") }
+    var dc by rememberSaveable { mutableStateOf("") }
+    var calibration by rememberSaveable { mutableStateOf("") }
+    var calibrationEnabled by rememberSaveable { mutableStateOf(false) }
+    var progression by rememberSaveable { mutableStateOf(false) }
+    var confirmedNames by rememberSaveable { mutableStateOf("") }
+    val confirmed = confirmedNames.split(',').mapNotNull { name -> Upgrade.entries.firstOrNull { it.name == name } }.toSet()
+    var capacity by rememberSaveable { mutableStateOf("") }
+    var elementCapacity by rememberSaveable { mutableStateOf("") }
+    var release by rememberSaveable { mutableStateOf("") }
+    var limit by rememberSaveable { mutableStateOf("") }
+    var replacement by rememberSaveable { mutableStateOf("") }
+    var syntheticGp by rememberSaveable { mutableStateOf("") }
+    var syntheticDays by rememberSaveable { mutableStateOf("") }
+    fun edit() {
+        baselineJson = BackupCodec.json.encodeToString(p)
+        level = p.level.toString(); intelligence = p.intelligence.toString(); proficiency = p.proficiency.toString()
+        dc = p.saveDc.toString(); calibration = p.calibration.toString(); calibrationEnabled = p.calibrationEnabled
+        progression = p.proposedCalibrationProgression
+        confirmedNames = Upgrade.entries.filter { it in p.confirmed }.joinToString(",") { it.name }
+        capacity = p.capacityOverride?.toString().orEmpty(); elementCapacity = p.elementCapacityOverride?.toString().orEmpty()
+        release = p.releaseOverride?.toString().orEmpty(); limit = p.spellShotsPerTurn.toString()
+        replacement = p.fastReplacementLevel.toString(); syntheticGp = p.syntheticGp?.toString().orEmpty()
+        syntheticDays = p.syntheticDays?.toString().orEmpty(); a.message = ""; mode = "edit"
+    }
+    val stale = baseline != null && p != baseline
+    val dirty = mode == "edit" && baseline?.let { b ->
+        level != b.level.toString() || intelligence != b.intelligence.toString() || proficiency != b.proficiency.toString() ||
+            dc != b.saveDc.toString() || calibration != b.calibration.toString() || calibrationEnabled != b.calibrationEnabled ||
+            progression != b.proposedCalibrationProgression || confirmed != b.confirmed ||
+            capacity != b.capacityOverride?.toString().orEmpty() || elementCapacity != b.elementCapacityOverride?.toString().orEmpty() ||
+            release != b.releaseOverride?.toString().orEmpty() || limit != b.spellShotsPerTurn.toString() ||
+            replacement != b.fastReplacementLevel.toString() || syntheticGp != b.syntheticGp?.toString().orEmpty() ||
+            syntheticDays != b.syntheticDays?.toString().orEmpty()
+    } == true
     Page {
-        Section("${p.name} · version ${p.version}") {
-            Text("ACCEPTED: attunement and a usable core are required. ${p.base} Force; 60/180 ft. Extra Attack gives two ordinary attacks within one Attack action. Selector changes are free. Explosions always take one Action.")
-            Text("Discharge: ${p.discharge} Force (3× Primary dice), 60 ft range / 15 ft radius. Shatter: ${p.shatter} Force (7× Discharge dice), 120 ft range / 60 ft RADIUS. Each active element adds ${p.selector} once. A successful save halves each rolled Force/selector component, rounded down; spell payload/overcharge deals zero on success. No flat weapon bonus on explosions.")
-            Text("PROVISIONAL: one spell-powered firing per turn; spell shots replace all free selector dice; one stored payload until confirmed dual storage at level 12, then two. Loaded magic persists through rests and swaps.")
-            Text("ASSUMPTION: starter +1 calibration. PROPOSED, disabled by default: +2 at 10 / +3 at 15. Four/five payloads at level 20 are not finalized.")
+        PlayerHeading("Rules & profile")
+        PlayerCard {
+            Text(p.character, style = MaterialTheme.typography.titleLarge)
+            Text("Level ${p.level} · profile ${p.version}", color = RebuildPalette.Muted)
+            Text("${if (p.attack >= 0) "+" else ""}${p.attack} attack · DC ${p.saveDc}", color = RebuildPalette.Ice, style = MaterialTheme.typography.titleMedium)
+            Text("${p.base} Force · ${p.selector} per selected element", style = MaterialTheme.typography.bodyMedium)
         }
-        Section("Weapon → Upgrades") {
-            WeaponDamageUpgrades(p,enabled=!a.busy,elements=elements,onBaseCountSelected={ count ->
-                if(count!=p.baseDamageDiceCount) a.change("Primary Force damage set to ${count}d${p.primaryForceDieSides}") {
-                    it.copy(profile=it.profile.copy(version=it.profile.version+1,baseDamageDiceCount=count))
+        PlayerEntry("Damage upgrades", "Primary Force and elemental selector dice", "Weapon", { a.message = ""; mode = "upgrades" })
+        PlayerEntry("Edit weapon profile", "Level, modifiers and confirmed engineering upgrades", "Settings", ::edit)
+        PlayerEntry("Mechanics reference", "Actions, blast rules, payloads and provisional settings", "Core", { mode = "reference" })
+        if (a.message.isNotBlank()) Text(a.message, color = RebuildPalette.Ice)
+    }
+    mode?.let { currentMode ->
+        PlayerSheet(when (currentMode) { "upgrades" -> "Damage upgrades"; "edit" -> "Weapon profile"; else -> "Mechanics reference" },
+            onDismiss = { if (!a.busy) mode = null }, dirty = dirty, showCancel = false, actions = {
+                if (currentMode == "edit") {
+                    val close = LocalPlayerDismiss.current
+                    PlayerTextButton(onClick = close, enabled = !a.busy) { Text("Cancel") }
+                    PlayerButton(enabled = !a.busy && !stale && dirty, onClick = {
+                        val expected = baseline ?: return@PlayerButton
+                        a.run("Saved explicit profile version ${expected.version + 1}; past shots and stored payloads preserved") {
+                            a.repo.mutate(label = "Saved explicit profile version ${expected.version + 1}; past shots and stored payloads preserved") { current ->
+                                check(current.profile == expected) { "The profile changed. Reopen the editor before saving." }
+                                current.copy(profile = expected.copy(version = expected.version + 1,
+                                    level = level.intValue("Level", 5, 20), intelligence = intelligence.intValue("INT", -5, 10),
+                                    proficiency = proficiency.intValue("Proficiency", 0, 10), saveDc = dc.intValue("DC", 1, 40),
+                                    calibration = calibration.intValue("Calibration", 0, 10), calibrationEnabled = calibrationEnabled,
+                                    proposedCalibrationProgression = progression, confirmed = confirmed,
+                                    spellShotsPerTurn = limit.intValue("Turn limit", 1, 20),
+                                    elementCapacityOverride = elementCapacity.takeIf { it.isNotBlank() }?.intValue("Selector capacity", 1, 9),
+                                    capacityOverride = capacity.takeIf { it.isNotBlank() }?.intValue("Capacity", 1, 12),
+                                    releaseOverride = release.takeIf { it.isNotBlank() }?.intValue("Release", 1, 12),
+                                    fastReplacementLevel = replacement.intValue("Replacement level", 5, 20),
+                                    syntheticGp = syntheticGp.takeIf { it.isNotBlank() }?.intValue("GP", 0, 1000000),
+                                    syntheticDays = syntheticDays.takeIf { it.isNotBlank() }?.intValue("Days", 1, 10000)))
+                            }
+                            mode = null
+                        }
+                    }) { Text("Save profile") }
                 }
-            },onSelectorCountSelected={ count ->
-                if(count!=p.elementalSelectorDiceCount) a.change("Elemental selector damage set to ${count}d8") {
-                    it.copy(profile=it.profile.copy(version=it.profile.version+1,elementalSelectorDiceCount=count))
+            }) {
+            when (currentMode) {
+                "upgrades" -> WeaponDamageUpgrades(p, enabled = !a.busy, elements = elements,
+                    onBaseCountSelected = { count ->
+                        if (count != p.baseDamageDiceCount) a.change("Primary Force damage set to ${count}d${p.primaryForceDieSides}") {
+                            it.copy(profile = it.profile.copy(version = it.profile.version + 1, baseDamageDiceCount = count))
+                        }
+                    }, onSelectorCountSelected = { count ->
+                        if (count != p.elementalSelectorDiceCount) a.change("Elemental selector damage set to ${count}d8") {
+                            it.copy(profile = it.profile.copy(version = it.profile.version + 1, elementalSelectorDiceCount = count))
+                        }
+                    })
+                "edit" -> {
+                    if (stale) Text("The profile changed while this editor was open. Close and reopen to review the current values.", color = MaterialTheme.colorScheme.error)
+                    PlayerDisclosure("Character & attack", initiallyOpen = true) {
+                        Field("Artificer level", level, { level = it }, enabled = !a.busy)
+                        Field("INT modifier", intelligence, { intelligence = it }, enabled = !a.busy)
+                        Field("Proficiency bonus", proficiency, { proficiency = it }, enabled = !a.busy)
+                        Field("Spell save DC (independent)", dc, { dc = it }, enabled = !a.busy)
+                    }
+                    PlayerDisclosure("Calibration") {
+                        Toggle("Calibration enabled · assumption", calibrationEnabled, !a.busy) { calibrationEnabled = it }
+                        Field("Calibration bonus", calibration, { calibration = it }, enabled = !a.busy)
+                        Toggle("Enable PROPOSED +2/+3 calibration progression", progression, !a.busy) { progression = it }
+                    }
+                    PlayerDisclosure("Confirmed upgrades") {
+                        Text("Confirm installed upgrades independently. Level gates still apply.", color = RebuildPalette.Muted)
+                        Upgrade.entries.forEach { upgrade ->
+                            Toggle("${upgrade.name.replace('_', ' ')} · ${if (p.has(upgrade)) "active" else "not active"}", upgrade in confirmed, !a.busy) { checked ->
+                                val next = if (checked) confirmed + upgrade else confirmed - upgrade
+                                confirmedNames = Upgrade.entries.filter { it in next }.joinToString(",") { it.name }
+                            }
+                        }
+                    }
+                    PlayerDisclosure("Payload & release limits") {
+                        Field("Provisional spell firings per turn", limit, { limit = it }, enabled = !a.busy)
+                        Field("Explicit storage capacity override (blank = milestone rules)", capacity, { capacity = it }, enabled = !a.busy)
+                        Field("Proposed selector capacity override (blank = accepted 1/2)", elementCapacity, { elementCapacity = it }, enabled = !a.busy)
+                        Field("Explicit release limit override (blank = milestone rules)", release, { release = it }, enabled = !a.busy)
+                    }
+                    PlayerDisclosure("Replacement & synthetic cores") {
+                        Field("Fast replacement threshold · approximately level 15", replacement, { replacement = it }, enabled = !a.busy)
+                        Field("Synthetic core gp (blank = unresolved)", syntheticGp, { syntheticGp = it }, enabled = !a.busy)
+                        Field("Synthetic core days (blank = unresolved)", syntheticDays, { syntheticDays = it }, enabled = !a.busy)
+                    }
                 }
-            })
-        }
-        Section("Edit next profile version") {
-            Field("Artificer level",level,{level=it}); Field("INT modifier",intelligence,{intelligence=it}); Field("Proficiency bonus",proficiency,{proficiency=it}); Field("Spell save DC (independent)",dc,{dc=it})
-            Toggle("Calibration enabled · assumption",enabled) {enabled=it}; Field("Calibration bonus",calibration,{calibration=it})
-            Toggle("Enable PROPOSED +2/+3 calibration progression",progression) {progression=it}
-            Text("Eligible does not mean installed. Confirm engineering upgrades independently; level gates still apply.")
-            Upgrade.entries.forEach { u -> Toggle("${u.name.replace('_',' ')} · ${if(p.has(u)) "active" else "not active"}",u in confirmed) {v -> confirmed=if(v) confirmed+u else confirmed-u} }
-            Field("Provisional spell firings per turn",limit,{limit=it})
-            Field("Explicit storage capacity override (blank = milestone rules)",capacity,{capacity=it})
-            Field("Proposed selector capacity override (blank = accepted 1/2)",elementCapacity,{elementCapacity=it})
-            Field("Explicit release limit override (blank = milestone rules)",release,{release=it})
-            Field("Fast replacement threshold · approximately level 15",replacement,{replacement=it})
-            Field("Synthetic core gp (blank = unresolved)",syntheticGp,{syntheticGp=it}); Field("Synthetic core days (blank = unresolved)",syntheticDays,{syntheticDays=it})
-            Action("Save new rules version",!a.busy) { a.change("Saved explicit profile version ${p.version+1}; past shots and stored payloads preserved") {
-                it.copy(profile=p.copy(version=p.version+1,level=level.intValue("Level",5,20),intelligence=intelligence.intValue("INT",-5,10),proficiency=proficiency.intValue("Proficiency",0,10),saveDc=dc.intValue("DC",1,40),calibration=calibration.intValue("Calibration",0,10),calibrationEnabled=enabled,proposedCalibrationProgression=progression,confirmed=confirmed,spellShotsPerTurn=limit.intValue("Turn limit",1,20),elementCapacityOverride=elementCapacity.takeIf {x->x.isNotBlank()}?.intValue("Selector capacity",1,9),capacityOverride=capacity.takeIf { x->x.isNotBlank() }?.intValue("Capacity",1,12),releaseOverride=release.takeIf { x->x.isNotBlank() }?.intValue("Release",1,12),fastReplacementLevel=replacement.intValue("Replacement level",5,20),syntheticGp=syntheticGp.takeIf { x->x.isNotBlank() }?.intValue("GP",0,1000000),syntheticDays=syntheticDays.takeIf { x->x.isNotBlank() }?.intValue("Days",1,10000)))
-            } }
+                "reference" -> {
+                    PlayerDisclosure("Accepted attacks", initiallyOpen = true) {
+                        Text("Attunement and a usable core are required. ${p.base} Force; 60/180 ft. Extra Attack gives two ordinary attacks within one Attack action. Selector changes are free. Explosions always take one Action.")
+                    }
+                    PlayerDisclosure("Discharge & Shatter") {
+                        Text("Discharge: ${p.discharge} Force (3× Primary dice), 60 ft range / 15 ft radius. Shatter: ${p.shatter} Force (7× Discharge dice), 120 ft range / 60 ft RADIUS. Each active element adds ${p.selector} once.")
+                        Text("A successful save halves each rolled Force/selector component, rounded down; spell payload/overcharge deals zero on success. No flat weapon bonus on explosions.")
+                    }
+                    PlayerDisclosure("Payloads · provisional") {
+                        Text("One spell-powered firing per turn; spell shots replace all free selector dice; one stored payload until confirmed dual storage at level 12, then two. Loaded magic persists through rests and swaps.")
+                    }
+                    PlayerDisclosure("Assumptions & proposals") {
+                        Text("Assumption: starter +1 calibration. Proposed, disabled by default: +2 at 10 / +3 at 15. Four/five payloads at level 20 are not finalized.")
+                    }
+                }
+            }
+            if (a.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (a.message.isNotBlank()) Text(a.message, color = RebuildPalette.Ice)
         }
     }
 }
-@Composable fun ResourcesPage(s: Campaign,history: List<HistorySummary>,a: Actions) {
-    var seconds by remember { mutableStateOf("600") }; var slotLevel by remember { mutableStateOf(1) }; var slotCount by remember { mutableStateOf("") }
-    var notes by remember(s.notes) { mutableStateOf(s.notes) }; var undo by remember { mutableStateOf(false) }
-    val c=LocalContext.current
+
+@Composable fun ResourcesPage(s: Campaign, history: List<HistorySummary>, a: Actions) {
+    var mode by rememberSaveable { mutableStateOf<String?>(null) }
+    var seconds by rememberSaveable { mutableStateOf("600") }
+    var timeBaseline by rememberSaveable { mutableLongStateOf(0L) }
+    var slotLevel by rememberSaveable { mutableIntStateOf(1) }
+    var slotCount by rememberSaveable { mutableStateOf("") }
+    var slotBaseline by rememberSaveable { mutableStateOf<Int?>(null) }
+    var requestedSlotLevel by rememberSaveable { mutableStateOf<Int?>(null) }
+    var notes by rememberSaveable { mutableStateOf("") }
+    var notesBaseline by rememberSaveable { mutableStateOf("") }
+    var selectedHistoryId by rememberSaveable { mutableStateOf<String?>(null) }
+    val correction = history.firstOrNull { !it.undone && it.origin != "correction" }
+    val historyEntry = history.firstOrNull { it.id == selectedHistoryId }
+    val dirty = when (mode) {
+        "time" -> seconds != "600"
+        "slots" -> slotCount != slotBaseline?.toString().orEmpty()
+        "notes" -> notes != notesBaseline
+        else -> false
+    }
+    fun selectSlotLevel(next: Int) {
+        slotLevel = next; slotBaseline = s.slots[next]; slotCount = slotBaseline?.toString().orEmpty()
+        requestedSlotLevel = null
+    }
+    fun open(next: String) {
+        a.message = ""
+        if (next == "time") { seconds = "600"; timeBaseline = s.gameSeconds }
+        if (next == "slots") { slotBaseline = s.slots[slotLevel]; slotCount = slotBaseline?.toString().orEmpty() }
+        if (next == "notes") { notes = s.notes; notesBaseline = s.notes }
+        mode = next
+    }
+    fun close() { if (!a.busy) mode = if (mode == "event" || mode == "correction") "history" else null }
     Page {
-        Section("Weapon action limits") {
-            Toggle("Enforce Astravar actions on my turn",s.encounter) {v -> a.change("Weapon action limits set to $v; action budget reset") {it.copy(encounter=v,turn=Turn())}}
-            Text("Optional enforcement of two ordinary attacks or one full Action, one Bonus Action, and the configured spell-firing limit. No initiative, enemy or round tracking.")
-            if(s.encounter) Action("My next turn · reset weapon actions",!a.busy) {a.change("Player confirmed next weapon action window") {Engine.resetWeaponActions(it)}}
+        PlayerHeading("Resources & recovery")
+        PlayerCard {
+            Text(if (s.encounter) "Weapon actions tracked" else "Weapon action limits off", style = MaterialTheme.typography.titleLarge)
+            if (s.encounter) Text("${s.turn.attacks}/2 attacks used · ${if (s.turn.fullAction) "Action spent" else "Action available"}", color = RebuildPalette.Muted)
+            if (s.encounter) Action("My next turn · reset weapon actions", !a.busy) {
+                a.change("Player confirmed next weapon action window") { Engine.resetWeaponActions(it) }
+            }
         }
-        Section("Core recovery & installation") {
-            Text("Advance only time that has passed at your table. Wall time and app restarts never recover resources.")
-            s.cores.filter { !it.usable(s.gameSeconds) && !it.destroyed }.forEach {Text("${it.name} · ${it.readiness(s.gameSeconds)}")}
-            s.installation?.let {Text("Installation · ${(it.completeAt-s.gameSeconds).coerceAtLeast(0)} game seconds remaining")}
-            Field("Elapsed game seconds",seconds,{seconds=it})
-            Action("Confirm elapsed time",!a.busy) {a.change("Player confirmed elapsed recovery time") {Engine.advance(it,seconds.intValue("Seconds",0,31536000).toLong())}}
+        PlayerEntry("Weapon action limits", if (s.encounter) "Enforced on your turn" else "Optional manual enforcement", "Settings", { open("actions") })
+        PlayerEntry("Core recovery & installation", "${s.cores.count { it.usable(s.gameSeconds) }}/${s.cores.size} cores ready", "Core", { open("time") })
+        PlayerEntry("Spell slots", if (s.slots.isEmpty()) "Not reconciled" else s.slots.toSortedMap().entries.joinToString(" · ") { "L${it.key}: ${it.value}" }, "Payload", { open("slots") })
+        PlayerEntry("Weapon notes", s.notes.ifBlank { "No notes" }, "More", { open("notes") })
+        PlayerEntry("Accounting history", "${history.size} retained operations", "History", { open("history") })
+        if (a.message.isNotBlank()) Text(a.message, color = RebuildPalette.Ice)
+    }
+    mode?.let { currentMode ->
+        val title = when (currentMode) {
+            "actions" -> "Weapon action limits"; "time" -> "Confirm elapsed time"; "slots" -> "Spell slots"
+            "notes" -> "Weapon notes"; "history" -> "Accounting history"; "correction" -> "Correct latest operation"
+            else -> "Accounting event"
         }
-        Section("Spell slots · manually reconciled") {
-            Text("Unknown levels have no counter. A rest never silently refills slots; enter your actual remaining count.")
-            Text((1..5).joinToString(" · ") { "L$it: ${s.slots[it] ?: "unknown"}" })
-            Choices("Spell level",(1..9).toList(),slotLevel) {slotLevel=it}; Field("Confirmed remaining slots",slotCount,{slotCount=it})
-            Action("Reconcile slot count",!a.busy) {a.change("Manual slot reconciliation L$slotLevel") {it.copy(slots=it.slots+(slotLevel to slotCount.intValue("Slots",0,99)))}}
-            Action("Mark this level unknown",!a.busy) {a.change("Slot level $slotLevel marked unknown") {it.copy(slots=it.slots-slotLevel)}}
-        }
-        Section("Weapon notes") { Field("Weapon / crafting notes",notes,{notes=it},single=false); Action("Save notes",!a.busy) {a.change("Updated campaign notes") {it.copy(notes=notes)}} }
-        Section("Accounting history") {
-            Action("Undo last operation with logged correction",!a.busy && history.isNotEmpty(),danger=true) {undo=true}
-            history.forEach { Text("Game ${it.gameSeconds}s · ${it.origin}${if(it.undone) " · UNDONE" else ""}\n${it.label}"); HorizontalDivider() }
+        PlayerSheet(title, onDismiss = ::close, dirty = dirty, showCancel = false, actions = {
+            val cancel = LocalPlayerDismiss.current
+            if (currentMode in listOf("time", "slots", "notes", "correction")) PlayerTextButton(onClick = cancel, enabled = !a.busy) { Text("Cancel") }
+            when (currentMode) {
+                "time" -> PlayerButton(enabled = !a.busy && s.gameSeconds == timeBaseline, onClick = {
+                    a.run("Player confirmed elapsed recovery time") {
+                        a.repo.mutate(label = "Player confirmed elapsed recovery time") {
+                            check(it.gameSeconds == timeBaseline) { "Game time changed. Reopen the elapsed-time editor." }
+                            Engine.advance(it, seconds.intValue("Seconds", 0, 31536000).toLong())
+                        }; mode = null
+                    }
+                }) { Text("Confirm time") }
+                "slots" -> PlayerButton(enabled = !a.busy && slotCount.isNotBlank() && s.slots[slotLevel] == slotBaseline, onClick = {
+                    a.run("Manual slot reconciliation L$slotLevel") {
+                        a.repo.mutate(label = "Manual slot reconciliation L$slotLevel") {
+                            check(it.slots[slotLevel] == slotBaseline) { "This slot count changed. Reopen the editor." }
+                            it.copy(slots = it.slots + (slotLevel to slotCount.intValue("Slots", 0, 99)))
+                        }; mode = null
+                    }
+                }) { Text("Save count") }
+                "notes" -> PlayerButton(enabled = !a.busy && notes != notesBaseline && s.notes == notesBaseline, onClick = {
+                    a.run("Updated campaign notes") {
+                        a.repo.mutate(label = "Updated campaign notes") {
+                            check(it.notes == notesBaseline) { "Notes changed. Reopen the editor before saving." }
+                            it.copy(notes = notes)
+                        }; mode = null
+                    }
+                }) { Text("Save notes") }
+                "correction" -> PlayerButton(enabled = !a.busy && correction != null, onClick = {
+                    a.run("Logged correction applied") { a.repo.undo(); mode = "history" }
+                }) { Text("Confirm correction") }
+            }
+        }) {
+            when (currentMode) {
+                "actions" -> {
+                    Toggle("Enforce Astravar actions on my turn", s.encounter, !a.busy) { enabled ->
+                        a.change("Weapon action limits set to $enabled; action budget reset") { it.copy(encounter = enabled, turn = Turn()) }
+                    }
+                    Text("Tracks two ordinary attacks or one full Action, one Bonus Action, and the configured spell-firing limit. No initiative, enemy or round tracking.", color = RebuildPalette.Muted)
+                }
+                "time" -> {
+                    Text("Advance only time that has passed at your table.", color = RebuildPalette.Muted)
+                    s.cores.filter { !it.usable(s.gameSeconds) && !it.destroyed }.forEach { Text("${it.name} · ${it.readiness(s.gameSeconds)}") }
+                    s.installation?.let { Text("Installation · ${(it.completeAt - s.gameSeconds).coerceAtLeast(0)} game seconds remaining") }
+                    Field("Elapsed game seconds", seconds, { seconds = it }, enabled = !a.busy)
+                    if (s.gameSeconds != timeBaseline) Text("Game time changed. Close and reopen this editor.", color = MaterialTheme.colorScheme.error)
+                }
+                "slots" -> {
+                    Text("Enter actual remaining slots. Unknown levels have no counter; rests never refill them automatically.", color = RebuildPalette.Muted)
+                    Choices("Spell level", (1..9).toList(), slotLevel, enabled = !a.busy) {
+                        if (slotCount != slotBaseline?.toString().orEmpty()) requestedSlotLevel = it else selectSlotLevel(it)
+                    }
+                    requestedSlotLevel?.let { next ->
+                        AlertDialog(onDismissRequest = { requestedSlotLevel = null }, title = { Text("Discard this count?") },
+                            text = { Text("The unsaved count for level $slotLevel will be discarded before changing levels.") },
+                            confirmButton = { PlayerTextButton(onClick = { selectSlotLevel(next) }) { Text("Discard count") } },
+                            dismissButton = { PlayerTextButton(onClick = { requestedSlotLevel = null }) { Text("Keep editing") } })
+                    }
+                    Field("Confirmed remaining slots", slotCount, { slotCount = it }, enabled = !a.busy)
+                    if (s.slots[slotLevel] != slotBaseline) Text("This count changed. Close and reopen the editor.", color = MaterialTheme.colorScheme.error)
+                    PlayerOutlinedButton(enabled = !a.busy && s.slots[slotLevel] == slotBaseline, onClick = {
+                        a.run("Slot level $slotLevel marked unknown") {
+                            a.repo.mutate(label = "Slot level $slotLevel marked unknown") {
+                                check(it.slots[slotLevel] == slotBaseline) { "This slot count changed. Reopen the editor." }
+                                it.copy(slots = it.slots - slotLevel)
+                            }; mode = null
+                        }
+                    }) { Text("Mark this level unknown") }
+                }
+                "notes" -> {
+                    Field("Weapon / crafting notes", notes, { notes = it }, single = false, enabled = !a.busy)
+                    if (s.notes != notesBaseline) Text("Notes changed. Close and reopen this editor.", color = MaterialTheme.colorScheme.error)
+                }
+                "history" -> {
+                    if (history.isEmpty()) PlayerEmpty("No accounting history", "Weapon operations appear here after they are saved.", "History")
+                    if (correction != null) PlayerOutlinedButton(onClick = { mode = "correction" }, enabled = !a.busy) { Text("Correct latest operation") }
+                    history.forEach { entry ->
+                        PlayerEntry(entry.label, "Game ${entry.gameSeconds}s · ${entry.origin}${if (entry.undone) " · corrected" else ""}", "History",
+                            { selectedHistoryId = entry.id; mode = "event" })
+                    }
+                }
+                "event" -> historyEntry?.let { entry ->
+                    Text(entry.label, style = MaterialTheme.typography.titleMedium)
+                    Text("Game ${entry.gameSeconds}s · ${entry.origin}", color = RebuildPalette.Muted)
+                    if (entry.undone) Text("Reversed by a logged correction.", color = RebuildPalette.Ice)
+                } ?: Text("This event is no longer in retained history.")
+                "correction" -> {
+                    Text(correction?.label ?: "No retained operation to undo.", style = MaterialTheme.typography.titleMedium)
+                    Text("Reverses the latest retained operation, including its resources and pending results. A correction event is kept. Rolls removed by the retention limit cannot be recovered.", color = RebuildPalette.Muted)
+                }
+            }
+            if (a.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (a.message.isNotBlank()) Text(a.message, color = RebuildPalette.Ice)
         }
     }
-    if(undo) ArcaneDialog(onDismissRequest={undo=false},title={Text("Restore the previous state?")},text={Text("The latest operation will be reversed, including its resources and pending results. A correction event is retained. Rolls already removed by the retention limit cannot be recovered.\n${history.firstOrNull()?.label}")},confirmButton={TextButton(onClick={a.run("Logged correction applied") {a.repo.undo()};undo=false}) {Text("Confirm correction")}},dismissButton={TextButton(onClick={undo=false}) {Text("Cancel")}})
 }
 @Composable fun BackupPage(s: Campaign,a: Actions) {
     val c=LocalContext.current
@@ -124,33 +345,93 @@ import java.util.UUID
             Action("Back up current state first",!a.busy) {export.launch("astravar-before-import.json")}
             val id=remember(b) {UUID.randomUUID().toString()}
             Action("Replace campaign with validated import",!a.busy && backupSaved,danger=true) {a.run("Campaign imported once") {a.repo.import(b,id)};incoming=null}
-            TextButton(onClick={incoming=null}) {Text("Cancel import")}
+            PlayerTextButton(onClick={incoming=null}) {Text("Cancel import")}
         }
     }
 }
-@Composable fun SettingsPage(app: AstravarApp,s: Campaign,a: Actions,start: ()->Unit,grant: ()->Unit,stop: ()->Unit) {
-    val prefs by app.preferences.flow.collectAsState(initial=com.yazsras.astravar.data.OverlayPrefs())
-    val c=LocalContext.current
-    val image=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri -> if(uri!=null) a.run("Artwork selected") {
-        c.contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        app.preferences.image(uri.toString())
-    } }
-    var resetDemo by remember {mutableStateOf(false)}
-    Page {
-        Section("Floating panel") {
-            Text("The crystal can be dragged and snaps to an edge. Portrait and landscape positions are saved independently. Outside touches reach your other app. Text entry belongs to explicit result editors.")
-            Action("Allow display over other apps",onClick=grant); Action("Start overlay session",onClick=start); Action("Stop session",onClick=stop)
-            Text("Overlay scale: ${"%.0f".format(prefs.scale*100)}%")
-            Slider(prefs.scale,onValueChange={v -> a.run("Panel scale saved") {app.preferences.scale(v)}},valueRange=.85f..1.3f)
-            Action("Reset overlay positions") {a.run("Positions reset; restart overlay to apply") {app.preferences.position(false,0,160);app.preferences.position(true,0,80)}}
+@Composable fun SettingsPage(app: AstravarApp, s: Campaign, a: Actions, start: () -> Unit, grant: () -> Unit, stop: () -> Unit) {
+    val prefs by app.preferences.flow.collectAsState(initial = com.yazsras.astravar.data.OverlayPrefs())
+    val context = LocalContext.current
+    var mode by rememberSaveable { mutableStateOf<String?>(null) }
+    var scale by rememberSaveable { mutableFloatStateOf(1f) }
+    var scaleBaseline by rememberSaveable { mutableFloatStateOf(1f) }
+    val image = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) a.run("Artwork selected") {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            app.preferences.image(uri.toString())
         }
-        Section("Feedback & advanced controls") {
-            Toggle("Haptic feedback",prefs.haptics) {v->a.run("Feedback updated") {app.preferences.haptics(v)}}
-            Toggle("Advanced: manual roll override",prefs.manualOverrides) {v->a.run("Manual override updated") {app.preferences.manualOverrides(v)}}
-            if(prefs.manualOverrides) Text("Weapon shot options now includes external dice. Manual entry is recorded separately from Astravar's dice.")
-        }
-        Section("Artwork") { Text("Approved Astravar pistol artwork is included. A personal image can be selected using Android's file picker."); Action("Choose personal artwork") {image.launch(arrayOf("image/*"))}; Action("Use included Astravar artwork") {a.run("Original artwork restored") {app.preferences.image("")}} }
-        if(s.demo) Section("Leave demo") {Text("Your demo has its own labeled state. Export it if needed before starting a real campaign. The correction history remains available.");Action("End demo and begin empty real campaign",danger=true) {resetDemo=true}}
     }
-    if(resetDemo) ArcaneDialog(onDismissRequest={resetDemo=false},title={Text("End demo?")},text={Text("Remove demo resources and return to profile confirmation. No real resources will be assumed.")},confirmButton={TextButton(onClick={a.change("Left labeled demo; empty real campaign") {Campaign()};resetDemo=false}) {Text("End demo")}},dismissButton={TextButton(onClick={resetDemo=false}) {Text("Cancel")}})
+    Page {
+        PlayerHeading("Overlay & appearance")
+        PlayerCard {
+            Text("Floating combat overlay", style = MaterialTheme.typography.titleLarge)
+            Action("Start overlay session", onClick = start)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PlayerOutlinedButton(onClick = grant, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Allow overlay") }
+                PlayerOutlinedButton(onClick = stop, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Stop session") }
+            }
+        }
+        PlayerEntry("Panel layout", "${"%.0f".format(prefs.scale * 100)}% scale · saved portrait and landscape positions", "Settings", {
+            scale = prefs.scale; scaleBaseline = prefs.scale; a.message = ""; mode = "layout"
+        })
+        PlayerEntry("Feedback & advanced controls", "Haptics ${if (prefs.haptics) "on" else "off"} · manual dice ${if (prefs.manualOverrides) "on" else "off"}", "Settings", { a.message = ""; mode = "feedback" })
+        PlayerEntry("Artwork", if (prefs.image.isBlank()) "Included Astravar artwork" else "Personal image selected", "Weapon", { a.message = ""; mode = "artwork" })
+        if (s.demo) PlayerEntry("Leave demo", "Begin an empty campaign after review", "More", { a.message = ""; mode = "demo" })
+        if (a.message.isNotBlank()) Text(a.message, color = RebuildPalette.Ice)
+    }
+    mode?.let { currentMode ->
+        PlayerSheet(when (currentMode) { "layout" -> "Panel layout"; "feedback" -> "Feedback & advanced controls"; "artwork" -> "Artwork"; else -> "End demo?" },
+            onDismiss = { if (!a.busy) mode = null }, dirty = currentMode == "layout" && scale != scaleBaseline, showCancel = false,
+            actions = {
+                val close = LocalPlayerDismiss.current
+                if (currentMode == "layout") {
+                    PlayerTextButton(onClick = close, enabled = !a.busy) { Text("Cancel") }
+                    PlayerButton(enabled = !a.busy && scale != scaleBaseline && prefs.scale == scaleBaseline, onClick = {
+                        a.run("Panel scale saved") { app.preferences.scale(scale); mode = null }
+                    }) { Text("Save scale") }
+                }
+                if (currentMode == "demo") {
+                    PlayerTextButton(onClick = close, enabled = !a.busy) { Text("Cancel") }
+                    PlayerButton(enabled = !a.busy, onClick = {
+                        a.run("Left labeled demo; empty real campaign") {
+                            a.repo.mutate(label = "Left labeled demo; empty real campaign") { current ->
+                                check(current.demo) { "Demo is no longer active. Your campaign was kept." }
+                                Campaign()
+                            }; mode = null
+                        }
+                    }) { Text("End demo") }
+                }
+            }) {
+            when (currentMode) {
+                "layout" -> {
+                    Text("Overlay scale: ${"%.0f".format(scale * 100)}%", style = MaterialTheme.typography.titleMedium)
+                    Slider(scale, onValueChange = { scale = it }, valueRange = .85f..1.3f, enabled = !a.busy,
+                        modifier = Modifier.heightIn(min = 48.dp).semantics {
+                            contentDescription = "Overlay scale"
+                            stateDescription = "${"%.0f".format(scale * 100)} percent"
+                        })
+                    if (prefs.scale != scaleBaseline) Text("Scale changed. Close and reopen to review it.", color = MaterialTheme.colorScheme.error)
+                    Text("Drag the collapsed crystal to reposition it. Portrait and landscape positions are saved separately.", color = RebuildPalette.Muted)
+                    PlayerOutlinedButton(enabled = !a.busy, onClick = {
+                        a.run("Positions reset; restart overlay to apply") {
+                            app.preferences.position(false, 0, 160); app.preferences.position(true, 0, 80)
+                        }
+                    }) { Text("Reset overlay positions") }
+                }
+                "feedback" -> {
+                    Toggle("Haptic feedback", prefs.haptics, !a.busy) { value -> a.run("Feedback updated") { app.preferences.haptics(value) } }
+                    Toggle("Advanced: manual roll override", prefs.manualOverrides, !a.busy) { value -> a.run("Manual override updated") { app.preferences.manualOverrides(value) } }
+                    if (prefs.manualOverrides) Text("External dice become available in weapon shot options and are recorded separately from Astravar's rolls.", color = RebuildPalette.Muted)
+                }
+                "artwork" -> {
+                    Text(if (prefs.image.isBlank()) "Included Astravar artwork is active." else "A personal image is selected.", color = RebuildPalette.Muted)
+                    Action("Choose personal artwork", !a.busy) { image.launch(arrayOf("image/*")) }
+                    PlayerOutlinedButton(enabled = !a.busy, onClick = { a.run("Original artwork restored") { app.preferences.image("") } }) { Text("Use included Astravar artwork") }
+                }
+                "demo" -> Text("Remove labeled demo resources and return to profile confirmation. Export the demo first if you want to keep it. No real resources will be assumed; correction history remains available.", color = RebuildPalette.Muted)
+            }
+            if (a.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (a.message.isNotBlank()) Text(a.message, color = RebuildPalette.Ice)
+        }
+    }
 }

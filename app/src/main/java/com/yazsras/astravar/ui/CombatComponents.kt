@@ -1,5 +1,8 @@
 package com.yazsras.astravar.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Build
 import android.view.HapticFeedbackConstants
 import android.view.View
@@ -14,6 +17,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -52,28 +58,68 @@ fun rollFeedback(view: View,roll: ShotRoll?) {
     }
     image?.let {Image(it,"Personal Astravar artwork",modifier,contentScale=ContentScale.Fit)} ?: Image(painterResource(R.drawable.astravar_cutout),"Astravar crystal pistol",modifier,contentScale=ContentScale.Fit)
 }
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable fun CorePicker(s: Campaign,a: Actions,dismiss: ()->Unit) {
-    ModalBottomSheet(onDismissRequest=dismiss) {
-        Column(Modifier.fillMaxWidth().heightIn(max=480.dp).verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
-            SectionCaption("CHOOSE A CORE", "${s.cores.count {it.usable(s.gameSeconds)}} ready")
-            if(s.cores.isEmpty()) Text("Add the completed cores you own in Cores & Payloads.")
-            s.cores.forEach {c->
-                val active=c.id==s.installedId
-                val ready=c.usable(s.gameSeconds)
-                ArcanePanel(accent=if(active) Brass else Frost,modifier=Modifier.clickable(enabled=!a.busy && !active && ready && s.installation==null) {a.change("Install ${c.name}") {Engine.install(it,c.id)};dismiss()}) {
-                    Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-                        InstrumentMedallion("Core",Modifier.size(50.dp),if(ready) Frost else Muted)
-                        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
-                            Text("${c.name}${if(active) " · ACTIVE" else ""}",style=MaterialTheme.typography.titleLarge)
-                            Text("${c.readiness(s.gameSeconds)} · ${c.payloads.size}/${s.profile.capacity} stored",style=MaterialTheme.typography.bodySmall,color=Muted)
-                            if(!active) Text("Install · ${if(s.postShatter) s.profile.replacementCost else s.profile.swapCost}",style=MaterialTheme.typography.labelMedium,color=Brass)
-                        }
-                        StatusPill(if(ready) "READY" else "UNAVAILABLE",ready)
-                    }
+@Composable fun CorePicker(s: Campaign, a: Actions, dismiss: () -> Unit) {
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var reviewRevision by rememberSaveable { mutableStateOf<Long?>(null) }
+    var reviewCommandId by rememberSaveable { mutableStateOf<String?>(null) }
+    var attempted by rememberSaveable { mutableStateOf(false) }
+    val core = s.cores.firstOrNull { it.id == selectedId }
+    val installCost = if (s.postShatter) s.profile.replacementCost else s.profile.swapCost
+    val stale = core != null && reviewRevision != s.revision
+    val available = core != null && core.id != s.installedId && core.usable(s.gameSeconds) && s.installation == null
+    PlayerSheet(if (core == null) "Choose a core" else "Install core", { if (!a.busy) dismiss() }, actions = {
+        if (core != null) PlayerButton(onClick = {
+            if (a.busy) return@PlayerButton
+            val expectedRevision = reviewRevision ?: return@PlayerButton
+            val targetCoreId = core.id
+            val targetCoreName = core.name
+            val commandId = reviewCommandId ?: return@PlayerButton
+            attempted = true
+            a.run("Core installation confirmed") {
+                a.repo.mutate(commandId, "Install $targetCoreName") { current ->
+                    require(current.revision == expectedRevision) { "Core configuration changed. Review it again before installing." }
+                    Engine.install(current, targetCoreId)
                 }
+                dismiss()
             }
-            Spacer(Modifier.height(16.dp))
+        }, enabled = !a.busy && available && !stale && reviewCommandId != null) { Text(if (a.busy) "Installing…" else "Confirm install") }
+    }) {
+        if (core == null) {
+            if (s.cores.isEmpty()) PlayerEmpty("No completed cores", "Add the completed cores you own in Systems.", "Core")
+            s.cores.forEach { candidate ->
+                val installed = candidate.id == s.installedId
+                val installing = candidate.id == s.installation?.coreId
+                PlayerEntry(candidate.name,
+                    listOf(if (installed) "Installed" else if (installing) "Installing" else candidate.readiness(s.gameSeconds),
+                        "${candidate.payloads.size}/${s.profile.capacity} stored").joinToString(" · "),
+                    "Core", onClick = {
+                        if (!a.busy) {
+                            selectedId = candidate.id
+                            reviewRevision = s.revision
+                            reviewCommandId = java.util.UUID.randomUUID().toString()
+                            attempted = false
+                        }
+                    })
+            }
+        } else {
+            PlayerTextButton(onClick = { if (!a.busy) { selectedId = null; attempted = false } }, enabled = !a.busy) { Text("‹ All cores") }
+            Text(core.name, style = MaterialTheme.typography.titleLarge, color = RebuildPalette.Ice)
+            Text(core.readiness(s.gameSeconds), color = RebuildPalette.Muted, style = MaterialTheme.typography.bodyMedium)
+            PlayerCard {
+                Text("Installation cost", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelLarge)
+                Text(installCost, color = RebuildPalette.Gold, style = MaterialTheme.typography.titleMedium)
+                Text("${core.payloads.size}/${s.profile.capacity} stored payloads", style = MaterialTheme.typography.bodyMedium)
+            }
+            when {
+                core.id == s.installedId -> Text("This core is already installed.", color = RebuildPalette.Muted)
+                s.installation != null -> Text("A core installation is already in progress.", color = RebuildPalette.Muted)
+                !core.usable(s.gameSeconds) -> Text("This core is not usable.", color = RebuildPalette.Muted)
+                stale -> Text("Configuration changed. Return to the list and review the current cost.", color = MaterialTheme.colorScheme.error)
+                s.postShatter && installCost == "10 in-game minutes" -> Text("Confirmation starts installation. It completes only after recorded game time advances.", style = MaterialTheme.typography.bodyMedium)
+                else -> Text("Confirm to install this core and apply its existing action cost.", style = MaterialTheme.typography.bodyMedium)
+            }
+            if (attempted && !a.busy && a.message.isNotBlank()) Text(a.message, color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -97,70 +143,67 @@ fun rollFeedback(view: View,roll: ShotRoll?) {
                     }
                 }
             }
-            TextButton(onClick={a.run("Payload selection cleared") {preferences.payloads(emptySet());preferences.mode(Ability.ARCANE)};dismiss()}) {Text("No payload · arcane shot")}
+            PlayerTextButton(onClick={a.run("Payload selection cleared") {preferences.payloads(emptySet());preferences.mode(Ability.ARCANE)};dismiss()}) {Text("No payload · arcane shot")}
             Action("Done",onClick=dismiss)
             Spacer(Modifier.height(16.dp))
         }
     }
 }
 @Composable fun CombatHistoryPage(s: Campaign) {
-    var selected by remember {mutableStateOf<String?>(null)}
+    var selected by rememberSaveable { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val shots = s.recentRolls()
     Page {
-        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
-            InstrumentMedallion("History",Modifier.size(54.dp),Brass)
-            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
-                Text("ASTRAVAR ARCHIVE",style=MaterialTheme.typography.labelSmall,color=Brass)
-                Text("Recent rolls",style=MaterialTheme.typography.headlineMedium,color=MaterialTheme.colorScheme.onSurface)
-                Text("Newest first · ${s.pending.size.coerceAtMost(HistoryRetention.MAX_HISTORY_ENTRIES)} retained",style=MaterialTheme.typography.bodySmall,color=Muted)
-            }
+        PlayerHeading("Recent rolls") {
+            Text("${shots.size} / ${HistoryRetention.MAX_HISTORY_ENTRIES}", color = RebuildPalette.Muted,
+                style = MaterialTheme.typography.bodySmall)
         }
-        SectionCaption("COMBAT HISTORY", "Latest ${HistoryRetention.MAX_HISTORY_ENTRIES}")
-        if(s.pending.isEmpty()) ArcanePanel(accent=Frost) {
-            InstrumentMedallion("History",Modifier.size(64.dp),Frost)
-            Text("Your first roll will appear here",style=MaterialTheme.typography.titleLarge)
-            Text("Open Weapon and tap Roll attack.",style=MaterialTheme.typography.bodyMedium,color=Muted)
-        }
-        s.recentRolls().forEach {shot->
-            val roll=shot.rolled
-            val time=roll?.rolledAtMillis?.takeIf {it>0}?.let {SimpleDateFormat("MMM d · HH:mm",Locale.getDefault()).format(Date(it))} ?: "Earlier"
-            val tint=if(roll?.natural==1) MaterialTheme.colorScheme.error else if(roll?.critical==true) Brass else Frost
-            val damage=historyDamage(shot)
-            val expanded=selected==shot.plan.id
-            ArcanePanel(accent=tint,modifier=Modifier.clickable {selected=if(expanded) null else shot.plan.id}) {
-                Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(4.dp)) {
-                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(9.dp)) {
-                        InstrumentMedallion(if(shot.plan.blast) "Payload" else "Weapon",Modifier.size(40.dp),tint)
-                        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
-                            Text("$time · ${shot.plan.ability.title}",style=MaterialTheme.typography.labelMedium,color=Brass)
-                            when(roll?.natural) {
-                                20 -> Text("CRITICAL HIT · natural 20",style=MaterialTheme.typography.labelSmall,color=Brass)
-                                1 -> Text("NATURAL 1 — MISS",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.error)
-                            }
-                        }
-                        Column(horizontalAlignment=Alignment.End) {
-                            Text(roll?.attackTotal?.toString() ?: if(shot.plan.blast) shot.plan.profile.saveDc.toString() else "—",style=MaterialTheme.typography.headlineMedium,fontSize=30.sp,lineHeight=34.sp,color=tint)
-                            Text(if(roll?.attackTotal!=null) "TO HIT" else if(shot.plan.blast) "SAVE DC" else "ATTACK",style=MaterialTheme.typography.labelSmall,color=Muted)
+        if (shots.isEmpty()) PlayerEmpty("No rolls yet", "Roll an attack in Combat to start your history.", "History")
+        shots.forEach { shot ->
+            val roll = shot.rolled
+            val time = roll?.rolledAtMillis?.takeIf { it > 0 }?.let {
+                SimpleDateFormat("MMM d · HH:mm", Locale.getDefault()).format(Date(it))
+            } ?: "Earlier"
+            val tint = if (roll?.natural == 1) MaterialTheme.colorScheme.error else if (roll?.critical == true) RebuildPalette.Gold else RebuildPalette.Ice
+            val damage = historyDamage(shot)
+            PlayerCard(onClick = { selected = shot.plan.id }) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("$time · ${shot.plan.ability.title}", style = MaterialTheme.typography.labelLarge,
+                            color = RebuildPalette.Muted)
+                        when (roll?.natural) {
+                            20 -> Text("Critical · natural 20", style = MaterialTheme.typography.labelLarge, color = RebuildPalette.Gold)
+                            1 -> Text("Natural 1 · miss", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error)
                         }
                     }
-                    Text(roll?.takeIf {it.attackTotal!=null}?.let {it.attackDescription(shot.plan)+if(it.mode==RollMode.NORMAL) " · normal" else ""} ?: if(shot.plan.blast) "Dexterity save · ${shot.result?.targets?.size ?: 0} results${if(shot.result==null) " · awaiting saves" else ""}" else "External dice",style=MaterialTheme.typography.bodySmall,color=Muted)
-                    HorizontalDivider(color=tint.copy(alpha=.24f))
-                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                        HistoryDamageChips(damage,Modifier.weight(1f))
-                        Column(horizontalAlignment=Alignment.End) {
-                            Text(damage.values.sum().toString(),style=MaterialTheme.typography.titleLarge,color=MaterialTheme.colorScheme.onSurface)
-                            Text(if(shot.plan.blast) "ROLLED" else if(shot.result?.outcome==Outcome.MISS) "DAMAGE" else "POTENTIAL",style=MaterialTheme.typography.labelSmall,color=Muted)
-                        }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(roll?.attackTotal?.toString() ?: if (shot.plan.blast) shot.plan.profile.saveDc.toString() else "—",
+                            style = MaterialTheme.typography.headlineSmall, color = tint)
+                        Text(if (roll?.attackTotal != null) "TO HIT" else if (shot.plan.blast) "SAVE DC" else "ATTACK",
+                            style = MaterialTheme.typography.labelSmall, color = RebuildPalette.Muted)
                     }
-                    Text("${roll?.coreName?.ifBlank {shot.plan.coreId} ?: shot.plan.coreId} · ${shot.plan.selectedPayloads.joinToString {it.template.name}.ifBlank {shot.plan.immediate?.name ?: "No payload"}}",style=MaterialTheme.typography.bodySmall,color=Muted)
-                    Text(if(expanded) "Hide details ▴" else "View dice & details ▾",style=MaterialTheme.typography.labelSmall,color=Frost)
-                    if(expanded) {
-                        HorizontalDivider(color=tint.copy(alpha=.24f))
-                        Text(shotSummary(shot),style=MaterialTheme.typography.bodySmall)
-                    }
+                    Text("›", color = RebuildPalette.Muted, style = MaterialTheme.typography.titleLarge)
                 }
+                Text(roll?.takeIf { it.attackTotal != null }?.let { it.attackDescription(shot.plan) }
+                    ?: if (shot.plan.blast) "Dexterity save${if (shot.result == null) " · awaiting saves" else ""}" else "External dice",
+                    style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
+                if (damage.isNotEmpty()) Text(damage.entries.joinToString(" · ") { (type, total) ->
+                    "${type.name.lowercase().replaceFirstChar(Char::titlecase)} $total"
+                }, style = MaterialTheme.typography.bodyMedium, color = RebuildPalette.Ice)
+                Text("${roll?.coreName?.ifBlank { shot.plan.coreId } ?: shot.plan.coreId} · ${shot.plan.selectedPayloads.joinToString { it.template.name }.ifBlank { shot.plan.immediate?.name ?: "No payload" }}",
+                    style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
             }
-
         }
+    }
+    val detail = shots.firstOrNull { it.plan.id == selected }
+    if (detail != null) PlayerSheet("Roll details", { selected = null }, actions = {
+        PlayerTextButton(onClick = {
+            (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                .setPrimaryClip(ClipData.newPlainText("Astravar result", shotSummary(detail)))
+        }) { Text("Copy full result") }
+    }) {
+        SelectionContainer { Text(shotSummary(detail), style = MaterialTheme.typography.bodyMedium) }
     }
 }
 private fun historyDamage(shot: PendingShot): Map<DamageType,Int> {
