@@ -132,7 +132,7 @@ class OverlayService: Service() {
         minHeight=maxOf(dp(48),(48*resources.displayMetrics.density).toInt());setTextColor(if(danger) OverlayInk.RED else OverlayInk.TEXT)
         elevation=0f;stateListAnimator=null;textSize=14f;typeface=bodyTypeface;includeFontPadding=false
         setPadding(dp(7),dp(4),dp(7),dp(4))
-        val primary=label in listOf("Roll attack","Roll again","Confirm & roll","Destroy core & roll")
+        val primary=label in listOf("Roll attack","Roll again","Confirm & roll")
         val selected=label.startsWith("✓")
         background=android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x30DDB577),
             ArcaneSurface(primary || selected,danger,dp(12).toFloat(),ornament=primary,texture=OverlayMaterials.shader(resources,primary || selected)),null)
@@ -178,8 +178,9 @@ class OverlayService: Service() {
             addView(text(damage,14f).apply {setPadding(dp(5),0,dp(2),0)})
         },LinearLayout.LayoutParams(0,-2,1f))
         addView(top)
+        val attack=if(prefs.mode==Ability.GUARDIAN) s.profile.melee?.guardianAttackBonus else if(prefs.mode in listOf(Ability.GAUNTLET,Ability.SPELL_GAUNTLET)) s.profile.melee?.attackBonus else s.profile.attack
         row(this,
-            text("ATTACK  +${s.profile.attack}",13f).apply {setTextColor(OverlayInk.GOLD);gravity=Gravity.CENTER;setPadding(0,dp(3),0,0)},
+            text("ATTACK  ${attack?.let {if(it>=0) "+$it" else it.toString()} ?: "—"}",13f).apply {setTextColor(OverlayInk.GOLD);gravity=Gravity.CENTER;setPadding(0,dp(3),0,0)},
             text("DEX SAVE  ${s.profile.saveDc}",13f).apply {setTextColor(OverlayInk.BLUE);gravity=Gravity.CENTER;setPadding(0,dp(3),0,0)})
     }
     private fun moduleButton(label: String,fact: String,kind: String,action: ()->Unit)=button("$label\n$fact",action=action).apply {
@@ -244,7 +245,7 @@ class OverlayService: Service() {
             orientation=LinearLayout.VERTICAL;background=ArcaneSurface(radius=dp(18).toFloat(),capsule=!expanded,ornament=expanded,texture=OverlayMaterials.shader(resources))
             elevation=dp(10).toFloat();setPadding(dp(2),dp(2),dp(2),dp(2))
         }
-        val ready=s.attuned && s.installed?.usable(s.gameSeconds)==true && !s.postShatter
+        val ready=runCatching {makePlan(s)}.isSuccess
         val handle=header(ready)
         handle.setOnClickListener {expanded=!expanded;if(!expanded) {resultId=null;editingTarget=false};render()}
         root.addView(handle);drag(handle)
@@ -277,8 +278,10 @@ class OverlayService: Service() {
     }
     private fun options()=RollOptions(prefs.advantage,prefs.disadvantage)
     private fun makePlan(s: Campaign): ShotPlan {
-        val mode=prefs.mode;val magic=mode in listOf(Ability.SPELL,Ability.DISCHARGE,Ability.SHATTER)
-        return Engine.plan(s,UUID.randomUUID().toString(),mode,if(magic) selected.toList() else emptyList(),if(magic) s.templates.find {it.id==immediateId} else null,elements,directImpact && mode in listOf(Ability.DISCHARGE,Ability.SHATTER),distance,targetPoint,manualSlot)
+        val mode=if(prefs.mode==Ability.SHATTER) Ability.ARCANE else prefs.mode
+        val magic=mode in listOf(Ability.SPELL,Ability.DISCHARGE,Ability.SPELL_GAUNTLET)
+        val melee=mode in listOf(Ability.GAUNTLET,Ability.SPELL_GAUNTLET,Ability.GUARDIAN)
+        return Engine.plan(s,UUID.randomUUID().toString(),mode,if(magic) selected.toList() else emptyList(),if(magic) s.templates.find {it.id==immediateId} else null,elements,directImpact && mode==Ability.DISCHARGE,if(melee) 5 else distance,targetPoint,manualSlot)
     }
     private fun requestRoll(s: Campaign) {
         try {
@@ -292,6 +295,12 @@ class OverlayService: Service() {
             // Room's observer may deliver after this coroutine resumes. Render the
             // committed roll now so an old empty snapshot cannot reset the result page.
             state=after
+            if(!p.blast || p.directImpact) app.preferences.targeting(RollOptions())
+            if(p.hasSpell) {
+                selected=emptySet();immediateId=null;manualSlot=false
+                app.preferences.payloads(emptySet())
+                app.preferences.aim(p.distance,p.targetPoint,p.directImpact,null,false)
+            }
             resultId=p.id;outcome=null;targetResults=emptyList();panelPage="result";showDice=false
             if(prefs.haptics) view?.let {rollFeedback(it,after.pending.last().rolled)}
         }
@@ -328,20 +337,18 @@ class OverlayService: Service() {
                     content.addView(text(p.ability.title,22f));content.addView(text(p.actionCost))
                     content.addView(text(Engine.components(p).joinToString("\n") {"${it.damage.dice} ${it.damage.type.name.lowercase()}"}))
                     if(p.hasSpell) content.addView(text("Uses ${p.selectedPayloads.size} stored spell(s)${p.immediate?.let {" + level-${it.castingLevel} slot"} ?: ""}. Spent even on a miss."))
-                    if(p.ability==Ability.SHATTER) content.addView(text("Destroys this core and ALL remaining stored spells."))
                     if(p.ability==Ability.DISCHARGE) content.addView(text("Core exhausted for 600 game seconds."))
-                    content.addView(button(if(p.ability==Ability.SHATTER) "Destroy core & roll" else "Confirm & roll",p.ability==Ability.SHATTER) {fire(p)})
+                    content.addView(button("Confirm & roll") {fire(p)})
                     content.addView(button("Cancel") {preview=null;panelPage="combat";render()})
                 }
             }
             "cores" -> {
-                content.addView(text("Choose a core",20f))
-                s.cores.forEach {c->content.addView(button("${c.name} · ${if(c.id==s.installedId) "Active" else c.readiness(s.gameSeconds)}\n${c.payloads.size} stored · ${if(s.postShatter) s.profile.replacementCost else s.profile.swapCost}") {run("Core installed") {app.repository.mutate(label="Install ${c.name}",origin="overlay") {Engine.install(it,c.id)};panelPage="combat"}}.apply {isEnabled=c.id!=s.installedId && c.usable(s.gameSeconds) && s.installation==null})}
+                content.addView(text("Astravar's internal nexus is permanent. There is no core installation or swap action.",14f))
                 content.addView(button("Back") {panelPage="combat";render()})
             }
             "payloads" -> {
                 content.addView(text("Stored spells · select ${s.profile.releaseLimit} max",18f))
-                if(s.installed?.payloads.isNullOrEmpty()) content.addView(text("No stored spells. Charge a core in Cores & Payloads."))
+                if(s.installed?.payloads.isNullOrEmpty()) content.addView(text("No stored spells. Charge the internal reservoir from Config."))
                 s.installed?.payloads?.forEach {p->content.addView(button("${if(p.id in selected) "✓ Selected" else "Stored"} · ${p.template.name} · L${p.template.castingLevel}") {
                     val ids=if(p.id in selected) selected-p.id else if(s.profile.releaseLimit==1) setOf(p.id) else (selected+p.id).toList().takeLast(s.profile.releaseLimit).toSet()
                     run("Payload selected") {app.preferences.payloads(ids);app.preferences.mode(Ability.SPELL);if(s.profile.releaseLimit==1) panelPage="combat"}
@@ -351,15 +358,24 @@ class OverlayService: Service() {
             }
             "modes" -> {
                 content.addView(text("Firing mode",20f))
-                Ability.entries.forEach {mode->content.addView(button(mode.title,mode==Ability.SHATTER) {run("Mode selected") {app.preferences.mode(mode);panelPage=if(mode==Ability.ELEMENTAL) "elements" else if(mode in listOf(Ability.DISCHARGE,Ability.SHATTER)) "target" else "combat";editingTarget=panelPage=="target"}})}
+                Ability.entries.filterNot { it == Ability.SHATTER }.forEach {mode->
+                    val melee=mode in listOf(Ability.GAUNTLET,Ability.SPELL_GAUNTLET,Ability.GUARDIAN)
+                    val lock=if(mode==Ability.GUARDIAN) Engine.guardianLockReason(s.profile) else if(melee) Engine.meleeLockReason(s.profile) else null
+                    content.addView(button(mode.title + (lock?.let { "\n$it" } ?: ""),false) {run("Mode selected") {
+                        app.preferences.mode(mode)
+                        if(melee) {distance=5;app.preferences.aim(5,targetPoint,false,immediateId,manualSlot)}
+                        panelPage=if(mode==Ability.ELEMENTAL) "elements" else if(mode==Ability.DISCHARGE) "target" else "combat";editingTarget=panelPage=="target"
+                    }}.apply { isEnabled=!busy && lock==null })
+                }
+                if(Engine.meleeLockReason(s.profile)!=null) content.addView(text("Configure accepted melee values in Config → Rules & profile → Gauntlet configuration.",12f))
                 content.addView(button("Back") {panelPage="combat";render()})
             }
             "elements" -> {
-                content.addView(text("Element selector · ${s.profile.selector} each · ${s.profile.elementCapacity} max",18f))
+                content.addView(text("Element selector · ${s.profile.elementCapacity} max",18f))
                 content.addView(button("${if(elements.isEmpty()) "✓ " else ""}Neutral Force") {run("Neutral Force selected") {
                     elements=emptyList();app.preferences.elements(emptyList());if(prefs.mode==Ability.ELEMENTAL) app.preferences.mode(Ability.ARCANE);panelPage="combat"
                 }})
-                Engine.elements(s.profile).forEach {type->content.addView(button("${if(type in elements) "✓ " else ""}${type.name.lowercase()}") {
+                Engine.elements(s.profile).forEach {type->content.addView(button("${if(type in elements) "✓ " else ""}${type.name.lowercase()} · ${s.profile.selectorFor(type)}") {
                     val next=if(s.profile.elementCapacity==1) listOf(type) else if(type in elements) elements-type else (elements+type).takeLast(s.profile.elementCapacity)
                     panelPage=if(s.profile.elementCapacity==1) "combat" else "elements";saveElements(next)
                 }.apply {
@@ -373,8 +389,8 @@ class OverlayService: Service() {
                 editingTarget=true
                 content.addView(text("Shot options",20f))
                 var range=distance.toString();var point=targetPoint
-                content.addView(edit("Distance in feet",range,true) {range=it})
-                if(prefs.mode in listOf(Ability.DISCHARGE,Ability.SHATTER)) {
+                if(prefs.mode in listOf(Ability.GAUNTLET,Ability.SPELL_GAUNTLET,Ability.GUARDIAN)) {range="5";content.addView(text("Melee reach: 5 feet"))} else content.addView(edit("Distance in feet",range,true) {range=it})
+                if(prefs.mode == Ability.DISCHARGE) {
                     content.addView(edit("Blast target point",point) {point=it})
                     content.addView(Switch(uiContext).apply {text="Direct pistol impact";isChecked=directImpact;setTextColor(Color.WHITE);setOnCheckedChangeListener {_,checked->directImpact=checked}})
                 }
@@ -389,7 +405,7 @@ class OverlayService: Service() {
                 content.addView(button("Element selection") {panelPage="elements";render()})
                 content.addView(button("Fresh slot: ${s.templates.find {it.id==immediateId}?.name ?: "None"}") {val ids=listOf<String?>(null)+s.templates.filter {it.approved}.map {it.id};val next=ids[(ids.indexOf(immediateId)+1)%ids.size];run("Fresh slot selected") {app.preferences.aim(distance,targetPoint,directImpact,next,manualSlot)}})
                 if(immediateId!=null) content.addView(button("Slot availability: ${if(manualSlot) "confirmed" else "tap to confirm if unknown"}") {run("Availability updated") {app.preferences.aim(distance,targetPoint,directImpact,immediateId,!manualSlot)}})
-                if(s.encounter) content.addView(button("My next turn · reset weapon actions") {run("Weapon actions reset") {app.repository.mutate(label="Player confirmed next weapon action window",origin="overlay") {Engine.resetWeaponActions(it)}}})
+                if(s.encounter || s.turn.spellShots>0 || s.turn.bonus || s.gauntletCharge!=null) content.addView(button("My next turn · reset weapon actions") {run("Weapon actions reset") {app.repository.mutate(label="Player confirmed next weapon action window",origin="overlay") {Engine.resetWeaponActions(it)}}})
                 s.pending.filter {it.result==null}.forEach {shot->content.addView(button("Finish ${shot.plan.ability.title}") {resultId=shot.plan.id;outcome=null;targetResults=emptyList();panelPage="result";render()})}
                 if(prefs.manualOverrides) content.addView(button("Manual roll override") {try {val p=makePlan(s);run("External dice pending") {app.repository.commit(p,"overlay");resultId=p.id;panelPage="result"}} catch(e:Exception) {status=e.message ?: "Check shot";render()}})
                 if(pending?.rolled!=null) content.addView(button("Last roll · ${pending.rolled?.attackTotal ?: "blast"}") {resultId=pending.plan.id;panelPage="result";render()})
@@ -405,9 +421,14 @@ class OverlayService: Service() {
                 if(planned.isFailure) content.addView(text(planned.exceptionOrNull()?.message ?: "Check configuration",12f))
                 planned.getOrNull()?.takeIf {it.hasSpell}?.let {p->content.addView(text("Uses ${p.selectedPayloads.size} stored spell(s)${p.immediate?.let {" + level-${it.castingLevel} slot"} ?: ""}, even on a miss.",12f))}
                 row(content,*RollMode.entries.map {mode->button("${if((mode==RollMode.ADVANTAGE && prefs.advantage) || (mode==RollMode.DISADVANTAGE && prefs.disadvantage) || (mode==RollMode.NORMAL && !prefs.advantage && !prefs.disadvantage)) "✓ " else ""}${when(mode) {RollMode.NORMAL->"Normal";RollMode.ADVANTAGE->"Adv";RollMode.DISADVANTAGE->"Dis"}}") {run("Roll mode selected") {app.preferences.targeting(options().copy(advantage=mode==RollMode.ADVANTAGE,disadvantage=mode==RollMode.DISADVANTAGE))}}}.toTypedArray())
-                row(content,
-                    moduleButton(s.installed?.name ?: "Core",s.installed?.readiness(s.gameSeconds) ?: "None","core") {panelPage="cores";render()},
-                    moduleButton("Payload",s.installed?.payloads?.filter {it.id in selected}?.joinToString {it.template.name}?.ifBlank {"None"} ?: "None","payload") {panelPage="payloads";render()})
+                content.addView(text("Internal nexus · ${s.installed?.readiness(s.gameSeconds) ?: "Not configured"}",12f))
+                content.addView(moduleButton("Payload",s.installed?.payloads?.filter {it.id in selected}?.joinToString {it.template.name}?.ifBlank {"None"} ?: "None","payload") {panelPage="payloads";render()})
+                if(prefs.mode in listOf(Ability.GAUNTLET,Ability.SPELL_GAUNTLET)) {
+                    if(s.gauntletCharge!=null) content.addView(text("Charged strike prepared · consumed on next melee attempt",12f))
+                    else content.addView(button("Prepare charged strike · Bonus Action") {run("Charged Gauntlet prepared") {app.repository.mutate(label="Charged Gauntlet prepared · Bonus Action",origin="overlay") {Engine.chargeGauntlet(it)}}}.apply {isEnabled=!busy && Engine.meleeLockReason(s.profile)==null && s.profile.melee?.chargedDamageType!=null && !s.turn.bonus})
+                    if(s.profile.melee?.chargedDamageType==null) content.addView(text("Charging needs an accepted bonus damage type in Gauntlet configuration.",12f))
+                }
+                if(s.turn.spellShots>0 || s.turn.bonus || s.gauntletCharge!=null) content.addView(button("My next turn · reset weapon actions") {run("Weapon actions reset") {app.repository.mutate(label="Player confirmed next weapon action window",origin="overlay") {Engine.resetWeaponActions(it)}}})
                 content.addView(button("Roll attack") {requestRoll(s)}.apply {isEnabled=!busy && planned.isSuccess && s.pending.none {it.result==null}})
                 row(content,button("Mode") {panelPage="modes";render()},button("More") {panelPage="more";render()},button("Collapse") {expanded=false;render()})
                 if(!s.attuned) content.addView(text("Confirm attunement in the full app"))
@@ -438,7 +459,7 @@ class OverlayService: Service() {
         } else content.addView(text("Manual override · costs already spent"))
         if((!p.blast || p.directImpact) && auto?.suggestedOutcome==null) {
             for(o in if(auto==null) listOf(Outcome.HIT,Outcome.CRITICAL,Outcome.MISS) else listOf(Outcome.HIT,Outcome.MISS)) content.addView(button("${if(outcome==o) "✓" else "○"} $o") {outcome=o;if(auto==null) rollTexts.clear();render()})
-            if(auto==null) content.addView(edit("Attack total · modifier +${p.profile.attack}",attackText,true) {attackText=it})
+            if(auto==null) content.addView(edit("Attack total · modifier ${p.attackBonus}",attackText,true) {attackText=it})
         }
         val components=Engine.components(p,outcome==Outcome.CRITICAL).filterNot {outcome==Outcome.MISS && it.portion==Portion.DIRECT}
         components.forEach {c -> content.addView(text("${c.label}: ${c.damage.dice} ${c.damage.type}${auto?.let {" = ${it.damage.getValue(c.id).total}"} ?: ""}"));if(auto==null) content.addView(edit("Actual ${c.id} result",rollTexts[c.id] ?: "",true) {rollTexts[c.id]=it})}
