@@ -33,7 +33,8 @@ class NativeRecheckTest(unittest.TestCase):
         self.git(repo, "config", "user.email", "fictional@example.invalid")
         for name in ["app/src/main/Product.kt", "rules/src/Rules.kt", "app/src/main/res/icon.xml",
                      "app/build.gradle.kts", "scripts/ci-player-first-emulator.sh",
-                     "overlay-target/src/androidTest/NativeTest.kt"]:
+                     "overlay-target/src/androidTest/NativeTest.kt",
+                     "overlay-target/src/main/java/com/yazsras/astravar/target/TargetActivity.kt"]:
             path = repo / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("original\n")
@@ -57,6 +58,40 @@ class NativeRecheckTest(unittest.TestCase):
         self.assertEqual(result["reused_product_source_commit"], base)
         self.assertEqual(result["test_source_commit"], self.git(repo, "rev-parse", "HEAD"))
         self.assertEqual(len(result["changed_paths"]), len(native.ALLOWED_FILES) + 1)
+
+    def test_only_exact_controlled_activity_fixture_is_allowed_among_main_sources(self):
+        repo, base, tree = self.repository()
+        fixture = "overlay-target/src/main/java/com/yazsras/astravar/target/TargetActivity.kt"
+        (repo / fixture).write_text("controlled second-app IME insets repair\n")
+        self.commit(repo)
+        result = native.source_guard(repo, base, tree)
+        self.assertEqual(result["changed_paths"], [fixture])
+        self.assertEqual(result["reused_product_source_commit"], base)
+        self.assertEqual(result["reused_product_source_tree"], tree)
+
+        forbidden = [
+            "overlay-target/src/main/java/com/yazsras/astravar/target/OtherActivity.kt",
+            fixture + ".bak",
+            "overlay-target/src/main/AndroidManifest.xml",
+            "overlay-target/src/main/res/layout/target.xml",
+            "overlay-target/build.gradle.kts",
+            "app/src/main/Product.kt",
+            "app/src/main/res/icon.xml",
+            "app/build.gradle.kts",
+            "rules/src/Rules.kt",
+            "scripts/ci-player-first-emulator.sh",
+        ]
+        for name in forbidden:
+            with self.subTest(forbidden_path=name):
+                self.git(repo, "reset", "--hard", base)
+                # An allowed fixture repair must never mask a second source change.
+                (repo / fixture).write_text("controlled second-app IME insets repair\n")
+                path = repo / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("unapproved adjacent source or product change\n")
+                self.commit(repo)
+                with self.assertRaisesRegex(ValueError, "full verification"):
+                    native.source_guard(repo, base, tree)
 
     def test_product_rules_resources_build_and_unchanged_runner_cannot_be_reused(self):
         repo, base, tree = self.repository()
