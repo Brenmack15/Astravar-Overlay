@@ -14,7 +14,7 @@
     "app/src/main/java/com/yazsras/astravar/data/SandboxSync.kt": "25f71e8aac585b24f83975796e9a4a7aa01b7c6a8c6f94607544bdf8775f5cf9",
     "app/src/main/java/com/yazsras/astravar/data/Store.kt": "61dc33220fec3d279b93047bc14e53d4101c62431fc2087c95c41a6501e02fc6",
     "app/src/main/java/com/yazsras/astravar/overlay/ArcaneSurface.kt": "e73af0007da85e7807f1e8d3245347eb6256d507c17b67bbb4dd456285669cbb",
-    "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": "c6bc90d78cc81a8425449bde69281a5aa1247ec0f07cbb80137a7d8ad99656e3",
+    "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": "355b4b5bf6e8fa934eba59c453ddb83d0d11ca1001d34bbf72fa38f032141153",
     "app/src/main/res/drawable-nodpi/astravar_armor_front.png": "25d225393ba934260690d184a5993805add290bdfdb76e05bcb7ff8486b355b3",
     "app/src/main/res/drawable-nodpi/astravar_cutout.webp": "580c7e31c3cab1ebfef5b5b449b660c45d3b055ff88c876f8f12876115cce7c4",
     "app/src/main/res/drawable-nodpi/astravar_reference.jpg": "c60543080b52334ec9e8637f6509c1a146e7f284d39d15a2d9c696a48e6df3dd",
@@ -127,8 +127,8 @@
       },
       "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": {
         "previous_pinned_sha256": "30f890627065eee06373db12499118b2107176cedd1abe9d92fa02c7b8d09576",
-        "reviewed_sha256": "c6bc90d78cc81a8425449bde69281a5aa1247ec0f07cbb80137a7d8ad99656e3",
-        "reason": "Native permanent-nexus controls and accepted sourced melee; shared engine remains authoritative. Shared selector keeps unlocked advanced elements usable individually alongside accepted basic-only Dual Resonance. Payload selection preserves already chosen Discharge or Spell-Imbued Gauntlet instead of changing attack type."
+        "reviewed_sha256": "355b4b5bf6e8fa934eba59c453ddb83d0d11ca1001d34bbf72fa38f032141153",
+        "reason": "Native permanent-nexus controls and accepted sourced melee; shared engine remains authoritative. Shared selector keeps unlocked advanced elements usable individually alongside accepted basic-only Dual Resonance. Payload selection preserves already chosen Discharge or Spell-Imbued Gauntlet instead of changing attack type. Explicit result-dial and mode-callback statements resolve lint indentation diagnostics without behavior changes."
       },
       "rules/src/main/kotlin/com/yazsras/astravar/rules/BackupCodec.kt": {
         "previous_pinned_sha256": "c0dee331adc50ac4a042379203d4b0e4b459e81046bf873bdcdd7b099feb0fbc",
