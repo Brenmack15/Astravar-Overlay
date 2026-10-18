@@ -36,6 +36,11 @@ Use Help & diagnostics to distinguish installed variants.
 | UI debug | `com.yazsras.astravar.v2uidebug` | `2.0.1-ui-rebuild` / 21 |
 | Remote-stat debug, current CI | `com.yazsras.astravar.v2statdebug` | `2.0.2-remote-stat-test` / 22 |
 
+The branding delivery workflow explicitly sets `ASTRAVAR_VERSION_CODE=23` for
+the remote-stat CI artifact, above the previously delivered build 22. The table
+shows the unchanged Gradle defaults. Version-name and signing settings remain
+unchanged. A higher code alone does not establish signing compatibility.
+
 The older Preview (`.v2debug`) and Inventory Beta (`.debug`) also remain separate.
 The existing CI creates ephemeral debug certificates. This branding build is not
 a guaranteed update for any existing debug installation. Version/code defaults
