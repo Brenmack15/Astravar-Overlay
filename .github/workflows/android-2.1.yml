@@ -16,7 +16,7 @@ jobs:
   verify:
     if: github.event_name != 'pull_request' || github.head_ref == 'feat/astravar-2.1-player-first'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 80
     env:
       ASTRAVAR_VERSION_NAME: '2.1.0'
       ASTRAVAR_VERSION_CODE: '24'
@@ -54,7 +54,10 @@ jobs:
           python3 scripts/verify_particle_resources.py
           python3 scripts/verify_upgrade_integrity.py
       - name: Rules, Android regressions, release lint and optimized APK
-        timeout-minutes: 25
+        # The measured cold runner completed all tests/lint/build24, then reached
+        # the former 25-minute limit during the separate proof-build25 R8 pass.
+        # Preserve every check and give both optimized versions a bounded budget.
+        timeout-minutes: 40
         run: |
           chmod +x gradlew
           # Deliberately ephemeral, public test-only credentials. This does not
@@ -86,7 +89,7 @@ jobs:
           sha256sum validation/*.apk > validation/SHA256SUMS.txt
           printf '%s\n' 'CI TEST ONLY. The optimized APK uses a disposable signer, not the permanent owner signing identity. Do not install over an owner-signed app or uninstall an existing app to bypass signature checks. No production release is published.' >validation/CI-ONLY-NOT-A-PERMANENT-RELEASE.txt
       - name: Native overlay, font scaling and in-place update preservation
-        timeout-minutes: 20
+        timeout-minutes: 25
         run: bash scripts/ci-player-first-emulator.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
