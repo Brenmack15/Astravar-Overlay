@@ -8,7 +8,9 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: astravar-21-${{ github.ref }}
+  # Push and draft-PR runs for one development branch share the same queue.
+  # Both still check out the exact head; opening a PR need not duplicate the build.
+  group: astravar-21-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 jobs:
   verify:
