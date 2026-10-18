@@ -10,14 +10,21 @@ an approved public production release.
 Five primary destinations: **Armor · Combat · Party · Campaign · Config**.
 Armor provides compact character statistics, source-conflict notices, Active
 Element and Core Systems. Combat and the native floating overlay share the same
-Kotlin engine, dice snapshots, resource accounting and newest-20 history.
+Kotlin engine, dice snapshots and resource accounting. The interactive history
+shows the newest 20 entries; complete ZIP backups retain preserved raw history.
 
 Party provides editable sourced identity/status/abilities, typed character and
 companion sheets, existing specialized Eek records, shared-item equipment,
 quantity events, currencies and history. Transfers keep the same item ID;
 revision checks and original command receipts prevent duplicate spending.
 Unknown values remain unknown. Individual damage formulas and sourced melee
-configuration live in Rules & profile. Unestablished rulings stay clearly locked.
+configuration live in Rules & profile. Missing accepted melee configuration keeps
+the corresponding actions locked; Discharge retains the inherited behavior below.
+Full authoritative Party statistics still await approved source reconciliation and
+import. Sheets support descriptive creature/spell records without invented level-up
+grants. Equipping/installing an item does not automatically apply its bonuses;
+transfers move whole recorded stacks, with no split/merge command. Wallets track
+copper, silver and gold independently.
 
 Campaign retains inventory, inventions, relationships and player-known facts,
 with versioned checkpoints and merge-only reviewed backups. Config includes
@@ -28,8 +35,12 @@ diagnostics, backup tools and authenticated connection readiness.
 
 The internal nexus is permanent. New Shatter and spare-core installation actions
 are rejected by the engine; their old serialized records remain readable.
-Discharge retains recorded in-world recovery and the existing profile until its
-source conflict is adjudicated. Advanced elements retain accepted upgrade gates.
+Discharge remains enabled with inherited formula/accounting and 600 seconds of
+recorded in-world recovery: 3× primary Force dice, 60-foot range and 15-foot radius.
+The later reference's 12d12 Force, 1-mile range, 20-foot radius and once-per-Long-Rest
+limit remain unapplied pending adjudication and implementation. Charged Gauntlet
+remains locked until its flat bonus has an accepted damage type and sourced profile.
+Advanced elements retain accepted upgrade gates.
 No real character values, level-ups, speculative upgrades or private review
 sheets are seeded. Original approved artwork and launcher portrait are preserved.
 
@@ -40,10 +51,16 @@ not automatically imported or declared canonical.
 
 ## Connection boundary
 
-The owner-sync implementation has campaign-scoped credentials, AndroidKeystore
-encryption, durable offline commands, verified receipts, conflict/replay checks
-and an authenticated synthetic reference service. Production hosting, owner
-enrollment, native ChatGPT access and actual device acceptance are still gates.
+The owner-sync foundation has a scoped wire protocol, AndroidKeystore credential
+vault, staging queue, verified receipts and an authenticated synthetic reference
+service. Remaining engineering includes typed party/item/currency server commands,
+atomic domain/outbox writes and application adapters, owner OAuth/device enrollment,
+credential renewal and server revocation, production native connection UX and an
+authenticated MCP/tool adapter. The current Config page is a fictional acceptance
+harness; its generic replacement command does not synchronize real campaign
+transactions. Later gates include authorized hosting, actual native Astravar HTTPS
+and native ChatGPT Android access, and a shared-record round trip. Real import and
+authority cutover require separate approval after acceptance.
 The existing private DM Bridge is preserved. The anonymous Worker remains a
 separate fictional experiment and must never receive real campaign data.
 HTTPS networking is enabled; cleartext is disabled. No paid service is activated.
