@@ -119,7 +119,7 @@ private fun framePath(w:Float,h:Float,inset:Float,cut:Float)=Path().apply {
         shape=CutCornerShape(topEnd=12.dp,bottomStart=12.dp),
         colors=ButtonDefaults.buttonColors(containerColor=background,contentColor=foreground),contentPadding=PaddingValues(horizontal=16.dp,vertical=12.dp)) {
         if(icon!=null){ArcaneIcon(icon,Modifier.size(24.dp),if(enabled) foreground else Muted);Spacer(Modifier.width(8.dp))}
-        Text(text,style=if(primary && icon=="d20") MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelLarge,textAlign=TextAlign.Center)
+        Text(text,modifier=Modifier.weight(1f),style=if(primary && icon=="d20") MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelLarge,textAlign=TextAlign.Center)
     }
 }
 @Composable fun AstravarHeader(demo:Boolean,onSettings:(()->Unit)?=null) {
@@ -168,7 +168,7 @@ val weaponDestinations=listOf("Weapon","Cores & Payloads","History","More")
                     .background(if(active) RebuildPalette.Active else Color.Transparent)
                     .semantics(mergeDescendants=true) {selected=active;contentDescription=label}
                     .clickable(role=Role.RadioButton) {change(m)}.padding(horizontal=3.dp,vertical=12.dp),contentAlignment=Alignment.Center) {
-                    Text(display,style=MaterialTheme.typography.labelLarge,color=if(active) RebuildPalette.Cyan else Muted,textAlign=TextAlign.Center,maxLines=1)
+                    Text(display,modifier=Modifier.fillMaxWidth(),style=MaterialTheme.typography.labelLarge,color=if(active) RebuildPalette.Cyan else Muted,textAlign=TextAlign.Center,maxLines=1)
                 }
             }
         }
