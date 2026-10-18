@@ -10,11 +10,16 @@ on:
         required: false
         default: '0'
         type: string
+      remote_stat_live:
+        description: 'Append disposable remote-stat commands and acknowledgements to the existing public sandbox'
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: read
   actions: read
 concurrency:
-  group: android-${{ github.ref }}
+  group: android-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && 'manual' || 'automatic' }}
   cancel-in-progress: true
 jobs:
   verify:
@@ -59,13 +64,21 @@ jobs:
       - name: Unit tests, lint and native APKs
         if: env.REUSE_RUN_ID == '0'
         timeout-minutes: 20
+        env:
+          # Explicit marker also allows this opted-in test while the default branch
+          # deliberately has no Android workflow. Ordinary pushes/PRs do not write.
+          ASTRAVAR_LIVE_REMOTE_STATS: ${{ ((github.event_name == 'workflow_dispatch' && inputs.remote_stat_live) || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Verify disposable remote-stat HTTPS'))) && 'true' || 'false' }}
         run: |
           chmod +x gradlew
           if [[ "$INVENTORY_BETA" == 'true' ]]; then
             python3 -m unittest discover -s scripts/tests -v
             python3 scripts/verify_v2_protected_source.py
-            if [[ "${{ github.head_ref || github.ref_name }}" == 'feat/astravar-2.0-ui-rebuild' ]]; then python3 scripts/verify_ui_foundation.py; fi
-            timeout -k 10s 1140s ./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug -PastravarScreenshots="$GITHUB_WORKSPACE/validation/screenshots"
+            stat_args=()
+            if [[ "${{ github.head_ref || github.ref_name }}" == 'feat/astravar-2.0-ui-rebuild' ]]; then
+              python3 scripts/verify_ui_foundation.py
+              stat_args+=('-PastravarRemoteStatTest=true')
+            fi
+            timeout -k 10s 1140s ./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug "${stat_args[@]}" -PastravarScreenshots="$GITHUB_WORKSPACE/validation/screenshots"
             exit 0
           fi
           # This one-run key is ONLY for exercising the optimized release on CI.
@@ -118,22 +131,22 @@ jobs:
             validation/
           retention-days: 14
 
-      - name: Verify and name Astravar 2.0 APK
+      - name: Verify and name Astravar 2.0 Stat Test APK
         if: success() && (github.head_ref == 'feat/astravar-2.0-ui-rebuild' || github.ref_name == 'feat/astravar-2.0-ui-rebuild')
         run: |
           mkdir -p validation
-          cp app/build/outputs/apk/debug/app-debug.apk validation/Astravar-2.0-UI-Rebuild-debug.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs validation/Astravar-2.0-UI-Rebuild-debug.apk > validation/apk-signature.txt
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 -v 4 validation/Astravar-2.0-UI-Rebuild-debug.apk > validation/apk-alignment.txt
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging validation/Astravar-2.0-UI-Rebuild-debug.apk > validation/apk-badging.txt
-          sha256sum validation/Astravar-2.0-UI-Rebuild-debug.apk > validation/SHA256SUMS.txt
+          cp app/build/outputs/apk/debug/app-debug.apk validation/Astravar-2.0-Stat-Test-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs validation/Astravar-2.0-Stat-Test-debug.apk > validation/apk-signature.txt
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 -v 4 validation/Astravar-2.0-Stat-Test-debug.apk > validation/apk-alignment.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging validation/Astravar-2.0-Stat-Test-debug.apk > validation/apk-badging.txt
+          sha256sum validation/Astravar-2.0-Stat-Test-debug.apk > validation/SHA256SUMS.txt
           git rev-parse HEAD > validation/SOURCE_COMMIT.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: success() && (github.head_ref == 'feat/astravar-2.0-ui-rebuild' || github.ref_name == 'feat/astravar-2.0-ui-rebuild')
         with:
-          name: Astravar-2.0-UI-Rebuild-apk
+          name: Astravar-2.0-Stat-Test-apk
           path: |
-            validation/Astravar-2.0-UI-Rebuild-debug.apk
+            validation/Astravar-2.0-Stat-Test-debug.apk
             validation/SHA256SUMS.txt
             validation/SOURCE_COMMIT.txt
             validation/apk-*.txt
