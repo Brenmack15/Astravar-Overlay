@@ -30,10 +30,12 @@ class ChatGptToolkitTest {
         try {
             activity.get().setContent { AstravarTheme { ChatGptPromptsPage() } }
             compose.onNodeWithText("Find a prompt").performTextInput("last resolved event")
-            compose.onNodeWithText("Continue a campaign in a new chat").assertExists()
-            compose.onNodeWithText("Read prompt").performScrollTo().performClick()
+            val campaignTitle = hasText("Continue a campaign in a new chat") and !hasSetTextAction()
+            compose.onNode(campaignTitle).assertExists()
+            // Multiple valid recovery cards may match; act on the selected card, not a global label.
+            compose.onNode(hasText("Read prompt") and hasAnySibling(campaignTitle)).performScrollTo().performClick()
             compose.onNodeWithText("Act as DM for my established solo campaign.", substring = true).assertExists()
-            compose.onNodeWithText("Copy handoff prompt").performScrollTo().performClick()
+            compose.onNode(hasText("Copy handoff prompt") and hasAnySibling(campaignTitle)).performScrollTo().performClick()
             val context = ApplicationProvider.getApplicationContext<Context>()
             val text = (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).primaryClip!!.getItemAt(0).text.toString()
             assertTrue(text.contains("through the connected authorized integration when available"))
@@ -70,8 +72,9 @@ class ChatGptToolkitTest {
             activity.get().setContent { AstravarTheme { ChatGptPromptsPage() } }
             for ((query, title, required) in workflows) {
                 compose.onNodeWithText("Find a prompt").performScrollTo().performTextReplacement(query)
-                compose.onNodeWithText(title).assertExists()
-                compose.onNodeWithText("Copy handoff prompt").performScrollTo().performClick()
+                val cardTitle = hasText(title) and !hasSetTextAction()
+                compose.onNode(cardTitle).assertExists()
+                compose.onNode(hasText("Copy handoff prompt") and hasAnySibling(cardTitle)).performScrollTo().performClick()
                 val copied = (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
                     .primaryClip!!.getItemAt(0).text.toString()
                 required.forEach { guard -> assertTrue("$title must retain: $guard", copied.contains(guard)) }
