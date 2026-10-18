@@ -4,6 +4,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import kotlinx.serialization.json.decodeFromJsonElement
 
+/** Bounded weapon working-view compatibility codec; complete Android history backups use HistoryBackup ZIP. */
 object BackupCodec {
     const val MAX_BYTES=8*1024*1024
     val json=Json { encodeDefaults=true; ignoreUnknownKeys=false; isLenient=false }
