@@ -128,7 +128,7 @@ class OverlayInstrumentationTest {
         screenshot("automatic-normal-result")
         tapPanel("Collapse")
         ui.tap(By.desc("Keyboard focus test").pkg(targetPackage), "Keyboard focus test")
-        ui.enterEmptyFocusedField("typed under Astravar",targetPackage,"Keyboard focus test")
+        ui.enterFocusedField("typed under Astravar",targetPackage,"Keyboard focus test")
         assertEquals("typed under Astravar",ui.snapshot(By.desc("Keyboard focus test").pkg(targetPackage), "typed keyboard text") { it.text })
         device.pressBack();device.setOrientationLeft();device.waitForIdle()
         assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))

@@ -2,6 +2,7 @@ package com.yazsras.astravar
 
 import android.graphics.Rect
 import android.os.SystemClock
+import android.view.KeyEvent
 import androidx.test.uiautomator.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -80,10 +81,15 @@ internal class ObservedUi(private val device: UiDevice) {
     fun texts(selector: BySelector, description: String): List<String> =
         snapshot(selector, description) { device.findObjects(selector).map { node -> node.text } }
 
-    fun enterEmptyFocusedField(value: String, packageName: String, description: String) {
+    fun enterFocusedField(value: String, packageName: String, description: String) {
         val selector = By.clazz("android.widget.EditText").focused(true).pkg(packageName)
-        assertEquals("Synthetic input must start in its expected empty field: $description", "",
-            snapshot(selector, description, timeoutMs = 10_000) { it.text.orEmpty() })
+        assertTrue("Native input must target the focused field: $description",
+            snapshot(selector, description, timeoutMs = 10_000) { it.isFocused })
+        // Accessibility may expose an empty field's hint as its text. Replace
+        // through native keys once, without interpreting that hint as content.
+        assertTrue("Native select-all must dispatch once: $description",
+            device.pressKeyCode(KeyEvent.KEYCODE_A, KeyEvent.META_CTRL_ON))
+        assertTrue("Native delete must dispatch once: $description", device.pressKeyCode(KeyEvent.KEYCODE_DEL))
         val quoted = "'" + value.replace(" ", "%s").replace("'", "'\\''") + "'"
         device.executeShellCommand("input text $quoted")
         assertEquals("Native keyboard input must reach the focused field: $description", value,

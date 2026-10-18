@@ -22,7 +22,7 @@ class UpdateFixtureInstrumentationTest {
         fun enter(label: String, value: String) {
             tap(label)
             assertNotNull("Focused field for $label", ui.bounds(By.clazz("android.widget.EditText").focused(true).pkg(product), label, timeoutMs = 10_000))
-            ui.enterEmptyFocusedField(value, product, label)
+            ui.enterFocusedField(value, product, label)
             device.pressBack()
         }
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
