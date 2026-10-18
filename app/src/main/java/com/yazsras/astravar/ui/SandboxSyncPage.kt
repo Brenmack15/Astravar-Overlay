@@ -1,16 +1,31 @@
 package com.yazsras.astravar.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.data.PublicSandbox
 import com.yazsras.astravar.data.SandboxSyncRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import java.text.DateFormat
+import java.util.Date
 
-/** No free-form public payload: only prewritten fictional test milestones can be sent. */
+private fun sandboxKindLabel(kind: String) = when (kind) {
+    "new_fact" -> "New fact"
+    "agreement" -> "Agreement"
+    "shared_interest" -> "Shared interest"
+    else -> kind.replace('_', ' ')
+}
+
+/** Presentation only. Fixed fictional payloads, command identity and receipt recovery stay in the repository. */
 @Composable
 fun SandboxSyncPage(repository: SandboxSyncRepository) {
     val scope = rememberCoroutineScope()
@@ -19,89 +34,145 @@ fun SandboxSyncPage(repository: SandboxSyncRepository) {
     val endpoint by remember(origin) { repository.endpoint(origin) }.collectAsState(initial = null)
     val commands by remember(origin) { repository.commands(origin) }.collectAsState(initial = emptyList())
     val events by remember(origin) { repository.events(origin) }.collectAsState(initial = emptyList())
-    var url by remember(origin) { mutableStateOf(origin) }
+    var url by rememberSaveable { mutableStateOf(origin) }
+    var addressBaseline by rememberSaveable { mutableStateOf(origin) }
     var busy by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf("") }
-    var kind by remember { mutableStateOf("new_fact") }
-    var confirming by remember { mutableStateOf(false) }
+    var message by rememberSaveable { mutableStateOf("") }
+    var failure by rememberSaveable { mutableStateOf(false) }
+    var kind by rememberSaveable { mutableStateOf("new_fact") }
+    var mode by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedCommandId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedEventId by rememberSaveable { mutableStateOf<String?>(null) }
     val pending = commands.count { it.status == "PENDING" }
+    val selectedCommand = commands.firstOrNull { it.commandId == selectedCommandId }
+    val selectedEvent = events.firstOrNull { it.eventId == selectedEventId }
     fun operation(action: suspend () -> Unit) {
-        busy = true
-        message = ""
+        if (busy) return
+        busy = true; message = ""; failure = false
         scope.launch {
             try { action() }
             catch (e: CancellationException) { throw e }
-            catch (e: Exception) { message = e.message ?: "Connection interrupted; retry when online." }
+            catch (e: Exception) { failure = true; message = e.message ?: "Connection interrupted; retry when online." }
             finally { busy = false }
         }
     }
-    if (confirming) AlertDialog(
-        onDismissRequest = { confirming = false },
-        title = { Text("Send a fictional public test?") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("This unauthenticated disposable service is public. It receives only the fixed text below.")
-            Text(PublicSandbox.templates.getValue(kind))
-            Text("No inventory, Eek, currency, local Connections or Notion records are sent.")
-        } },
-        confirmButton = { TextButton(onClick = {
-            confirming = false
-            val selected = kind
-            operation { repository.queueSynthetic(selected); repository.retryPending() }
-        }) { Text("Confirm fictional test") } },
-        dismissButton = { TextButton(onClick = { confirming = false }) { Text("Cancel") } }
-    )
+    fun closeSheet() {
+        if (!busy) mode = when (mode) { "command", "event" -> "history"; else -> null }
+    }
+    val status = when {
+        busy -> "Connecting…"
+        endpoint?.status?.startsWith("Remote read verified") == true -> "Connected"
+        endpoint?.status?.startsWith("Offline") == true -> "Offline"
+        endpoint?.status?.startsWith("Disconnected") == true -> "Disconnected"
+        endpoint?.status?.startsWith("Rejected") == true -> "Needs review"
+        endpoint?.lastSyncedAt != null -> "Sync paused"
+        else -> "Not connected"
+    }
     Page {
-        SectionCaption("SYNTHETIC CONNECTION", "PUBLIC DISPOSABLE SANDBOX · NO REAL CAMPAIGN DATA")
-        Section("Connection status") {
-            Text(endpoint?.status ?: "Not connected · tap Read sandbox to check availability.", color = Brass)
-            Text("This is separate from your local campaign and the private DM Bridge database.", color = Muted)
-            Text("${PublicSandbox.CAMPAIGN} / ${PublicSandbox.CONNECTION}", style = MaterialTheme.typography.bodySmall)
-            Text("Remote revision: ${endpoint?.remoteRevision ?: "unread"} · history cursor: ${endpoint?.cursor ?: 1}")
-            Text("$pending pending · ${commands.count { it.status == "COMMITTED" }} verified receipts · ${events.size} cached milestones")
-            if (message.isNotBlank()) Text(message, color = Frost)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { operation { repository.refresh() } }, enabled = !busy, modifier = Modifier.weight(1f)) {
-                    Text(if (busy) "Working…" else "Read sandbox")
-                }
-                OutlinedButton(onClick = { operation { repository.retryPending() } }, enabled = !busy && pending > 0, modifier = Modifier.weight(1f)) {
-                    Text("Retry pending")
-                }
+        PlayerHeading("Fictional sync")
+        PlayerCard {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(status, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, color = RebuildPalette.Ice)
+                endpoint?.remoteRevision?.let { Text("Revision $it", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelLarge) }
             }
-            Text("Pending commands survive app closure. A timeout is not proof of failure; retry uses the same UUID and receipt lookup.",
-                style = MaterialTheme.typography.bodySmall, color = Muted)
+            Text(endpoint?.lastSyncedAt?.let { "Last updated ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))}" }
+                ?: "No verified read yet", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+            if (pending > 0) Text("$pending pending · saved on this device", color = RebuildPalette.GoldBright)
+            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            Action("Read sandbox", !busy) { operation { repository.refresh() } }
+            PlayerOutlinedButton(onClick = { operation { repository.retryPending() } }, enabled = !busy && pending > 0,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Retry pending") }
         }
-        Section("Fictional milestone test") {
-            Choices("Choose a fixed test", PublicSandbox.templates.keys.toList(), kind) { if (!busy) kind = it }
-            Text(PublicSandbox.templates.getValue(kind))
-            Action("Review fictional test", !busy && pending == 0 && endpoint?.remoteRevision != null) { confirming = true }
-            Text("No login, key, subscription or automatic polling. Public sandbox availability is not guaranteed.",
-                style = MaterialTheme.typography.bodySmall, color = Muted)
+        if (message.isNotBlank()) Text(message, color = if (failure) MaterialTheme.colorScheme.error else RebuildPalette.Ice,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+        val connectionError = endpoint?.status?.takeUnless { it.startsWith("Remote read verified") || it.startsWith("Not connected") }
+        if (connectionError != null && message.isBlank() && !busy) Text(connectionError, color = RebuildPalette.Muted,
+            style = MaterialTheme.typography.bodySmall, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+        PlayerButton(onClick = { mode = "test" }, enabled = !busy && pending == 0 && endpoint?.remoteRevision != null,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Review fictional test") }
+        Text("Public test data only. Your campaign stays on this device.", color = RebuildPalette.Muted,
+            style = MaterialTheme.typography.bodySmall)
+        PlayerEntry("History & receipts", "${events.size} cached events · ${commands.count { it.status == "COMMITTED" }} verified commands",
+            "History", { mode = "history" })
+        PlayerEntry("Sandbox address", origin.removePrefix("https://"), "Settings", { url = origin; addressBaseline = origin; mode = "address" })
+    }
+    mode?.let { current ->
+        val title = when (current) {
+            "test" -> "Fictional test"
+            "address" -> "Sandbox address"
+            "history" -> "History & receipts"
+            "command" -> "Command receipt"
+            else -> "Fictional event"
         }
-        Section("Verified history and receipts") {
-            if (events.isEmpty()) Text("No remote history cached yet.", color = Muted)
-            events.take(50).forEach { event ->
-                Text("r${event.resultingRevision} · ${event.kind}", color = Brass)
-                Text(event.detail)
-                Text("Event ${event.eventId}\nCommand ${event.commandId}\n${event.recordedAt}",
-                    style = MaterialTheme.typography.bodySmall, color = Muted)
-                HorizontalDivider()
-            }
-            commands.take(10).forEach { command ->
-                Text("${command.status} · ${command.commandId}", style = MaterialTheme.typography.bodySmall)
-                if (command.lastError.isNotBlank()) Text(command.lastError, color = Muted)
-                command.receiptJson?.let { receipt ->
-                    Text("Original immutable receipt: $receipt", style = MaterialTheme.typography.bodySmall, color = Muted)
+        PlayerSheet(title, onDismiss = ::closeSheet, dirty = current == "address" && url != addressBaseline,
+            actions = {
+                if (current == "address") PlayerButton(enabled = !busy && url != addressBaseline, onClick = {
+                    operation { repository.configure(url); message = "Address saved. Read the sandbox to check it."; mode = null }
+                }) { Text("Save address") }
+                if (current == "test") PlayerButton(enabled = !busy && pending == 0 && endpoint?.remoteRevision != null, onClick = {
+                    val selected = kind
+                    mode = null
+                    operation { repository.queueSynthetic(selected); repository.retryPending() }
+                }) { Text("Confirm fictional test") }
+            }) {
+            when (current) {
+                "test" -> {
+                    Text("Only this fixed fictional text will be sent to the public sandbox.", color = RebuildPalette.Muted)
+                    PublicSandbox.templates.keys.forEach { value ->
+                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(enabled = !busy) { kind = value },
+                            verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = kind == value, onClick = { kind = value }, enabled = !busy)
+                            Text(sandboxKindLabel(value), Modifier.weight(1f))
+                        }
+                    }
+                    PlayerCard { Text(PublicSandbox.templates.getValue(kind)) }
                 }
-                HorizontalDivider()
+                "address" -> {
+                    Field("Public HTTPS workers.dev origin", url, { if (!busy) url = it }, enabled = !busy)
+                    Text("Pending commands and history remain with their original address.", color = RebuildPalette.Muted)
+                }
+                "history" -> {
+                    if (events.isEmpty() && commands.isEmpty()) PlayerEmpty("No cached history", "Read the sandbox to check for fictional events.", "History")
+                    events.take(50).forEach { event ->
+                        PlayerEntry(sandboxKindLabel(event.kind), event.detail, "History",
+                            { selectedEventId = event.eventId; mode = "event" }, "r${event.resultingRevision}")
+                    }
+                    if (commands.isNotEmpty()) Text("Commands", style = MaterialTheme.typography.titleMedium)
+                    commands.take(10).forEach { command ->
+                        PlayerEntry(sandboxKindLabel(command.kind), command.lastError.ifBlank { command.status.lowercase().replaceFirstChar { it.uppercase() } },
+                            "History", { selectedCommandId = command.commandId; mode = "command" })
+                    }
+                    PlayerDisclosure("Connection details") {
+                        Text("History cursor: ${endpoint?.cursor ?: 1}")
+                        Text("${PublicSandbox.CAMPAIGN}\n${PublicSandbox.CONNECTION}", color = RebuildPalette.Muted)
+                        Text("Retries recover the original command receipt before sending again.", color = RebuildPalette.Muted)
+                    }
+                }
+                "event" -> selectedEvent?.let { event ->
+                    Text(sandboxKindLabel(event.kind), style = MaterialTheme.typography.titleMedium)
+                    Text(event.detail)
+                    Text("Revision ${event.priorRevision} → ${event.resultingRevision}", color = RebuildPalette.Ice)
+                    Text(event.recordedAt, color = RebuildPalette.Muted)
+                    PlayerDisclosure("Identifiers") {
+                        Text("Event ${event.eventId}\nCommand ${event.commandId}", style = MaterialTheme.typography.bodySmall)
+                    }
+                } ?: Text("This event is no longer available for the selected address.")
+                "command" -> selectedCommand?.let { command ->
+                    Text(command.status, style = MaterialTheme.typography.titleMedium, color = RebuildPalette.Ice)
+                    Text(command.detail)
+                    if (command.lastError.isNotBlank()) Text(command.lastError, color = MaterialTheme.colorScheme.error)
+                    Text("Expected revision ${command.expectedRevision}", color = RebuildPalette.Muted)
+                    PlayerDisclosure("Immutable receipt", initiallyOpen = command.receiptJson != null) {
+                        Text(command.receiptJson ?: "Not verified yet. Retry pending to recover the original receipt.", style = MaterialTheme.typography.bodySmall)
+                    }
+                    PlayerDisclosure("Command details") {
+                        Text("Command ${command.commandId}\nAddress ${command.origin}\nFingerprint ${command.fingerprint}", style = MaterialTheme.typography.bodySmall)
+                    }
+                } ?: Text("This command is no longer available for the selected address.")
             }
-        }
-        Section("Sandbox address") {
-            Field("Public HTTPS workers.dev origin", url, { if (!busy) url = it })
-            OutlinedButton(onClick = { operation { repository.configure(url); message = "Address saved; tap Read sandbox." } }, enabled = !busy) {
-                Text("Save sandbox address")
-            }
-            Text("Only an origin is accepted. History and pending commands stay pinned to the original address and never move when this setting changes.",
-                style = MaterialTheme.typography.bodySmall, color = Muted)
+            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (message.isNotBlank()) Text(message, color = if (failure) MaterialTheme.colorScheme.error else RebuildPalette.Ice,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         }
     }
 }

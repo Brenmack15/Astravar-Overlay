@@ -19,6 +19,9 @@ import kotlinx.coroutines.*
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
+import org.junit.Before
+import org.junit.After
+import androidx.compose.ui.semantics.SemanticsProperties
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
@@ -32,6 +35,9 @@ import org.robolectric.annotation.LooperMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class WeaponPresentationTest {
     @get:Rule val compose=createEmptyComposeRule()
+    private var previousRequestedSize:String?=null
+    @Before fun dialogBounds() {previousRequestedSize=System.getProperty("robolectric.windowManager.useRequestedSize");System.setProperty("robolectric.windowManager.useRequestedSize","true")}
+    @After fun restoreDialogBounds() {previousRequestedSize?.let {System.setProperty("robolectric.windowManager.useRequestedSize",it)} ?: System.clearProperty("robolectric.windowManager.useRequestedSize")}
     private fun seed()=Campaign(onboarded=true,attuned=true,installedId="core",cores=listOf(Core("core","Resonant crystal")),profile=Profile(baseDamageDiceCount=4,elementalSelectorDiceCount=2))
     private fun capture(name:String,activity:ComponentActivity) {
         // Opt-in review artifacts from the real composables, never included in the APK.
@@ -50,20 +56,20 @@ class WeaponPresentationTest {
         val actions=Actions(Repository(db,scope),scope)
         val activity=Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
-            activity.get().setContent {AstravarTheme {Scaffold(topBar={AstravarHeader(false)},bottomBar={WeaponNavigation("Weapon") {}}) {padding->
+            activity.get().setContent {AstravarTheme {Scaffold(topBar={RebuildAppHeader(false)},bottomBar={RebuildPrimaryNavigation("Combat") {}}) {padding->
                 Box(Modifier.padding(padding)) {Dashboard(seed(),actions,{},{},{},Preferences(context),OverlayPrefs(mode=Ability.ELEMENTAL,elements=listOf(DamageType.LIGHTNING)))}
             }}}
             compose.onNodeWithText("Roll attack").assertIsDisplayed().assertIsEnabled()
-            listOf("Normal","Advantage","Disadvantage").forEach {compose.onNodeWithText(it).assertIsDisplayed().assertHeightIsAtLeast(48.dp)}
-            weaponDestinations.forEach {compose.onNodeWithText(it).assertIsDisplayed()}
-            compose.onNodeWithText("4d12+5").assertIsDisplayed()
+            listOf("Normal","Advantage","Disadvantage").forEach {compose.onNodeWithContentDescription(it).assertIsDisplayed().assertHeightIsAtLeast(48.dp)}
+            rebuildDestinations.forEach {compose.onNode(hasText(it) and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).assertIsDisplayed()}
             compose.onNodeWithText("4d12+5 Force + 2d8 Lightning").assertIsDisplayed()
             compose.onNodeWithText("Target Armor Class (optional)").assertDoesNotExist()
-            compose.onNodeWithText("Combat").assertDoesNotExist()
             capture("weapon",activity.get())
-            compose.onNodeWithText("Shot options ▾").performScrollTo().performClick()
+            compose.onNodeWithText("Options").performScrollTo().performClick()
             compose.onNodeWithText("Distance in feet").performScrollTo().assertIsDisplayed()
             compose.onAllNodes(hasText("Armor Class",substring=true)).assertCountEquals(0)
+            compose.onNodeWithText("Save").assertIsDisplayed()
+            compose.onNodeWithText("Close").performClick()
             compose.onNodeWithText("Roll attack").assertIsDisplayed()
         } finally {activity.pause().stop().destroy();scope.coroutineContext[Job]!!.cancelAndJoin();db.close()}
     }
@@ -84,15 +90,15 @@ class WeaponPresentationTest {
                 if(history.value) CombatHistoryPage(s.copy(pending=listOf(shot(16).copy(plan=p.copy(id="ordinary")),shot(20).copy(plan=p.copy(id="critical")),shot(1).copy(plan=p.copy(id="miss"))))) else Dashboard(s.copy(pending=listOf(current.value)),actions,{},{},{},Preferences(context),OverlayPrefs(mode=Ability.ELEMENTAL,elements=listOf(DamageType.LIGHTNING)))
             }}}}
             compose.onNodeWithText("24").assertIsDisplayed()
-            compose.onNodeWithText("23 POTENTIAL DAMAGE").assertIsDisplayed()
-            compose.onNodeWithText("Roll again").assertIsDisplayed().assertIsEnabled().assertHeightIsAtLeast(48.dp)
+            compose.onNodeWithText("23").assertIsDisplayed()
+            compose.onNodeWithText("Roll attack").assertIsDisplayed().assertIsEnabled().assertHeightIsAtLeast(48.dp)
             compose.onNodeWithText("HIT").assertDoesNotExist();compose.onNodeWithText("MISS").assertDoesNotExist()
             capture("result",activity.get())
             compose.runOnIdle {current.value=shot(20)}
-            compose.onNodeWithText("CRITICAL HIT").assertIsDisplayed();compose.onNodeWithText("41 POTENTIAL DAMAGE").assertExists()
+            compose.onNodeWithText("Natural 20").assertIsDisplayed();compose.onNodeWithText("41").assertExists()
             capture("critical",activity.get())
             compose.runOnIdle {current.value=shot(1)}
-            compose.onNodeWithText("NATURAL 1 — MISS").assertIsDisplayed();compose.onNodeWithText("0 DAMAGE").assertIsDisplayed()
+            compose.onNodeWithText("Natural 1").assertIsDisplayed();compose.onNodeWithText("0").assertIsDisplayed()
             capture("natural1",activity.get())
             compose.runOnIdle {history.value=true}
             compose.onNodeWithText("Recent rolls").assertIsDisplayed()
@@ -138,7 +144,7 @@ class WeaponPresentationTest {
             compose.onNodeWithText("Deselect").assertIsDisplayed().assertIsEnabled().assertHeightIsAtLeast(48.dp)
             compose.onNodeWithText("Sunspike Charge").assertDoesNotExist()
             capture("payloads",activity.get())
-            compose.onNodeWithText("Review templates & edit future loads ▾").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Spell templates").performScrollTo().assertIsDisplayed()
         } finally {activity.pause().stop().destroy();scope.coroutineContext[Job]!!.cancelAndJoin();db.close()}
     }
     @Test(timeout=60000) fun controlRoomKeepsAllSecondaryUtilitiesReachable() {
@@ -164,16 +170,18 @@ class WeaponPresentationTest {
         val actions=Actions(Repository(db,scope),scope)
         val activity=Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
-            activity.get().setContent {AstravarTheme {Scaffold(topBar={AstravarHeader(false)},bottomBar={WeaponNavigation("Weapon") {}}) {padding->
+            activity.get().setContent {AstravarTheme {Scaffold(topBar={RebuildAppHeader(false)},bottomBar={RebuildPrimaryNavigation("Combat") {}}) {padding->
                 Box(Modifier.padding(padding)) {Dashboard(seed(),actions,{},{},{},Preferences(context),OverlayPrefs(mode=Ability.ELEMENTAL,elements=listOf(DamageType.LIGHTNING)))}
             }}}
             val roll=compose.onNodeWithText("Roll attack")
             roll.assertIsDisplayed().assertIsEnabled().assertHeightIsAtLeast(48.dp)
-            listOf("Normal","Advantage","Disadvantage").forEach {compose.onNodeWithText(it).assertIsDisplayed().assertHeightIsAtLeast(48.dp)}
-            weaponDestinations.forEach {compose.onNodeWithText(it).assertIsDisplayed()}
+            listOf("Normal","Advantage","Disadvantage").forEach {compose.onNodeWithContentDescription(it).assertIsDisplayed().assertHeightIsAtLeast(48.dp)}
+            rebuildDestinations.forEach {compose.onNode(hasText(it) and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).assertIsDisplayed()}
             capture("weapon-360dp",activity.get())
-            compose.onNodeWithText("Shot options ▾").performScrollTo().performClick()
+            compose.onNodeWithText("Options").performScrollTo().performClick()
             compose.onNodeWithText("Distance in feet").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Save").assertIsDisplayed()
+            compose.onNodeWithText("Close").performClick()
             roll.assertIsDisplayed()
         } finally {activity.pause().stop().destroy();scope.coroutineContext[Job]!!.cancelAndJoin();db.close()}
     }

@@ -8,361 +8,369 @@ import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.yazsras.astravar.data.CampaignLedgerRepository
-import com.yazsras.astravar.data.LedgerDraft
-import com.yazsras.astravar.data.LedgerItem
-import com.yazsras.astravar.data.ItemDetails
-import com.yazsras.astravar.data.ItemProperty
-import com.yazsras.astravar.data.CampaignLink
 import androidx.compose.ui.platform.LocalContext
+import com.yazsras.astravar.data.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.io.ByteArrayOutputStream
 
-/** Native local inventory; existing item IDs, data and audit history remain authoritative. */
+/** Presentation only: stable identities, revisions, events and transactions remain repository-owned. */
 @Composable
 fun CampaignLedgerPage(repository: CampaignLedgerRepository) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val records = repository.records
+    val items by repository.items.collectAsState(initial = emptyList())
     val itemDetails by records.itemDetails.collectAsState(initial = emptyList())
     val itemProperties by records.itemProperties.collectAsState(initial = emptyList())
     val links by records.links.collectAsState(initial = emptyList())
     val projects by records.projects.collectAsState(initial = emptyList())
     val entities by records.entities.collectAsState(initial = emptyList())
-    val companionStates by records.companionStates.collectAsState(initial = emptyList())
-    val extensionActions = rememberLocalRecordActions()
-    var search by remember { mutableStateOf("") }
-    var categoryFilter by remember { mutableStateOf("All categories") }
-    var weight by remember { mutableStateOf("") }
-    var extraNotes by remember { mutableStateOf("") }
-    var propertyLabel by remember { mutableStateOf("") }
-    var propertyValue by remember { mutableStateOf("") }
-    var propertyEvidence by remember { mutableStateOf("Unverified") }
-    var selectedProperty by remember { mutableStateOf<ItemProperty?>(null) }
-    var relatedType by remember { mutableStateOf("companion") }
-    var relatedId by remember { mutableStateOf<String?>(null) }
-    var relationLabel by remember { mutableStateOf("Equipment") }
-    val items by repository.items.collectAsState(initial = emptyList())
-    var selectedId by remember { mutableStateOf<String?>(null) }
-    var newItemRequest by remember { mutableIntStateOf(0) }
-    val selectedItem = items.firstOrNull { it.id == selectedId }
-    var loadedItem by remember { mutableStateOf<LedgerItem?>(null) }
-    var loadedDetails by remember { mutableStateOf<ItemDetails?>(null) }
-    var historyLimit by remember(selectedId) { mutableIntStateOf(40) }
+    val companions by records.companionStates.collectAsState(initial = emptyList())
+    val audit by records.audit.collectAsState(initial = emptyList())
+    var query by rememberSaveable { mutableStateOf("") }
+    var filter by rememberSaveable { mutableStateOf("All") }
+    var mode by rememberSaveable { mutableStateOf("") }
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Frozen serializable editor baselines survive recreation, including their optimistic revision.
+    val itemDraft = rememberUiDraftText()
+    var itemSnapshot by itemDraft
+    val detailsDraft = rememberUiDraftText()
+    var detailsSnapshot by detailsDraft
+    val propertyDraft = rememberUiDraftText()
+    var propertySnapshot by propertyDraft
+    val loadedItem = remember(itemSnapshot) { itemSnapshot?.let { runCatching { Json.decodeFromString<LedgerItem>(it) }.getOrNull() } }
+    val loadedDetails = remember(detailsSnapshot) { detailsSnapshot?.let { runCatching { Json.decodeFromString<ItemDetails>(it) }.getOrNull() } }
+    val loadedProperty = remember(propertySnapshot) { propertySnapshot?.let { runCatching { Json.decodeFromString<ItemProperty>(it) }.getOrNull() } }
+    val selected = items.firstOrNull { it.id == selectedId } ?: loadedItem
+    var title by rememberSaveable { mutableStateOf("") }
+    var category by rememberSaveable { mutableStateOf("Other") }
+    var owner by rememberSaveable { mutableStateOf("Unknown") }
+    var itemState by rememberSaveable { mutableStateOf("Unknown") }
+    var evidence by rememberSaveable { mutableStateOf("Unverified") }
+    var location by rememberSaveable { mutableStateOf("Unknown") }
+    var quantity by rememberSaveable { mutableStateOf("") }
+    var description by rememberSaveable { mutableStateOf("") }
+    var known by rememberSaveable { mutableStateOf("") }
+    var potential by rememberSaveable { mutableStateOf("") }
+    var limitations by rememberSaveable { mutableStateOf("") }
+    var source by rememberSaveable { mutableStateOf("") }
+    var baselineSource by rememberSaveable { mutableStateOf("") }
+    var notionId by rememberSaveable { mutableStateOf("") }
+    val imageDraft = rememberUiDraftText()
+    var iconData by imageDraft
+    var archived by rememberSaveable { mutableStateOf(false) }
+    var weight by rememberSaveable { mutableStateOf("") }
+    var notes by rememberSaveable { mutableStateOf("") }
+    var propertyLabel by rememberSaveable { mutableStateOf("") }
+    var propertyValue by rememberSaveable { mutableStateOf("") }
+    var propertyEvidence by rememberSaveable { mutableStateOf("Unverified") }
+    var relatedType by rememberSaveable { mutableStateOf("companion") }
+    var relatedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var relationLabel by rememberSaveable { mutableStateOf("Equipment") }
+    var discoveryType by rememberSaveable { mutableStateOf("Confirmed") }
+    var discoveryText by rememberSaveable { mutableStateOf("") }
+    var discoverySource by rememberSaveable { mutableStateOf("") }
+    var eventId by rememberSaveable { mutableStateOf<String?>(null) }
+    var historyLimit by rememberSaveable(selectedId) { mutableIntStateOf(40) }
     var busy by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf("") }
+    var message by rememberSaveable { mutableStateOf("") }
+    var imageTarget by rememberSaveable { mutableStateOf<String?>(null) }
+    var draftToken by rememberSaveable { mutableIntStateOf(0) }
+    var imageToken by rememberSaveable { mutableIntStateOf(0) }
 
-    var title by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf("Other") }
-    var owner by remember { mutableStateOf("Unknown") }
-    var itemState by remember { mutableStateOf("Unknown") }
-    var evidenceStatus by remember { mutableStateOf("Unverified") }
-    var location by remember { mutableStateOf("Unknown") }
-    var quantity by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    var known by remember { mutableStateOf("") }
-    var potential by remember { mutableStateOf("") }
-    var limitations by remember { mutableStateOf("") }
-    var source by remember { mutableStateOf("") }
-    var notionId by remember { mutableStateOf("") }
-    var iconData by remember { mutableStateOf<String?>(null) }
-    var archived by remember { mutableStateOf(false) }
-    var imageTargetId by remember { mutableStateOf<String?>(null) }
-    var imageTargetRequest by remember { mutableIntStateOf(0) }
-    var discoveryType by remember { mutableStateOf("Confirmed") }
-    var discoveryText by remember { mutableStateOf("") }
-    var discoverySource by remember { mutableStateOf("") }
-
+    val eventsFlow = remember(selectedId) { selectedId?.let(repository::eventsForItem) }
+    val events = eventsFlow?.collectAsState(initial = emptyList())?.value.orEmpty()
+    val stale = selected != null && loadedItem != null && selected.revision != loadedItem.revision
+    val details = itemDetails.firstOrNull { it.itemId == selectedId }
+    val staleDetails = details != null && loadedDetails != null && details.revision != loadedDetails.revision
+    val itemDraftValid = itemDraft.canSave && (itemSnapshot == null || loadedItem != null) &&
+        (selectedId == null || loadedItem?.id == selectedId)
+    val detailsDraftValid = detailsDraft.canSave && (detailsSnapshot == null || loadedDetails != null)
+    val propertyDraftValid = propertyDraft.canSave && (propertySnapshot == null || loadedProperty != null)
+    val profileDraftValid = itemDraftValid && imageDraft.canSave
+    val draftErrors = buildList {
+        itemDraft.error?.let(::add)
+        if (!itemDraftValid && itemDraft.error == null) add("The saved item draft could not be read. Close and reopen the item before saving.")
+        if (mode in setOf("create", "edit")) imageDraft.error?.let(::add)
+        if (mode == "handling") {
+            detailsDraft.error?.let(::add)
+            if (!detailsDraftValid && detailsDraft.error == null) add("The saved handling draft could not be read. Reopen weight & handling before saving.")
+        }
+        if (mode == "property") {
+            propertyDraft.error?.let(::add)
+            if (!propertyDraftValid && propertyDraft.error == null) add("The saved property draft could not be read. Reopen the property before saving.")
+        }
+    }.distinct()
     val profileDirty = title != loadedItem?.title.orEmpty() || category != (loadedItem?.category ?: "Other") ||
         owner != (loadedItem?.owner ?: "Unknown") || itemState != (loadedItem?.itemState ?: "Unknown") ||
-        evidenceStatus != (loadedItem?.evidenceStatus ?: "Unverified") || location != (loadedItem?.location ?: "Unknown") ||
+        evidence != (loadedItem?.evidenceStatus ?: "Unverified") || location != (loadedItem?.location ?: "Unknown") ||
         quantity != loadedItem?.quantity?.toString().orEmpty() || description != loadedItem?.description.orEmpty() ||
         known != loadedItem?.knownProperties.orEmpty() || potential != loadedItem?.possibleUses.orEmpty() ||
         limitations != loadedItem?.limitations.orEmpty() || source != loadedItem?.source.orEmpty() ||
         notionId != loadedItem?.notionPageId.orEmpty() || iconData != loadedItem?.imageBase64 || archived != (loadedItem?.archived ?: false)
-    val staleProfile = selectedItem != null && loadedItem != null && selectedItem.revision != loadedItem?.revision
-    LaunchedEffect(selectedId, selectedItem?.revision, newItemRequest) {
-        if (loadedItem?.id == selectedId && selectedItem != null && loadedItem != null && profileDirty) return@LaunchedEffect
-        loadedItem = selectedItem
-        title = selectedItem?.title.orEmpty()
-        category = selectedItem?.category ?: "Other"
-        owner = selectedItem?.owner ?: "Unknown"
-        itemState = selectedItem?.itemState ?: "Unknown"
-        evidenceStatus = selectedItem?.evidenceStatus ?: "Unverified"
-        location = selectedItem?.location ?: "Unknown"
-        quantity = selectedItem?.quantity?.toString().orEmpty()
-        description = selectedItem?.description.orEmpty()
-        known = selectedItem?.knownProperties.orEmpty()
-        potential = selectedItem?.possibleUses.orEmpty()
-        limitations = selectedItem?.limitations.orEmpty()
-        source = selectedItem?.source.orEmpty()
-        notionId = selectedItem?.notionPageId.orEmpty()
-        iconData = selectedItem?.imageBase64
-        archived = selectedItem?.archived ?: false
-        discoveryText = ""
-        discoverySource = ""
+    val dirty = when (mode) {
+        "create", "edit" -> profileDirty
+        "handling" -> weight != loadedDetails?.weightGrams?.toString().orEmpty() || notes != loadedDetails?.notes.orEmpty() || source != baselineSource
+        "property" -> propertyLabel != loadedProperty?.label.orEmpty() || propertyValue != loadedProperty?.value.orEmpty() || propertyEvidence != (loadedProperty?.evidenceStatus ?: "Unverified") || source != baselineSource
+        "link" -> relatedId != null || source != baselineSource
+        "research" -> discoveryText.isNotBlank() || discoverySource.isNotBlank()
+        else -> false
     }
-
-    val details = itemDetails.firstOrNull { it.itemId == selectedId }
-    val detailsDirty = weight != loadedDetails?.weightGrams?.toString().orEmpty() || extraNotes != loadedDetails?.notes.orEmpty()
-    val staleDetails = details != null && loadedDetails != null && details.revision != loadedDetails?.revision
-    LaunchedEffect(selectedId, details?.revision, newItemRequest) {
-        if (loadedDetails?.itemId == selectedId && loadedDetails != null && detailsDirty) return@LaunchedEffect
-        loadedDetails = details
-        weight = details?.weightGrams?.toString().orEmpty()
-        extraNotes = details?.notes.orEmpty()
+    fun load(item: LedgerItem?) {
+        itemSnapshot = item?.let { Json.encodeToString(it) }; selectedId = item?.id; draftToken++
+        // An explicit reopen/reload replaces failed draft references from authoritative state.
+        detailsSnapshot = null; propertySnapshot = null
+        title = item?.title.orEmpty(); category = item?.category ?: "Other"; owner = item?.owner ?: "Unknown"
+        itemState = item?.itemState ?: "Unknown"; evidence = item?.evidenceStatus ?: "Unverified"
+        location = item?.location ?: "Unknown"; quantity = item?.quantity?.toString().orEmpty()
+        description = item?.description.orEmpty(); known = item?.knownProperties.orEmpty()
+        potential = item?.possibleUses.orEmpty(); limitations = item?.limitations.orEmpty()
+        source = item?.source.orEmpty(); baselineSource = source; notionId = item?.notionPageId.orEmpty()
+        iconData = item?.imageBase64; archived = item?.archived ?: false; message = ""
     }
-    LaunchedEffect(selectedId) {
-        selectedProperty = null; propertyLabel = ""; propertyValue = ""; propertyEvidence = "Unverified"
-        relatedId = null
+    fun execute(block: suspend () -> Unit) {
+        if (busy) return
+        busy = true; message = ""
+        scope.launch {
+            try { block() }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { message = e.message ?: "Could not save. Please try again." }
+            finally { busy = false }
+        }
     }
-
+    fun saveProfile() {
+        if (!profileDraftValid) { message = draftErrors.firstOrNull() ?: "Reload this item before saving."; return }
+        val before = loadedItem
+        val raw = quantity.trim()
+        val draft = LedgerDraft(title = title, category = category, owner = owner, itemState = itemState,
+            location = location, evidenceStatus = evidence, quantity = raw.toIntOrNull(), description = description,
+            knownProperties = known, possibleUses = potential, limitations = limitations, source = source,
+            notionPageId = notionId.trim().ifEmpty { null }, imageBase64 = iconData, archived = archived)
+        execute {
+            require(raw.isEmpty() || raw.toIntOrNull() != null) { "Quantity must be a whole number or blank." }
+            val saved = if (before == null) repository.create(draft) else repository.update(before.id, before.revision, draft, draft.source)
+            load(saved); mode = if (saved.archived) "" else "detail"; message = "Item saved"
+        }
+    }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null && !busy) {
-            busy = true
-            scope.launch {
-                try {
-                    check(imageTargetId == selectedId && imageTargetRequest == newItemRequest) { "The item changed. Choose its image again." }
-                    val prepared = compressIcon(context, uri)
-                    check(imageTargetId == selectedId && imageTargetRequest == newItemRequest) { "The item changed. Choose its image again." }
-                    iconData = prepared
-                    status = "Image prepared. Save the item to keep it."
-                } catch (e: Exception) {
-                    status = "Image not attached: ${e.message ?: "Unable to read picture"}"
-                } finally { busy = false }
-            }
+        if (uri != null && !busy) execute {
+            check(imageTarget == selectedId && imageToken == draftToken) { "The item changed. Choose its image again." }
+            val prepared = compressIcon(context, uri)
+            check(imageTarget == selectedId && imageToken == draftToken) { "The item changed. Choose its image again." }
+            iconData = prepared; message = "Image ready to save"
         }
     }
     val exportPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        if (uri != null && !busy) {
-            busy = true
-            scope.launch {
-                try {
-                    val bytes = repository.export().toByteArray(Charsets.UTF_8)
-                    withContext(Dispatchers.IO) {
-                        val stream = context.contentResolver.openOutputStream(uri)
-                            ?: error("The selected document could not be opened.")
-                        stream.use { it.write(bytes) }
+        if (uri != null && !busy) execute {
+            val bytes = repository.export().toByteArray(Charsets.UTF_8)
+            withContext(Dispatchers.IO) { (context.contentResolver.openOutputStream(uri) ?: error("Cannot open the document.")).use { it.write(bytes) } }
+            message = "Backup saved"
+        }
+    }
+    val visibleItems = items.filter { (filter == "All" || it.category == filter) &&
+        (query.isBlank() || "${it.title} ${it.category} ${it.owner} ${it.description}".contains(query, true)) }
+    Page {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) { Text("Inventory", style = MaterialTheme.typography.headlineMedium); Text("${items.size} items", color = Muted, style = MaterialTheme.typography.bodySmall) }
+            PlayerButton(onClick = { load(null); mode = "create" }, enabled = !busy) { Text("Add Item") }
+        }
+        PlayerSearch(query, { query = it }, "Search inventory")
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            (listOf("All") + items.map { it.category }.distinct().sorted()).forEach { name ->
+                PlayerFilterChip(selected = filter == name, onClick = { filter = name }, label = { Text(name) })
+            }
+        }
+        if (message.isNotBlank() && mode.isBlank()) Text(message, color = Frost, style = MaterialTheme.typography.bodySmall)
+        if (visibleItems.isEmpty()) PlayerCard {
+            Text(if (items.isEmpty()) "Your inventory is ready" else "No matching items", style = MaterialTheme.typography.titleMedium)
+            Text(if (items.isEmpty()) "Add equipment, materials or a discovery." else "Try another name or category.", color = Muted)
+        }
+        visibleItems.forEach { item ->
+            PlayerCard(onClick = { load(item); mode = "detail" }) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LedgerIcon(item.imageBase64, Modifier.size(48.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(item.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(listOf(item.category, item.itemState.takeUnless { it == "Unknown" }, item.owner.takeUnless { it == "Unknown" }).filterNotNull().joinToString(" · "), color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    status = "Campaign inventory backup saved to the chosen document."
-                } catch (e: Exception) {
-                    status = "Export failed: ${e.message ?: "No data was written"}"
-                } finally { busy = false }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(item.quantity?.toString() ?: "—", color = Frost, style = MaterialTheme.typography.titleLarge)
+                        Text("qty", color = Muted, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+        }
+        PlayerTextButton(onClick = { exportPicker.launch("astravar-campaign-items.json") }, enabled = !busy) { Text("Export JSON") }
+    }
+    if (mode.isNotBlank()) {
+        val sheetTitle = when(mode) { "create" -> "Add Item"; "edit" -> "Edit item"; "handling" -> "Weight & handling"; "property" -> if (loadedProperty == null) "Add property" else "Edit property"; "link" -> "Connect record"; "research" -> "Add discovery"; "event" -> "History entry"; else -> selected?.title ?: "Item" }
+        PlayerSheet(sheetTitle, onDismiss = { if (!busy) mode = "" }, dirty = dirty, actions = {
+            if (mode in setOf("create", "edit")) PlayerButton(onClick = ::saveProfile, enabled = !busy && profileDraftValid && !stale && title.isNotBlank()) { Text(if (mode == "create") "Save new item" else "Save item changes") }
+            if (mode == "detail") PlayerButton(onClick = { selected?.let(::load); mode = "edit" }, enabled = !busy) { Text("Edit item") }
+            if (mode == "handling") PlayerButton(onClick = {
+                val item = selected ?: return@PlayerButton; val before = loadedDetails; val raw = weight.trim(); val provenance = source
+                val model = before?.copy(weightGrams = raw.toLongOrNull(), notes = notes) ?: ItemDetails(itemId = item.id, weightGrams = raw.toLongOrNull(), notes = notes)
+                execute {
+                    require(raw.isEmpty() || raw.toLongOrNull()?.let { it >= 0 } == true) { "Weight must be nonnegative grams or unknown." }
+                    records.saveItemDetails(model, before?.revision, provenance); mode = "detail"; message = "Weight and handling saved"
+                }
+            }, enabled = !busy && itemDraftValid && detailsDraftValid && !staleDetails && source.isNotBlank()) { Text("Save weight and handling") }
+            if (mode == "property") PlayerButton(onClick = {
+                val item = selected ?: return@PlayerButton; val before = loadedProperty; val provenance = source
+                val model = before?.copy(label = propertyLabel, value = propertyValue, evidenceStatus = propertyEvidence) ?: ItemProperty(itemId = item.id, label = propertyLabel, value = propertyValue, evidenceStatus = propertyEvidence)
+                execute { records.saveItemProperty(model, before?.revision, provenance); mode = "detail"; message = "Property saved" }
+            }, enabled = !busy && itemDraftValid && propertyDraftValid && propertyLabel.isNotBlank() && propertyValue.isNotBlank() && source.isNotBlank()) { Text(if (loadedProperty == null) "Add item property" else "Save item property") }
+            if (mode == "link") PlayerButton(onClick = {
+                val item = selected ?: return@PlayerButton; val target = relatedId ?: return@PlayerButton; val provenance = source
+                val link = CampaignLink(fromType = "item", fromId = item.id, toType = relatedType, toId = target, label = relationLabel)
+                execute { records.saveLink(link, null, provenance); relatedId = null; mode = "detail"; message = "Record connected" }
+            }, enabled = !busy && itemDraftValid && relatedId != null && source.isNotBlank()) { Text("Link this existing item") }
+            if (mode == "research") PlayerButton(onClick = {
+                val item = selected ?: return@PlayerButton; val kind = discoveryType; val text = discoveryText; val provenance = discoverySource
+                execute { val saved = repository.discover(item.id, item.revision, kind, text, provenance); load(saved); discoveryText = ""; discoverySource = ""; mode = "detail"; message = "Discovery saved" }
+            }, enabled = !busy && itemDraftValid && discoveryText.isNotBlank() && discoverySource.isNotBlank()) { Text("Append discovery") }
+        }) {
+            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            draftErrors.forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            if (message.isNotBlank()) Text(message, color = Frost, style = MaterialTheme.typography.bodySmall)
+            when(mode) {
+                "create", "edit" -> {
+                    if (stale) Text("This item changed elsewhere. Your draft is preserved. Close and reopen it to load the latest revision.", color = Frost)
+                    Field("Item name", title, { title = it }, enabled = !busy)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.weight(1f)) { Choices("Category", listOf("Armor", "Weapon", "Tool", "Component", "Material", "Magic Item", "Consumable", "Treasure", "Other"), category, enabled = !busy) { category = it } }
+                        Box(Modifier.weight(1f)) { Field("Quantity", quantity, { quantity = it }, enabled = !busy) }
+                    }
+                    Text("Blank quantity means unknown", style = MaterialTheme.typography.labelSmall, color = Muted)
+                    Field("Description / appearance", description, { description = it }, single = false, enabled = !busy)
+                    ExpandableRecordSection("Ownership & location") {
+                        Field("Owner / holder label", owner, { owner = it }, enabled = !busy)
+                        Choices("Current state", listOf("Unknown", "Carried", "Equipped", "Installed", "Stored", "Consumed", "Sold", "Lost"), itemState, enabled = !busy) { itemState = it }
+                        Field("Specific location / container (optional)", location, { location = it }, enabled = !busy)
+                    }
+                    ExpandableRecordSection("Properties & research notes") {
+                        Field("Known properties / legacy notes", known, { known = it }, single = false, enabled = !busy)
+                        Field("Possible uses (not active mechanics)", potential, { potential = it }, single = false, enabled = !busy)
+                        Field("Known limits", limitations, { limitations = it }, single = false, enabled = !busy)
+                    }
+                    ExpandableRecordSection("Artwork & provenance") {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            LedgerIcon(iconData, Modifier.size(64.dp))
+                            PlayerTextButton(onClick = { imageTarget = selectedId; imageToken = draftToken; imagePicker.launch("image/*") }, enabled = !busy) { Text("Choose item image") }
+                        }
+                        if (iconData != null) PlayerTextButton(onClick = { iconData = null }, enabled = !busy) { Text("Remove image") }
+                        Choices("Evidence", listOf("Unverified", "Confirmed", "Proposed", "Disputed"), evidence, enabled = !busy) { evidence = it }
+                        Field("Notion item page ID or URL (optional)", notionId, { notionId = it }, enabled = !busy)
+                    }
+                    Field("Source / checkpoint", source, { source = it }, single = false, enabled = !busy)
+                    if (loadedItem != null) ExpandableRecordSection("Archive") { Toggle("Archive this entry (keep history)", archived, enabled = !busy) { archived = it } }
+                }
+                "detail" -> selected?.let { item ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        LedgerIcon(item.imageBase64, Modifier.size(64.dp))
+                        Column { Text(item.category, color = Frost, style = MaterialTheme.typography.labelLarge); Text("${item.quantity?.toString() ?: "Unknown"} quantity · ${item.itemState}", color = Muted) }
+                    }
+                    ExpandableRecordSection("Overview", true) {
+                        if (item.description.isNotBlank()) Text(item.description)
+                        RecordValue("Owner", item.owner); RecordValue("Location", item.location); RecordValue("Evidence", item.evidenceStatus)
+                        if (item.source.isNotBlank()) RecordValue("Source", item.source)
+                    }
+                    ExpandableRecordSection("Properties & Mechanics") {
+                        if (item.knownProperties.isNotBlank()) Text(item.knownProperties)
+                        if (item.limitations.isNotBlank()) RecordValue("Limits", item.limitations)
+                        val value = itemDetails.firstOrNull { it.itemId == item.id }
+                        RecordValue("Weight per item", value?.weightGrams?.let { "$it g" } ?: "Unknown")
+                        if (value?.notes?.isNotBlank() == true) Text(value.notes)
+                        PlayerTextButton(onClick = { detailsSnapshot = value?.let { Json.encodeToString(it) }; weight = value?.weightGrams?.toString().orEmpty(); notes = value?.notes.orEmpty(); source = item.source; baselineSource = source; mode = "handling" }) { Text("Edit weight & handling") }
+                        itemProperties.filter { it.itemId == item.id }.forEach { property ->
+                            PlayerTextButton(onClick = { propertySnapshot = Json.encodeToString(property); propertyLabel = property.label; propertyValue = property.value; propertyEvidence = property.evidenceStatus; source = property.source; baselineSource = source; mode = "property" }) { Column(Modifier.fillMaxWidth()) { Text(property.label); Text(property.value, color = Muted, style = MaterialTheme.typography.bodySmall) } }
+                        }
+                        PlayerTextButton(onClick = { propertySnapshot = null; propertyLabel = ""; propertyValue = ""; propertyEvidence = "Unverified"; source = item.source; baselineSource = source; mode = "property" }) { Text("Add property") }
+                    }
+                    ExpandableRecordSection("Research") {
+                        if (item.possibleUses.isNotBlank()) RecordValue("Possible uses", item.possibleUses)
+                        val discoveries = events.filter { it.kind == "DISCOVER" || it.kind.contains("DISCOVER", true) }
+                        if (discoveries.isEmpty()) Text("No discoveries recorded", color = Muted)
+                        discoveries.take(5).forEach { Text(it.detail, style = MaterialTheme.typography.bodySmall) }
+                        PlayerTextButton(onClick = { discoveryText = ""; discoverySource = ""; mode = "research" }) { Text("Add discovery") }
+                    }
+                    ExpandableRecordSection("Connected Records") {
+                        val related = links.filter { (it.fromType == "item" && it.fromId == item.id) || (it.toType == "item" && it.toId == item.id) }
+                        if (related.isEmpty()) Text("No connected records", color = Muted)
+                        related.forEach { link ->
+                            val forward = link.fromType == "item" && link.fromId == item.id
+                            val type = if (forward) link.toType else link.fromType; val id = if (forward) link.toId else link.fromId
+                            val name = when(type) { "companion" -> companions.firstOrNull { it.companionId == id }?.name ?: "Eek"; "project" -> projects.firstOrNull { it.id == id }?.title; "connection" -> entities.firstOrNull { it.id == id }?.name; else -> items.firstOrNull { it.id == id }?.title } ?: "Related record"
+                            RecordValue(link.label, name)
+                        }
+                        PlayerTextButton(onClick = { relatedType = "companion"; relatedId = null; relationLabel = "Equipment"; source = item.source; baselineSource = source; mode = "link" }) { Text("Connect record") }
+                    }
+                    ExpandableRecordSection("History") {
+                        if (events.isEmpty()) Text("No history recorded", color = Muted)
+                        events.take(historyLimit).forEach { entry ->
+                            PlayerTextButton(onClick = { eventId = entry.commandId; mode = "event" }) { Column(Modifier.fillMaxWidth()) { Text(entry.kind.replace('_', ' '), color = Frost); Text(entry.detail, color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis) } }
+                        }
+                        audit.filter { entry -> entry.recordId == item.id || entry.recordId in itemProperties.filter { p -> p.itemId == item.id }.map { p -> p.id } || entry.recordId in links.filter { link -> (link.fromType == "item" && link.fromId == item.id) || (link.toType == "item" && link.toId == item.id) }.map { it.id } }.take(historyLimit).forEach { entry -> RecordValue(entry.kind, entry.source) }
+                        if (events.size > historyLimit) PlayerTextButton(onClick = { historyLimit += 40 }) { Text("Show more item history") }
+                        Text(item.id, color = Muted, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                "handling" -> {
+                    if (staleDetails) Text("These details changed elsewhere. Your draft is preserved; reopen the item before saving.", color = Frost)
+                    Field("Weight per item in grams (blank = unknown)", weight, { weight = it }, enabled = !busy)
+                    Field("Property / handling notes", notes, { notes = it }, single = false, enabled = !busy)
+                    Field("Source / checkpoint", source, { source = it }, single = false, enabled = !busy)
+                }
+                "property" -> {
+                    Field("Property name", propertyLabel, { propertyLabel = it }, enabled = !busy)
+                    Field("Property value / exact rule reference", propertyValue, { propertyValue = it }, single = false, enabled = !busy)
+                    Choices("Property evidence", listOf("Unverified", "Confirmed", "Proposed", "Disputed"), propertyEvidence, enabled = !busy) { propertyEvidence = it }
+                    Field("Source / checkpoint", source, { source = it }, single = false, enabled = !busy)
+                }
+                "link" -> {
+                    Choices("Related record type", listOf("companion", "project", "connection"), relatedType, display = { when(it) { "companion" -> "Eek"; "project" -> "Invention"; else -> "Connection" } }, enabled = !busy) { relatedType = it; relatedId = null }
+                    val targets = when(relatedType) { "companion" -> companions.map { it.companionId to it.name }; "project" -> projects.map { it.id to it.title }; else -> entities.map { it.id to it.name } }
+                    if (targets.isEmpty()) Text("Create the related record first", color = Muted)
+                    Choices("Related record", targets.map { it.first }, relatedId, display = { id -> targets.firstOrNull { it.first == id }?.second ?: "Choose record" }, enabled = !busy) { relatedId = it }
+                    Choices("Relationship", listOf("Owned by", "Held by", "Equipment", "Installed component", "Material requirement", "Research subject", "Origin"), relationLabel, enabled = !busy) { relationLabel = it }
+                    Field("Source / checkpoint", source, { source = it }, single = false, enabled = !busy)
+                    Text("Links keep the same item identity. Ownership and quantity stay unchanged.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+                "research" -> {
+                    Choices("Evidence category", listOf("Confirmed", "Possible use", "Limitation", "Correction"), discoveryType, enabled = !busy) { discoveryType = it }
+                    Field("What was discovered?", discoveryText, { discoveryText = it }, single = false, enabled = !busy)
+                    Field("Source / roll / scene", discoverySource, { discoverySource = it }, single = false, enabled = !busy)
+                }
+                "event" -> events.firstOrNull { it.commandId == eventId }?.let { entry ->
+                    RecordValue("Change", entry.kind); Text(entry.detail); RecordValue("Evidence", entry.evidenceStatus); RecordValue("Source", entry.source)
+                    RecordValue("Revision", "${entry.priorRevision} → ${entry.resultingRevision}")
+                }
             }
         }
     }
+}
 
-    val eventsFlow = remember(selectedId) { selectedId?.let { repository.eventsForItem(it) } }
-    val activeEvents = eventsFlow?.collectAsState(initial = emptyList())?.value ?: emptyList()
-
-    Page(resetKey = selectedId to newItemRequest) {
-        SectionCaption("INVENTORY", "LOCAL RECORDS · PERSISTENT ITEM IDENTITIES")
-        Section("Owned items & equipment") {
-            Text(
-                "Items, equipment, materials and discoveries saved privately on this device. Weapon resources and rolls remain separate.",
-                color = Muted, style = MaterialTheme.typography.bodySmall
-            )
-            Text("Private campaign records are not sent to the public synthetic sandbox.",
-                style = MaterialTheme.typography.bodySmall, color = Frost)
-            Field("Search inventory", search, { search = it }, enabled = !busy && !extensionActions.busy)
-            Choices("Show category", listOf("All categories") + items.map { it.category }.distinct().sorted(), categoryFilter, enabled = !busy && !extensionActions.busy) { categoryFilter = it }
-            LocalRecordStatus(extensionActions.message, extensionActions.busy)
-            if (status.isNotBlank()) Text(status, color = Brass, style = MaterialTheme.typography.bodyMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { selectedId = null; newItemRequest++; status = "" },
-                    enabled = !busy && !extensionActions.busy, modifier = Modifier.weight(1f)) {
-                    Text("New item")
-                }
-                OutlinedButton(onClick = { exportPicker.launch("astravar-campaign-items.json") },
-                    enabled = !busy && !extensionActions.busy, modifier = Modifier.weight(1f)) { Text("Export JSON") }
-            }
-            if (items.isEmpty()) Text("No local items recorded yet. Add an item to begin; no campaign data has been imported.", color = Muted)
-            else items.filter { item ->
-                (categoryFilter == "All categories" || item.category == categoryFilter) &&
-                    (search.isBlank() || "${item.title} ${item.category} ${item.owner} ${item.description}".contains(search, true))
-            }.forEach { item ->
-                TextButton(onClick = { loadedItem = null; loadedDetails = null; selectedId = item.id; newItemRequest++; status = "" },
-                    enabled = !busy && !extensionActions.busy, modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        LedgerIcon(item.imageBase64, Modifier.size(50.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(item.title, color = Brass)
-                            Text("${item.owner} · ${item.itemState} · ${item.quantity?.toString() ?: "unknown quantity"}",
-                                style = MaterialTheme.typography.bodySmall, color = Muted)
-                        }
-                        Text("›", color = Frost)
-                    }
-                }
-                HorizontalDivider()
-            }
-        }
-        Section(if (selectedItem == null) "Create an item" else "Edit: ${selectedItem.title}") {
-            if (staleProfile) Text("A newer item revision exists. Your draft is preserved. Select this item again to load its current state before saving.", color = Frost, style = MaterialTheme.typography.bodySmall)
-            Field("Item name", title, { title = it }, enabled = !busy && !extensionActions.busy)
-            Choices("Category", listOf("Armor", "Weapon", "Tool", "Component", "Material", "Magic Item", "Consumable", "Treasure", "Other"), category, enabled = !busy && !extensionActions.busy) { category = it }
-            Field("Owner / holder label", owner, { owner = it }, enabled = !busy && !extensionActions.busy)
-            Choices("Current state", listOf("Unknown", "Carried", "Equipped", "Installed", "Stored", "Consumed", "Sold", "Lost"), itemState, enabled = !busy && !extensionActions.busy) { itemState = it }
-            Choices("Evidence", listOf("Unverified", "Confirmed", "Proposed", "Disputed"), evidenceStatus, enabled = !busy && !extensionActions.busy) { evidenceStatus = it }
-            Field("Specific location / container (optional)", location, { location = it }, enabled = !busy && !extensionActions.busy)
-            Field("Quantity (blank means unknown)", quantity, { quantity = it }, enabled = !busy && !extensionActions.busy)
-            Field("Description / appearance", description, { description = it }, single = false, enabled = !busy && !extensionActions.busy)
-            Text("Properties and research notes are descriptive. They never change attack calculations or activate an unapproved mechanic.", color = Muted, style = MaterialTheme.typography.bodySmall)
-            Field("Known properties / legacy notes", known, { known = it }, single = false, enabled = !busy && !extensionActions.busy)
-            Field("Possible uses (not active mechanics)", potential, { potential = it }, single = false, enabled = !busy && !extensionActions.busy)
-            Field("Known limits", limitations, { limitations = it }, single = false, enabled = !busy && !extensionActions.busy)
-            Field("Source / checkpoint", source, { source = it }, single = false, enabled = !busy && !extensionActions.busy)
-            Field("Notion item page ID or URL (optional)", notionId, { notionId = it }, enabled = !busy && !extensionActions.busy)
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                LedgerIcon(iconData, Modifier.size(82.dp))
-                Column(Modifier.weight(1f)) {
-                    OutlinedButton(onClick = { imageTargetId = selectedId; imageTargetRequest = newItemRequest; imagePicker.launch("image/*") }, enabled = !busy && !extensionActions.busy) { Text("Choose item image") }
-                    if (iconData != null) TextButton(onClick = { iconData = null }, enabled = !busy) { Text("Remove image") }
-                    Text("Images are compressed and included in JSON exports.", style = MaterialTheme.typography.bodySmall, color = Muted)
-                }
-            }
-            if (selectedItem != null) Toggle("Archive this entry (keep history)", archived, enabled = !busy && !extensionActions.busy) { archived = it }
-            Action(if (selectedItem == null) "Save new item" else "Save item changes", !busy && !extensionActions.busy && !staleProfile && title.isNotBlank()) {
-                busy = true
-                status = "Saving item…"
-                val current = loadedItem
-                val draft = LedgerDraft(title = title, category = category, owner = owner,
-                    itemState = itemState, location = location, evidenceStatus = evidenceStatus,
-                    quantity = quantity.trim().takeIf { it.isNotEmpty() }?.toIntOrNull(),
-                    description = description, knownProperties = known, possibleUses = potential,
-                    limitations = limitations, source = source,
-                    notionPageId = notionId.trim().ifEmpty { null }, imageBase64 = iconData, archived = archived)
-                val qtyText = quantity.trim()
-                scope.launch {
-                    try {
-                        require(qtyText.isEmpty() || qtyText.toIntOrNull() != null) { "Quantity must be a whole number or blank." }
-                        val saved = if (current == null) repository.create(draft)
-                            else repository.update(current.id, current.revision, draft, source)
-                        loadedItem = saved
-                        selectedId = saved.id
-                        status = "Saved locally: ${saved.title} (revision ${saved.revision}). Not synchronized."
-                    } catch (e: Exception) {
-                        status = "Save failed: ${e.message ?: "Unknown error"}"
-                    } finally { busy = false }
-                }
-            }
-        }
-        if (selectedItem != null) {
-            ExpandableRecordSection("Weight, properties & mechanics") {
-                val selectedDetails = loadedDetails
-                if (staleDetails) Text("Weight or handling changed elsewhere. Your draft is preserved; reopen this item before saving those details.", color = Frost, style = MaterialTheme.typography.bodySmall)
-                Field("Weight per item in grams (blank = unknown)", weight, { weight = it }, enabled = !busy && !extensionActions.busy)
-                Field("Property / handling notes", extraNotes, { extraNotes = it }, single = false, enabled = !busy && !extensionActions.busy)
-                Text("Use measured or confirmed weight. Existing quantity and identity are unchanged.", color = Muted, style = MaterialTheme.typography.bodySmall)
-                Action("Save weight and handling", !busy && !extensionActions.busy && !staleDetails && source.isNotBlank()) {
-                    val text = weight.trim(); val notes = extraNotes; val provenance = source
-                    val model = selectedDetails?.copy(weightGrams = text.toLongOrNull(), notes = notes)
-                        ?: ItemDetails(itemId = selectedItem.id, weightGrams = text.toLongOrNull(), notes = notes)
-                    extensionActions.run {
-                        require(text.isEmpty() || text.toLongOrNull()?.let { it >= 0 } == true) { "Weight must be nonnegative grams or unknown." }
-                        val receipt = records.saveItemDetails(model, selectedDetails?.revision, provenance)
-                        loadedDetails = model.copy(revision = receipt.resultingRevision, source = provenance, updatedAt = receipt.createdAt)
-                        "Weight and handling saved locally."
-                    }
-                }
-                val properties = itemProperties.filter { it.itemId == selectedItem.id }
-                properties.forEach { property ->
-                    TextButton(onClick = { selectedProperty = property; propertyLabel = property.label; propertyValue = property.value; propertyEvidence = property.evidenceStatus }, enabled = !busy && !extensionActions.busy) {
-                        Text("${property.label}: ${property.value} · ${property.evidenceStatus}", color = Brass)
-                    }
-                }
-                Field("Property name", propertyLabel, { propertyLabel = it }, enabled = !busy && !extensionActions.busy)
-                Field("Property value / exact rule reference", propertyValue, { propertyValue = it }, single = false, enabled = !busy && !extensionActions.busy)
-                Choices("Property evidence", listOf("Unverified", "Confirmed", "Proposed", "Disputed"), propertyEvidence, enabled = !busy && !extensionActions.busy) { propertyEvidence = it }
-                Text("Confirmed descriptive evidence does not activate a combat effect. The existing rules engine remains authoritative.", color = Muted, style = MaterialTheme.typography.bodySmall)
-                Action(if (selectedProperty == null) "Add item property" else "Save item property", !busy && !extensionActions.busy && propertyLabel.isNotBlank() && propertyValue.isNotBlank() && source.isNotBlank()) {
-                    val before = selectedProperty; val provenance = source
-                    val model = before?.copy(label = propertyLabel, value = propertyValue, evidenceStatus = propertyEvidence)
-                        ?: ItemProperty(itemId = selectedItem.id, label = propertyLabel, value = propertyValue, evidenceStatus = propertyEvidence)
-                    extensionActions.run {
-                        records.saveItemProperty(model, before?.revision, provenance)
-                        selectedProperty = null; propertyLabel = ""; propertyValue = ""
-                        "Property saved locally as descriptive evidence."
-                    }
-                }
-                if (selectedProperty != null) TextButton(onClick = { selectedProperty = null; propertyLabel = ""; propertyValue = "" }, enabled = !extensionActions.busy) { Text("New property") }
-                if (source.isBlank()) Text("Provide a source in the item editor before saving structured details.", color = Frost, style = MaterialTheme.typography.bodySmall)
-            }
-            ExpandableRecordSection("Ownership links, inventions & equipment") {
-                Text("A link references this physical item by its permanent ID. It does not duplicate, transfer, install, consume or activate it.", color = Muted, style = MaterialTheme.typography.bodySmall)
-                Text("Item ID: ${selectedItem.id}", color = Muted, style = MaterialTheme.typography.labelSmall)
-                links.filter { (it.fromType == "item" && it.fromId == selectedItem.id) || (it.toType == "item" && it.toId == selectedItem.id) }.forEach { link ->
-                    val targetType = if (link.fromType == "item" && link.fromId == selectedItem.id) link.toType else link.fromType
-                    val targetId = if (link.fromType == "item" && link.fromId == selectedItem.id) link.toId else link.fromId
-                    val targetName = when (targetType) {
-                        "companion" -> "Eek"
-                        "project" -> projects.firstOrNull { it.id == targetId }?.title
-                        "connection" -> entities.firstOrNull { it.id == targetId }?.name
-                        else -> null
-                    } ?: "Linked record"
-                    Text("${link.label} · $targetName", style = MaterialTheme.typography.bodySmall)
-                }
-                Choices("Related record type", listOf("companion", "project", "connection"), relatedType,
-                    display = { when (it) { "companion" -> "Eek"; "project" -> "Invention"; else -> "Connection" } }, enabled = !busy && !extensionActions.busy) { relatedType = it; relatedId = null }
-                val targets = when (relatedType) {
-                    "companion" -> companionStates.map { it.companionId to it.name }
-                    "project" -> projects.map { it.id to it.title }
-                    else -> entities.map { it.id to it.name }
-                }
-                if (targets.isEmpty()) Text("Create a sourced ${if (relatedType == "companion") "Eek status" else "related record"} before adding this link.", color = Muted, style = MaterialTheme.typography.bodySmall)
-                Choices("Related record", targets.map { it.first }, relatedId, display = { id -> targets.firstOrNull { it.first == id }?.second ?: "Choose record" }, enabled = !busy && !extensionActions.busy) { relatedId = it }
-                Choices("Relationship", listOf("Owned by", "Held by", "Equipment", "Installed component", "Material requirement", "Research subject", "Origin"), relationLabel, enabled = !busy && !extensionActions.busy) { relationLabel = it }
-                Action("Link this existing item", !busy && !extensionActions.busy && relatedId != null && source.isNotBlank()) {
-                    val target = relatedId ?: return@Action; val kind = relatedType; val relation = relationLabel; val provenance = source
-                    extensionActions.run {
-                        records.saveLink(CampaignLink(fromType = "item", fromId = selectedItem.id, toType = kind, toId = target, label = relation), null, provenance)
-                        "Persistent item link saved locally. Quantity and ownership state unchanged."
-                    }
-                }
-            }
-        }
-        if (selectedItem != null) Section("Research and discoveries") {
-            Text("Study results are appended to this same item and kept in a revision history.",
-                style = MaterialTheme.typography.bodySmall, color = Muted)
-            Choices("Evidence category", listOf("Confirmed", "Possible use", "Limitation", "Correction"), discoveryType, enabled = !busy && !extensionActions.busy) { discoveryType = it }
-            Field("What was discovered?", discoveryText, { discoveryText = it }, single = false, enabled = !busy && !extensionActions.busy)
-            Field("Source / roll / scene", discoverySource, { discoverySource = it }, single = false, enabled = !busy && !extensionActions.busy)
-            Action("Append discovery", !busy && !extensionActions.busy && discoveryText.isNotBlank() && discoverySource.isNotBlank()) {
-                busy = true
-                val item = selectedItem
-                val kind = discoveryType; val detail = discoveryText; val src = discoverySource
-                scope.launch {
-                    try {
-                        val saved = repository.discover(item.id, item.revision, kind, detail, src)
-                        status = "Discovery saved locally on ${saved.title} (revision ${saved.revision})."
-                        discoveryText = ""; discoverySource = ""
-                    } catch (e: Exception) {
-                        status = "Discovery not saved: ${e.message ?: "Unknown error"}"
-                    } finally { busy = false }
-                }
-            }
-            if (activeEvents.isEmpty()) Text("No research recorded yet.", color = Muted)
-            activeEvents.take(historyLimit).forEach { entry ->
-                Text("${entry.evidenceStatus} · ${entry.kind}: ${entry.detail}",
-                    style = MaterialTheme.typography.bodySmall)
-                if (entry.source.isNotBlank()) Text("Source: ${entry.source}",
-                    color = Muted, style = MaterialTheme.typography.bodySmall)
-                HorizontalDivider()
-            }
-            if (activeEvents.size > historyLimit) OutlinedButton(onClick = { historyLimit += 40 }, enabled = !busy) {
-                Text("Show more item history (${activeEvents.size - historyLimit} remaining)")
-            }
-        }
+@Composable internal fun RecordValue(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, color = Muted, style = MaterialTheme.typography.labelSmall)
+        Text(value, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

@@ -35,17 +35,17 @@ import kotlin.math.*
 val DisplayFace=FontFamily(Font(R.font.cinzel),Font(R.font.cinzel_semibold,FontWeight.SemiBold))
 val InterfaceFace=FontFamily(Font(R.font.inter),Font(R.font.inter_medium,FontWeight.Medium),Font(R.font.inter_semibold,FontWeight.SemiBold))
 fun arcaneTypography() = Typography(
-    headlineLarge=TextStyle(fontFamily=DisplayFace,fontSize=40.sp,lineHeight=46.sp),
-    headlineMedium=TextStyle(fontFamily=DisplayFace,fontSize=27.sp,lineHeight=34.sp,letterSpacing=1.sp),
-    headlineSmall=TextStyle(fontFamily=DisplayFace,fontSize=23.sp,lineHeight=30.sp),
-    titleLarge=TextStyle(fontFamily=DisplayFace,fontSize=21.sp,lineHeight=28.sp),
-    titleMedium=TextStyle(fontFamily=DisplayFace,fontSize=17.sp,lineHeight=24.sp),
+    headlineLarge=TextStyle(fontFamily=InterfaceFace,fontSize=32.sp,lineHeight=40.sp),
+    headlineMedium=TextStyle(fontFamily=InterfaceFace,fontSize=26.sp,lineHeight=32.sp),
+    headlineSmall=TextStyle(fontFamily=InterfaceFace,fontSize=24.sp,lineHeight=30.sp),
+    titleLarge=TextStyle(fontFamily=InterfaceFace,fontSize=21.sp,lineHeight=28.sp),
+    titleMedium=TextStyle(fontFamily=InterfaceFace,fontSize=16.sp,lineHeight=24.sp,fontWeight=FontWeight.SemiBold),
     bodyLarge=TextStyle(fontFamily=InterfaceFace,fontSize=16.sp,lineHeight=24.sp),
     bodyMedium=TextStyle(fontFamily=InterfaceFace,fontSize=14.sp,lineHeight=21.sp),
-    bodySmall=TextStyle(fontFamily=InterfaceFace,fontSize=12.sp,lineHeight=18.sp),
+    bodySmall=TextStyle(fontFamily=InterfaceFace,fontSize=13.sp,lineHeight=19.sp),
     labelLarge=TextStyle(fontFamily=InterfaceFace,fontSize=13.sp,lineHeight=18.sp,fontWeight=FontWeight.Medium),
-    labelMedium=TextStyle(fontFamily=InterfaceFace,fontSize=11.sp,lineHeight=16.sp,fontWeight=FontWeight.Medium),
-    labelSmall=TextStyle(fontFamily=InterfaceFace,fontSize=10.sp,lineHeight=14.sp,letterSpacing=.8.sp)
+    labelMedium=TextStyle(fontFamily=InterfaceFace,fontSize=12.sp,lineHeight=17.sp,fontWeight=FontWeight.Medium),
+    labelSmall=TextStyle(fontFamily=InterfaceFace,fontSize=12.sp,lineHeight=16.sp,letterSpacing=.4.sp)
 )
 
 /** One small repeating texture; geometry and brushes are cached per measured surface. */
@@ -54,7 +54,7 @@ fun arcaneTypography() = Typography(
     return drawWithCache {
         val texture=ShaderBrush(ImageShader(grain,TileMode.Repeated,TileMode.Repeated))
         val light=Brush.radialGradient(listOf(Frost.copy(alpha=.07f),Color.Transparent),Offset(size.width*.8f,0f),size.height.coerceAtLeast(1f)*.75f)
-        onDrawBehind {drawRect(Color(0xFF000510));drawRect(texture,alpha=.04f);drawRect(light)}
+        onDrawBehind {drawRect(RebuildPalette.Canvas);drawRect(texture,alpha=.04f);drawRect(light)}
     }
 }
 private fun framePath(w:Float,h:Float,inset:Float,cut:Float)=Path().apply {
@@ -62,32 +62,11 @@ private fun framePath(w:Float,h:Float,inset:Float,cut:Float)=Path().apply {
     lineTo(w-inset,h-inset-cut);lineTo(w-inset-cut,h-inset);lineTo(inset+cut,h-inset)
     lineTo(inset,h-inset-cut);lineTo(inset,inset+cut);close()
 }
-@Composable fun Modifier.metalSurface(accent:Color=Brass,lit:Boolean=false,pressed:Boolean=false):Modifier {
-    val grain=ImageBitmap.imageResource(R.drawable.metal_texture)
-    return drawWithCache {
-        val edge=framePath(size.width,size.height,1.dp.toPx(),16.dp.toPx())
-        val inner=framePath(size.width,size.height,5.dp.toPx(),8.dp.toPx())
-        val etched=framePath(size.width,size.height,8.dp.toPx(),6.dp.toPx())
-        val texture=ShaderBrush(ImageShader(grain,TileMode.Repeated,TileMode.Repeated))
-        val base=Brush.verticalGradient(if(pressed) listOf(Color(0xFF011D49),Color(0xFF000F28)) else listOf(Color(0xFF011534),Color(0xFF000F28),Color(0xFF000C21)))
-        val metallic=Brush.linearGradient(listOf(accent.copy(alpha=.85f),Color(0xFF615140),accent.copy(alpha=.38f),accent.copy(alpha=.9f)))
-        val glow=Brush.radialGradient(listOf(accent.copy(alpha=if(lit) .23f else .06f),Color.Transparent),Offset(size.width*.5f,size.height),size.width.coerceAtLeast(1f)*.7f)
-        onDrawBehind {
-            drawPath(edge,base);drawPath(edge,texture,alpha=.05f);drawPath(edge,glow)
-            drawPath(edge,metallic,style=Stroke(if(lit) 2.dp.toPx() else 1.dp.toPx()))
-            drawPath(inner,accent.copy(alpha=if(lit) .65f else .3f),style=Stroke(.6.dp.toPx()))
-            drawPath(etched,Color.Black.copy(alpha=.7f),style=Stroke(1.dp.toPx()))
-            val length=20.dp.toPx();val pad=11.dp.toPx()
-            for(x in listOf(pad,size.width-pad)) {
-                val direction=if(x==pad) 1 else -1
-                drawLine(accent.copy(alpha=.6f),Offset(x,6.dp.toPx()),Offset(x+length*direction,6.dp.toPx()),.5.dp.toPx())
-                drawLine(accent.copy(alpha=.4f),Offset(x,size.height-6.dp.toPx()),Offset(x+length*direction,size.height-6.dp.toPx()),.5.dp.toPx())
-            }
-        }
-    }
-}
+@Composable fun Modifier.metalSurface(accent:Color=Brass,lit:Boolean=false,pressed:Boolean=false):Modifier =
+    this.background(if(lit || pressed) RebuildPalette.Active else RebuildPalette.Elevated, androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+        .then(if(lit) Modifier.border(1.dp,RebuildPalette.BlueAccent,androidx.compose.foundation.shape.RoundedCornerShape(14.dp)) else Modifier)
 @Composable fun ArcanePanel(accent:Color=Brass,modifier:Modifier=Modifier,content:@Composable ColumnScope.()->Unit) {
-    Column(modifier.fillMaxWidth().clip(CutCornerShape(16.dp)).metalSurface(accent).padding(17.dp),verticalArrangement=Arrangement.spacedBy(10.dp),content=content)
+    PlayerCard(modifier=modifier,content=content)
 }
 
 @Composable fun ArcaneIcon(kind:String,modifier:Modifier=Modifier,tint:Color=Brass) {
@@ -134,12 +113,13 @@ private fun framePath(w:Float,h:Float,inset:Float,cut:Float)=Path().apply {
     }
 }
 @Composable fun MetalButton(text:String,enabled:Boolean=true,modifier:Modifier=Modifier,primary:Boolean=false,danger:Boolean=false,icon:String?=null,onClick:()->Unit) {
-    val interaction=remember {MutableInteractionSource()};val pressed by interaction.collectIsPressedAsState()
-    val tint=if(!enabled) Muted.copy(alpha=.65f) else if(danger) MaterialTheme.colorScheme.error else Brass
-    val buttonModifier=modifier.heightIn(min=if(primary && icon=="d20") 64.dp else 52.dp).clip(CutCornerShape(10.dp)).metalSurface(tint,primary,pressed).clickable(enabled=enabled,role=Role.Button,interactionSource=interaction,indication=ripple(),onClick=onClick)
-    Row(buttonModifier.padding(horizontal=14.dp,vertical=12.dp),horizontalArrangement=Arrangement.Center,verticalAlignment=Alignment.CenterVertically) {
-        if(icon!=null){ArcaneIcon(icon,Modifier.size(if(primary) 28.dp else 20.dp),tint);Spacer(Modifier.width(10.dp))}
-        Text(text,color=tint,style=if(primary && icon=="d20") MaterialTheme.typography.titleLarge else if(primary && text.length<22) MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelLarge,textAlign=TextAlign.Center)
+    val background=if(danger) MaterialTheme.colorScheme.errorContainer else if(primary) RebuildPalette.Gold else RebuildPalette.Active
+    val foreground=if(danger) MaterialTheme.colorScheme.onErrorContainer else if(primary) RebuildPalette.Void else RebuildPalette.Ice
+    Button(onClick=onClick,enabled=enabled,modifier=modifier.heightIn(min=if(primary && icon=="d20") 60.dp else 48.dp),
+        shape=CutCornerShape(topEnd=12.dp,bottomStart=12.dp),
+        colors=ButtonDefaults.buttonColors(containerColor=background,contentColor=foreground),contentPadding=PaddingValues(horizontal=16.dp,vertical=12.dp)) {
+        if(icon!=null){ArcaneIcon(icon,Modifier.size(24.dp),if(enabled) foreground else Muted);Spacer(Modifier.width(8.dp))}
+        Text(text,modifier=Modifier.weight(1f),style=if(primary && icon=="d20") MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelLarge,textAlign=TextAlign.Center)
     }
 }
 @Composable fun AstravarHeader(demo:Boolean,onSettings:(()->Unit)?=null) {
@@ -179,11 +159,17 @@ val weaponDestinations=listOf("Weapon","Cores & Payloads","History","More")
     }
 }
 @Composable fun RollModeControl(mode:RollMode,change:(RollMode)->Unit) {
-    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-        RollMode.entries.forEach {m->val active=m==mode;val label=when(m){RollMode.NORMAL->"Normal";RollMode.ADVANTAGE->"Advantage";RollMode.DISADVANTAGE->"Disadvantage"}
-            Column(Modifier.weight(1f).heightIn(min=52.dp).semantics {selected=active}.clip(CutCornerShape(7.dp)).metalSurface(if(active) Brass else Muted.copy(alpha=.35f),active).clickable(role=Role.RadioButton) {change(m)}.padding(vertical=9.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(4.dp)) {
-                ArcaneIcon(if(m==RollMode.NORMAL) "Emblem" else "d20",Modifier.size(16.dp),if(active) Brass else Muted)
-                Text(label,fontSize=11.sp,color=if(active) Brass else Muted,maxLines=1)
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val compact=maxWidth<360.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale>1.15f
+        Row(Modifier.fillMaxWidth().background(RebuildPalette.Panel,androidx.compose.foundation.shape.RoundedCornerShape(14.dp)).padding(4.dp)) {
+            RollMode.entries.forEach {m->val active=m==mode;val label=when(m){RollMode.NORMAL->"Normal";RollMode.ADVANTAGE->"Advantage";RollMode.DISADVANTAGE->"Disadvantage"}
+                val display=if(compact) when(m){RollMode.NORMAL->"Normal";RollMode.ADVANTAGE->"Adv.";RollMode.DISADVANTAGE->"Disadv."} else label
+                Box(Modifier.weight(1f).heightIn(min=48.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                    .background(if(active) RebuildPalette.Active else Color.Transparent)
+                    .semantics(mergeDescendants=true) {selected=active;contentDescription=label}
+                    .clickable(role=Role.RadioButton) {change(m)}.padding(horizontal=3.dp,vertical=12.dp),contentAlignment=Alignment.Center) {
+                    Text(display,modifier=Modifier.fillMaxWidth(),style=MaterialTheme.typography.labelLarge,color=if(active) RebuildPalette.Cyan else Muted,textAlign=TextAlign.Center,maxLines=1)
+                }
             }
         }
     }
@@ -212,7 +198,7 @@ val weaponDestinations=listOf("Weapon","Cores & Payloads","History","More")
 }
 @Composable fun WeaponActionWindow(s:Campaign,a:Actions) {
     if(s.encounter)ArcanePanel {SectionCaption("Weapon action limits");Text("Attacks ${s.turn.attacks}/2 · ${if(s.turn.fullAction) "Action used" else "Action available"}\n${if(s.turn.bonus) "Bonus Action used" else "Bonus Action available"} · spell firings ${s.turn.spellShots}/${s.profile.spellShotsPerTurn}",style=MaterialTheme.typography.bodySmall)
-        TextButton(onClick={a.change("Player confirmed next weapon action window") {Engine.resetWeaponActions(it)}},enabled=!a.busy){Text("My next turn · reset weapon actions")}}
+        PlayerTextButton(onClick={a.change("Player confirmed next weapon action window") {Engine.resetWeaponActions(it)}},enabled=!a.busy){Text("My next turn · reset weapon actions")}}
 }
 @Composable fun ControlRoomLink(title:String,subtitle:String,kind:String="More",open:()->Unit) {
     ArcanePanel(modifier=Modifier.clickable(role=Role.Button,onClick=open)) {
@@ -224,15 +210,16 @@ val weaponDestinations=listOf("Weapon","Cores & Payloads","History","More")
     }
 }
 
-/** Shared native dialog shell; resource confirmations keep their existing callbacks. */
+/** Adaptive focused dialog: native content scrolls independently of its actions and IME. */
 @Composable fun ArcaneDialog(onDismissRequest:()->Unit,title:@Composable ()->Unit,text:@Composable ()->Unit,confirmButton:@Composable ()->Unit,dismissButton:(@Composable ()->Unit)?=null) {
-    androidx.compose.ui.window.Dialog(onDismissRequest=onDismissRequest) {
-        ArcanePanel(modifier=Modifier.widthIn(max=560.dp).imePadding()) {
-            CompositionLocalProvider(LocalContentColor provides Brass) {ProvideTextStyle(MaterialTheme.typography.headlineSmall) {title()}}
-            HorizontalDivider(color=Brass.copy(alpha=.3f))
-            Box(Modifier.heightIn(max=440.dp).verticalScroll(rememberScrollState())) {text()}
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End,verticalAlignment=Alignment.CenterVertically) {
-                dismissButton?.invoke();confirmButton()
+    androidx.compose.ui.window.Dialog(onDismissRequest=onDismissRequest,properties=androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth=false,decorFitsSystemWindows=false)) {
+        Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(12.dp),contentAlignment=Alignment.Center) {
+            Surface(Modifier.widthIn(max=600.dp).fillMaxWidth(),shape=androidx.compose.foundation.shape.RoundedCornerShape(24.dp),color=RebuildPalette.Panel) {
+                Column(Modifier.heightIn(max=(androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp*.88f).dp).padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                    ProvideTextStyle(MaterialTheme.typography.titleLarge) {title()}
+                    Box(Modifier.weight(1f,fill=false).verticalScroll(rememberScrollState())) {text()}
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End,verticalAlignment=Alignment.CenterVertically) {dismissButton?.invoke();confirmButton()}
+                }
             }
         }
     }

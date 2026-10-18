@@ -3,6 +3,10 @@ package com.yazsras.astravar.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.text.style.TextOverflow
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -34,7 +38,6 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
 }
 
 @Composable internal fun LocalRecordStatus(message: String, busy: Boolean) {
-    Text("PRIVATE LOCAL RECORDS · NOT UPLOADED", color = Frost, style = MaterialTheme.typography.labelSmall)
     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
     if (message.isNotBlank()) Text(message, color = Brass, style = MaterialTheme.typography.bodyMedium)
 }
@@ -44,9 +47,9 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
     initiallyExpanded: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    var expanded by remember(title) { mutableStateOf(initiallyExpanded) }
-    ArcanePanel {
-        TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
+    var expanded by rememberSaveable(title) { mutableStateOf(initiallyExpanded) }
+    PlayerCard {
+        PlayerTextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(title, Modifier.weight(1f), color = Brass, style = MaterialTheme.typography.titleMedium)
                 Text(if (expanded) "−" else "+", color = Frost)
@@ -56,10 +59,8 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
     }
 }
 
-@Composable private fun SourceField(value: String, change: (String) -> Unit, enabled: Boolean = true) {
+@Composable internal fun SourceField(value: String, change: (String) -> Unit, enabled: Boolean = true) {
     Field("Source / resolved scene / checkpoint", value, change, single = false, enabled = enabled)
-    Text("Record what actually happened. Proposals do not consume resources or create owned items.",
-        color = Muted, style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable fun InventionsPageV2(repository: CampaignLedgerRepository) {
@@ -69,350 +70,283 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
     val links by records.links.collectAsState(initial = emptyList())
     val audit by records.audit.collectAsState(initial = emptyList())
     val actions = rememberLocalRecordActions()
-    var selectedId by remember { mutableStateOf<String?>(null) }
-    var draftKey by remember { mutableIntStateOf(0) }
-    val selected = projects.firstOrNull { it.id == selectedId }
-    var historyLimit by remember(selectedId) { mutableIntStateOf(40) }
-    var editorProject by remember { mutableStateOf<InventionProject?>(null) }
-    var discardTarget by remember { mutableStateOf<String?>(null) }
-    var showDiscard by remember { mutableStateOf(false) }
-    var query by remember { mutableStateOf("") }
-    var title by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    var status by remember { mutableStateOf("Proposed") }
-    var source by remember { mutableStateOf("") }
-    var stageTitle by remember { mutableStateOf("") }
-    var stageNotes by remember { mutableStateOf("") }
-    var stageStatus by remember { mutableStateOf("Planned") }
-    var materialId by remember { mutableStateOf<String?>(null) }
-    var materialLabel by remember { mutableStateOf("") }
-    var materialQuantity by remember { mutableStateOf("") }
-    var materialNotes by remember { mutableStateOf("") }
-    var outputTitle by remember { mutableStateOf("") }
-    var outputQuantity by remember { mutableStateOf("1") }
-    var outputDescription by remember { mutableStateOf("") }
-    var craftReview by remember { mutableStateOf<CraftCommand?>(null) }
-    var craftReviewLabels by remember { mutableStateOf<List<String>>(emptyList()) }
-    var consumedSelections by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var selectedStage by remember { mutableStateOf<ProjectStage?>(null) }
-    var selectedRequirement by remember { mutableStateOf<MaterialRequirement?>(null) }
-    val stagesFlow = remember(selectedId) { selectedId?.let { records.stagesFor(it) } }
-    val requirementsFlow = remember(selectedId) { selectedId?.let { records.requirementsFor(it) } }
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var mode by rememberSaveable { mutableStateOf("") }
+    val projectDraft = rememberUiDraftText()
+    var projectSnapshot by projectDraft
+    val stageDraft = rememberUiDraftText()
+    var stageSnapshot by stageDraft
+    val requirementDraft = rememberUiDraftText()
+    var requirementSnapshot by requirementDraft
+    val editorProject = remember(projectSnapshot) { projectSnapshot?.let { runCatching { Json.decodeFromString<InventionProject>(it) }.getOrNull() } }
+    val selectedStage = remember(stageSnapshot) { stageSnapshot?.let { runCatching { Json.decodeFromString<ProjectStage>(it) }.getOrNull() } }
+    val selectedRequirement = remember(requirementSnapshot) { requirementSnapshot?.let { runCatching { Json.decodeFromString<MaterialRequirement>(it) }.getOrNull() } }
+    val selected = projects.firstOrNull { it.id == selectedId } ?: editorProject
+    var query by rememberSaveable { mutableStateOf("") }
+    var activeOnly by rememberSaveable { mutableStateOf(false) }
+    var title by rememberSaveable { mutableStateOf("") }
+    var description by rememberSaveable { mutableStateOf("") }
+    var status by rememberSaveable { mutableStateOf("Proposed") }
+    var source by rememberSaveable { mutableStateOf("") }
+    var baselineSource by rememberSaveable { mutableStateOf("") }
+    var stageTitle by rememberSaveable { mutableStateOf("") }
+    var stageNotes by rememberSaveable { mutableStateOf("") }
+    var stageStatus by rememberSaveable { mutableStateOf("Planned") }
+    var materialId by rememberSaveable { mutableStateOf<String?>(null) }
+    var materialLabel by rememberSaveable { mutableStateOf("") }
+    var materialQuantity by rememberSaveable { mutableStateOf("") }
+    var materialNotes by rememberSaveable { mutableStateOf("") }
+    var outputTitle by rememberSaveable { mutableStateOf("") }
+    var outputQuantity by rememberSaveable { mutableStateOf("1") }
+    var outputDescription by rememberSaveable { mutableStateOf("") }
+    val craftDraft = rememberUiDraftText()
+    var craftReviewJson by craftDraft
+    val craftLabelsDraft = rememberUiDraftText("[]")
+    var craftLabelsJson by craftLabelsDraft
+    val parsedLabels = remember(craftLabelsJson) { craftLabelsJson?.let { runCatching { Json.decodeFromString<List<String>>(it) }.getOrNull() } }
+    val craftReviewLabels = parsedLabels.orEmpty()
+    // Large command/selection snapshots use compact file references in the Activity Bundle.
+    val reviewedCraft = remember(craftReviewJson) { craftReviewJson?.let { runCatching { Json.decodeFromString<CraftCommand>(it) }.getOrNull() } }
+    val consumptionDraft = rememberUiDraftText("{}")
+    var consumedJson by consumptionDraft
+    val parsedSelections = remember(consumedJson) { consumedJson?.let { runCatching { Json.decodeFromString<Map<String, String>>(it) }.getOrNull() } }
+    val consumedSelections = parsedSelections.orEmpty()
+    var historyLimit by rememberSaveable(selectedId) { mutableIntStateOf(40) }
+    var eventId by rememberSaveable { mutableStateOf<String?>(null) }
+    val stagesFlow = remember(selectedId) { selectedId?.let(records::stagesFor) }
+    val requirementsFlow = remember(selectedId) { selectedId?.let(records::requirementsFor) }
     val stages = stagesFlow?.collectAsState(initial = emptyList())?.value.orEmpty()
     val requirements = requirementsFlow?.collectAsState(initial = emptyList())?.value.orEmpty()
-
-    val profileDirty = title != editorProject?.title.orEmpty() || description != editorProject?.description.orEmpty() ||
-        status != (editorProject?.status ?: "Proposed") || source != editorProject?.source.orEmpty()
-    val auxiliaryDirty = stageTitle != selectedStage?.title.orEmpty() || stageNotes != selectedStage?.notes.orEmpty() ||
-        stageStatus != (selectedStage?.status ?: "Planned") || materialId != selectedRequirement?.itemId ||
-        materialLabel != selectedRequirement?.label.orEmpty() || materialQuantity != selectedRequirement?.quantity?.toString().orEmpty() ||
-        materialNotes != selectedRequirement?.notes.orEmpty() || outputTitle.isNotBlank() || outputDescription.isNotBlank() ||
-        outputQuantity != "1" || consumedSelections.isNotEmpty()
-    val stale = selected != null && editorProject != null && selected.revision != editorProject?.revision
-    fun navigateTo(id: String?) {
-        if (profileDirty || auxiliaryDirty) { discardTarget = id; showDiscard = true }
-        else { selectedId = id; if (id == null) draftKey++; actions.message = "" }
-    }
-    LaunchedEffect(selectedId, selected?.revision, draftKey) {
-        if (editorProject?.id == selectedId && selected != null && editorProject != null && (profileDirty || auxiliaryDirty)) return@LaunchedEffect
-        editorProject = selected
-        title = selected?.title.orEmpty(); description = selected?.description.orEmpty()
-        status = selected?.status ?: "Proposed"; source = selected?.source.orEmpty()
-        stageTitle = ""; stageNotes = ""; stageStatus = "Planned"; selectedStage = null
-        materialId = null; materialLabel = ""; materialQuantity = ""; materialNotes = ""; selectedRequirement = null
-        outputTitle = ""; outputQuantity = "1"; outputDescription = ""; craftReview = null; craftReviewLabels = emptyList(); consumedSelections = emptyMap()
-    }
-    Page(resetKey = selectedId to draftKey) {
-        SectionCaption("INVENTIONS", "DESIGNS · RESEARCH · CONSTRUCTION")
-        Section("Workshop") {
-            LocalRecordStatus(actions.message, actions.busy)
-            Field("Search inventions", query, { query = it }, enabled = !actions.busy)
-            OutlinedButton(onClick = { navigateTo(null) }, enabled = !actions.busy) { Text("New invention") }
-            if (projects.isEmpty()) Text("Your workshop is empty. Record a design without creating an owned item.", color = Muted)
-            projects.filter { query.isBlank() || "${it.title} ${it.description} ${it.status}".contains(query, true) }.forEach { project ->
-                TextButton(onClick = { navigateTo(project.id) }, enabled = !actions.busy, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.fillMaxWidth()) {
-                        Text(project.title, color = Brass)
-                        Text("${project.status} · revision ${project.revision}", color = Muted, style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
+    val stale = selected != null && editorProject != null && selected.revision != editorProject.revision
+    val projectDraftValid = projectDraft.canSave && (projectSnapshot == null || editorProject != null) &&
+        (selectedId == null || editorProject?.id == selectedId)
+    val stageDraftValid = stageDraft.canSave && (stageSnapshot == null || selectedStage != null)
+    val requirementDraftValid = requirementDraft.canSave && (requirementSnapshot == null || selectedRequirement != null)
+    val consumptionDraftValid = consumptionDraft.canSave && parsedSelections != null
+    val reviewDraftValid = projectDraftValid && consumptionDraftValid && craftDraft.canSave &&
+        craftReviewJson != null && reviewedCraft != null && craftLabelsDraft.canSave && parsedLabels != null
+    val draftErrors = buildList {
+        projectDraft.error?.let(::add)
+        if (!projectDraftValid && projectDraft.error == null) add("The saved invention draft could not be read. Close and reopen the invention before saving.")
+        if (mode == "stage") {
+            stageDraft.error?.let(::add)
+            if (!stageDraftValid && stageDraft.error == null) add("The saved stage draft could not be read. Reopen this stage before saving.")
         }
-        Section(if (selected == null) "New invention record" else "Design: ${selected.title}") {
-            if (stale) {
-                Text("A newer revision exists. Your draft is preserved; reopen this design before saving.", color = Frost, style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = { editorProject = null; draftKey++ }, enabled = !actions.busy) { Text("Reload latest invention") }
-            }
-            Field("Invention name", title, { title = it }, enabled = !actions.busy)
-            Choices("Development status", listOf("Proposed", "Research", "Blueprint", "Prototype", "Construction", "Completed", "Paused"), status, enabled = !actions.busy) { status = it }
-            Field("Blueprint / design / research notes", description, { description = it }, single = false, enabled = !actions.busy)
-            SourceField(source, { source = it }, enabled = !actions.busy)
-            Text("A completed design is not an owned item. Only a confirmed craft transaction records material consumption and its physical output.", color = Muted, style = MaterialTheme.typography.bodySmall)
-            Action(if (selected == null) "Save invention" else "Save invention changes", !actions.busy && !stale && title.isNotBlank() && source.isNotBlank()) {
-                val before = editorProject
-                val model = before?.copy(title = title, description = description, status = status)
-                    ?: InventionProject(title = title, description = description, status = status)
-                val provenance = source
-                actions.run {
-                    records.saveProject(model, before?.revision, provenance)
-                    editorProject = model.copy(revision = (before?.revision ?: 0) + 1, source = provenance)
-                    selectedId = model.id
-                    "Saved locally: ${model.title}. No resources consumed."
-                }
-            }
+        if (mode == "material") {
+            requirementDraft.error?.let(::add)
+            if (!requirementDraftValid && requirementDraft.error == null) add("The saved material draft could not be read. Reopen this requirement before saving.")
         }
-        if (selected != null) {
-            ExpandableRecordSection("Research & construction stages", true) {
-                if (stages.isEmpty()) Text("No stages recorded. Add only the work that is actually planned or resolved.", color = Muted)
-                stages.forEach { stage ->
-                    TextButton(onClick = { selectedStage = stage; stageTitle = stage.title; stageNotes = stage.notes; stageStatus = stage.status }, enabled = !actions.busy) {
-                        Text("${stage.title} · ${stage.status}", color = Brass)
-                    }
-                }
-                Field("Stage title", stageTitle, { stageTitle = it }, enabled = !actions.busy)
-                Field("Research outcome / construction notes", stageNotes, { stageNotes = it }, single = false, enabled = !actions.busy)
-                Choices("Stage status", listOf("Planned", "In progress", "Completed", "Blocked"), stageStatus, enabled = !actions.busy) { stageStatus = it }
-                Action(if (selectedStage == null) "Add stage" else "Save stage", !actions.busy && stageTitle.isNotBlank() && source.isNotBlank()) {
-                    val before = selectedStage
-                    val model = before?.copy(title = stageTitle, notes = stageNotes, status = stageStatus)
-                        ?: ProjectStage(projectId = selected.id, title = stageTitle, notes = stageNotes, status = stageStatus, sortOrder = stages.size)
-                    val provenance = source
-                    actions.run {
-                        records.saveStage(model, before?.revision, provenance)
-                        selectedStage = null; stageTitle = ""; stageNotes = ""; stageStatus = "Planned"
-                        "Stage saved locally. Resources unchanged."
-                    }
-                }
-                if (selectedStage != null) TextButton(onClick = { selectedStage = null; stageTitle = ""; stageNotes = ""; stageStatus = "Planned" }, enabled = !actions.busy) { Text("New stage") }
-            }
-            ExpandableRecordSection("Required materials", true) {
-                Text("Requirements describe the design; they do not reserve or spend inventory. Link a real item when its identity is known.", color = Muted, style = MaterialTheme.typography.bodySmall)
-                requirements.forEach { requirement ->
-                    TextButton(onClick = {
-                        selectedRequirement = requirement; materialId = requirement.itemId
-                        materialLabel = requirement.label; materialQuantity = requirement.quantity?.toString().orEmpty(); materialNotes = requirement.notes
-                    }, enabled = !actions.busy) {
-                        Text("${requirement.label} · ${requirement.quantity?.toString() ?: "quantity unknown"}", color = Brass)
-                    }
-                }
-                Choices("Inventory material (optional)", listOf<String?>(null) + items.map { it.id }, materialId,
-                    display = { id -> items.firstOrNull { it.id == id }?.title ?: "Unlinked requirement" }, enabled = !actions.busy) { materialId = it }
-                Field("Material requirement", materialLabel, { materialLabel = it }, enabled = !actions.busy)
-                Field("Required quantity (blank = unknown)", materialQuantity, { materialQuantity = it }, enabled = !actions.busy)
-                Field("Requirement / tool / handling notes", materialNotes, { materialNotes = it }, single = false, enabled = !actions.busy)
-                Action(if (selectedRequirement == null) "Add material requirement" else "Save material requirement", !actions.busy && materialLabel.isNotBlank() && source.isNotBlank()) {
-                    val raw = materialQuantity.trim(); val before = selectedRequirement
-                    val model = before?.copy(itemId = materialId, label = materialLabel, quantity = raw.toIntOrNull(), notes = materialNotes)
-                        ?: MaterialRequirement(projectId = selected.id, itemId = materialId, label = materialLabel, quantity = raw.toIntOrNull(), notes = materialNotes)
-                    val provenance = source
-                    actions.run {
-                        require(raw.isEmpty() || raw.toIntOrNull()?.let { it > 0 } == true) { "Material quantity must be positive or unknown." }
-                        records.saveRequirement(model, before?.revision, provenance)
-                        selectedRequirement = null; materialId = null; materialLabel = ""; materialQuantity = ""; materialNotes = ""
-                        "Requirement saved locally. Nothing consumed."
-                    }
-                }
-                if (selectedRequirement != null) TextButton(onClick = { selectedRequirement = null; materialId = null; materialLabel = ""; materialQuantity = ""; materialNotes = "" }, enabled = !actions.busy) { Text("New requirement") }
-            }
-            ExpandableRecordSection("Confirm a resolved craft") {
-                Text("Use only after the craft has actually succeeded. This spends the linked, known quantities below and creates one new physical output. It does not roll success, advance time, or spend character resources.", color = Muted, style = MaterialTheme.typography.bodySmall)
-                requirements.forEach { requirement ->
-                    val material = items.firstOrNull { it.id == requirement.itemId }
-                    Text("${requirement.label}: ${requirement.quantity?.toString() ?: "unknown"} required · ${material?.quantity?.toString() ?: "unknown"} available", style = MaterialTheme.typography.bodySmall)
-                    Toggle("Actually consume ${requirement.label}", consumedSelections.containsKey(requirement.id), enabled = !actions.busy) { selectedUse ->
-                        consumedSelections = if (selectedUse) consumedSelections + (requirement.id to requirement.quantity?.toString().orEmpty()) else consumedSelections - requirement.id
-                    }
-                    if (consumedSelections.containsKey(requirement.id)) Field("Actual consumed quantity: ${requirement.label}", consumedSelections[requirement.id].orEmpty(), { consumedSelections = consumedSelections + (requirement.id to it) }, enabled = !actions.busy)
-                }
-                Text("Leave reusable tools and retained components unchecked. Only checked, confirmed quantities are consumed.", color = Frost, style = MaterialTheme.typography.bodySmall)
-                Field("Crafted item name", outputTitle, { outputTitle = it }, enabled = !actions.busy)
-                Field("Output quantity", outputQuantity, { outputQuantity = it }, enabled = !actions.busy)
-                Field("Output description / resolved outcome", outputDescription, { outputDescription = it }, single = false, enabled = !actions.busy)
-                Text("Current source: ${source.ifBlank { "Provide a source in the design editor." }}", color = Muted, style = MaterialTheme.typography.bodySmall)
-                Action("Review material consumption", !actions.busy && outputTitle.isNotBlank() && source.isNotBlank() && consumedSelections.isNotEmpty()) {
-                    try {
-                        val count = outputQuantity.toIntOrNull() ?: error("Output quantity must be a whole number.")
-                        require(count > 0) { "Output quantity must be positive." }
-                        val chosenRequirements = requirements.filter { consumedSelections.containsKey(it.id) }
-                        require(chosenRequirements.isNotEmpty()) { "Select the actual materials consumed." }
-                        val consumed = chosenRequirements.map { requirement ->
-                            val material = items.firstOrNull { it.id == requirement.itemId }
-                                ?: error("Link every consumed requirement to its real inventory item first.")
-                            val amount = consumedSelections[requirement.id]?.toIntOrNull()
-                                ?: error("Confirm actual consumed quantities before crafting.")
-                            require(amount > 0) { "Consumed quantities must be positive." }
-                            MaterialConsumption(itemId = material.id, expectedRevision = material.revision, quantity = amount)
-                        }
-                        val combined = consumed.groupBy { it.itemId }.map { (_, uses) ->
-                            val total = uses.sumOf { it.quantity.toLong() }
-                            require(total <= Int.MAX_VALUE) { "Consumed quantity is too large." }
-                            uses.first().copy(quantity = total.toInt())
-                        }
-                        craftReviewLabels = combined.map { use -> "${items.first { it.id == use.itemId }.title}: ${use.quantity}" }
-                        craftReview = CraftCommand(projectId = selected.id, expectedProjectRevision = selected.revision,
-                            materials = combined, output = LedgerDraft(title = outputTitle, category = "Other", owner = "Unknown", itemState = "Unknown",
-                                quantity = count, description = outputDescription, source = source), source = source)
-                    } catch (e: Exception) { actions.message = "Cannot review craft: ${e.message ?: "Check the quantities and linked materials."}" }
-                }
-            }
-            ExpandableRecordSection("Connected records & history") {
-                val related = links.filter { (it.fromType == "project" && it.fromId == selected.id) || (it.toType == "project" && it.toId == selected.id) }
-                if (related.isEmpty()) Text("No linked physical output or equipment yet.", color = Muted)
-                related.forEach { link ->
-                    val itemId = if (link.fromType == "item") link.fromId else if (link.toType == "item") link.toId else null
-                    Text("${link.label} · ${items.firstOrNull { it.id == itemId }?.title ?: "Linked record"}", style = MaterialTheme.typography.bodySmall)
-                }
-                Text("Persistent design ID: ${selected.id}", color = Muted, style = MaterialTheme.typography.labelSmall)
-                val relatedIds = setOf(selected.id) + stages.map { it.id } + requirements.map { it.id } + related.map { it.id }
-                val history = audit.filter { it.recordId in relatedIds }
-                if (history.isEmpty()) Text("No local audit entries yet.", color = Muted)
-                history.take(historyLimit).forEach { event ->
-                    Text("${event.kind} · revision ${event.priorRevision} → ${event.resultingRevision}", style = MaterialTheme.typography.bodySmall)
-                    Text("Source: ${event.source}", color = Muted, style = MaterialTheme.typography.bodySmall)
-                }
-                if (history.size > historyLimit) OutlinedButton(onClick = { historyLimit += 40 }, enabled = !actions.busy) {
-                    Text("Show more invention history (${history.size - historyLimit} remaining)")
-                }
-            }
+        if (mode in setOf("craft", "review")) {
+            consumptionDraft.error?.let(::add)
+            if (!consumptionDraftValid && consumptionDraft.error == null) add("The saved material selections could not be read. Reopen crafting and review the actual quantities.")
         }
+        if (mode == "review") {
+            craftDraft.error?.let(::add); craftLabelsDraft.error?.let(::add)
+            if (!reviewDraftValid && projectDraftValid && consumptionDraftValid && craftDraft.error == null && craftLabelsDraft.error == null) add("The saved craft review could not be read. Cancel and review the craft again before confirming.")
+        }
+    }.distinct()
+    val dirty = when(mode) {
+        "create", "edit" -> title != editorProject?.title.orEmpty() || description != editorProject?.description.orEmpty() || status != (editorProject?.status ?: "Proposed") || source != editorProject?.source.orEmpty()
+        "stage" -> stageTitle != selectedStage?.title.orEmpty() || stageNotes != selectedStage?.notes.orEmpty() || stageStatus != (selectedStage?.status ?: "Planned") || source != baselineSource
+        "material" -> materialId != selectedRequirement?.itemId || materialLabel != selectedRequirement?.label.orEmpty() || materialQuantity != selectedRequirement?.quantity?.toString().orEmpty() || materialNotes != selectedRequirement?.notes.orEmpty() || source != baselineSource
+        "craft", "review" -> outputTitle.isNotBlank() || outputQuantity != "1" || outputDescription.isNotBlank() || consumedSelections.isNotEmpty() || source != baselineSource
+        else -> false
     }
-    if (showDiscard) ArcaneDialog(
-        onDismissRequest = { showDiscard = false },
-        title = { Text("Discard unsaved design edits?") },
-        text = { Text("The saved design remains unchanged. Continue editing to keep this draft.") },
-        confirmButton = { TextButton(onClick = { selectedId = discardTarget; editorProject = null; draftKey++; showDiscard = false }) { Text("Discard draft") } },
-        dismissButton = { TextButton(onClick = { showDiscard = false }) { Text("Keep editing") } }
-    )
-    val reviewedCraft = craftReview
-    if (reviewedCraft != null) ArcaneDialog(
-        onDismissRequest = { if (!actions.busy) craftReview = null },
-        title = { Text("Commit confirmed craft?") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Create ${reviewedCraft.output.quantity} × ${reviewedCraft.output.title} and consume these confirmed quantities. Revisions are frozen at this review; newer changes will reject the transaction.")
-                craftReviewLabels.forEach { Text(it) }
-                Text("Source: ${reviewedCraft.source}", color = Muted)
+    fun load(project: InventionProject?) {
+        projectSnapshot = project?.let { Json.encodeToString(it) }; selectedId = project?.id
+        stageSnapshot = null; requirementSnapshot = null
+        craftReviewJson = null; craftLabelsJson = "[]"; consumedJson = "{}"
+        title = project?.title.orEmpty(); description = project?.description.orEmpty(); status = project?.status ?: "Proposed"
+        source = project?.source.orEmpty(); baselineSource = source; actions.message = ""
+    }
+    fun beginCraft() {
+        outputTitle = ""; outputQuantity = "1"; outputDescription = ""; consumedJson = "{}"; craftReviewJson = null; craftLabelsJson = "[]"
+        source = selected?.source.orEmpty(); baselineSource = source; mode = "craft"; actions.message = ""
+    }
+    fun prepareCraft() {
+        if (!projectDraftValid || !consumptionDraftValid) { actions.message = draftErrors.firstOrNull() ?: "Reopen the invention and review material quantities."; return }
+        try {
+            val project = selected ?: error("Choose an invention first.")
+            val count = outputQuantity.toIntOrNull() ?: error("Output quantity must be a whole number.")
+            require(count > 0) { "Output quantity must be positive." }
+            val chosenRequirements = requirements.filter { consumedSelections.containsKey(it.id) }
+            require(chosenRequirements.isNotEmpty()) { "Select the actual materials consumed." }
+            val consumed = chosenRequirements.map { requirement ->
+                val item = items.firstOrNull { it.id == requirement.itemId } ?: error("Link every consumed requirement to its real inventory item first.")
+                val amount = consumedSelections[requirement.id]?.toIntOrNull() ?: error("Confirm actual consumed quantities before crafting.")
+                require(amount > 0) { "Consumed quantities must be positive." }
+                MaterialConsumption(itemId = item.id, expectedRevision = item.revision, quantity = amount)
             }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                craftReview = null
-                actions.run {
-                    records.confirmCraft(reviewedCraft)
-                    outputTitle = ""; outputDescription = ""; consumedSelections = emptyMap()
-                    "Craft recorded locally. Materials and physical output saved together."
-                }
-            }, enabled = !actions.busy) { Text("Confirm resolved craft") }
-        },
-        dismissButton = { TextButton(onClick = { craftReview = null }, enabled = !actions.busy) { Text("Cancel") } }
-    )
-}
-
-@Composable fun EekPageV2(repository: CampaignLedgerRepository) {
-    val records = repository.records
-    val companions by records.companionStates.collectAsState(initial = emptyList())
-    val resources by records.companionResources.collectAsState(initial = emptyList())
-    val items by repository.items.collectAsState(initial = emptyList())
-    val links by records.links.collectAsState(initial = emptyList())
-    val state = companions.firstOrNull { it.companionId == "eek" }
-    var editorState by remember { mutableStateOf<CompanionState?>(null) }
-    var reloadState by remember { mutableIntStateOf(0) }
-    val actions = rememberLocalRecordActions()
-    var condition by remember { mutableStateOf("Unknown") }
-    var notes by remember { mutableStateOf("") }
-    var source by remember { mutableStateOf("") }
-    var resourceName by remember { mutableStateOf("") }
-    var resourceCurrent by remember { mutableStateOf("") }
-    var resourceMax by remember { mutableStateOf("") }
-    var selectedResource by remember { mutableStateOf<CompanionResource?>(null) }
-    var itemId by remember { mutableStateOf<String?>(null) }
-    var linkKind by remember { mutableStateOf("Equipment") }
-    val stateDirty = condition != (editorState?.condition ?: "Unknown") || notes != editorState?.notes.orEmpty() || source != editorState?.source.orEmpty()
-    val staleState = state != null && editorState != null && state.revision != editorState?.revision
-    LaunchedEffect(state?.revision, reloadState) {
-        if (editorState != null && stateDirty) return@LaunchedEffect
-        editorState = state
-        condition = state?.condition ?: "Unknown"; notes = state?.notes.orEmpty(); source = state?.source.orEmpty()
+            val combined = consumed.groupBy { it.itemId }.map { (_, uses) ->
+                val total = uses.sumOf { it.quantity.toLong() }
+                require(total <= Int.MAX_VALUE) { "Consumed quantity is too large." }
+                uses.first().copy(quantity = total.toInt())
+            }
+            craftLabelsJson = Json.encodeToString(combined.map { use -> "${items.first { it.id == use.itemId }.title}: ${use.quantity}" })
+            craftReviewJson = Json.encodeToString(CraftCommand(projectId = project.id, expectedProjectRevision = project.revision,
+                materials = combined, output = LedgerDraft(title = outputTitle, category = "Other", owner = "Unknown", itemState = "Unknown", quantity = count, description = outputDescription, source = source), source = source))
+            mode = "review"
+        } catch (e: Exception) { actions.message = "Cannot review craft: ${e.message ?: "Check the quantities and linked materials."}" }
     }
+    val visible = projects.filter { (!activeOnly || it.status !in setOf("Completed", "Paused")) &&
+        (query.isBlank() || "${it.title} ${it.description} ${it.status}".contains(query, true)) }
     Page {
-        SectionCaption("EEK", "COMPANION · MANUAL KNOWN STATE")
-        Section("Mechanical owl companion") {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) { Text("Inventions", style = MaterialTheme.typography.headlineMedium); Text(if (projects.size == 1) "1 design" else "${projects.size} designs", color = Muted, style = MaterialTheme.typography.bodySmall) }
+            PlayerButton(onClick = { load(null); mode = "create" }, enabled = !actions.busy) { Text("Add Invention") }
+        }
+        PlayerSearch(query, { query = it }, "Search inventions")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PlayerFilterChip(selected = !activeOnly, onClick = { activeOnly = false }, label = { Text("All designs") })
+            PlayerFilterChip(selected = activeOnly, onClick = { activeOnly = true }, label = { Text("Active") })
+        }
+        if (actions.message.isNotBlank() && mode.isBlank()) LocalRecordStatus(actions.message, actions.busy)
+        if (visible.isEmpty()) PlayerCard {
+            Text(if (projects.isEmpty()) "Start with an idea" else "No matching inventions", style = MaterialTheme.typography.titleMedium)
+            Text(if (projects.isEmpty()) "Keep concepts, research and construction together." else "Try another name or filter.", color = Muted)
+        }
+        visible.forEach { project ->
+            val projectRequirements by remember(project.id) { records.requirementsFor(project.id) }.collectAsState(initial = emptyList())
+            val ready = projectRequirements.count { requirement ->
+                val item = items.firstOrNull { it.id == requirement.itemId }
+                val sameItem = projectRequirements.filter { it.itemId == requirement.itemId }
+                item?.quantity != null && sameItem.all { it.quantity != null } &&
+                    item.quantity.toLong() >= sameItem.sumOf { it.quantity!!.toLong() }
+            }
+            PlayerCard(onClick = { load(project); mode = "detail" }) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    InstrumentMedallion("Core", Modifier.size(44.dp), Frost)
+                    Column(Modifier.weight(1f)) {
+                        Text(project.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(project.status, color = Frost, style = MaterialTheme.typography.labelLarge)
+                        Text(if (projectRequirements.isEmpty()) "No materials listed" else "$ready / ${projectRequirements.size} requirements ready", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text("›", color = Frost)
+                }
+            }
+        }
+    }
+    if (mode.isNotBlank()) {
+        val sheetTitle = when(mode) { "create" -> "Add Invention"; "edit" -> "Edit invention"; "stage" -> if (selectedStage == null) "Add stage" else "Edit stage"; "material" -> if (selectedRequirement == null) "Add material" else "Edit material"; "craft" -> "Confirm a resolved craft"; "review" -> "Commit confirmed craft?"; "event" -> "Invention history"; else -> selected?.title ?: "Invention" }
+        PlayerSheet(sheetTitle, onDismiss = { if (!actions.busy) { if (mode == "review") { craftReviewJson = null; mode = "craft" } else mode = "" } }, dirty = dirty && mode != "review", actions = {
+            when(mode) {
+                "create", "edit" -> PlayerButton(onClick = {
+                    val before = editorProject; val provenance = source
+                    val model = before?.copy(title = title, description = description, status = status) ?: InventionProject(title = title, description = description, status = status)
+                    actions.run { val receipt = records.saveProject(model, before?.revision, provenance); projectSnapshot = Json.encodeToString(model.copy(revision = receipt.resultingRevision, source = provenance, updatedAt = receipt.createdAt)); selectedId = model.id; mode = "detail"; "Invention saved · no resources consumed" }
+                }, enabled = !actions.busy && projectDraftValid && !stale && title.isNotBlank() && source.isNotBlank()) { Text(if (mode == "create") "Save invention" else "Save invention changes") }
+                "detail" -> PlayerButton(onClick = { selected?.let(::load); mode = "edit" }, enabled = !actions.busy) { Text("Edit invention") }
+                "stage" -> PlayerButton(onClick = {
+                    val project = selected ?: return@PlayerButton; val before = selectedStage; val provenance = source
+                    val model = before?.copy(title = stageTitle, notes = stageNotes, status = stageStatus) ?: ProjectStage(projectId = project.id, title = stageTitle, notes = stageNotes, status = stageStatus, sortOrder = stages.size)
+                    actions.run { records.saveStage(model, before?.revision, provenance); mode = "detail"; "Stage saved" }
+                }, enabled = !actions.busy && projectDraftValid && stageDraftValid && stageTitle.isNotBlank() && source.isNotBlank()) { Text(if (selectedStage == null) "Add stage" else "Save stage") }
+                "material" -> PlayerButton(onClick = {
+                    val project = selected ?: return@PlayerButton; val before = selectedRequirement; val raw = materialQuantity.trim(); val provenance = source
+                    val model = before?.copy(itemId = materialId, label = materialLabel, quantity = raw.toIntOrNull(), notes = materialNotes) ?: MaterialRequirement(projectId = project.id, itemId = materialId, label = materialLabel, quantity = raw.toIntOrNull(), notes = materialNotes)
+                    actions.run { require(raw.isEmpty() || raw.toIntOrNull()?.let { it > 0 } == true) { "Material quantity must be positive or unknown." }; records.saveRequirement(model, before?.revision, provenance); mode = "detail"; "Requirement saved · nothing consumed" }
+                }, enabled = !actions.busy && projectDraftValid && requirementDraftValid && materialLabel.isNotBlank() && source.isNotBlank()) { Text(if (selectedRequirement == null) "Add material requirement" else "Save material requirement") }
+                "craft" -> PlayerButton(onClick = ::prepareCraft, enabled = !actions.busy && projectDraftValid && consumptionDraftValid && outputTitle.isNotBlank() && source.isNotBlank() && consumedSelections.isNotEmpty()) { Text("Review material consumption") }
+                "review" -> {
+                    PlayerTextButton(onClick = { craftReviewJson = null; mode = "craft" }, enabled = !actions.busy) { Text("Cancel") }
+                    PlayerButton(onClick = {
+                        val command = reviewedCraft ?: return@PlayerButton
+                        actions.run { records.confirmCraft(command); outputTitle = ""; outputQuantity = "1"; outputDescription = ""; consumedJson = "{}"; craftReviewJson = null; mode = "detail"; "Craft recorded · materials and output saved together" }
+                    }, enabled = !actions.busy && reviewDraftValid) { Text("Confirm resolved craft") }
+                }
+            }
+        }) {
             LocalRecordStatus(actions.message, actions.busy)
-            Text("Brass mechanical owl · folds into a compact sphere. Current HP, build, equipment and recovery availability are not inferred from old sheets.", color = Muted, style = MaterialTheme.typography.bodySmall)
-            StatusPill(state?.condition ?: "Current condition unknown", state?.condition == "Active")
-            if (staleState) {
-                Text("A newer companion status exists. Your draft is preserved; reload before changing status.", color = Frost, style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = { editorState = null; reloadState++ }, enabled = !actions.busy) { Text("Reload latest Eek status") }
-            }
-            Choices("Confirmed condition", listOf("Unknown", "Active", "Dormant", "Disabled", "Other"), condition, enabled = !actions.busy) { condition = it }
-            Field("Current status / upgrade notes", notes, { notes = it }, single = false, enabled = !actions.busy)
-            SourceField(source, { source = it }, enabled = !actions.busy)
-            Action("Save Eek status", !actions.busy && !staleState && source.isNotBlank()) {
-                val before = editorState
-                val model = before?.copy(condition = condition, notes = notes)
-                    ?: CompanionState(companionId = "eek", name = "Eek", condition = condition, notes = notes)
-                val provenance = source
-                actions.run {
-                    val receipt = records.saveCompanionState(model, before?.revision, provenance)
-                    editorState = model.copy(revision = receipt.resultingRevision, source = provenance, updatedAt = receipt.createdAt)
-                    "Eek status saved locally. No resources restored."
+            draftErrors.forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            when(mode) {
+                "create", "edit" -> {
+                    if (stale) Text("This design changed elsewhere. Your draft is preserved; close and reopen it to load the latest revision.", color = Frost)
+                    Field("Invention name", title, { title = it }, enabled = !actions.busy)
+                    Choices("Development status", listOf("Proposed", "Research", "Blueprint", "Prototype", "Construction", "Completed", "Paused"), status, enabled = !actions.busy) { status = it }
+                    Field("Blueprint / design / research notes", description, { description = it }, single = false, enabled = !actions.busy)
+                    SourceField(source, { source = it }, enabled = !actions.busy)
+                    Text("A design is separate from its physical output.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 }
-            }
-        }
-        ExpandableRecordSection("Known resources", true) {
-            Text("Record only confirmed values. Blank is unknown. HP, Reaction, Mending Repairs and Reconstruction are separate counters; no rest or time-based refill happens here.", color = Muted, style = MaterialTheme.typography.bodySmall)
-            val eekResources = resources.filter { it.companionId == "eek" }
-            if (eekResources.isEmpty()) Text("No current resource values have been entered.", color = Muted)
-            eekResources.forEach { resource ->
-                TextButton(onClick = {
-                    selectedResource = resource; resourceName = resource.name
-                    resourceCurrent = resource.current?.toString().orEmpty(); resourceMax = resource.maximum?.toString().orEmpty()
-                }, enabled = !actions.busy) { Text("${resource.name}: ${resource.current?.toString() ?: "?"} / ${resource.maximum?.toString() ?: "?"}", color = Brass) }
-            }
-            Field("Resource name", resourceName, { resourceName = it }, enabled = !actions.busy)
-            Field("Confirmed current value (blank = unknown)", resourceCurrent, { resourceCurrent = it }, enabled = !actions.busy)
-            Field("Confirmed maximum (blank = unknown)", resourceMax, { resourceMax = it }, enabled = !actions.busy)
-            if (state == null) Text("Save Eek's sourced status before adding resources.", color = Frost, style = MaterialTheme.typography.bodySmall)
-            Action(if (selectedResource == null) "Save known resource" else "Update known resource", !actions.busy && state != null && resourceName.isNotBlank() && source.isNotBlank()) {
-                val before = selectedResource; val current = resourceCurrent.trim(); val maximum = resourceMax.trim(); val provenance = source
-                val model = before?.copy(name = resourceName, current = current.toIntOrNull(), maximum = maximum.toIntOrNull())
-                    ?: CompanionResource(companionId = "eek", name = resourceName, current = current.toIntOrNull(), maximum = maximum.toIntOrNull())
-                actions.run {
-                    require(current.isEmpty() || current.toIntOrNull()?.let { it >= 0 } == true) { "Current value must be nonnegative or unknown." }
-                    require(maximum.isEmpty() || maximum.toIntOrNull()?.let { it >= 0 } == true) { "Maximum must be nonnegative or unknown." }
-                    records.saveCompanionResource(model, before?.revision, provenance)
-                    selectedResource = null; resourceName = ""; resourceCurrent = ""; resourceMax = ""
-                    "Confirmed resource value saved locally. No recovery or roll performed."
+                "detail" -> selected?.let { project ->
+                    Text(project.status, color = Frost, style = MaterialTheme.typography.labelLarge)
+                    ExpandableRecordSection("Concept & Blueprint", true) {
+                        Text(project.description.ifBlank { "No design notes recorded" }, color = if (project.description.isBlank()) Muted else MaterialTheme.colorScheme.onSurface)
+                        RecordValue("Source", project.source)
+                    }
+                    ExpandableRecordSection("Research & Construction") {
+                        if (stages.isEmpty()) Text("No stages recorded", color = Muted)
+                        stages.forEach { stage ->
+                            PlayerTextButton(onClick = { stageSnapshot = Json.encodeToString(stage); stageTitle = stage.title; stageNotes = stage.notes; stageStatus = stage.status; source = stage.source; baselineSource = source; mode = "stage" }) {
+                                Column(Modifier.fillMaxWidth()) { Text(stage.title, color = Frost); Text(stage.status, color = Muted, style = MaterialTheme.typography.bodySmall); if (stage.notes.isNotBlank()) Text(stage.notes, color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                            }
+                        }
+                        PlayerTextButton(onClick = { stageSnapshot = null; stageTitle = ""; stageNotes = ""; stageStatus = "Planned"; source = project.source; baselineSource = source; mode = "stage" }) { Text("Add stage") }
+                    }
+                    ExpandableRecordSection("Required materials") {
+                        if (requirements.isEmpty()) Text("No materials listed", color = Muted)
+                        requirements.forEach { requirement ->
+                            val item = items.firstOrNull { it.id == requirement.itemId }
+                            PlayerTextButton(onClick = { requirementSnapshot = Json.encodeToString(requirement); materialId = requirement.itemId; materialLabel = requirement.label; materialQuantity = requirement.quantity?.toString().orEmpty(); materialNotes = requirement.notes; source = requirement.source; baselineSource = source; mode = "material" }) {
+                                Column(Modifier.fillMaxWidth()) { Text(requirement.label, color = Frost); Text("${requirement.quantity?.toString() ?: "Unknown"} required · ${item?.quantity?.toString() ?: "Unknown"} available", color = Muted, style = MaterialTheme.typography.bodySmall); if (requirement.notes.isNotBlank()) Text(requirement.notes, color = Muted, style = MaterialTheme.typography.bodySmall) }
+                            }
+                        }
+                        PlayerTextButton(onClick = { requirementSnapshot = null; materialId = null; materialLabel = ""; materialQuantity = ""; materialNotes = ""; source = project.source; baselineSource = source; mode = "material" }) { Text("Add material") }
+                    }
+                    ExpandableRecordSection("Physical output") {
+                        val related = links.filter { (it.fromType == "project" && it.fromId == project.id) || (it.toType == "project" && it.toId == project.id) }
+                        if (related.isEmpty()) Text("No linked physical output or equipment", color = Muted)
+                        related.forEach { link -> val itemId = if (link.fromType == "item") link.fromId else if (link.toType == "item") link.toId else null; RecordValue(link.label, items.firstOrNull { it.id == itemId }?.title ?: "Linked record") }
+                        PlayerTextButton(onClick = ::beginCraft) { Text("Confirm a resolved craft") }
+                    }
+                    ExpandableRecordSection("History") {
+                        val relatedIds = setOf(project.id) + stages.map { it.id } + requirements.map { it.id } + links.filter { it.fromId == project.id || it.toId == project.id }.map { it.id }
+                        val history = audit.filter { it.recordId in relatedIds }
+                        if (history.isEmpty()) Text("No history recorded", color = Muted)
+                        history.take(historyLimit).forEach { event -> PlayerTextButton(onClick = { eventId = event.id; mode = "event" }) { Column(Modifier.fillMaxWidth()) { Text(event.kind.replace('_', ' '), color = Frost); Text(event.source, color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis) } } }
+                        if (history.size > historyLimit) PlayerTextButton(onClick = { historyLimit += 40 }) { Text("Show more invention history") }
+                        Text(project.id, color = Muted, style = MaterialTheme.typography.labelSmall)
+                    }
                 }
-            }
-            if (selectedResource != null) TextButton(onClick = { selectedResource = null; resourceName = ""; resourceCurrent = ""; resourceMax = "" }, enabled = !actions.busy) { Text("New resource") }
-        }
-        ExpandableRecordSection("Equipment & accepted upgrades", true) {
-            Text("Links point to existing item IDs; Eek's view never creates a duplicate item or silently transfers ownership. Record the actual owner and state in Inventory.", color = Muted, style = MaterialTheme.typography.bodySmall)
-            val equipped = links.filter { (it.toType == "companion" && it.toId == "eek") || (it.fromType == "companion" && it.fromId == "eek") }
-            if (equipped.isEmpty()) Text("No equipment links recorded.", color = Muted)
-            equipped.forEach { link ->
-                val id = if (link.fromType == "item") link.fromId else link.toId
-                Text("${items.firstOrNull { it.id == id }?.title ?: "Related record"} · ${link.label}", style = MaterialTheme.typography.bodyMedium)
-            }
-            Choices("Existing physical item", items.map { it.id }, itemId, display = { id -> items.firstOrNull { it.id == id }?.title ?: "Choose item" }, enabled = !actions.busy) { itemId = it }
-            Choices("Relationship", listOf("Equipment", "Installed upgrade", "Carried", "Research subject"), linkKind, enabled = !actions.busy) { linkKind = it }
-            Action("Link existing item to Eek", !actions.busy && state != null && itemId != null && source.isNotBlank()) {
-                val id = itemId ?: return@Action; val relation = linkKind; val provenance = source
-                actions.run {
-                    records.saveLink(CampaignLink(fromType = "item", fromId = id, toType = "companion", toId = "eek", label = relation), null, provenance)
-                    "Item linked locally by its persistent identity. Ownership unchanged."
+                "stage" -> {
+                    Field("Stage title", stageTitle, { stageTitle = it }, enabled = !actions.busy)
+                    Choices("Stage status", listOf("Planned", "In progress", "Completed", "Blocked"), stageStatus, enabled = !actions.busy) { stageStatus = it }
+                    Field("Research outcome / construction notes", stageNotes, { stageNotes = it }, single = false, enabled = !actions.busy)
+                    SourceField(source, { source = it }, enabled = !actions.busy)
                 }
+                "material" -> {
+                    Field("Material requirement", materialLabel, { materialLabel = it }, enabled = !actions.busy)
+                    Field("Required quantity (blank = unknown)", materialQuantity, { materialQuantity = it }, enabled = !actions.busy)
+                    Choices("Inventory material (optional)", listOf<String?>(null) + items.map { it.id }, materialId, display = { id -> items.firstOrNull { it.id == id }?.title ?: "Unlinked requirement" }, enabled = !actions.busy) { materialId = it }
+                    Field("Requirement / tool / handling notes", materialNotes, { materialNotes = it }, single = false, enabled = !actions.busy)
+                    SourceField(source, { source = it }, enabled = !actions.busy)
+                    Text("Requirements do not reserve or consume inventory.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+                "craft" -> {
+                    Text("Record an already successful craft. Only selected materials are consumed.", style = MaterialTheme.typography.bodyMedium)
+                    if (requirements.isEmpty()) Text("Add linked material requirements before recording a craft.", color = Muted)
+                    requirements.forEach { requirement ->
+                        val item = items.firstOrNull { it.id == requirement.itemId }
+                        PlayerCard {
+                            Text(requirement.label, style = MaterialTheme.typography.titleSmall)
+                            Text("${requirement.quantity?.toString() ?: "Unknown"} required · ${item?.quantity?.toString() ?: "Unknown"} available", color = Muted, style = MaterialTheme.typography.bodySmall)
+                            Toggle("Actually consume ${requirement.label}", consumedSelections.containsKey(requirement.id), enabled = !actions.busy) { use -> consumedJson = Json.encodeToString(if (use) consumedSelections + (requirement.id to requirement.quantity?.toString().orEmpty()) else consumedSelections - requirement.id) }
+                            if (consumedSelections.containsKey(requirement.id)) Field("Actual consumed quantity: ${requirement.label}", consumedSelections[requirement.id].orEmpty(), { consumedJson = Json.encodeToString(consumedSelections + (requirement.id to it)) }, enabled = !actions.busy)
+                        }
+                    }
+                    Field("Crafted item name", outputTitle, { outputTitle = it }, enabled = !actions.busy)
+                    Field("Output quantity", outputQuantity, { outputQuantity = it }, enabled = !actions.busy)
+                    Field("Output description / resolved outcome", outputDescription, { outputDescription = it }, single = false, enabled = !actions.busy)
+                    SourceField(source, { source = it }, enabled = !actions.busy)
+                }
+                "review" -> reviewedCraft?.let { command ->
+                    Text("${command.output.quantity} × ${command.output.title}", style = MaterialTheme.typography.titleLarge)
+                    Text("Materials to consume", color = Muted, style = MaterialTheme.typography.labelLarge)
+                    craftReviewLabels.forEach { Text(it) }
+                    RecordValue("Source", command.source)
+                    Text("Newer material or project changes reject this transaction. Nothing is spent until you confirm.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+                "event" -> audit.firstOrNull { it.id == eventId }?.let { event -> RecordValue("Change", event.kind); RecordValue("Source", event.source); RecordValue("Revision", "${event.priorRevision} → ${event.resultingRevision}") }
             }
-        }
-        ExpandableRecordSection("Accepted homebrew reference") {
-            Text("HB-01 · Dedicated companion infusion slot. Eek remains Zerg's Homunculus Servant, not a generic familiar or Steel Defender.", style = MaterialTheme.typography.bodySmall)
-            Text("HB-03 · Eek acts immediately after Zerg; commands do not cost Zerg a Bonus Action. This screen does not automate turns or dice.", style = MaterialTheme.typography.bodySmall)
-            Text("HB-04 · Maximum HP = 6 + 4 × Artificer level. AC = 13 + PB. Force Strike = 1d6 + PB force; attack uses Zerg's base spell attack modifier. Evasion follows the accepted Dexterity-save rule.", style = MaterialTheme.typography.bodySmall)
-            Text("HB-05 · One shared Reaction per round. Channel Magic delivers Zerg's Touch-range spell when Eek is within 120 ft. of Zerg and can reach the target. Protective Deflection can reduce an attack's damage by Zerg's PB when Zerg is hit, Eek can perceive that attack and Eek is within 5 ft. of Zerg.", style = MaterialTheme.typography.bodySmall)
-            Text("HB-06 · At 0 HP Eek folds into a Disabled sphere. Active Mending Repairs: 2d6 HP up to maximum, once per Short Rest. Disabled Reconstruction: 10 minutes with Tinker's Tools and Mending, once per Long Rest. Time or a rest alone does not automatically reactivate or refill Eek.", style = MaterialTheme.typography.bodySmall)
-            Text("Reference: accepted 06_HOMEBREW_AND_EEK.md. Historical example levels do not establish the current build. Later accepted amendments take precedence.", color = Muted, style = MaterialTheme.typography.bodySmall)
-            Text("This is a manual known-state ledger. Update HP, condition and separate resource counters explicitly; this screen does not enforce companion combat, rest timing or automatic state transitions.", color = Muted, style = MaterialTheme.typography.bodySmall)
         }
     }
 }

@@ -12,4 +12,6 @@ class AstravarApp: Application() {
     val campaignLedger by lazy { CampaignLedgerRepository(CampaignLedgerDb.open(this)) }
     // Physically isolated fictional public connectivity lab; no campaign record serialization.
     val sandboxSync by lazy { SandboxSyncRepository(SandboxSyncDb.open(this)) }
+    // Explicit opt-in, disposable-profile commands; no real campaign serialization.
+    val remoteStats by lazy { RemoteStatRepository(RemoteStatDb.open(this), campaignLedger.records, sandboxSync) }
 }

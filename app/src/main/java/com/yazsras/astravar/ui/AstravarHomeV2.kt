@@ -67,68 +67,39 @@ val campaignDestinationsV2 = listOf("Astravar", "Inventory", "Campaign", "More")
 
 @Composable fun ArmorOverviewV2(
     state: Campaign, ledger: CampaignLedgerRepository, combat: () -> Unit, systems: () -> Unit,
-    eek: () -> Unit, inventory: () -> Unit, elements: List<DamageType> = emptyList(), selectElement: () -> Unit = combat
+    eek: () -> Unit, inventory: () -> Unit, elements: List<DamageType> = emptyList(), selectElement: () -> Unit = combat,
+    characterProfileId: String = "local-player", onOverlayVisibilityChanged: (Boolean) -> Unit = {}
 ) {
-    val items by ledger.items.collectAsState(initial = emptyList())
-    val ready = state.onboarded && state.attuned && state.installed?.usable(state.gameSeconds) == true && !state.postShatter && state.installation == null
-    val installed = items.filter { it.itemState == "Installed" }
-    val equipped = items.filter { it.itemState == "Equipped" }
+    var capabilitiesOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var characterEditorOpen by remember { mutableStateOf(false) }
+    SideEffect { onOverlayVisibilityChanged(capabilitiesOpen || characterEditorOpen) }
     Page {
-        SectionCaption("ASTRAVAR ARMOR", "MK.I · LOCAL PREVIEW")
-        ArcanePanel(accent = Frost) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("ARMOR & ARCANE SYSTEMS", style = MaterialTheme.typography.labelSmall, color = Brass)
-                StatusPill(if(ready) "CORE READY" else "CHECK SYSTEMS", ready)
+        CharacterOverviewV2(ledger, state, characterProfileId) { characterEditorOpen = it }
+        val cardRatio = if (androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.15f) .85f else 1f
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            PlayerCard(modifier = Modifier.weight(1f).aspectRatio(cardRatio), onClick = selectElement, padding = 12.dp, spacing = 0.dp) {
+                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Active element", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.fillMaxWidth())
+                    ElementParticle(elements.firstOrNull() ?: DamageType.FORCE, Modifier.size(56.dp))
+                    Text(elements.ifEmpty { listOf(DamageType.FORCE) }.joinToString(" + ") {
+                        it.name.lowercase().replaceFirstChar(Char::titlecase)
+                    }, color = RebuildPalette.Ice, style = MaterialTheme.typography.titleMedium,
+                        textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                }
             }
-            Image(painterResource(R.drawable.astravar_armor_front),
-                contentDescription = "Approved Astravar armor front artwork",
-                contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth().height(180.dp))
-            Text("ASTRAVAR", fontFamily = DisplayFace, fontSize = 28.sp, color = Brass,
-                modifier = Modifier.align(Alignment.CenterHorizontally))
-        }
-        CharacterOverviewV2(ledger)
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            ArcanePanel(accent = Frost, modifier = Modifier.weight(1f).heightIn(min = 170.dp).clickable(onClick = selectElement)) {
-                SectionCaption("Active element")
-                ElementParticle(elements.firstOrNull() ?: DamageType.FORCE, Modifier.size(64.dp).align(Alignment.CenterHorizontally))
-                Text(elements.ifEmpty { listOf(DamageType.FORCE) }.joinToString(" + ") { it.name.lowercase().replaceFirstChar(Char::titlecase) }, color = Frost)
-                Text("Change element", style = MaterialTheme.typography.labelSmall, color = Muted)
-            }
-            ArcanePanel(accent = Brass, modifier = Modifier.weight(1f).heightIn(min = 170.dp).clickable(onClick = systems)) {
-                SectionCaption("Core systems")
-                InstrumentMedallion("Core", Modifier.size(64.dp).align(Alignment.CenterHorizontally), Brass)
-                Text(state.installed?.name ?: "No core installed", color = Brass, maxLines = 2)
-                Text(state.installed?.let { "${it.payloads.size} stored payloads" } ?: "No active payload store", style = MaterialTheme.typography.labelSmall, color = Muted)
-            }
-        }
-        Action("Open combat controls", onClick = combat)
-        Section("Current configuration") {
-            Text(if(state.onboarded) "${state.profile.character} · saved profile v${state.profile.version}"
-                else "Weapon profile awaits your confirmation. No live character data has been imported.", color = Frost)
-            Text("Attunement: ${if(state.attuned) "confirmed" else "not confirmed"}")
-            Text("Armor AC and unconfigured armor abilities remain unknown. Illustration and descriptive modules do not grant mechanics.",
-                style = MaterialTheme.typography.bodySmall, color = Muted)
-            if(state.onboarded) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    WeaponStat("ATTACK", "+${state.profile.attack}", Modifier.weight(1f))
-                    WeaponStat("FORCE", state.profile.base.toString(), Modifier.weight(1f))
-                    WeaponStat("SAVE DC", state.profile.saveDc.toString(), Modifier.weight(1f))
+            PlayerCard(modifier = Modifier.weight(1f).aspectRatio(cardRatio), onClick = { capabilitiesOpen = true }, padding = 12.dp, spacing = 0.dp) {
+                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Core systems", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.fillMaxWidth())
+                    InstrumentMedallion("Core", Modifier.size(56.dp), RebuildPalette.Gold)
+                    Text("Capabilities", color = RebuildPalette.Gold, style = MaterialTheme.typography.titleMedium,
+                        textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 }
             }
         }
-        Section("Installed & equipped records") {
-            if(installed.isEmpty() && equipped.isEmpty()) Text("No local equipment records assigned. Add only items you actually confirm.", color = Muted)
-            (installed + equipped).distinctBy { it.id }.forEach { item ->
-                Text("${item.title} · ${item.owner} · ${item.itemState}", color = Frost)
-                if(item.location.isNotBlank() && item.location != "Unknown") Text(item.location, style = MaterialTheme.typography.bodySmall)
-            }
-            Text("These are the same inventory objects, never copies. Item descriptions do not alter the weapon engine.",
-                style = MaterialTheme.typography.bodySmall, color = Muted)
-            TextButton(onClick = inventory) { Text("Manage equipment & research") }
-        }
-        ControlRoomLink("Eek", "Companion state, accepted rules and linked equipment", "Emblem", eek)
     }
+    if (capabilitiesOpen) ArmorCapabilitiesRebuild(onDismiss = { capabilitiesOpen = false })
 }
 
 @Composable fun WeaponSetupV2(state: Campaign, actions: Actions, rules: () -> Unit, restore: () -> Unit) {
@@ -140,7 +111,7 @@ val campaignDestinationsV2 = listOf("Astravar", "Inventory", "Campaign", "More")
             Action("Confirm this weapon profile", !actions.busy) {
                 actions.change("Weapon profile confirmed") { it.copy(onboarded = true) }
             }
-            TextButton(onClick = restore) { Text("Restore my weapon backup") }
+            PlayerTextButton(onClick = restore) { Text("Restore my weapon backup") }
         }
         Section("Optional fictional demo") {
             Text("Explicitly creates test weapon resources in this preview only. It does not import or replace the installed release.", color = Muted)

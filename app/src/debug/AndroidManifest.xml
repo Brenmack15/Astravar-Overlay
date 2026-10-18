@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
-    <application android:label="Astravar 2.0 Preview" android:usesCleartextTraffic="false" tools:replace="android:label" />
+    <application android:label="${astravarDebugLabel}" android:usesCleartextTraffic="false" tools:replace="android:label" />
 </manifest>

@@ -1,5 +1,7 @@
 package com.yazsras.astravar.ui
 
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.mutableStateOf
@@ -20,7 +22,7 @@ import org.robolectric.annotation.LooperMode
 @LooperMode(LooperMode.Mode.PAUSED)
 class HistoryPresentationTest {
     @get:Rule val compose=createEmptyComposeRule()
-    @Test(timeout=60000) fun twentyLargeRollsOpenNewestFirstAndDetailsStayCollapsedUntilRequested() {
+    @Test(timeout=60000) fun twentyLargeRollsOpenNewestFirstAndFullDetailsRequireAnOverlay() {
         val seed=Campaign(onboarded=true,attuned=true,installedId="core",profile=Profile(baseDamageDiceCount=10),cores=listOf(Core("core","Core")))
         val shots=(1..100).map {i->
             val p=Engine.plan(seed,"roll-$i",Ability.SHATTER,elements=listOf(DamageType.LIGHTNING),point="Gate $i")
@@ -38,13 +40,27 @@ class HistoryPresentationTest {
             compose.onAllNodes(hasText(" · Shatter",substring=true)).assertCountEquals(HistoryRetention.MAX_HISTORY_ENTRIES)
             compose.onAllNodes(hasText("Force blast:",substring=true)).assertCountEquals(0)
             compose.onNodeWithText("Crystal 100 · No payload").performClick()
+            compose.onNodeWithText("Roll details").assertIsDisplayed()
+            val fullSummary=shotSummary(s.pending.last())
+            compose.onNodeWithText(fullSummary).assertExists()
             compose.onAllNodes(hasText("Force blast: 210d12",substring=true)).assertCountEquals(1)
+            compose.onNodeWithText("Copy full result").performClick()
+            compose.runOnIdle {
+                val clipboard=activity.get().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                assertEquals(fullSummary,clipboard.primaryClip!!.getItemAt(0).text.toString())
+            }
+            compose.onNodeWithText("Close").performClick()
+            compose.onAllNodes(hasText("Force blast:",substring=true)).assertCountEquals(0)
             compose.runOnIdle {showCurrent.value=true}
-            compose.onNodeWithText("DEXTERITY SAVE · DC 15").assertIsDisplayed()
-            compose.onNode(hasText("EXPLOSION",substring=true)).assertIsDisplayed()
-            compose.onAllNodesWithText("2520").assertCountEquals(2)[0].assertIsDisplayed()
-            compose.onNodeWithText("Show individual dice").assertExists()
+            compose.onNodeWithText("Latest result").assertIsDisplayed()
+            compose.onNodeWithText("SAVE DC").assertIsDisplayed()
+            compose.onNodeWithText("15").assertIsDisplayed()
+            compose.onNodeWithText(s.pending.last().rolled!!.damage.values.sumOf {it.total}.toString()).assertIsDisplayed()
+            compose.onNodeWithText("Latest result").performClick()
+            compose.onNodeWithText("Roll details").assertIsDisplayed()
+            compose.onNodeWithText(fullSummary).assertExists()
             assertEquals(2520,s.pending.last().rolled!!.damage.getValue("blast").total)
+            assertEquals(210,s.pending.last().rolled!!.damage.getValue("blast").faces.size)
         } finally {activity.pause().stop().destroy()}
     }
 }

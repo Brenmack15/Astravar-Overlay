@@ -2,11 +2,15 @@ package com.yazsras.astravar.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
@@ -26,104 +30,255 @@ import com.yazsras.astravar.R
 import com.yazsras.astravar.rules.*
 import com.yazsras.astravar.data.*
 import java.util.UUID
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.Saver
+import kotlinx.serialization.encodeToString
 
 @Composable fun Dashboard(s: Campaign,a: Actions,start: ()->Unit,grant: ()->Unit,stop: ()->Unit,preferences: Preferences,prefs: OverlayPrefs) {
     val view=LocalView.current
     val ability=prefs.mode
-    val elements=prefs.elements
-    val selected=prefs.selectedPayloads.filter {id->s.installed?.payloads?.any {it.id==id}==true}.toSet()
-    var immediate by remember(prefs.immediateId) {mutableStateOf(prefs.immediateId)}
-    var manualSlot by remember(prefs.manualSlot) {mutableStateOf(prefs.manualSlot)}
-    var direct by remember(prefs.directImpact) {mutableStateOf(prefs.directImpact)}
-    var distance by remember(prefs.distance) {mutableStateOf(prefs.distance.toString())}
-    var target by remember(prefs.targetPoint) {mutableStateOf(prefs.targetPoint)}
-    var advantage by remember(prefs.advantage) {mutableStateOf(prefs.advantage)}
-    var disadvantage by remember(prefs.disadvantage) {mutableStateOf(prefs.disadvantage)}
-    var optionsOpen by remember {mutableStateOf(false)}
-    var preview by remember {mutableStateOf<ShotPlan?>(null)}
-    var externalDice by remember {mutableStateOf(false)}
     val blast=ability in listOf(Ability.DISCHARGE,Ability.SHATTER)
     val magic=ability in listOf(Ability.SPELL,Ability.DISCHARGE,Ability.SHATTER)
+    val selected=prefs.selectedPayloads.filter {id->s.installed?.payloads?.any {it.id==id}==true}.toSet()
+    var immediate by androidx.compose.runtime.saveable.rememberSaveable(prefs.immediateId) {mutableStateOf(prefs.immediateId)}
+    var manualSlot by androidx.compose.runtime.saveable.rememberSaveable(prefs.manualSlot) {mutableStateOf(prefs.manualSlot)}
+    var direct by androidx.compose.runtime.saveable.rememberSaveable(prefs.directImpact) {mutableStateOf(prefs.directImpact)}
+    var distance by androidx.compose.runtime.saveable.rememberSaveable(prefs.distance) {mutableStateOf(prefs.distance.toString())}
+    var target by androidx.compose.runtime.saveable.rememberSaveable(prefs.targetPoint) {mutableStateOf(prefs.targetPoint)}
+    var advantage by remember(prefs.advantage) {mutableStateOf(prefs.advantage)}
+    var disadvantage by remember(prefs.disadvantage) {mutableStateOf(prefs.disadvantage)}
+    var overlay by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
+    var preview by remember {mutableStateOf<ShotPlan?>(null)}
+    var externalDice by remember {mutableStateOf(false)}
+    val unresolved=s.pending.firstOrNull {it.result==null}
+    var resolutionDirty by rememberSaveable(unresolved?.plan?.id) {mutableStateOf(false)}
+    val last=s.pending.lastOrNull()
     fun options()=RollOptions(advantage,disadvantage)
-    fun plan()=Engine.plan(s,UUID.randomUUID().toString(),ability,if(magic) selected.toList() else emptyList(),if(magic) s.templates.find {it.id==immediate} else null,elements,direct && blast,distance.intValue("Distance",0,180),target,manualSlot)
-    fun prepare(manual: Boolean=false) {
-        try {options().validate();externalDice=manual;preview=plan()} catch(e: Exception) {a.message=e.message ?: "Check your shot settings"}
+    fun plan()=Engine.plan(s,UUID.randomUUID().toString(),ability,if(magic) selected.toList() else emptyList(),
+        if(magic) s.templates.find {it.id==immediate} else null,prefs.elements,direct && blast,
+        distance.intValue("Distance",0,180),target,manualSlot)
+    fun prepare(manual:Boolean=false) {
+        try { options().validate(); externalDice=manual; preview=plan() }
+        catch(e:Exception) {a.message=e.message ?: "Check attack settings"}
     }
-    fun fire(p: ShotPlan) {
-        a.run("Dice saved") {val o=options();preferences.targeting(o);preferences.aim(distance.intValue("Distance",0,180),target,direct,immediate,manualSlot);val after=a.repo.fire(p,o,"main");if(prefs.haptics) rollFeedback(view,after.pending.last().rolled)}
+    fun restoreSavedOptions() {
+        distance=prefs.distance.toString(); target=prefs.targetPoint; direct=prefs.directImpact
+        immediate=prefs.immediateId; manualSlot=prefs.manualSlot
+    }
+    suspend fun clearExecutedPayloadSelection(p:ShotPlan) {
+        if(p.hasSpell) {
+            preferences.payloads(emptySet())
+            preferences.aim(p.distance,p.targetPoint,p.directImpact,null,false)
+            immediate=null; manualSlot=false
+        }
+    }
+    fun fire(p:ShotPlan) {
+        a.run("") {
+            val o=options()
+            preferences.targeting(o)
+            preferences.aim(distance.intValue("Distance",0,180),target,direct,immediate,manualSlot)
+            val after=a.repo.fire(p,o,"main")
+            // Presentation selections reset only AFTER a committed execution, never on failure.
+            if(!p.blast || p.directImpact) {
+                preferences.targeting(RollOptions()); advantage=false; disadvantage=false
+            }
+            clearExecutedPayloadSelection(p)
+            if(prefs.haptics) rollFeedback(view,after.pending.last().rolled)
+        }
     }
     val planned=runCatching {plan()}
-    val unresolved=s.pending.firstOrNull {it.result==null}
-    var showResult by remember(s.pending.lastOrNull()?.plan?.id) {mutableStateOf(true)}
-    var corePicker by remember {mutableStateOf(false)}
-    var payloadPicker by remember {mutableStateOf(false)}
-    fun attack() {if(blast) prepare() else planned.fold({fire(it)},{a.message=it.message ?: "Check your shot"})}
+    val activePlan=planned.getOrNull()
+    val saveOnly=blast && !direct
     Column(Modifier.fillMaxSize()) {
-    Page(Modifier.weight(1f),resetKey=s.pending.lastOrNull()?.plan?.id) {
-        val last=s.pending.lastOrNull()?.takeIf {it.result!=null}
-        if(last!=null && showResult) {
-            RollResultCard(last)
-            TextButton(onClick={showResult=false}) {Text("Back to weapon")}
-        } else if(unresolved==null) WeaponHero(s,prefs.image,ability,planned.getOrNull(),planned.exceptionOrNull()?.message)
-        if(!s.attuned) Action("Confirm I am attuned",!a.busy) {a.change("Attunement confirmed by player") {it.copy(attuned=true)}}
-        if(unresolved!=null) ResolutionPanel(unresolved,a,prefs.manualOverrides)
-        SectionCaption("Equipped systems")
-        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-            ModuleControl("Core",s.installed?.name ?: "None",Frost,Modifier.weight(1f)) {corePicker=true}
-            ModuleControl("Payload",s.installed?.payloads?.filter {it.id in selected}?.joinToString {it.template.name}?.ifBlank {"None"} ?: "None",Brass,Modifier.weight(1f)) {payloadPicker=true}
-        }
-        if((distance.toIntOrNull() ?: 0)>60) Text("Long range · ${if(advantage) "advantage and disadvantage cancel" else "disadvantage applies"}",style=MaterialTheme.typography.bodySmall,color=Frost)
-        Choices("Firing mode",Ability.entries.toList(),ability,{it.title}) {v->a.run("") {preferences.mode(v)}}
-        if(ability==Ability.ELEMENTAL || blast) {
-            TextButton(onClick={a.run("") {preferences.elements(emptyList());if(!blast) preferences.mode(Ability.ARCANE)}}) {Text(if(elements.isEmpty()) "✓ Neutral Force" else "Neutral Force")}
-            val allowed=if(s.profile.elementCapacity>1 && s.profile.elementCapacityOverride==null) Engine.basic else Engine.elements(s.profile)
-            SectionCaption("Elemental selector",s.profile.selector.toString())
-            ElementSelector(allowed,elements) {t->a.run("") {preferences.elements(if(s.profile.elementCapacity==1) listOf(t) else if(t in elements) elements-t else (elements+t).takeLast(s.profile.elementCapacity))}}
-            if(elements.size>1) Text(elements.joinToString(" + "){it.name.lowercase()},color=Frost)
-        }
-        if(blast) Section("Blast targeting") {
-            Text(if(ability==Ability.SHATTER) "60 ft radius · destroys the core" else "15 ft radius · core recovers in 10 game minutes",color=if(ability==Ability.SHATTER) MaterialTheme.colorScheme.error else Frost)
-            Field("Where does the blast land?",target,{target=it})
-            Toggle("Also make a direct pistol attack",direct) {direct=it}
-        }
-        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-            MetalButton("Floating controls",modifier=Modifier.weight(1f),icon="Emblem") {a.run("") {preferences.targeting(options());preferences.aim(distance.intValue("Distance",0,180),target,direct,immediate,manualSlot);start()}}
-            TextButton(onClick={optionsOpen=!optionsOpen},modifier=Modifier.weight(1f).heightIn(min=48.dp)) {Text(if(optionsOpen) "Less ▴" else "Shot options ▾")}
-        }
-        WeaponActionWindow(s,a)
-        if(optionsOpen) Section("Shot options") {
-            Field("Distance in feet",distance,{distance=it})
-            if(magic) {
-                Choices("Fresh spell slot",listOf<String?>(null)+s.templates.filter {it.approved}.map {it.id},immediate,display={id->s.templates.find {it.id==id}?.name ?: "None"}) {immediate=it}
-                if(immediate!=null) {Text("Spends one level-${s.templates.find {it.id==immediate}?.castingLevel} slot.");Toggle("Confirm slot available when its count is unknown",manualSlot) {manualSlot=it}}
+        Page(Modifier.weight(1f)) {
+            PlayerHeading("Combat") {
+                PlayerTextButton(onClick={overlay="Options"}) {Text("Options")}
             }
-            Action("Save shot options",!a.busy) {a.run("Shot options saved") {preferences.targeting(options());preferences.aim(distance.intValue("Distance",0,180),target,direct,immediate,manualSlot);optionsOpen=false}}
-            TextButton(onClick={prepare()},enabled=!a.busy && unresolved==null) {Text("Preview dice & resource cost")}
-            if(prefs.manualOverrides) TextButton(onClick={prepare(true)},enabled=!a.busy && unresolved==null) {Text("Manual override · external dice")}
+            PlayerCard(onClick={overlay="Attacks"},modifier=Modifier.border(1.dp,Brass.copy(alpha=.55f),androidx.compose.foundation.shape.RoundedCornerShape(16.dp))) {
+                Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                    ApprovedAttackMedallion(ability.approvedArt(),Modifier.size(64.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(ability.title,style=MaterialTheme.typography.titleLarge,color=Brass)
+                        Text(if(blast) "Area release" else if(ability==Ability.SPELL) "Stored / configured spell" else "Ranged attack",style=MaterialTheme.typography.bodySmall,color=Muted)
+                    }
+                    PlayerTextButton(onClick={overlay="Attacks"}) {Text("Change")}
+                }
+            }
+            if(ability==Ability.ELEMENTAL || blast) {
+                PlayerCard(onClick={overlay="Element"}) {
+                    Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                        ElementParticle(prefs.elements.firstOrNull() ?: DamageType.FORCE,Modifier.size(40.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Active element",style=MaterialTheme.typography.bodySmall,color=Muted)
+                            Text(prefs.elements.ifEmpty {listOf(DamageType.FORCE)}.joinToString(" + "){it.name.lowercase().replaceFirstChar(Char::titlecase)},style=MaterialTheme.typography.titleMedium)
+                        }
+                        Text("Change",color=Frost,style=MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+            if(magic) PlayerCard(onClick={overlay="Spells"}) {
+                Text("Spell payload",style=MaterialTheme.typography.bodySmall,color=Muted)
+                Text((s.installed?.payloads?.filter {it.id in selected}?.map {it.template.name}.orEmpty()+
+                    listOfNotNull(s.templates.find {it.id==immediate}?.name)).joinToString(" + ").ifBlank {"Select spell"},style=MaterialTheme.typography.titleMedium)
+            }
+            PlayerCard(onClick={overlay="Damage"}) {
+                Row(verticalAlignment=Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                        Text(activePlan?.let {Engine.components(it).joinToString(" + "){c->"${c.damage.dice} ${c.damage.type.name.lowercase().replaceFirstChar(Char::titlecase)}"}}
+                            ?: "${s.profile.base} Force",style=MaterialTheme.typography.titleMedium,color=Frost)
+                        Text(if(saveOnly) "DC ${s.profile.saveDc} Dexterity · ${if(ability==Ability.SHATTER) 60 else 15} ft radius"
+                            else "+${s.profile.attack} Attack · 60 / 180 ft",style=MaterialTheme.typography.bodySmall,color=Muted)
+                    }
+                    Text("›",color=Frost,fontSize=24.sp)
+                }
+            }
+            if(last!=null) RollResultCard(last) else PlayerCard {
+                Text("Latest result",color=Muted,style=MaterialTheme.typography.bodySmall)
+                Text("No rolls yet",style=MaterialTheme.typography.titleMedium)
+            }
+            if(unresolved!=null) PlayerTextButton(onClick={overlay="Resolve"}) {Text("Complete saved ${unresolved.plan.ability.title.lowercase()}")}
+            if(!s.attuned) Action("Confirm attunement",!a.busy) {a.change("Attunement confirmed by player") {it.copy(attuned=true)}}
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
+                PlayerTextButton(onClick={overlay="Core"}) {Text(s.installed?.name ?: "Choose core")}
+                PlayerTextButton(onClick={start}) {Text("Floating controls")}
+            }
+        }
+        Column(Modifier.fillMaxWidth().background(RebuildPalette.Canvas).padding(horizontal=16.dp,vertical=8.dp),
+            verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            if(!saveOnly) RollModeControl(if(advantage && !disadvantage) RollMode.ADVANTAGE else if(disadvantage && !advantage) RollMode.DISADVANTAGE else RollMode.NORMAL) {mode->
+                advantage=mode==RollMode.ADVANTAGE;disadvantage=mode==RollMode.DISADVANTAGE
+                a.run("") {preferences.targeting(options())}
+            }
+            CombatRollAction(ability,if(saveOnly) "Roll ${ability.title.lowercase()}" else "Roll attack",
+                !a.busy && activePlan!=null && unresolved==null,danger=ability==Ability.SHATTER) {
+                if(blast) prepare() else activePlan?.let(::fire)
+            }
+            if(planned.isFailure && unresolved==null) Text(planned.exceptionOrNull()?.message ?: "Review systems",color=Muted,style=MaterialTheme.typography.bodySmall)
         }
     }
-    Surface(color=Color.Transparent,modifier=Modifier.instrumentSurface()) {
-        Column(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=10.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
-        RollModeControl(if(advantage && !disadvantage) RollMode.ADVANTAGE else if(disadvantage && !advantage) RollMode.DISADVANTAGE else RollMode.NORMAL) {mode->
-            advantage=mode==RollMode.ADVANTAGE;disadvantage=mode==RollMode.DISADVANTAGE
-            a.run("") {preferences.targeting(options())}
+    when(overlay) {
+        "Attacks" -> AttackChooserRebuild(ability,{overlay=null}) {value->a.run("") {preferences.mode(value)};overlay=null}
+        "Element" -> ElementWheelV2(s.profile,prefs.elements,{overlay=null}) {type->
+            a.run("") {
+                if(type==DamageType.FORCE) {preferences.elements(emptyList());if(!blast) preferences.mode(Ability.ARCANE)}
+                else {preferences.elements(if(s.profile.elementCapacity==1) listOf(type) else if(type in prefs.elements) prefs.elements-type else (prefs.elements+type).takeLast(s.profile.elementCapacity));if(!blast) preferences.mode(Ability.ELEMENTAL)}
+            };overlay=null
         }
-            Action(if(blast) "Review & roll ${ability.title.lowercase()}" else if(showResult && s.pending.lastOrNull()?.result!=null) "Roll again" else "Roll attack",!a.busy && planned.isSuccess && unresolved==null,danger=ability==Ability.SHATTER) {showResult=true;attack()}
-            Text(if(blast) "Review the core cost before releasing" else "Attack + potential damage · DM determines the hit",style=MaterialTheme.typography.labelSmall,color=Muted)
+        "Core" -> CorePicker(s,a) {overlay=null}
+        "Spells" -> SpellChooserRebuild(s,a,preferences,selected,immediate,{id->
+            immediate=id;a.run("") {
+                if(id==null) preferences.payloads(emptySet())
+                preferences.aim(distance.intValue("Distance",0,180),target,direct,id,manualSlot)
+            }
+        }) {overlay=null}
+        "Damage" -> PlayerSheet("Damage breakdown",{overlay=null}) {
+            if(activePlan==null) Text(planned.exceptionOrNull()?.message ?: "Configure a usable attack first.")
+            activePlan?.let {p->
+                Engine.components(p).forEach {c->PlayerCard {
+                    Text(c.label,style=MaterialTheme.typography.titleMedium)
+                    Text("${c.damage.dice} ${c.damage.type.name.lowercase()}",color=Frost)
+                    Text("Average ${c.damage.dice.average}",color=Muted,style=MaterialTheme.typography.bodySmall)
+                }}
+                Text(p.actionCost,style=MaterialTheme.typography.bodySmall,color=Muted)
+                if(p.hasSpell) Text("Configured payload replaces the free elemental selector.",style=MaterialTheme.typography.bodySmall,color=Muted)
+            }
+        }
+        "Resolve" -> unresolved?.let {shot->PlayerSheet("Saved result",{overlay=null},dirty=resolutionDirty) {ResolutionPanel(shot,a,prefs.manualOverrides) {resolutionDirty=it}}}
+        "Options" -> PlayerSheet("Attack options",{restoreSavedOptions();overlay=null},dirty=distance!=prefs.distance.toString() || target!=prefs.targetPoint || direct!=prefs.directImpact || manualSlot!=prefs.manualSlot,
+            actions={PlayerTextButton(onClick={
+                a.run("Attack options saved") {preferences.targeting(options());preferences.aim(distance.intValue("Distance",0,180),target,direct,immediate,manualSlot);overlay=null}
+            },enabled=!a.busy) {Text("Save")}}) {
+            Field("Distance in feet",distance,{distance=it})
+            if(blast) {
+                Field("Blast location",target,{target=it})
+                Toggle("Include direct impact attack",direct) {direct=it}
+            }
+            if(magic && immediate!=null) Toggle("Confirm available slot when count is unknown",manualSlot) {manualSlot=it}
+            PlayerTextButton(onClick={overlay=null;prepare()},enabled=!a.busy && unresolved==null) {Text("Preview resource cost")}
+            if(prefs.manualOverrides) PlayerTextButton(onClick={overlay=null;prepare(true)},enabled=!a.busy && unresolved==null) {Text("Use external dice")}
+            WeaponActionWindow(s,a)
         }
     }
-    }
-    if(corePicker) CorePicker(s,a) {corePicker=false}
-    if(payloadPicker) PayloadPicker(s,a,preferences,selected) {payloadPicker=false}
-    preview?.let {p->ArcaneDialog(onDismissRequest={preview=null},title={Text(if(p.ability==Ability.SHATTER) "Shatter this core?" else p.ability.title)},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+    preview?.let {p->ArcaneDialog(onDismissRequest={preview=null;restoreSavedOptions()},title={Text(if(p.ability==Ability.SHATTER) "Destroy core?" else "Confirm ${p.ability.title.lowercase()}")},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
         Text(p.actionCost)
         Engine.components(p).forEach {Text("${it.damage.dice} ${it.damage.type.name.lowercase()} · ${it.label}")}
-        if(p.disadvantage) Text("Long-range disadvantage applies.")
-        if(p.hasSpell) Text("Spends ${p.selectedPayloads.size} stored spell(s)${p.immediate?.let {" and one level-${it.castingLevel} slot"} ?: ""}, including on a miss.")
-        if(p.ability==Ability.DISCHARGE) Text("The core recovers after 600 game seconds. Unselected spells remain.")
-        if(p.ability==Ability.SHATTER) Text("Destroys ${s.core(p.coreId).name} and ALL remaining stored spells. Only the selected spells add damage.",color=MaterialTheme.colorScheme.error)
-        Text(if(externalDice) "Costs will be saved; enter your external dice afterward." else "Dice and costs are saved together when you tap Roll.")
-    }},confirmButton={TextButton(onClick={if(externalDice) a.run("Enter your dice below") {a.repo.commit(p,"main")} else fire(p);preview=null},enabled=!a.busy) {Text(if(externalDice) "Commit for external dice" else if(p.ability==Ability.SHATTER) "Destroy core & roll" else "Roll now")}},dismissButton={TextButton(onClick={preview=null}) {Text("Cancel")}})}
+        if(p.hasSpell) Text("Consumes ${p.selectedPayloads.size} stored spell(s)${p.immediate?.let {" and one level-${it.castingLevel} slot"} ?: ""} on execution.")
+        if(p.ability==Ability.DISCHARGE) Text("Core recovery: 600 game seconds. Unselected spells remain.")
+        if(p.ability==Ability.SHATTER) Text("Destroys ${s.core(p.coreId).name} and all remaining stored spells.",color=MaterialTheme.colorScheme.error)
+    }},confirmButton={PlayerTextButton(onClick={if(externalDice) a.run("Enter external dice") {a.repo.commit(p,"main");clearExecutedPayloadSelection(p)} else fire(p);preview=null},enabled=!a.busy) {Text(if(externalDice) "Commit" else if(p.ability==Ability.SHATTER) "Destroy core & roll" else "Roll now")}},dismissButton={PlayerTextButton(onClick={preview=null;restoreSavedOptions()}) {Text("Cancel")}})}
+}
+
+@Composable private fun CombatRollAction(ability:Ability,label:String,enabled:Boolean,danger:Boolean=false,onClick:()->Unit) {
+    val shape=CutCornerShape(topEnd=16.dp,bottomStart=16.dp)
+    val colors=if(!enabled) listOf(RebuildPalette.Elevated,RebuildPalette.Elevated)
+        else if(danger) listOf(MaterialTheme.colorScheme.errorContainer,MaterialTheme.colorScheme.errorContainer)
+        else listOf(RebuildPalette.GoldBurnished,RebuildPalette.GoldBright,RebuildPalette.Gold)
+    Row(Modifier.fillMaxWidth().heightIn(min=64.dp).clip(shape).background(Brush.linearGradient(colors))
+        .clickable(enabled=enabled,role=androidx.compose.ui.semantics.Role.Button,onClick=onClick).padding(horizontal=16.dp,vertical=10.dp),
+        verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.Center) {
+        ApprovedAttackMedallion(ability.approvedArt(),Modifier.size(40.dp).alpha(if(enabled) 1f else .35f))
+        Spacer(Modifier.width(12.dp))
+        Text(label,color=if(!enabled) Muted else if(danger) MaterialTheme.colorScheme.onErrorContainer else RebuildPalette.Void,
+            style=MaterialTheme.typography.titleMedium)
+    }
+}
+
+private data class ApprovedAttackChoice(val art:ApprovedAttackArt,val name:String,val classification:String,val mode:Ability?)
+@Composable fun AttackChooserRebuild(selected:Ability,onDismiss:()->Unit,onSelect:(Ability)->Unit) {
+    val choices=listOf(
+        ApprovedAttackChoice(ApprovedAttackArt.ELEMENTAL,"Elemental shot","Ranged attack",Ability.ELEMENTAL),
+        ApprovedAttackChoice(ApprovedAttackArt.GAUNTLET,"Gauntlet strike","Mechanics pending",null),
+        ApprovedAttackChoice(ApprovedAttackArt.CHARGED_GAUNTLET,"Charged gauntlet","Mechanics pending",null),
+        ApprovedAttackChoice(ApprovedAttackArt.SPELL_SHOT,"Spell-imbued shot","Configured spell",Ability.SPELL),
+        ApprovedAttackChoice(ApprovedAttackArt.SPELL_STRIKE,"Spell-imbued strike","Mechanics pending",null),
+        ApprovedAttackChoice(ApprovedAttackArt.DISCHARGE,"Discharge","Save-based area",Ability.DISCHARGE))
+    PlayerSheet("Choose attack",onDismiss) {
+        choices.chunked(2).forEach {row->Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+            row.forEach {choice->
+                val available=choice.mode!=null
+                val active=choice.mode==selected || (selected==Ability.ARCANE && choice.mode==Ability.ELEMENTAL)
+                PlayerCard(Modifier.weight(1f).fillMaxHeight().then(if(!available) Modifier.semantics {disabled()} else Modifier),
+                    onClick=choice.mode?.let {mode->{onSelect(mode)}},padding=12.dp,spacing=4.dp) {
+                    ApprovedAttackMedallion(choice.art,Modifier.size(64.dp).alpha(if(available) 1f else .45f))
+                    Text(choice.name,style=MaterialTheme.typography.titleMedium,color=if(available) MaterialTheme.colorScheme.onSurface else Muted)
+                    Text(if(active) "Selected" else choice.classification,style=MaterialTheme.typography.bodySmall,color=Muted)
+                }
+            }
+        }}
+        PlayerDisclosure("Existing weapon modes") {
+            PlayerEntry("Arcane shot","Neutral Force · existing ranged attack","Weapon",{onSelect(Ability.ARCANE)})
+            PlayerEntry("Shatter","Destroys the installed core · review before rolling","Core",{onSelect(Ability.SHATTER)})
+        }
+    }
+}
+
+@Composable private fun SpellChooserRebuild(s:Campaign,a:Actions,preferences:Preferences,selected:Set<String>,immediate:String?,selectImmediate:(String?)->Unit,dismiss:()->Unit) {
+    var family by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
+    val templates=s.templates.filter {it.approved}.groupBy {it.name}
+    PlayerSheet(if(family==null) "Spell payload" else family!!,dismiss) {
+        if(family!=null) {
+            PlayerTextButton(onClick={family=null}) {Text("Back to spells")}
+            templates[family].orEmpty().forEach {template->PlayerEntry("Level ${template.castingLevel}",template.damage.joinToString(" + "){"${it.dice} ${it.type.name.lowercase()}"},"Payload",{
+                selectImmediate(template.id);dismiss()
+            },if(immediate==template.id) "Selected" else null)}
+        } else {
+            if(s.installed?.payloads.isNullOrEmpty() && templates.isEmpty()) PlayerEmpty("No configured spells","Add approved spell templates in Config → Spell library.","Payload")
+            if(!s.installed?.payloads.isNullOrEmpty()) {
+                SectionCaption("Stored payloads")
+                s.installed?.payloads?.forEach {payload->PlayerEntry(payload.template.name,"Level ${payload.template.castingLevel} · stored","Payload",{
+                    a.run("") {preferences.payloads(if(payload.id in selected) selected-payload.id else if(s.profile.releaseLimit==1) setOf(payload.id) else (selected+payload.id).toList().takeLast(s.profile.releaseLimit).toSet())}
+                    if(s.profile.releaseLimit==1) dismiss()
+                },if(payload.id in selected) "Selected" else null)}
+            }
+            if(templates.isNotEmpty()) {
+                SectionCaption("Configured spell slot")
+                templates.forEach {(name,variants)->PlayerEntry(name,if(variants.size==1) "Level ${variants.single().castingLevel}" else "${variants.size} configured variants","Payload",{
+                    if(variants.size==1) {selectImmediate(variants.single().id);dismiss()} else family=name
+                })}
+            }
+            PlayerTextButton(onClick={selectImmediate(null);dismiss()}) {Text("Clear temporary selection")}
+        }
+    }
 }
 
 @Composable fun ModuleControl(label:String,value:String,tint:Color,modifier:Modifier=Modifier,open:()->Unit) {
@@ -170,65 +325,62 @@ import java.util.UUID
     }
 }
 @Composable fun RollResultCard(pending:PendingShot,onAgain:(()->Unit)?=null,enabled:Boolean=true) {
-    val p=pending.plan;val result=pending.result ?: return
+    val p=pending.plan
+    val roll=pending.rolled
+    val result=pending.result
     val context=LocalContext.current
-    val natural=pending.rolled?.natural
-    val critical=natural==20 || result.outcome==Outcome.CRITICAL
-    val miss=natural==1 || result.outcome==Outcome.MISS
-    val tint=if(miss) MaterialTheme.colorScheme.error else if(critical) Brass else Frost
-    SectionCaption("Roll result",p.ability.title)
-    ArcanePanel(accent=tint) {
-        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
-            Text(p.ability.title.uppercase(),style=MaterialTheme.typography.labelSmall,color=Brass)
-            if(critical)StatusPill("NATURAL 20",false)
+    var details by androidx.compose.runtime.saveable.rememberSaveable(p.id) {mutableStateOf(false)}
+    val components=Engine.components(p,roll?.critical ?: (result?.outcome==Outcome.CRITICAL))
+    val damage=if(!p.blast && result!=null) Engine.damage(p,result) else components.mapNotNull {c->(roll?.damage?.get(c.id)?.total ?: result?.rolls?.get(c.id))?.let {c.damage.type to it}}
+        .groupBy({it.first},{it.second}).mapValues {it.value.sum()}
+    PlayerCard(onClick={details=true}) {
+        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
+            Text("Latest result",style=MaterialTheme.typography.bodySmall,color=Muted)
+            Text(when(roll?.natural){20->"Natural 20";1->"Natural 1";else->p.ability.title},style=MaterialTheme.typography.labelLarge,color=Frost)
         }
-        val heading=when {critical->"CRITICAL HIT";natural==1->"NATURAL 1 — MISS";p.blast->"DEXTERITY SAVE · DC ${p.profile.saveDc}";else->"ATTACK ROLL"}
-        Text(heading,color=tint,style=MaterialTheme.typography.titleMedium,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth())
-        result.attackTotal?.let {total->
-            Box(Modifier.fillMaxWidth().height(166.dp),contentAlignment=Alignment.Center) {
-                ArcaneDial(Modifier.size(186.dp),tint)
-                Text(total.toString(),fontFamily=DisplayFace,fontSize=79.sp,color=if(critical) Color(0xFFFFE9B7) else Color(0xFFE5F1FF))
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(16.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text(if(roll?.attackTotal!=null || result?.attackTotal!=null) "ATTACK" else "SAVE DC",style=MaterialTheme.typography.labelSmall,color=Muted)
+                Text((roll?.attackTotal ?: result?.attackTotal ?: p.profile.saveDc).toString(),fontSize=36.sp,fontFamily=InterfaceFace,color=Frost)
+            }
+            Column(Modifier.weight(1f)) {
+                Text("DAMAGE",style=MaterialTheme.typography.labelSmall,color=Muted)
+                Text(damage.values.sum().toString(),fontSize=36.sp,fontFamily=InterfaceFace,color=Brass)
             }
         }
-        pending.rolled?.let {Text(it.attackDescription(p),color=Color(0xFFDDD5C7),style=MaterialTheme.typography.bodyLarge,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth())}
-        if(p.blast) {
-            SectionCaption("Explosion • rolled damage")
-            val explosion=Engine.components(p).filter {it.portion!=Portion.DIRECT}.groupBy {it.damage.type}.mapValues {(_,cs)->cs.sumOf {result.rolls[it.id] ?: 0}}
-            DamageRows(explosion)
-            if(result.targets.isEmpty())Text("No affected creatures recorded")
-            result.targets.forEach {t->Text("${t.name} · ${if(t.saved==true) "save passed" else "save failed"}",style=MaterialTheme.typography.labelLarge);DamageRows(Engine.damage(p,result,t))}
-        } else {
-            val damage=Engine.damage(p,result)
-            SectionCaption(if(miss) "Damage" else "Potential damage")
-            Text("${damage.values.sum()} ${if(miss) "DAMAGE" else "POTENTIAL DAMAGE"}",style=MaterialTheme.typography.headlineSmall,color=Brass)
-            DamageRows(damage)
-            if(!miss)Text("DM determines the hit and any target-specific adjustments.",style=MaterialTheme.typography.bodySmall,color=Muted)
-            else if(natural!=1)Text("Miss recorded in this historical result.",style=MaterialTheme.typography.bodySmall,color=Muted)
-        }
-        Text("${pending.rolled?.coreName?.ifBlank {p.coreId} ?: p.coreId} · ${p.selectedPayloads.joinToString {it.template.name}.ifBlank {p.immediate?.name ?: "No spell payload"}}",style=MaterialTheme.typography.bodySmall,color=Muted)
-        Row(verticalAlignment=Alignment.CenterVertically) {
-            TextButton(onClick={(context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Astravar result",shotSummary(pending)))}) {Text("Copy result")}
-        }
-        DiceDetails(pending)
-        if(onAgain!=null)Action("Roll again",enabled=enabled,onClick=onAgain)
+        if(roll?.attackTotal!=null) Text(roll.attackDescription(p),style=MaterialTheme.typography.bodySmall,color=Muted)
+        else if(p.blast) Text("Dexterity · ${p.radius} ft radius",style=MaterialTheme.typography.bodySmall,color=Muted)
+        Text(damage.damageText(),style=MaterialTheme.typography.bodySmall,color=Frost)
+        if(p.blast && result==null) Text("Before saves",style=MaterialTheme.typography.bodySmall,color=Muted)
+        else if(result?.outcome==Outcome.UNCONFIRMED) Text("Awaiting adjudication",style=MaterialTheme.typography.bodySmall,color=Muted)
+    }
+    if(onAgain!=null) PlayerTextButton(onClick=onAgain,enabled=enabled) {Text("Roll again")}
+    if(details) PlayerSheet("Roll details",{details=false},actions={PlayerTextButton(onClick={
+        (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Astravar result",shotSummary(pending)))
+    }) {Text("Copy full result")}}) {
+        Text(shotSummary(pending),style=MaterialTheme.typography.bodyMedium)
     }
 }
 
 @Composable fun DiceDetails(pending: PendingShot) {
     var open by remember(pending.plan.id) {mutableStateOf(false)}
     val roll=pending.rolled ?: return
-    TextButton(onClick={open=!open}) {Text(if(open) "Hide individual dice" else "Show individual dice")}
+    PlayerTextButton(onClick={open=!open}) {Text(if(open) "Hide individual dice" else "Show individual dice")}
     if(open) Engine.components(pending.plan,roll.critical).forEach {c->Text("${c.label} · ${c.damage.dice} ${c.damage.type.name.lowercase()}: ${roll.damage.getValue(c.id).detail()}",style=MaterialTheme.typography.bodySmall)}
 }
 
-@Composable fun ResolutionPanel(pending: PendingShot,a: Actions,allowManual: Boolean=false) {
+@Composable fun ResolutionPanel(pending: PendingShot,a: Actions,allowManual: Boolean=false,onDirty:(Boolean)->Unit={}) {
     val p=pending.plan
     val roll=pending.rolled
-    var manual by remember(p.id) {mutableStateOf(false)}
-    var outcome by remember(p.id) {mutableStateOf<Outcome?>(if(p.blast && !p.directImpact) Outcome.POINT else null)}
-    var attack by remember(p.id) {mutableStateOf("")}
-    var values by remember(p.id) {mutableStateOf(mapOf<String,String>())}
-    var targets by remember(p.id) {mutableStateOf(emptyList<TargetSave>())}
+    var manual by rememberSaveable(p.id) {mutableStateOf(false)}
+    var outcome by rememberSaveable(p.id) {mutableStateOf<Outcome?>(if(p.blast && !p.directImpact) Outcome.POINT else null)}
+    var attack by rememberSaveable(p.id) {mutableStateOf("")}
+    var values by rememberSaveable(p.id,stateSaver=Saver<Map<String,String>,String>(
+        save={BackupCodec.json.encodeToString(it)},restore={BackupCodec.json.decodeFromString(it)})) {mutableStateOf(mapOf<String,String>())}
+    var targets by rememberSaveable(p.id,stateSaver=Saver<List<TargetSave>,String>(
+        save={BackupCodec.json.encodeToString(it)},restore={BackupCodec.json.decodeFromString(it)})) {mutableStateOf(emptyList<TargetSave>())}
+    val changed=attack.isNotBlank() || values.isNotEmpty() || targets.isNotEmpty() || outcome!=(if(p.blast && !p.directImpact) Outcome.POINT else null)
+    LaunchedEffect(changed) {onDirty(changed)}
     val resolvedOutcome=roll?.suggestedOutcome ?: outcome
     val components=Engine.components(p,roll?.critical ?: (outcome==Outcome.CRITICAL)).filterNot {resolvedOutcome==Outcome.MISS && it.portion==Portion.DIRECT}
     fun save(o: Outcome?) {
@@ -241,7 +393,7 @@ import java.util.UUID
         Text("Costs already saved. Finishing this result spends nothing more.",style=MaterialTheme.typography.bodySmall)
         if(roll==null && !manual) {
             Action("Roll saved shot now",!a.busy) {a.run("Dice saved") {a.repo.rollPending(p.id,RollOptions(),"main")}}
-            if(allowManual) TextButton(onClick={manual=true}) {Text("Enter external dice")}
+            if(allowManual) PlayerTextButton(onClick={manual=true}) {Text("Enter external dice")}
         } else {
             if(roll!=null) {
                 Text(roll.attackTotal?.let {"$it to hit"} ?: "Blast dice ready",style=MaterialTheme.typography.headlineLarge,color=Frost)
@@ -253,7 +405,7 @@ import java.util.UUID
                 DiceDetails(pending)
                 if(roll.suggestedOutcome==null) {
                     if(p.blast) Choices("DM’s Direct Impact decision",listOf(Outcome.HIT,Outcome.MISS),outcome,{it.name.lowercase().replaceFirstChar(Char::titlecase)}) {outcome=it}
-                    else {Text("Did it hit?");Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {Button(onClick={save(Outcome.HIT)},Modifier.weight(1f),enabled=!a.busy) {Text("Hit · apply")};OutlinedButton(onClick={save(Outcome.MISS)},Modifier.weight(1f),enabled=!a.busy) {Text("Miss")}}}
+                    else {Text("Did it hit?");Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {PlayerButton(onClick={save(Outcome.HIT)},Modifier.weight(1f),enabled=!a.busy) {Text("Hit · apply")};PlayerOutlinedButton(onClick={save(Outcome.MISS)},Modifier.weight(1f),enabled=!a.busy) {Text("Miss")}}}
                 }
             } else {
                 if(!p.blast || p.directImpact) {Choices("External attack outcome",listOf(Outcome.HIT,Outcome.CRITICAL,Outcome.MISS),outcome) {outcome=it;values=emptyMap()};Field("Attack total (optional)",attack,{attack=it})}
@@ -266,9 +418,9 @@ import java.util.UUID
                     Field("Creature ${i+1}",t.name,{v->targets=targets.toMutableList().also {it[i]=it[i].copy(name=v)}})
                     ChoiceGrid(listOf(false,true),t.saved,{if(it) "Save passed" else "Save failed"}) {v->targets=targets.toMutableList().also {it[i]=it[i].copy(saved=v)}}
                     if(p.directImpact) Toggle("Direct impact target",t.directTarget) {v->targets=targets.mapIndexed {j,x->x.copy(directTarget=j==i && v)}}
-                    TextButton(onClick={targets=targets.filterIndexed {j,_->j!=i}}) {Text("Remove creature")}
+                    PlayerTextButton(onClick={targets=targets.filterIndexed {j,_->j!=i}}) {Text("Remove creature")}
                 }
-                OutlinedButton(onClick={targets=targets+TargetSave("Creature ${targets.size+1}",null)},enabled=targets.size<200) {Text("+ Add affected creature")}
+                PlayerOutlinedButton(onClick={targets=targets+TargetSave("Creature ${targets.size+1}",null)},enabled=targets.size<200) {Text("+ Add affected creature")}
                 Action("Finish blast · ${targets.size} creatures",!a.busy) {save(resolvedOutcome)}
             } else if(roll==null) Action("Save external result",!a.busy) {save(outcome)}
         }

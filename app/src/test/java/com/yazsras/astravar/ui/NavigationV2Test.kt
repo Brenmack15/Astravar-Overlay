@@ -62,34 +62,34 @@ class NavigationV2Test {
                 app.repository.error.value?.let { error("Weapon repository could not open: $it") }
                 app.repository.state.value != null
             }
-            compose.onNodeWithText("ARMOR & ARCANE SYSTEMS").assertExists()
+            compose.onNodeWithText("Ability scores").assertExists()
             capture("v2-armor", activity.get())
             val before = app.repository.state.value!!
             assertFalse(before.onboarded)
             assertFalse(before.attuned)
-            compose.onNodeWithText("Inventory").performClick()
-            compose.onNodeWithText("OWNED ITEMS & EQUIPMENT").assertExists()
-            compose.onNodeWithText("Inventory").assertIsSelected()
-            capture("v2-inventory", activity.get())
-            compose.onNodeWithText("Item name").performScrollTo().performTextInput("Unsaved navigation test")
             compose.onNodeWithText("Campaign").performClick()
-            compose.onNodeWithText("PEOPLE, GROUPS & BEINGS").assertExists()
-            compose.onNodeWithText("Connections").assertIsSelected()
+            compose.onNodeWithText("Inventory").performClick()
+            compose.onNodeWithText("Add Item").assertExists()
+            capture("v2-inventory", activity.get())
+            compose.onNodeWithText("‹ Campaign").performClick()
+            compose.onNodeWithText("Connections").performClick()
+            compose.onNodeWithContentDescription("Add connection").assertExists()
             capture("v2-connections", activity.get())
+            compose.onNodeWithText("‹ Campaign").performClick()
             compose.onNodeWithText("Inventions").performClick()
-            compose.onNodeWithText("WORKSHOP").assertExists()
+            compose.onNodeWithText("Add Invention").assertExists()
+            compose.onNodeWithText("‹ Campaign").performClick()
             compose.onNodeWithText("Eek").performClick()
-            compose.onNodeWithText("MECHANICAL OWL COMPANION").assertExists()
-            compose.onNodeWithText("Eek").assertIsSelected()
+            compose.onNodeWithText("Condition unknown").assertExists()
             capture("v2-eek", activity.get())
-            compose.onNodeWithText("More").performClick()
-            compose.onNodeWithText("Campaign backup & restore").performScrollTo().performClick()
-            compose.onNodeWithText("COMPLETE CAMPAIGN EXPORT").assertExists()
-            compose.onNodeWithText("Astravar").performClick()
+            compose.onNodeWithText("Config").performClick()
+            compose.onNodeWithText("Campaign backup").performScrollTo().performClick()
+            compose.onNodeWithText("Export campaign backup").assertExists()
+            compose.onNodeWithText("Close").performClick()
             compose.onNodeWithText("Combat").performClick()
             compose.onNodeWithText("CONFIRM YOUR WEAPON PROFILE").assertExists()
-            compose.onNodeWithText("Inventory").performClick()
-            compose.onNodeWithText("OWNED ITEMS & EQUIPMENT").assertExists()
+            compose.onNodeWithText("Campaign").performClick()
+            compose.onNodeWithText("Condition unknown").assertExists()
             compose.runOnIdle { assertEquals(before, app.repository.state.value) }
             assertEquals(0, overlayStarts)
             assertEquals(0, permissionRequests)
@@ -104,19 +104,19 @@ class NavigationV2Test {
     }
 
     @Test fun primaryNavigationExposesSelectedDestinationAndReportsEachUserSelection() {
-        var selected by mutableStateOf("Astravar")
+        var selected by mutableStateOf("Armor")
         val visited = mutableListOf<String>()
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent {
-                AstravarTheme { CampaignNavigationV2(selected) { selected = it; visited += it } }
+                AstravarTheme { RebuildPrimaryNavigation(selected) { selected = it; visited += it } }
             }
-            compose.onNodeWithText("Astravar").assertIsSelected()
-            listOf("Inventory", "Campaign", "More", "Astravar").forEach { destination ->
+            compose.onNodeWithText("Armor").assertIsSelected()
+            listOf("Combat", "Campaign", "Config", "Armor").forEach { destination ->
                 compose.onNodeWithText(destination).performClick()
                 compose.onNodeWithText(destination).assertIsSelected()
             }
-            assertEquals(listOf("Inventory", "Campaign", "More", "Astravar"), visited)
+            assertEquals(listOf("Combat", "Campaign", "Config", "Armor"), visited)
         } finally { activity.pause().stop().destroy() }
     }
 }

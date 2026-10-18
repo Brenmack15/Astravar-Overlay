@@ -2,6 +2,9 @@ plugins {
     id("com.android.application"); kotlin("android"); kotlin("plugin.compose")
     kotlin("plugin.serialization"); id("com.google.devtools.ksp")
 }
+// The old CI debug signer cannot be recovered from its APK. This explicit build
+// installs beside the existing UI Preview, release and Inventory Beta.
+val remoteStatTest = providers.gradleProperty("astravarRemoteStatTest").map(String::toBooleanStrict).getOrElse(false)
 android {
     namespace = "com.yazsras.astravar"
     compileSdk = 36
@@ -9,8 +12,8 @@ android {
         applicationId = "com.yazsras.astravar"
         minSdk = 26
         targetSdk = 36
-        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(20)
-        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("2.0.0")
+        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(if (remoteStatTest) 22 else 21)
+        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse(if (remoteStatTest) "2.0.2" else "2.0.1")
     }
     signingConfigs {
         create("owner") {
@@ -24,7 +27,14 @@ android {
         }
     }
     buildTypes {
-        debug { applicationIdSuffix = ".v2debug"; versionNameSuffix = "-preview" }
+        debug {
+            applicationIdSuffix = ".v2uidebug"; versionNameSuffix = "-ui-rebuild"
+            manifestPlaceholders["astravarDebugLabel"] = "Astravar"
+            if (remoteStatTest) {
+                applicationIdSuffix = ".v2statdebug"; versionNameSuffix = "-remote-stat-test"
+                manifestPlaceholders["astravarDebugLabel"] = "Astravar"
+            }
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
