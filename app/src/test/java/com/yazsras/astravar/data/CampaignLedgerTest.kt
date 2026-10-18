@@ -93,7 +93,8 @@ class CampaignLedgerTest {
         assertTrue(data.contains("astravar-campaign-items"))
         assertTrue(data.contains(photo))
         assertTrue(data.contains("Found runes"))
-        assertTrue(data.contains("\"schema\":1"))
+        assertTrue(data.contains("\"schema\":2"))
+        assertTrue(repo.exportLegacy().contains("\"schema\":1"))
     }
 
     @Test fun discoveryCommandCannotCollideAcrossDetailAndSourceSeparators() = runBlocking {
