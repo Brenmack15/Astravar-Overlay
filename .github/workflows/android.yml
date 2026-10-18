@@ -1,7 +1,7 @@
 name: Bounded Android verification
 on:
   push:
-    branches: ['feat/astravar-android', 'feat/astravar-android/**', 'feat/astravar-inventory-mvp-v170']
+    branches: ['feat/astravar-android', 'feat/astravar-android/**', 'feat/astravar-inventory-mvp-v170', 'feat/astravar-2.0-integrated']
   pull_request:
   workflow_dispatch:
     inputs:
@@ -19,10 +19,10 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
       REUSE_RUN_ID: ${{ inputs.reuse_run_id || '0' }}
-      INVENTORY_BETA: ${{ github.head_ref == 'feat/astravar-inventory-mvp-v170' || github.ref_name == 'feat/astravar-inventory-mvp-v170' }}
+      INVENTORY_BETA: ${{ github.head_ref == 'feat/astravar-inventory-mvp-v170' || github.ref_name == 'feat/astravar-inventory-mvp-v170' || github.head_ref == 'feat/astravar-2.0-integrated' || github.ref_name == 'feat/astravar-2.0-integrated' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Select explicit overlay-only recheck
@@ -47,19 +47,24 @@ jobs:
           mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/19.0"
           export PATH="$ANDROID_HOME/cmdline-tools/19.0/bin:$ANDROID_HOME/platform-tools:$PATH"
           printf 'y\n%.0s' {1..100} | timeout -k 5s 60s sdkmanager --licenses >/dev/null
-          timeout -k 10s 240s sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'emulator' 'platform-tools' 'system-images;android-36;google_apis;x86_64'
+          if [[ "$INVENTORY_BETA" == 'true' ]]; then
+            timeout -k 10s 240s sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
+          else
+            timeout -k 10s 240s sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'emulator' 'platform-tools' 'system-images;android-36;google_apis;x86_64'
+          fi
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "$ANDROID_HOME/cmdline-tools/19.0/bin" >> "$GITHUB_PATH"
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
       - name: Unit tests, lint and native APKs
         if: env.REUSE_RUN_ID == '0'
-        timeout-minutes: 15
+        timeout-minutes: 20
         run: |
           chmod +x gradlew
           if [[ "$INVENTORY_BETA" == 'true' ]]; then
             python3 -m unittest discover -s scripts/tests -v
-            timeout -k 10s 780s ./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+            if [[ "${{ github.head_ref || github.ref_name }}" == 'feat/astravar-2.0-integrated' ]]; then python3 scripts/verify_v2_protected_source.py; fi
+            timeout -k 10s 1140s ./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
             exit 0
           fi
           # This one-run key is ONLY for exercising the optimized release on CI.
@@ -110,4 +115,25 @@ jobs:
             app/build/test-results/
             rules/build/test-results/
             validation/
+          retention-days: 14
+
+      - name: Verify and name Astravar 2.0 APK
+        if: success() && (github.head_ref == 'feat/astravar-2.0-integrated' || github.ref_name == 'feat/astravar-2.0-integrated')
+        run: |
+          mkdir -p validation
+          cp app/build/outputs/apk/debug/app-debug.apk validation/Astravar-2.0-preview-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs validation/Astravar-2.0-preview-debug.apk > validation/apk-signature.txt
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 -v 4 validation/Astravar-2.0-preview-debug.apk > validation/apk-alignment.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging validation/Astravar-2.0-preview-debug.apk > validation/apk-badging.txt
+          sha256sum validation/Astravar-2.0-preview-debug.apk > validation/SHA256SUMS.txt
+          git rev-parse HEAD > validation/SOURCE_COMMIT.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: success() && (github.head_ref == 'feat/astravar-2.0-integrated' || github.ref_name == 'feat/astravar-2.0-integrated')
+        with:
+          name: Astravar-2.0-debug-apk
+          path: |
+            validation/Astravar-2.0-preview-debug.apk
+            validation/SHA256SUMS.txt
+            validation/SOURCE_COMMIT.txt
+            validation/apk-*.txt
           retention-days: 14
