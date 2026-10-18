@@ -1,6 +1,6 @@
 # Builds and signing
 
-The release package ID remains `com.yazsras.astravar`. This UI reconstruction branch (`feat/astravar-2.0-ui-rebuild`) builds **Astravar 2.0 UI Rebuild**, version `2.0.1-ui-rebuild`, code `21`, debug package **`com.yazsras.astravar.v2uidebug`**. Original Preview is `com.yazsras.astravar.v2debug`; Inventory Beta is `com.yazsras.astravar.debug`. All have separate Android data sandboxes. Keep the installed working applications.
+The release package ID remains `com.yazsras.astravar`. This UI reconstruction branch (`feat/astravar-2.0-ui-rebuild`) uses launcher name **Astravar**, version `2.0.1-ui-rebuild`, code `21`, debug package **`com.yazsras.astravar.v2uidebug`**. Original Preview is `com.yazsras.astravar.v2debug`; Inventory Beta is `com.yazsras.astravar.debug`. All have separate Android data sandboxes. Keep the installed working applications.
 
 The prior installed Preview's debug signing key is unavailable here, so this branch uses a separate debug package instead of requiring an uncertain update or uninstall. Validated, user-selected exports are the explicit transfer path. Campaign merge-only restore and weapon replacement restore are different flows; neither contains the fictional sync outbox. Keep the old Preview to preserve its local pending commands and receipts. See [phone installation](ASTRAVAR_2_PHONE_INSTALL.md).
 
@@ -27,6 +27,8 @@ ASTRAVAR_LIVE_SANDBOX=true ./gradlew --no-daemon :app:testDebugUnitTest --tests 
 ```
 
 It uses the fixed public Worker origin and isolated sandbox test database, reopens Room, recovers the original command receipt, performs an exact retry and verifies read-back deduplication. This is host Kotlin-client evidence, not physical-device or private MCP-tool verification.
+
+The opted-in `-PastravarRemoteStatTest=true` build keeps `com.yazsras.astravar.v2statdebug`, version `2.0.2-remote-stat-test` (22), also labeled **Astravar**. Labels do not establish update compatibility. See [the permanent update plan and branding provenance](ASTRAVAR_IDENTITY.md).
 
 ## Durable owner release identity
 
@@ -56,7 +58,7 @@ The release is non-debuggable and minified. Packaging fails if signing variables
 
 ## Current UI branch workflow
 
-For `feat/astravar-2.0-ui-rebuild`, the workflow installs the checksum-verified SDK and builds debug only. It runs Python source safety, both preservation gates, rules/Android/UI tests, lint and APK assembly. Native Robolectric captures are collected with the reports. On success, signature, 16 KB alignment, APK metadata, SHA-256 and source commit are packaged into **Astravar-2.0-UI-Rebuild-apk** alongside **Astravar-2.0-UI-Rebuild-debug.apk**. Reports and screenshots are in **android-verification**. Artifacts are retained for 14 days; no GitHub Release is published.
+For `feat/astravar-2.0-ui-rebuild`, the workflow installs the checksum-verified SDK and builds debug only. It runs Python source safety, both preservation gates, rules/Android/UI tests, lint and APK assembly. Native Robolectric captures are collected with the reports. On success, signature, 16 KB alignment, APK metadata, SHA-256 and source commit are packaged into **Astravar-2.0-Stat-Test-apk** alongside **Astravar-2.0-Stat-Test-debug.apk**. Reports and screenshots are in **android-verification**. Artifacts are retained for 14 days; no GitHub Release is published.
 
 Use a successful push run to match `SOURCE_COMMIT.txt` to the branch's published commit. PR runs may use a temporary merge commit. Final results belong in the current UI reconstruction report; legacy `TEST_REPORT` files remain historical.
 
