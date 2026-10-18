@@ -10,4 +10,6 @@ class AstravarApp: Application() {
     val preferences by lazy { Preferences(this) }
     // Campaign items are isolated from the existing Room v3 weapon/combat database.
     val campaignLedger by lazy { CampaignLedgerRepository(CampaignLedgerDb.open(this)) }
+    // Physically isolated fictional public connectivity lab; no campaign record serialization.
+    val sandboxSync by lazy { SandboxSyncRepository(SandboxSyncDb.open(this)) }
 }
