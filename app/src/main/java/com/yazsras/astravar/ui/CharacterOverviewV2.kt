@@ -3,9 +3,6 @@ package com.yazsras.astravar.ui
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -135,7 +132,7 @@ private fun CharacterProfileDialog(snapshot: CharacterProfile?, latest: Characte
     var source by remember { mutableStateOf(snapshot?.source.orEmpty()) }
     val actions = rememberLocalRecordActions()
     val stale = latest?.revision != snapshot?.revision
-    CharacterEditorDialog(
+    ArcaneDialog(
         onDismissRequest = { if (!actions.busy) onDismiss() },
         title = { Text("Edit character status") },
         text = {
@@ -180,7 +177,7 @@ private fun CharacterAbilityDialog(key: String, snapshot: CharacterAbility?, lat
     val scorePreview = score.toIntOrNull()?.takeIf { it in 0..1000 }
     val magicPreview = magic.toIntOrNull()?.takeIf { it in -1000..1000 }
     val basePreview = scorePreview?.let { Math.floorDiv(it - 10, 2) }
-    CharacterEditorDialog(
+    ArcaneDialog(
         onDismissRequest = { if (!actions.busy) onDismiss() },
         title = { Text("Edit ${abilityNames[key] ?: key}") },
         text = {
@@ -213,24 +210,3 @@ private fun CharacterAbilityDialog(key: String, snapshot: CharacterAbility?, lat
     )
 }
 
-/** Material's measured dialog host keeps the multi-field editor bounded on small/IME windows. */
-@Composable
-private fun CharacterEditorDialog(
-    onDismissRequest: () -> Unit,
-    title: @Composable () -> Unit,
-    text: @Composable () -> Unit,
-    confirmButton: @Composable () -> Unit,
-    dismissButton: @Composable () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismissRequest,
-        title = title,
-        text = { Box(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) { text() } },
-        confirmButton = confirmButton,
-        dismissButton = dismissButton,
-        shape = CutCornerShape(14.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
-        titleContentColor = Brass,
-        textContentColor = MaterialTheme.colorScheme.onSurface
-    )
-}
