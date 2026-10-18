@@ -31,6 +31,7 @@ class UpdatePreservationInstrumentationTest {
         }
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
         assertTrue(device.wait(Until.hasObject(By.text("ASTRAVAR").pkg(product)), 60000))
+        repeat(3) { device.findObject(By.text("Close").pkg(product))?.let { it.click(); device.waitForIdle() } }
         assertTrue("The saved labeled demo survived", device.hasObject(By.text("DEMO").pkg(product)))
         device.findObjects(By.text("Config").pkg(product)).last().click()
         find("Roll history").click()

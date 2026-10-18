@@ -34,6 +34,7 @@ class UpdateFixtureInstrumentationTest {
         }
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
         assertTrue(device.wait(Until.hasObject(By.text("ASTRAVAR").pkg(product)), 60000))
+        repeat(3) { device.findObject(By.text("Close").pkg(product))?.let { it.click(); device.waitForIdle() } }
         device.findObjects(By.text("Campaign").pkg(product)).last().click()
         find("Inventory").click()
         find("Add Item").click()

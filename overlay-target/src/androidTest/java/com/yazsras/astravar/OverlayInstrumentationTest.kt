@@ -33,7 +33,12 @@ class OverlayInstrumentationTest {
     private fun shell(command:String)=device.executeShellCommand(command)
     private fun checkpoint(message:String) {instrumentation.sendStatus(0,android.os.Bundle().apply {putString("stream","\nCHECKPOINT: $message\n")})}
     private fun screenshot(name:String) {assertTrue(device.takeScreenshot(File(files,"api${android.os.Build.VERSION.SDK_INT}-$name.png")))}
-    private fun openMain() {shell("am start -W -n $appPackage/com.yazsras.astravar.MainActivity");assertTrue(device.wait(Until.hasObject(By.text("ASTRAVAR")),60000))}
+    private fun openMain() {
+        shell("am start -W -n $appPackage/com.yazsras.astravar.MainActivity")
+        assertTrue(device.wait(Until.hasObject(By.text("ASTRAVAR").pkg(appPackage)),60000))
+        // Saved native tool dialogs may legitimately survive activity recreation.
+        repeat(3) { device.findObject(By.text("Close").pkg(appPackage))?.let { it.click(); device.waitForIdle() } }
+    }
     private fun findText(text:String):UiObject2 {
         for(direction in listOf(Direction.DOWN,Direction.UP)) repeat(12) {
             device.findObject(By.text(text).pkg(appPackage))?.let {return it}
