@@ -12,8 +12,8 @@ android {
         applicationId = "com.yazsras.astravar"
         minSdk = 26
         targetSdk = 36
-        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(if (remoteStatTest) 22 else 21)
-        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse(if (remoteStatTest) "2.0.2" else "2.0.1")
+        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(24)
+        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("2.1.0")
     }
     signingConfigs {
         create("owner") {
