@@ -1,19 +1,21 @@
 # Builds and signing
 
-The package ID is `com.yazsras.astravar`. Debug is `com.yazsras.astravar.debug` and has a different signing identity. JSON export/import is the explicit way to move confirmed state between them; no silent data migration occurs.
+The release package ID is `com.yazsras.astravar`. This branch's debug preview is `com.yazsras.astravar.v2debug`; Inventory Beta used `com.yazsras.astravar.debug`. All have separate Android data sandboxes. Validated, user-selected JSON export/import is the explicit way to transfer supported records; no silent cross-package migration occurs. Campaign and weapon backups are separate. Do not uninstall a working app to try the preview.
 
 Use JDK 17 and SDK platform 36 / build tools 35.0.0. Set `ANDROID_HOME` or a local untracked `local.properties`. Run the included genuine Gradle wrapper. Its pinned distribution checksum is `20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed78`.
 
 ```sh
-timeout -k 10s 540s ./gradlew --no-daemon :rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+timeout -k 10s 1140s ./gradlew --no-daemon :rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 timeout -k 10s 180s ./gradlew --no-daemon :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
 timeout -k 5s 35s adb install app/build/outputs/apk/debug/app-debug.apk
-timeout -k 10s 300s ./gradlew --no-daemon :overlay-target:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.astravarPackage=com.yazsras.astravar.debug
+timeout -k 10s 300s ./gradlew --no-daemon :overlay-target:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.astravarPackage=com.yazsras.astravar.v2debug
 ```
 
 Install the controlled test APK on the emulator before the connected test. The instrumented test seeds only a labeled demo fixture. Never run fixture seeding against a real campaign without a backup.
 
 ## Durable owner release identity
+
+Astravar 2.0 preview validation builds debug only. The release configuration below is retained from the recovered application; this work does not rotate or exercise the owner key. Local and Actions debug certificates may differ, so keep one preview build channel for updates. Export preview records before switching channels; a signature mismatch is not permission to uninstall the release.
 
 A distinct RSA-4096 PKCS12 release identity was created for this project. Its encrypted keystore and recovery configuration are preserved in an owner-private recovery artifact, not the repository, public build artifacts, or chat text. Reuse that exact identity for every update. Do not generate a replacement when secrets are missing. The final test report records the public certificate SHA-256 and APK SHA-256.
 
