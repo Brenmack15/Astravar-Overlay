@@ -136,3 +136,19 @@ Exactly 51 unique development/design pages were reviewed recursively. This list 
 | 49 | 🧪 14 — Codex Technical Feasibility Review & Safe Implementation Gates | [Open](https://app.notion.com/p/3fc4d9aa716c8148aea7cb22d5c4941b?pvs=204) | `2026-10-17T23:21:13.130Z` |
 | 50 | 🤝 15 — Connections Tab: Campaign Relationships & Memory | [Open](https://app.notion.com/p/3fc4d9aa716c81b68c87fc7b19d58744?pvs=204) | `2026-10-17T23:19:40.998Z` |
 | 51 | 🔌 16 — ChatGPT ↔ Astravar Connectivity-First Feasibility Gate | [Open](https://app.notion.com/p/3fc4d9aa716c819ba0cfe68f4e2fc71b?pvs=204) | `2026-10-18T02:58:10.160Z` |
+
+## Provided campaign-reference review
+
+The seven provided Markdown reference attachments below were fully read during the implementation review on 18 October 2026 UTC. They supplement the 51 development/design pages listed above; they are not additional Notion pages or imported campaign records. Only filenames and integrity hashes are recorded here. Their private contents, historical examples and live campaign values are not reproduced.
+
+All seven files identify themselves as **Version 1.0, prepared 5 September 2026**. Their presence in the current upload does not establish that they contain the latest accepted amendment or current resource checkpoint. No newer complete version history or authoritative live-state reconciliation was verified. Later explicit accepted rulings take precedence; historical examples must not initialize current resources. This review added no campaign import and made no numerical changes to the preserved weapon engine.
+
+| Exact provided filename | SHA-256 of reviewed bytes |
+| --- | --- |
+| `01_DM_CORE(2).md` | `a1a93a4177be2f03e9224d8c6f0029df87c6331b2127eee371c30424aefe8ace` |
+| `02_RULES_AND_DICE(1).md` | `b6542c5131dd0aab918badc41ea8065e3bfc4529a1350ce08bc6c6c2a0408c79` |
+| `03_SOLO_COMBAT(1).md` | `90461d35219720a5f260207303d274738c6b75efb21f008b9180559ee09f90a4` |
+| `04_WORLD_AND_EXPLORATION(1).md` | `8574b6adead4fc1405298cb26dddab41c1efc02cd276f27aa9768af4ba8c8073` |
+| `05_CRAFTING_AND_RESOURCES(1).md` | `cf8b797717132c0399f85da6b57ab02ee196e3f3cdb51ce726be93a27c74eb1c` |
+| `06_HOMEBREW_AND_EEK(1).md` | `7849151030aea654d1387d01d2bc5505bfa95f90463a05813a354bff18183237` |
+| `07_CONTINUITY_AND_CHECKPOINTS(1).md` | `47edbc0a4a8f9d182dedc44aa8fa2bb236787c534a42b310f1546e3fa83f7527` |
