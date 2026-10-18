@@ -37,6 +37,7 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository) {
     val scope = rememberCoroutineScope()
     val records = repository.records
     val items by repository.items.collectAsState(initial = emptyList())
+    val placements by repository.party.placements.collectAsState(initial = emptyList())
     val itemDetails by records.itemDetails.collectAsState(initial = emptyList())
     val itemProperties by records.itemProperties.collectAsState(initial = emptyList())
     val links by records.links.collectAsState(initial = emptyList())
@@ -97,6 +98,7 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository) {
 
     val eventsFlow = remember(selectedId) { selectedId?.let(repository::eventsForItem) }
     val events = eventsFlow?.collectAsState(initial = emptyList())?.value.orEmpty()
+    val structuredPlacement = placements.firstOrNull { it.itemId == selectedId }
     val stale = selected != null && loadedItem != null && selected.revision != loadedItem.revision
     val details = itemDetails.firstOrNull { it.itemId == selectedId }
     val staleDetails = details != null && loadedDetails != null && details.revision != loadedDetails.revision
@@ -256,14 +258,14 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository) {
                     Field("Item name", title, { title = it }, enabled = !busy)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Box(Modifier.weight(1f)) { Choices("Category", listOf("Armor", "Weapon", "Tool", "Component", "Material", "Magic Item", "Consumable", "Treasure", "Other"), category, enabled = !busy) { category = it } }
-                        Box(Modifier.weight(1f)) { Field("Quantity", quantity, { quantity = it }, enabled = !busy) }
+                        Box(Modifier.weight(1f)) { Field("Quantity", quantity, { quantity = it }, enabled = !busy && structuredPlacement == null) }
                     }
-                    Text("Blank quantity means unknown", style = MaterialTheme.typography.labelSmall, color = Muted)
+                    Text(if (structuredPlacement == null) "Blank quantity means unknown" else "Party → Equipment records ownership and quantity changes atomically. These fields are read-only here.", style = MaterialTheme.typography.labelSmall, color = Muted)
                     Field("Description / appearance", description, { description = it }, single = false, enabled = !busy)
                     ExpandableRecordSection("Ownership & location") {
-                        Field("Owner / holder label", owner, { owner = it }, enabled = !busy)
-                        Choices("Current state", listOf("Unknown", "Carried", "Equipped", "Installed", "Stored", "Consumed", "Sold", "Lost"), itemState, enabled = !busy) { itemState = it }
-                        Field("Specific location / container (optional)", location, { location = it }, enabled = !busy)
+                        Field("Owner / holder label", owner, { owner = it }, enabled = !busy && structuredPlacement == null)
+                        Choices("Current state", listOf("Unknown", "Carried", "Equipped", "Installed", "Stored", "Consumed", "Sold", "Lost"), itemState, enabled = !busy && structuredPlacement == null) { itemState = it }
+                        Field("Specific location / container (optional)", location, { location = it }, enabled = !busy && structuredPlacement == null)
                     }
                     ExpandableRecordSection("Properties & research notes") {
                         Field("Known properties / legacy notes", known, { known = it }, single = false, enabled = !busy)

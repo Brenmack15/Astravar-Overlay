@@ -6,6 +6,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -29,6 +33,7 @@ fun ElementWheelV2(profile: Profile, selected: List<DamageType>, close: () -> Un
     val ring = listOf(DamageType.FIRE, DamageType.COLD, DamageType.LIGHTNING, DamageType.ACID,
         DamageType.POISON, DamageType.THUNDER, DamageType.NECROTIC, DamageType.PSYCHIC, DamageType.RADIANT)
     val allowed = if (profile.elementCapacity > 1 && profile.elementCapacityOverride == null) Engine.basic else Engine.elements(profile)
+    var showUnlocks by rememberSaveable { mutableStateOf(false) }
     PlayerSheet("Choose an element", close) {
         BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio(.9f).testTag("element-wheel")) {
             val centerX = maxWidth / 2
@@ -37,7 +42,9 @@ fun ElementWheelV2(profile: Profile, selected: List<DamageType>, close: () -> Un
             val nodeHeight = maxHeight * .25f
             val radiusX = maxWidth * .36f
             val radiusY = maxHeight * .36f
-            ArcaneDial(Modifier.fillMaxSize(), RebuildPalette.BlueAccent.copy(alpha = .65f))
+            // Center the dial on the 48dp particle, whose center is 2dp padding
+            // + 24dp from its node's top. Labels must not move the visual center.
+            ArcaneDial(Modifier.fillMaxSize().offset(y = 26.dp - nodeHeight / 2), RebuildPalette.BlueAccent.copy(alpha = .65f))
             ring.forEachIndexed { index, type ->
                 val angle = Math.toRadians(-90.0 + index * 40.0)
                 val enabled = type in allowed
@@ -57,6 +64,11 @@ fun ElementWheelV2(profile: Profile, selected: List<DamageType>, close: () -> Un
                 close()
             }
         }
+        TextButton(onClick = { showUnlocks = !showUnlocks }, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text("Radiant, Psychic & Necrotic unlocks")
+        }
+        if (showUnlocks) Text("These elements require Artificer level 8 or higher and the confirmed Advanced Elements upgrade in Rules & profile. Configure each damage formula there. An unconfirmed capacity override does not grant an upgrade.",
+            style = MaterialTheme.typography.bodyMedium, color = RebuildPalette.Ice)
     }
 }
 

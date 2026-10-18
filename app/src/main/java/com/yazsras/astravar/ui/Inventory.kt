@@ -18,14 +18,13 @@ import java.util.UUID
 /** Weapon configuration keeps the original repositories, rules and snapshot semantics. */
 @Composable fun CoresPage(s: Campaign, a: Actions) {
     var coreId by rememberSaveable { mutableStateOf<String?>(null) }
-    var addCore by rememberSaveable { mutableStateOf(false) }
     var charge by rememberSaveable { mutableStateOf(false) }
     Page {
-        PlayerHeading("Resonant cores") {
-            PlayerTextButton(onClick = { addCore = true }) { Text("Add core") }
+        PlayerHeading("Internal spell reservoir") {
+            Text("One permanent internal core", color = RebuildPalette.Muted)
         }
-        if (s.cores.isEmpty()) PlayerEmpty("No cores recorded", "Record only completed cores you own.", "Core")
-        s.cores.forEach { core ->
+        if (s.installed == null) PlayerEmpty("Internal core not configured", "Confirm the weapon profile first; spare cores are no longer used.", "Core")
+        s.cores.filter { it.id == s.installedId }.forEach { core ->
             val ready = core.usable(s.gameSeconds)
             PlayerCard(onClick = { coreId = core.id }) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -33,7 +32,7 @@ import java.util.UUID
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(core.name, style = MaterialTheme.typography.titleMedium)
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text(if (core.id == s.installedId) "EQUIPPED" else "SPARE", style = MaterialTheme.typography.labelSmall,
+                            Text("INTERNAL NEXUS", style = MaterialTheme.typography.labelSmall,
                                 color = if (core.id == s.installedId) RebuildPalette.Gold else RebuildPalette.Muted)
                             Text(if (ready) "READY" else "UNAVAILABLE", style = MaterialTheme.typography.labelSmall,
                                 color = if (ready) RebuildPalette.Ice else RebuildPalette.Muted)
@@ -47,114 +46,58 @@ import java.util.UUID
                     color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
             }
         }
-        PlayerButton(onClick = { charge = true }, modifier = Modifier.fillMaxWidth()) { Text("Charge / overwrite payload") }
+        PlayerButton(onClick = { charge = true }, enabled = !a.busy && s.installed != null, modifier = Modifier.fillMaxWidth()) { Text("Charge / overwrite payload") }
         CraftingSection(s, a)
     }
     val core = s.cores.firstOrNull { it.id == coreId }
-    if (core != null) WeaponCoreDetailsSheet(s, a, core) { coreId = null }
-    if (addCore) RecordCoreSheet(s, a) { addCore = false }
+    if (core != null) InternalPayloadDetailsSheet(s, a, core) { coreId = null }
     if (charge) ChargePayloadSheet(s, a) { charge = false }
 }
 
-@Composable private fun RecordCoreSheet(s: Campaign, a: Actions, close: () -> Unit) {
-    var name by rememberSaveable { mutableStateOf("") }
-    val revision = rememberSaveable { s.revision }
-    val commandId = rememberSaveable { UUID.randomUUID().toString() }
-    val newCoreId = rememberSaveable { UUID.randomUUID().toString() }
-    var attempted by rememberSaveable { mutableStateOf(false) }
-    PlayerSheet("Record a completed core", close, dirty = name.isNotBlank(), showCancel = true, actions = {
-        PlayerButton(onClick = {
-            attempted = true
-            val enteredName = name.trim()
-            a.run("Completed core recorded") {
-                a.repo.mutate(commandId, "Player confirmed completed core: $enteredName") { current ->
-                    requireWeaponDraftRevision(current, revision)
-                    current.copy(cores = current.cores + Core(newCoreId, enteredName))
-                }
-                close()
-            }
-        }, enabled = !a.busy && name.isNotBlank() && s.revision == revision) { Text("Record core") }
-    }) {
-        Field("Name of a completed core you actually own", name, { name = it }, enabled = !a.busy)
-        WeaponDraftStatus(s, revision, a, attempted)
-    }
-}
-
-@Composable private fun WeaponCoreDetailsSheet(s: Campaign, a: Actions, core: Core, close: () -> Unit) {
-    var step by rememberSaveable { mutableStateOf("details") }
-    var payloadId by rememberSaveable { mutableStateOf<String?>(null) }
-    var reviewRevision by rememberSaveable { mutableStateOf(s.revision) }
+@Composable private fun InternalPayloadDetailsSheet(s: Campaign, a: Actions, core: Core, close: () -> Unit) {
+    var purgeId by rememberSaveable { mutableStateOf<String?>(null) }
+    var revision by rememberSaveable { mutableLongStateOf(s.revision) }
     var commandId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
-    var attempted by rememberSaveable { mutableStateOf(false) }
-    val payload = core.payloads.firstOrNull { it.id == payloadId }
-    val installCost = if (s.postShatter) s.profile.replacementCost else s.profile.swapCost
-    val title = when (step) { "install" -> "Install core"; "purge" -> "Purge stored magic?"; else -> core.name }
-    PlayerSheet(title, close, actions = {
-        if (step == "install" || step == "purge") PlayerButton(onClick = {
-            attempted = true
-            val operation = step
-            val targetPayloadId = payload?.id
-            val expectedRevision = reviewRevision
-            val operationId = commandId
-            a.run(if (operation == "install") "Core installation confirmed" else "Payload purged") {
-                val label = if (operation == "install") "Install ${core.name}" else "Purge payload $targetPayloadId · Bonus Action"
-                a.repo.mutate(operationId, label) { current ->
-                    requireWeaponDraftRevision(current, expectedRevision)
-                    if (operation == "install") Engine.install(current, core.id)
-                    else Engine.purge(current, core.id, targetPayloadId ?: error("Payload no longer available"))
-                }
-                close()
+    val payload = core.payloads.firstOrNull { it.id == purgeId }
+    PlayerSheet(if (payload == null) "Internal spell reservoir" else "Purge stored magic?", close, actions = {
+        if (payload != null) PlayerButton(onClick = {
+            a.run("Stored spell purged · Bonus Action") {
+                a.repo.mutate(commandId, "Purge ${payload.template.name} · Bonus Action") { current ->
+                    requireWeaponDraftRevision(current, revision)
+                    Engine.purge(current, core.id, payload.id)
+                }; purgeId = null
             }
-        }, enabled = !a.busy && s.revision == reviewRevision &&
-            if (step == "install") core.usable(s.gameSeconds) && core.id != s.installedId && s.installation == null
-            else payload != null && !core.destroyed) { Text(if (step == "install") "Confirm install" else "Confirm purge") }
+        }, enabled = !a.busy && s.revision == revision) { Text("Purge · no refund") }
     }) {
-        if (step != "details") PlayerTextButton(onClick = { step = "details"; attempted = false }) { Text("‹ Core details") }
-        when (step) {
-            "install" -> {
-                Text(core.name, style = MaterialTheme.typography.titleMedium, color = RebuildPalette.Ice)
-                Text("Cost: $installCost", style = MaterialTheme.typography.bodyLarge)
-                if (s.postShatter && installCost == "10 in-game minutes") Text("Starts installation; recorded game time must advance before completion.")
-                else Text("Confirmation applies the existing installation action cost.")
-                WeaponDraftStatus(s, reviewRevision, a, attempted)
-            }
-            "purge" -> {
-                Text(payload?.template?.name ?: "Payload no longer available", style = MaterialTheme.typography.titleMedium)
-                Text("Spends a Bonus Action. The selected spell energy is lost without refund.")
-                WeaponDraftStatus(s, reviewRevision, a, attempted)
-            }
-            else -> {
-                Text(core.readiness(s.gameSeconds), color = RebuildPalette.Ice, style = MaterialTheme.typography.bodyMedium)
-                Text("${core.payloads.size}/${s.profile.capacity} stored payloads", color = RebuildPalette.Muted)
-                if (core.id != s.installedId && !core.destroyed) PlayerOutlinedButton(onClick = {
-                    step = "install"; reviewRevision = s.revision; commandId = UUID.randomUUID().toString(); attempted = false
-                }, enabled = !a.busy && core.usable(s.gameSeconds) && s.installation == null,
-                    modifier = Modifier.fillMaxWidth()) { Text("Install · $installCost") }
-                if (core.payloads.isEmpty()) Text("No payload loaded", color = RebuildPalette.Muted)
-                core.payloads.forEach { stored ->
-                    PlayerDisclosure(stored.template.name) {
-                        PayloadExpressions(stored.template)
-                        Text("Level ${stored.template.castingLevel} · ${stored.source.name.lowercase()}", color = RebuildPalette.Muted)
-                        Text(stored.template.approvalNotes, style = MaterialTheme.typography.bodySmall)
-                        Text("Loaded at game second ${stored.loadedAt}", style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
-                        if (!core.destroyed) PlayerTextButton(onClick = {
-                            payloadId = stored.id; step = "purge"; reviewRevision = s.revision
-                            commandId = UUID.randomUUID().toString(); attempted = false
-                        }, enabled = !a.busy) { Text("Purge · Bonus Action") }
-                    }
+        if (payload != null) {
+            Text(payload.template.name, style = MaterialTheme.typography.titleMedium)
+            Text("Spends a Bonus Action and removes this stored spell without a refund. The internal nexus stays installed.", color = Muted)
+            PlayerTextButton(onClick = { purgeId = null }, enabled = !a.busy) { Text("Cancel purge") }
+        } else {
+            Text(core.readiness(s.gameSeconds), color = Frost)
+            Text("${core.payloads.size}/${s.profile.capacity} stored payloads", color = Muted)
+            core.payloads.forEach { stored ->
+                PlayerDisclosure(stored.template.name) {
+                    PayloadExpressions(stored.template)
+                    Text("Level ${stored.template.castingLevel} · ${stored.source.name.lowercase()}", color = Muted)
+                    Text(stored.sourceReference, style = MaterialTheme.typography.bodySmall, color = Muted)
+                    Text("Loaded at game second ${stored.loadedAt}", style = MaterialTheme.typography.bodySmall, color = Muted)
+                    PlayerTextButton(onClick = { purgeId = stored.id; revision = s.revision; commandId = UUID.randomUUID().toString() }, enabled = !a.busy) { Text("Purge stored spell") }
                 }
             }
+            if (core.payloads.isEmpty()) Text("No payload loaded", color = Muted)
         }
+        if (a.message.isNotBlank()) Text(a.message, color = Frost)
     }
 }
 
 @Composable private fun ChargePayloadSheet(s: Campaign, a: Actions, close: () -> Unit) {
-    var coreId by rememberSaveable { mutableStateOf(s.installedId ?: s.cores.firstOrNull { !it.destroyed }?.id) }
+    var coreId by rememberSaveable { mutableStateOf(s.installedId) }
     var templateId by rememberSaveable { mutableStateOf(s.templates.firstOrNull { it.approved }?.id) }
     var source by rememberSaveable { mutableStateOf(SourceKind.SLOT) }
     var scrollId by rememberSaveable { mutableStateOf<String?>(null) }
     var overwrite by rememberSaveable { mutableStateOf<String?>(null) }
-    var touch by rememberSaveable { mutableStateOf(false) }
+    val touch = true // fixed installed core; explicit Charge button is confirmation
     var manual by rememberSaveable { mutableStateOf(false) }
     var dirty by rememberSaveable { mutableStateOf(false) }
     var attempted by rememberSaveable { mutableStateOf(false) }
@@ -184,8 +127,7 @@ import java.util.UUID
             (source != SourceKind.SCROLL || scrollId != null)) { Text(if (overwrite == null) "Charge · spend source" else "Overwrite · spend source") }
     }) {
         Text("Bonus Action", color = RebuildPalette.Gold, style = MaterialTheme.typography.labelLarge)
-        Choices("Available core", s.cores.filterNot { it.destroyed }.map { it.id }, coreId,
-            display = { id -> s.cores.firstOrNull { it.id == id }?.name ?: "Unavailable core" }, enabled = !a.busy) { coreId = it; overwrite = null; dirty = true }
+        Text("Stored magic uses Astravar's single internal core.", color = RebuildPalette.Muted)
         Choices("Approved payload template", s.templates.filter { it.approved }.map { it.id }, templateId,
             display = { id -> s.templates.firstOrNull { it.id == id }?.name ?: "Unavailable template" }, enabled = !a.busy) { templateId = it; scrollId = null; dirty = true }
         template?.let { PayloadExpressions(it) }
@@ -200,7 +142,7 @@ import java.util.UUID
         Choices("Payload to overwrite", listOf<String?>(null) + core?.payloads.orEmpty().map { it.id }, overwrite,
             display = { id -> core?.payloads?.firstOrNull { it.id == id }?.template?.name ?: "Do not overwrite" }, enabled = !a.busy) { overwrite = it; dirty = true }
         if (overwrite != null) Text("The selected old energy is lost without refund.", color = MaterialTheme.colorScheme.error)
-        Toggle("I am touching this available core", touch, !a.busy) { touch = it; dirty = true }
+        Text("The internal nexus remains installed; Charge is your explicit confirmation.", color = RebuildPalette.Muted)
         WeaponDraftStatus(s, revision, a, attempted)
     }
 }
@@ -212,7 +154,7 @@ import java.util.UUID
     var templateSnapshot by rememberSaveable { mutableStateOf<String?>(null) }
     Page {
         PlayerHeading("Stored payloads")
-        if (s.installed?.payloads.isNullOrEmpty()) PlayerEmpty("No stored payloads", "Charge an approved payload through Core management.", "Payload")
+        if (s.installed?.payloads.isNullOrEmpty()) PlayerEmpty("No stored payloads", "Charge an approved payload through the internal spell reservoir.", "Payload")
         s.installed?.payloads?.forEach { payload ->
             val active = payload.id in selected
             PlayerCard(onClick = { storedId = payload.id }) {
@@ -420,98 +362,17 @@ import java.util.UUID
         style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
 }
 
+/** Retired core projects stay readable without offering new spare/replacement cores. */
 @Composable fun CraftingSection(s: Campaign, a: Actions) {
     var open by rememberSaveable { mutableStateOf(false) }
-    PlayerEntry("Core crafting", "${s.projects.size} planned projects", "Core", { open = true })
-    if (open) CoreCraftingSheet(s, a) { open = false }
-}
-
-@Composable private fun CoreCraftingSheet(s: Campaign, a: Actions, close: () -> Unit) {
-    var creating by rememberSaveable { mutableStateOf(false) }
-    var projectId by rememberSaveable { mutableStateOf<String?>(null) }
-    var confirmDay by rememberSaveable { mutableStateOf(false) }
-    var name by rememberSaveable { mutableStateOf("") }
-    var notes by rememberSaveable { mutableStateOf("") }
-    var recipe by rememberSaveable { mutableStateOf("Replacement core") }
-    var revision by rememberSaveable { mutableStateOf(s.revision) }
-    var commandId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
-    val newProjectId = rememberSaveable { UUID.randomUUID().toString() }
-    var attempted by rememberSaveable { mutableStateOf(false) }
-    val recipes = mapOf(
-        "First prototype" to "Existing pistol + cult crystal; 150 gp total; 3 focused in-game days; no checks. Special first build only.",
-        "Replacement core" to "One suitable rare Resonant Crystal + 100 gp conductive magical metal + 50 gp filament + 50 gp catalyst + 50 gp stabilizing reagents (250 gp secondary total); 3 focused crafting days with tools/workspace.",
-        "Synthetic (proposed)" to "Level 20: natural crystal requirement removed. Cost/time require a ruling; configured ${s.profile.syntheticGp ?: "unknown"} gp / ${s.profile.syntheticDays ?: "unknown"} days."
-    )
-    val project = s.projects.firstOrNull { it.id == projectId }
-    val title = when { creating -> "Plan core crafting"; confirmDay -> "Record completed day?"; project != null -> project.name; else -> "Core crafting" }
-    PlayerSheet(title, close, dirty = creating && (name.isNotBlank() || notes.isNotBlank() || recipe != "Replacement core"),
-        showCancel = creating || confirmDay, actions = {
-            when {
-                creating -> PlayerButton(onClick = {
-                    attempted = true
-                    val expectedRevision = revision
-                    val operationId = commandId
-                    val enteredName = name
-                    val enteredRecipe = recipes.getValue(recipe)
-                    val enteredNotes = notes
-                    a.run("Crafting project recorded") {
-                        a.repo.mutate(operationId, "Crafting project recorded") { current ->
-                            requireWeaponDraftRevision(current, expectedRevision)
-                            current.copy(projects = current.projects + CraftProject(newProjectId, enteredName, enteredRecipe, notes = enteredNotes))
-                        }
-                        close()
-                    }
-                }, enabled = !a.busy && s.revision == revision && name.isNotBlank()) { Text("Record planned project") }
-                confirmDay && project != null -> PlayerButton(onClick = {
-                    attempted = true
-                    val expectedRevision = revision
-                    val operationId = commandId
-                    val targetProjectId = project.id
-                    val targetProjectName = project.name
-                    a.run("Focused crafting day recorded") {
-                        a.repo.mutate(operationId, "Player recorded one focused crafting day for $targetProjectName") { current ->
-                            requireWeaponDraftRevision(current, expectedRevision)
-                            require(current.projects.any { it.id == targetProjectId }) { "Project no longer available" }
-                            current.copy(projects = current.projects.map { if (it.id == targetProjectId) it.copy(daysWorked = it.daysWorked + 1) else it })
-                        }
-                        confirmDay = false
-                    }
-                }, enabled = !a.busy && s.revision == revision) { Text("Confirm completed day") }
-                project == null -> PlayerButton(onClick = {
-                    creating = true; revision = s.revision; commandId = UUID.randomUUID().toString(); attempted = false
-                }, enabled = !a.busy) { Text("Add project") }
-            }
-        }) {
-        when {
-            creating -> {
-                Choices("Recipe", recipes.keys.toList(), recipe, enabled = !a.busy) { recipe = it }
-                Text(recipes.getValue(recipe), style = MaterialTheme.typography.bodyMedium)
-                Field("Project name", name, { name = it }, enabled = !a.busy)
-                Field("Materials / campaign notes", notes, { notes = it }, single = false, enabled = !a.busy)
-                Text("A plan does not award a core or spend gold.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
-                WeaponDraftStatus(s, revision, a, attempted)
-            }
-            confirmDay && project != null -> {
-                Text(project.name, style = MaterialTheme.typography.titleMedium)
-                Text("Record one focused day already completed in play. Current progress: ${project.daysWorked} day(s).")
-                Text("Does not advance game time, spend gold or create a core.", color = RebuildPalette.Muted)
-                PlayerTextButton(onClick = { confirmDay = false }, enabled = !a.busy) { Text("‹ Project details") }
-                WeaponDraftStatus(s, revision, a, attempted)
-            }
-            project != null -> {
-                PlayerTextButton(onClick = { projectId = null }, enabled = !a.busy) { Text("‹ All projects") }
-                Text("${project.daysWorked} focused day(s)", color = RebuildPalette.Ice, style = MaterialTheme.typography.titleMedium)
-                Text(project.recipe, style = MaterialTheme.typography.bodyMedium)
-                if (project.notes.isNotBlank()) Text(project.notes)
-                PlayerOutlinedButton(onClick = {
-                    confirmDay = true; revision = s.revision; commandId = UUID.randomUUID().toString(); attempted = false
-                }, enabled = !a.busy, modifier = Modifier.fillMaxWidth()) { Text("Record one completed focused day") }
-            }
-            else -> {
-                if (s.projects.isEmpty()) Text("No core crafting projects", color = RebuildPalette.Muted)
-                s.projects.forEach { item -> PlayerEntry(item.name, "${item.daysWorked} focused day(s)", "Core", { if (!a.busy) projectId = item.id }) }
-            }
-        }
+    if (s.projects.isNotEmpty()) PlayerEntry("Historical core projects", "${s.projects.size} preserved records · read only", "History", { open = true })
+    if (open) PlayerSheet("Historical core projects", { open = false }) {
+        Text("Spare and replacement core crafting is retired. Existing project history is preserved. Use Campaign → Inventions for current crafting records.", color = Muted)
+        s.projects.forEach { project -> PlayerDisclosure(project.name) {
+            Text("${project.daysWorked} focused day(s)", color = Frost)
+            Text(project.recipe)
+            if (project.notes.isNotBlank()) Text(project.notes)
+        } }
     }
 }
 

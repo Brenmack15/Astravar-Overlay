@@ -140,7 +140,7 @@ val LocalPlayerDismiss = staticCompositionLocalOf<() -> Unit> { {} }
                         FlowRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.End) {
                             if (showCancel) PlayerTextButton(onClick = close) { Text("Cancel") }
-                            Row(verticalAlignment = Alignment.CenterVertically, content = actions)
+                            actions()
                         }
                     }
                 }

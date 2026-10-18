@@ -75,24 +75,25 @@ val campaignDestinationsV2 = listOf("Astravar", "Inventory", "Campaign", "More")
     SideEffect { onOverlayVisibilityChanged(capabilitiesOpen || characterEditorOpen) }
     Page {
         CharacterOverviewV2(ledger, state, characterProfileId) { characterEditorOpen = it }
-        val cardRatio = if (androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.15f) .85f else 1f
+        val largeText = androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.15f
+        val systemCard = if (largeText) Modifier.heightIn(min = 148.dp) else Modifier.height(132.dp)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PlayerCard(modifier = Modifier.weight(1f).aspectRatio(cardRatio), onClick = selectElement, padding = 12.dp, spacing = 0.dp) {
-                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.CenterHorizontally) {
+            PlayerCard(modifier = Modifier.weight(1f).then(systemCard), onClick = selectElement, padding = 10.dp, spacing = 0.dp) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Active element", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelLarge,
                         modifier = Modifier.fillMaxWidth())
-                    ElementParticle(elements.firstOrNull() ?: DamageType.FORCE, Modifier.size(56.dp))
+                    ElementParticle(elements.firstOrNull() ?: DamageType.FORCE, Modifier.size(48.dp))
                     Text(elements.ifEmpty { listOf(DamageType.FORCE) }.joinToString(" + ") {
                         it.name.lowercase().replaceFirstChar(Char::titlecase)
                     }, color = RebuildPalette.Ice, style = MaterialTheme.typography.titleMedium,
                         textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 }
             }
-            PlayerCard(modifier = Modifier.weight(1f).aspectRatio(cardRatio), onClick = { capabilitiesOpen = true }, padding = 12.dp, spacing = 0.dp) {
-                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.CenterHorizontally) {
+            PlayerCard(modifier = Modifier.weight(1f).then(systemCard), onClick = { capabilitiesOpen = true }, padding = 10.dp, spacing = 0.dp) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Core systems", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelLarge,
                         modifier = Modifier.fillMaxWidth())
-                    InstrumentMedallion("Core", Modifier.size(56.dp), RebuildPalette.Gold)
+                    InstrumentMedallion("Core", Modifier.size(48.dp), RebuildPalette.Gold)
                     Text("Capabilities", color = RebuildPalette.Gold, style = MaterialTheme.typography.titleMedium,
                         textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 }
@@ -109,7 +110,14 @@ val campaignDestinationsV2 = listOf("Astravar", "Inventory", "Campaign", "More")
             Text("Saved starter values: ${state.profile.character} · level ${state.profile.level} · INT modifier ${state.profile.intelligence} · proficiency ${state.profile.proficiency} · DC ${state.profile.saveDc}. Review them before play.", color = Muted)
             Action("Review profile & accepted rules", onClick = rules)
             Action("Confirm this weapon profile", !actions.busy) {
-                actions.change("Weapon profile confirmed") { it.copy(onboarded = true) }
+                actions.change("Weapon profile confirmed") { current ->
+                    // Initialize the one permanent internal core only for an empty profile.
+                    // Never erase existing core, payload or historical data during upgrade.
+                    if (current.cores.isEmpty()) current.copy(onboarded = true,
+                        installedId = "astravar-internal-core",
+                        cores = listOf(Core("astravar-internal-core", "Astravar internal nexus")))
+                    else current.copy(onboarded = true)
+                }
             }
             PlayerTextButton(onClick = restore) { Text("Restore my weapon backup") }
         }
@@ -118,7 +126,7 @@ val campaignDestinationsV2 = listOf("Astravar", "Inventory", "Campaign", "More")
             Action("Start labeled demo", !actions.busy) {
                 actions.change("Explicit demo started") {
                     it.copy(onboarded = true, demo = true, attuned = true, installedId = "demo-core",
-                        cores = listOf(Core("demo-core", "DEMO crystal"), Core("demo-spare", "DEMO spare")), slots = mapOf(1 to 4, 2 to 2))
+                        cores = listOf(Core("demo-core", "DEMO internal nexus")), slots = mapOf(1 to 4, 2 to 2))
                 }
             }
         }

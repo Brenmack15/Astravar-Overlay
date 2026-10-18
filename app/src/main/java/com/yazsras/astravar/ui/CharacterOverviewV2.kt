@@ -65,17 +65,37 @@ fun CharacterOverviewV2(repository: CampaignLedgerRepository, campaign: Campaign
     // A disposable test profile must never borrow a real character's identity or values.
     val confirmedWeapon = campaign?.takeIf { it.onboarded && profileId == "local-player" }?.profile
     val name = profile?.name?.takeIf { it.isNotBlank() } ?: confirmedWeapon?.character
-        ?: if (profileId == "local-player") "Your character" else "Disposable stat test"
+        ?: when(profileId) {
+            "local-player" -> "Your character"
+            "eek" -> "Eek"
+            "remote-stat-test-v1" -> "Disposable stat test"
+            "korr" -> "Korr"
+            "veyrath" -> "Veyrath"
+            else -> "Unconfigured party member"
+        }
     val level = profile?.level ?: confirmedWeapon?.level
+    val recordedIntelligence = abilities.firstOrNull { it.profileId == profileId && it.key == "INT" }?.totalModifier
+    val conflicts = buildList {
+        if (profile?.level != null && confirmedWeapon != null && profile.level != confirmedWeapon.level)
+            add("Character level ${profile.level}; weapon Artificer level ${confirmedWeapon.level}")
+        if (recordedIntelligence != null && confirmedWeapon != null && recordedIntelligence != confirmedWeapon.intelligence)
+            add("Character INT modifier ${signedModifier(recordedIntelligence)}; weapon INT ${signedModifier(confirmedWeapon.intelligence)}")
+    }
     SideEffect { onEditorVisibilityChanged(profileEditorOpen || abilityEditorKey != null) }
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(Modifier.size(64.dp, 76.dp).clip(CutCornerShape(12.dp)).background(RebuildPalette.Panel),
+            Box(Modifier.size(56.dp, 64.dp).clip(CutCornerShape(12.dp)).background(RebuildPalette.Panel),
                 contentAlignment = Alignment.Center) {
-                Image(painterResource(R.drawable.astravar_armor_front),
-                    contentDescription = "Approved Astravar armor artwork", contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().padding(4.dp))
+                when(profileId) {
+                    "eek" -> Image(painterResource(R.drawable.eek_portrait),
+                        contentDescription = "Eek, mechanical owl portrait", contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize().padding(4.dp))
+                    "local-player", "remote-stat-test-v1" -> Image(painterResource(R.drawable.astravar_armor_front),
+                        contentDescription = "Approved Astravar armor artwork", contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize().padding(4.dp))
+                    else -> ArcaneIcon("Emblem", Modifier.size(32.dp), RebuildPalette.Ice)
+                }
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(name, style = MaterialTheme.typography.titleLarge, fontFamily = InterfaceFace,
@@ -92,9 +112,17 @@ fun CharacterOverviewV2(repository: CampaignLedgerRepository, campaign: Campaign
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CharacterSummaryTile("Armor Class", profile?.armorClass?.toString() ?: "?", Modifier.weight(1f))
-            CharacterSummaryTile("Astravar ATK", signedModifier(confirmedWeapon?.attack), Modifier.weight(1f))
+            CharacterSummaryTile(if(profileId == "local-player" || profileId == "remote-stat-test-v1") "Astravar ATK" else "Attack Bonus", signedModifier(confirmedWeapon?.attack), Modifier.weight(1f))
             CharacterSummaryTile("Spell Save DC", confirmedWeapon?.saveDc?.toString() ?: "?", Modifier.weight(1f))
         }
+        // One compact read-only line; independent of the editable character sheet.
+        if (confirmedWeapon != null) Text(
+            "Weapon profile · Artificer ${confirmedWeapon.level} · INT ${signedModifier(confirmedWeapon.intelligence)} · PB +${confirmedWeapon.proficiency} · DC ${confirmedWeapon.saveDc}",
+            style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Ice
+        )
+        if (conflicts.isNotEmpty()) Text("Source conflict · ${conflicts.joinToString(". ")}. Review Party and Rules & profile; saved values are retained.",
+            color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.testTag("character-weapon-conflict"))
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Ability scores", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelLarge)
             abilityNames.entries.chunked(3).forEach { row ->
@@ -130,7 +158,7 @@ fun CharacterOverviewV2(repository: CampaignLedgerRepository, campaign: Campaign
 @Composable
 private fun CharacterSummaryTile(label: String, value: String, modifier: Modifier) {
     Surface(modifier = modifier, color = RebuildPalette.Panel, shape = CutCornerShape(10.dp)) {
-        Column(Modifier.padding(horizontal = 6.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        Column(Modifier.padding(horizontal = 6.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(value, fontFamily = InterfaceFace, fontWeight = FontWeight.SemiBold, fontSize = 25.sp,
                 color = RebuildPalette.Gold, textAlign = TextAlign.Center)
@@ -144,15 +172,15 @@ private fun CharacterSummaryTile(label: String, value: String, modifier: Modifie
 private fun AbilityTile(key: String, label: String, score: Int?, modifierValue: Int?, modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null) {
     val click = if (onClick != null) Modifier.clickable(role = Role.Button, onClickLabel = "Edit $label", onClick = onClick) else Modifier
-    Column(modifier.clip(CutCornerShape(10.dp)).background(RebuildPalette.Panel).then(click).padding(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(modifier.heightIn(min = 48.dp).clip(CutCornerShape(10.dp)).background(RebuildPalette.Panel).then(click).padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            ApprovedAbilityMedallion(key, Modifier.size(28.dp))
+            ApprovedAbilityMedallion(key, Modifier.size(22.dp))
             Text(key, color = RebuildPalette.Ice, style = MaterialTheme.typography.labelLarge)
         }
         Surface(color = RebuildPalette.Elevated, shape = RoundedCornerShape(4.dp), modifier = Modifier.fillMaxWidth()) {
-            Text(score?.toString() ?: "?", modifier = Modifier.padding(vertical = 4.dp), color = RebuildPalette.Gold,
-                fontFamily = InterfaceFace, fontSize = 25.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+            Text(score?.toString() ?: "?", modifier = Modifier.padding(vertical = 2.dp), color = RebuildPalette.Gold,
+                fontFamily = InterfaceFace, fontSize = 23.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
         }
         Surface(shape = RoundedCornerShape(50), color = RebuildPalette.Active,
             border = BorderStroke(.7.dp, RebuildPalette.Cyan.copy(alpha = .5f))) {

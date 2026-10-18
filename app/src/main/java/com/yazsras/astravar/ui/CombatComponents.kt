@@ -59,68 +59,14 @@ fun rollFeedback(view: View,roll: ShotRoll?) {
     image?.let {Image(it,"Personal Astravar artwork",modifier,contentScale=ContentScale.Fit)} ?: Image(painterResource(R.drawable.astravar_cutout),"Astravar crystal pistol",modifier,contentScale=ContentScale.Fit)
 }
 @Composable fun CorePicker(s: Campaign, a: Actions, dismiss: () -> Unit) {
-    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
-    var reviewRevision by rememberSaveable { mutableStateOf<Long?>(null) }
-    var reviewCommandId by rememberSaveable { mutableStateOf<String?>(null) }
-    var attempted by rememberSaveable { mutableStateOf(false) }
-    val core = s.cores.firstOrNull { it.id == selectedId }
-    val installCost = if (s.postShatter) s.profile.replacementCost else s.profile.swapCost
-    val stale = core != null && reviewRevision != s.revision
-    val available = core != null && core.id != s.installedId && core.usable(s.gameSeconds) && s.installation == null
-    PlayerSheet(if (core == null) "Choose a core" else "Install core", { if (!a.busy) dismiss() }, actions = {
-        if (core != null) PlayerButton(onClick = {
-            if (a.busy) return@PlayerButton
-            val expectedRevision = reviewRevision ?: return@PlayerButton
-            val targetCoreId = core.id
-            val targetCoreName = core.name
-            val commandId = reviewCommandId ?: return@PlayerButton
-            attempted = true
-            a.run("Core installation confirmed") {
-                a.repo.mutate(commandId, "Install $targetCoreName") { current ->
-                    require(current.revision == expectedRevision) { "Core configuration changed. Review it again before installing." }
-                    Engine.install(current, targetCoreId)
-                }
-                dismiss()
-            }
-        }, enabled = !a.busy && available && !stale && reviewCommandId != null) { Text(if (a.busy) "Installing…" else "Confirm install") }
-    }) {
-        if (core == null) {
-            if (s.cores.isEmpty()) PlayerEmpty("No completed cores", "Add the completed cores you own in Systems.", "Core")
-            s.cores.forEach { candidate ->
-                val installed = candidate.id == s.installedId
-                val installing = candidate.id == s.installation?.coreId
-                PlayerEntry(candidate.name,
-                    listOf(if (installed) "Installed" else if (installing) "Installing" else candidate.readiness(s.gameSeconds),
-                        "${candidate.payloads.size}/${s.profile.capacity} stored").joinToString(" · "),
-                    "Core", onClick = {
-                        if (!a.busy) {
-                            selectedId = candidate.id
-                            reviewRevision = s.revision
-                            reviewCommandId = java.util.UUID.randomUUID().toString()
-                            attempted = false
-                        }
-                    })
-            }
-        } else {
-            PlayerTextButton(onClick = { if (!a.busy) { selectedId = null; attempted = false } }, enabled = !a.busy) { Text("‹ All cores") }
-            Text(core.name, style = MaterialTheme.typography.titleLarge, color = RebuildPalette.Ice)
-            Text(core.readiness(s.gameSeconds), color = RebuildPalette.Muted, style = MaterialTheme.typography.bodyMedium)
-            PlayerCard {
-                Text("Installation cost", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelLarge)
-                Text(installCost, color = RebuildPalette.Gold, style = MaterialTheme.typography.titleMedium)
-                Text("${core.payloads.size}/${s.profile.capacity} stored payloads", style = MaterialTheme.typography.bodyMedium)
-            }
-            when {
-                core.id == s.installedId -> Text("This core is already installed.", color = RebuildPalette.Muted)
-                s.installation != null -> Text("A core installation is already in progress.", color = RebuildPalette.Muted)
-                !core.usable(s.gameSeconds) -> Text("This core is not usable.", color = RebuildPalette.Muted)
-                stale -> Text("Configuration changed. Return to the list and review the current cost.", color = MaterialTheme.colorScheme.error)
-                s.postShatter && installCost == "10 in-game minutes" -> Text("Confirmation starts installation. It completes only after recorded game time advances.", style = MaterialTheme.typography.bodyMedium)
-                else -> Text("Confirm to install this core and apply its existing action cost.", style = MaterialTheme.typography.bodyMedium)
-            }
-            if (attempted && !a.busy && a.message.isNotBlank()) Text(a.message, color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall)
+    PlayerSheet("Permanent internal nexus", dismiss) {
+        Text("Astravar has one permanent internal core. There is no installation, replacement or swap action.", color = Frost)
+        s.installed?.let { core ->
+            Text(core.name, style = MaterialTheme.typography.titleLarge, color = Brass)
+            Text(core.readiness(s.gameSeconds))
+            Text("${core.payloads.size}/${s.profile.capacity} stored payloads", color = Muted)
         }
+        Text("Charge or overwrite approved spell payloads in Config → Internal spell reservoir. Recovery advances only when elapsed in-world time is recorded.", style = MaterialTheme.typography.bodySmall, color = Muted)
     }
 }
 @OptIn(ExperimentalMaterial3Api::class)
@@ -128,7 +74,7 @@ fun rollFeedback(view: View,roll: ShotRoll?) {
     ModalBottomSheet(onDismissRequest=dismiss) {
         Column(Modifier.fillMaxWidth().heightIn(max=480.dp).verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             SectionCaption("STORED SPELLS", "Choose up to ${s.profile.releaseLimit}")
-            if(s.installed?.payloads.isNullOrEmpty()) Text("Charge a spell in Cores & Payloads → Cores.")
+            if(s.installed?.payloads.isNullOrEmpty()) Text("Charge a spell in Config → Internal spell reservoir.")
             s.installed?.payloads?.forEach {p->
                 val active=p.id in selected
                 val tint=elementTint(p.template.overchargeType)
