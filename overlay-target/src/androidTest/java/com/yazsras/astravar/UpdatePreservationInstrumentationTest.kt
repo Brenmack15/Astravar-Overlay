@@ -9,6 +9,7 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.Rule
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.regex.Pattern
@@ -16,6 +17,7 @@ import java.util.regex.Pattern
 /** Readback after adb install -r, without seeding or resetting the product. */
 @RunWith(AndroidJUnit4::class)
 class UpdatePreservationInstrumentationTest {
+    @get:Rule val failureEvidence = NativeFailureEvidence()
     @Test fun retainedRollAndPartyNavigationAfterSameKeyUpdate() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val device = UiDevice.getInstance(instrumentation)
@@ -24,6 +26,10 @@ class UpdatePreservationInstrumentationTest {
         val ui = ObservedUi(device)
         fun find(text: String): Rect = ui.textBounds(text, product, scrollAttempts = 14)
         fun tap(text: String, preferLast: Boolean = false) = ui.tapText(text, product, scrollAttempts = 14, preferLast = preferLast)
+        fun captureArmor(name: String) = ui.captureStablePage(File(files, name), product, "Armor",
+            listOf(By.textStartsWith("Weapon profile ·").pkg(product), By.text("Ability scores").pkg(product)))
+        fun captureParty(name: String) = ui.captureStablePage(File(files, name), product, "Party",
+            listOf(By.text("Eek").pkg(product)))
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
         ui.awaitMainAfterSavedDialogs(product)
         assertTrue("The saved labeled demo survived", device.hasObject(By.text("DEMO").pkg(product)))
@@ -50,6 +56,7 @@ class UpdatePreservationInstrumentationTest {
         assertTrue(device.takeScreenshot(File(files, "same-key-update-inventory.png")))
         tap("Close")
         tap("Party", preferLast = true)
+        find("Party & family")
         listOf("Zerg Hasma", "Eek", "Korr", "Veyrath").forEach { find(it) }
         // Layout acceptance captures are native emulator output, not a physical Galaxy test.
         device.executeShellCommand("wm size 1080x2400")
@@ -57,15 +64,15 @@ class UpdatePreservationInstrumentationTest {
             device.executeShellCommand("settings put system font_scale $scale")
             device.waitForIdle()
             tap("Armor", preferLast = true)
-            assertTrue(device.takeScreenshot(File(files, "armor-font-$scale.png")))
+            captureArmor("armor-font-$scale.png")
             tap("Party", preferLast = true)
             find("Eek")
-            assertTrue(device.takeScreenshot(File(files, "party-font-$scale.png")))
+            captureParty("party-font-$scale.png")
         }
         device.setOrientationLeft()
         device.waitForIdle()
         find("Eek")
-        assertTrue(device.takeScreenshot(File(files, "party-landscape-large-font.png")))
+        captureParty("party-landscape-large-font.png")
         device.setOrientationNatural()
         device.unfreezeRotation()
         device.executeShellCommand("settings put system font_scale 1.0")
@@ -74,6 +81,8 @@ class UpdatePreservationInstrumentationTest {
             device.executeShellCommand("wm size ${width}x2400")
             device.waitForIdle()
             tap("Armor", preferLast = true)
+            captureArmor("element-width-$width-armor.png")
+            device.dumpWindowHierarchy(File(files, "element-width-$width-armor.xml"))
             tap("Active element")
             find("Choose an element")
             val outer = listOf("Fire", "Cold", "Lightning", "Acid", "Poison", "Thunder", "Necrotic", "Psychic", "Radiant")
@@ -89,6 +98,10 @@ class UpdatePreservationInstrumentationTest {
             tap("Radiant, Psychic & Necrotic unlocks")
             assertTrue(device.wait(Until.hasObject(By.textContains("Artificer level 8").pkg(product)), 5000))
             tap("Close")
+            assertTrue("One Close must dismiss the element chooser before another display resize at width $width",
+                device.wait(Until.gone(By.text("Choose an element").pkg(product)), 5000))
+            assertTrue(device.takeScreenshot(File(files, "element-wheel-closed-width-$width.png")))
+            device.dumpWindowHierarchy(File(files, "element-wheel-closed-width-$width.xml"))
         }
         device.executeShellCommand("wm density reset")
         device.executeShellCommand("wm size reset")

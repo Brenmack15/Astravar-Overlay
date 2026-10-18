@@ -7,11 +7,13 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.Rule
 import org.junit.runner.RunWith
 
 /** Creates fictional ledger data through ordinary product controls on a fresh CI emulator. */
 @RunWith(AndroidJUnit4::class)
 class UpdateFixtureInstrumentationTest {
+    @get:Rule val failureEvidence = NativeFailureEvidence()
     @Test fun seedFictionalInventoryThroughNativeEditor() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val device = UiDevice.getInstance(instrumentation)
