@@ -26,8 +26,7 @@ class UpdateFixtureInstrumentationTest {
             device.pressBack()
         }
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
-        assertTrue(device.wait(Until.hasObject(By.text("ASTRAVAR").pkg(product)), 60000))
-        repeat(3) { if (device.hasObject(By.text("Close").pkg(product))) tap("Close") }
+        ui.awaitMainAfterSavedDialogs(product)
         tap("Campaign", preferLast = true)
         tap("Inventory")
         tap("Add Item")

@@ -25,8 +25,7 @@ class UpdatePreservationInstrumentationTest {
         fun find(text: String): Rect = ui.textBounds(text, product, scrollAttempts = 14)
         fun tap(text: String, preferLast: Boolean = false) = ui.tapText(text, product, scrollAttempts = 14, preferLast = preferLast)
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
-        assertTrue(device.wait(Until.hasObject(By.text("ASTRAVAR").pkg(product)), 60000))
-        repeat(3) { if (device.hasObject(By.text("Close").pkg(product))) tap("Close") }
+        ui.awaitMainAfterSavedDialogs(product)
         assertTrue("The saved labeled demo survived", device.hasObject(By.text("DEMO").pkg(product)))
         tap("Config", preferLast = true)
         tap("Roll history")

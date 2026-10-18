@@ -2,6 +2,7 @@ package com.yazsras.astravar
 
 import android.graphics.Rect
 import android.os.SystemClock
+import android.view.accessibility.AccessibilityWindowInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.*
@@ -37,9 +38,7 @@ class OverlayInstrumentationTest {
     private fun screenshot(name:String) {assertTrue(device.takeScreenshot(File(files,"api${android.os.Build.VERSION.SDK_INT}-$name.png")))}
     private fun openMain() {
         shell("am start -W -n $appPackage/com.yazsras.astravar.MainActivity")
-        assertTrue(device.wait(Until.hasObject(By.text("ASTRAVAR").pkg(appPackage)),60000))
-        // Saved native tool dialogs may legitimately survive activity recreation.
-        repeat(3) { if (device.hasObject(By.text("Close").pkg(appPackage))) tapMain("Close") }
+        ui.awaitMainAfterSavedDialogs(appPackage)
     }
     private fun findText(text:String):Rect = ui.textBounds(text, appPackage)
     private fun tapMain(text:String, preferLast:Boolean=false) = ui.tapText(text, appPackage, preferLast=preferLast)
@@ -130,7 +129,22 @@ class OverlayInstrumentationTest {
         ui.tap(By.desc("Keyboard focus test").pkg(targetPackage), "Keyboard focus test")
         ui.enterFocusedField("typed under Astravar",targetPackage,"Keyboard focus test")
         assertEquals("typed under Astravar",ui.snapshot(By.desc("Keyboard focus test").pkg(targetPackage), "typed keyboard text") { it.text })
-        device.pressBack();device.setOrientationLeft();device.waitForIdle()
+        val keyboardGeometry=ui.snapshot(By.desc("Keyboard focus test").pkg(targetPackage).focused(true), "focused field visible above open native IME", timeoutMs=10_000) { field ->
+            val ime=instrumentation.uiAutomation.windows.firstOrNull { it.type==AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+            if(ime==null) null else {
+                val imeBounds=Rect().also { ime.getBoundsInScreen(it) }
+                val fieldBounds=Rect(field.visibleBounds)
+                if(imeBounds.isEmpty || fieldBounds.isEmpty || fieldBounds.bottom>imeBounds.top) null else fieldBounds to imeBounds
+            }
+        }
+        assertTrue("The focused target field must remain fully above the visible native keyboard",keyboardGeometry.first.bottom<=keyboardGeometry.second.top)
+        assertTrue("Astravar must remain visible without taking keyboard focus",device.hasObject(By.descStartsWith("Expand Astravar crystal").pkg(appPackage)))
+        screenshot("keyboard-focus")
+        device.pressBack();device.waitForIdle()
+        assertEquals("Typed text survives hiding the native keyboard", "typed under Astravar", ui.snapshot(By.desc("Keyboard focus test").pkg(targetPackage), "keyboard-hidden field text", timeoutMs=10_000) { it.text })
+        assertTrue("Astravar remains available after the keyboard hides",device.hasObject(By.descStartsWith("Expand Astravar crystal").pkg(appPackage)))
+        screenshot("keyboard-hidden")
+        device.setOrientationLeft();device.waitForIdle()
         assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))
         val rotated=ui.snapshot(By.descStartsWith("Expand Astravar crystal").pkg(appPackage), "rotated crystal bounds") { Rect(it.visibleBounds) }
         assertTrue(rotated.left>=0 && rotated.right<=device.displayWidth && rotated.bottom<=device.displayHeight)
