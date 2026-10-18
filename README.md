@@ -1,8 +1,8 @@
-# Astravar Overlay — 2.0 UI Rebuild
+# Astravar
 
 PR #4 also contains the **opt-in Remote Updates experiment**. Config → Remote Updates creates an empty disposable stat profile, accepts strict versioned single-ability proposals for this installation's test session, and requires Apply or Reject. Approved changes use the existing campaign revision/audit/receipt transaction. Nothing targets Zerg or the normal `local-player` profile. See [the exact Galaxy S26 test procedure and protocol](docs/REMOTE_STAT_TEST.md).
 
-The current CI download is **Astravar-2.0-Stat-Test-apk**, built with `-PastravarRemoteStatTest=true`: `2.0.2-remote-stat-test` (22), `com.yazsras.astravar.v2statdebug`, launcher **Astravar 2.0 Stat Test**. It installs alongside the prior UI Rebuild because that CI APK's ephemeral signer is unavailable. Keep all existing apps installed. The ordinary build without that property retains the UI Rebuild identity described below. No release signing configuration changes.
+The current CI download is **Astravar-2.0-Stat-Test-apk**, built with `-PastravarRemoteStatTest=true`: `2.0.2-remote-stat-test` (22), `com.yazsras.astravar.v2statdebug`, launcher **Astravar**. It installs alongside the prior UI Rebuild because that CI APK's ephemeral signer is unavailable. Keep all existing apps installed. The ordinary build without that property retains the UI Rebuild identity described below. No release signing configuration changes. The supplied launcher portrait is used for adaptive and legacy icons; Config → Help & diagnostics shows the actual version and build. See [identity and permanent update strategy](docs/ASTRAVAR_IDENTITY.md).
 
 Native Android armor and campaign companion on the verified 2.0 engineering baseline (`7c1e42c0f2b3ea639aa675b9109f8d2ddbcee528`). Development branch: `feat/astravar-2.0-ui-rebuild`. The existing integrated preview and draft PR #3 remain recoverable and unmerged.
 
