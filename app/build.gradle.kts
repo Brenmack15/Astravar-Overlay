@@ -39,6 +39,16 @@ android {
     lint { abortOnError = true; checkReleaseBuilds = true }
 }
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
+// Robolectric retains framework/font caches per test classloader. Isolate classes so
+// the complete UI suite remains bounded locally and on the standard Actions runner.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    maxHeapSize = "1536m"
+    maxParallelForks = 1
+    forkEvery = 1
+    providers.gradleProperty("astravarScreenshots").orNull?.let {
+        systemProperty("astravar.screenshots", it)
+    }
+}
 tasks.matching { it.name == "packageRelease" }.configureEach {
     doFirst {
         check(providers.environmentVariable("ASTRAVAR_KEYSTORE").isPresent && providers.environmentVariable("ASTRAVAR_STORE_PASSWORD").isPresent && providers.environmentVariable("ASTRAVAR_KEY_PASSWORD").isPresent) {
