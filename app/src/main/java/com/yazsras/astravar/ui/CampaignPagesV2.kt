@@ -192,7 +192,7 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
         (query.isBlank() || "${it.title} ${it.description} ${it.status}".contains(query, true)) }
     Page {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) { Text("Inventions", style = MaterialTheme.typography.headlineMedium); Text("${projects.size} designs", color = Muted, style = MaterialTheme.typography.bodySmall) }
+            Column(Modifier.weight(1f)) { Text("Inventions", style = MaterialTheme.typography.headlineMedium); Text(if (projects.size == 1) "1 design" else "${projects.size} designs", color = Muted, style = MaterialTheme.typography.bodySmall) }
             PlayerButton(onClick = { load(null); mode = "create" }, enabled = !actions.busy) { Text("Add Invention") }
         }
         PlayerSearch(query, { query = it }, "Search inventions")

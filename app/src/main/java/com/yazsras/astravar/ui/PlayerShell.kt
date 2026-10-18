@@ -93,7 +93,7 @@ val rebuildDestinations = listOf("Armor", "Combat", "Campaign", "Config")
                         Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                         PlayerTextButton(onClick = onDismiss) { Text("Close") }
                     }
-                    Box(Modifier.weight(1f)) { content() }
+                    Box(Modifier.weight(1f)) { CompositionLocalProvider(LocalPlayerToolTitle provides title) { content() } }
                 }
             }
         }

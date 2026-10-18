@@ -222,7 +222,10 @@ import java.util.UUID
                 }
                 "capability" -> {
                     Text(eekCapabilities[capabilityIndex].third, style = MaterialTheme.typography.bodyLarge)
-                    Text("Accepted 06_HOMEBREW_AND_EEK.md · Later accepted amendments take precedence.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                    Text("Accepted companion rules", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                    PlayerDisclosure("Reference") {
+                        Text("06_HOMEBREW_AND_EEK.md · Later accepted amendments take precedence.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
                 "history", "event" -> {
                     val resourceIds = eekResources.map { it.id }.toSet()

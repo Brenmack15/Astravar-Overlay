@@ -81,9 +81,14 @@ object PlayerSpace {
     }
 }
 
+val LocalPlayerToolTitle = staticCompositionLocalOf<String?> { null }
+
 @Composable fun PlayerHeading(title: String, action: (@Composable () -> Unit)? = null) {
+    val titleInToolbar = title == LocalPlayerToolTitle.current
+    if (titleInToolbar && action == null) return
     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.headlineSmall,
+        if (titleInToolbar) Spacer(Modifier.weight(1f))
+        else Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold)
         action?.invoke()
     }
