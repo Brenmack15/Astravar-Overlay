@@ -25,7 +25,6 @@ val rebuildDestinations = listOf("Armor", "Combat", "Campaign", "Config")
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         ArcaneIcon("Emblem", Modifier.size(24.dp), Brass)
         Text("ASTRAVAR", fontFamily = DisplayFace, fontSize = 20.sp, letterSpacing = 2.sp, color = Brass)
-        Text("Mk.I", color = Muted, style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.weight(1f))
         if (demo) Text("DEMO", color = RebuildPalette.Cyan, style = MaterialTheme.typography.labelSmall)
     }

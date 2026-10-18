@@ -207,8 +207,11 @@ import kotlinx.coroutines.flow.flowOf
 @Composable fun HelpPage() {
     val c=LocalContext.current
     Page {
+        Section("App version") {
+            Text("Astravar ${BuildConfig.VERSION_NAME} · Build ${BuildConfig.VERSION_CODE}")
+        }
         Section("Device diagnostics") {
-            Text("${Build.MANUFACTURER} ${Build.MODEL}\nAndroid ${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}\nBuild ${Build.DISPLAY}\nApp ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\nPackage ${c.packageName}\nDisplay-over-apps permission: ${Settings.canDrawOverlays(c)}")
+            Text("${Build.MANUFACTURER} ${Build.MODEL}\nAndroid ${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}\nBuild ${Build.DISPLAY}\nPackage ${c.packageName}\nDisplay-over-apps permission: ${Settings.canDrawOverlays(c)}")
         }
         Section("Dice & your character sheet") {
             Text("Astravar does not read, control, or synchronize D&D Beyond. Tap Roll to generate attack and damage dice, or choose external dice. Individual faces are saved and never rerolled on restart. The DM determines ordinary hits; potential damage is clearly labeled. Natural 20s are criticals and natural 1s automatically miss. Reconcile your sheet manually. Damage averages are estimates, never rolled results. The optional public connectivity lab sends fixed fictional test messages only. Your local campaign records are not uploaded. No analytics, account, accessibility access, or screen capture.")
