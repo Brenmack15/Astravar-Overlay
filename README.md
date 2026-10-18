@@ -1,40 +1,51 @@
-# Astravar Overlay — 2.0 preview
+# Astravar Overlay — 2.0 UI Rebuild
 
-Native Android armor and campaign companion built on recovered v1.7.0 and the validated Inventory Beta. Preserves the Kotlin combat engine, automatic dice, weapon Room schema 3 and migrations, native floating overlay, historical snapshots, fonts and original artwork.
+Native Android armor and campaign companion on the verified 2.0 engineering baseline (`7c1e42c0f2b3ea639aa675b9109f8d2ddbcee528`). Development branch: `feat/astravar-2.0-ui-rebuild`. The existing integrated preview and draft PR #3 remain recoverable and unmerged.
 
 ## Native experience
 
-- **Astravar:** approved armor artwork, manual character overview/six ability scores, original elemental particles, armor/combat/systems navigation, familiar cores, payloads and roll history.
-- **Inventory:** persistent item identity, images, unknown quantities, categories, optional measured weight, descriptive properties, sourced research, stable equipment/project/connection links and audit.
-- **Campaign:** Inventions with stages/requirements and confirmed transactional material consumption/output; Connections with facts and meaningful milestones; Eek with separate manually sourced resources and accepted homebrew.
-- **More:** separate campaign/weapon backups, validated schema-1/schema-2 import preview and merge-only restore, synthetic connectivity lab, existing rules, overlay settings and diagnostics.
+One primary navigation bar: **Armor · Combat · Campaign · Config**.
 
-Illustration values and proposed descriptions never confer mechanics. Existing engine numbers win over unresolved mockup examples. No Notion campaign records are imported. HP, slots, currency, ownership and companion resources are not invented or refilled.
+- **Armor:** compact character overview, six ability tiles, Active Element wheel and Core Systems reference. Character and companion values stay unknown until explicitly recorded.
+- **Combat:** selected attack, supported payload/element controls, compact formulas, latest result, roll mode and automatic rolling. Detail and selection interactions open focused overlays. The preserved Kotlin engine determines dice, resource costs and adjudication boundaries.
+- **Campaign:** Inventory, Inventions, Connections and Eek are one tap from a compact hub. Records open detail/edit sheets. Stable identities, sourced research, equipment links, confirmed crafting transactions and audit history remain intact.
+- **Config:** core and spell management, rules, resources, roll history, floating overlay settings, separate campaign/weapon backups, diagnostics and fictional Cloudflare sync.
 
-## Public fictional connectivity lab
+Original artwork and live native text are reused. Distinctive missing artwork is not fabricated. Read the [UI rebuild implementation and limitations](docs/ASTRAVAR_UI_REBUILD.md). The [older preview provenance](docs/ASTRAVAR_2_ASSET_PROVENANCE.md) and [older preview design limits](docs/ASTRAVAR_2_DESIGN_LIMITS.md) describe the previous implementation; their screen layouts and outstanding-work lists are historical.
 
-The optional debug HTTPS client connects to the existing disposable Cloudflare Worker. Only fixed fictional templates scoped to `astravar-public-disposable` / `sandbox-merchant-0001` are accepted. Its Room database, outbox, receipts and cursor are physically separate from campaign/weapon records. Commands survive restart; retries preserve IDs/payloads; stale revisions become conflicts. No authentication is added to this deliberately public prototype.
+## Preservation and data boundaries
 
-**Real inventory, character, Eek, Connections, currency and Notion data are never uploaded.** No analytics, paid API, paid hosting activation, D&D Beyond scraping or accessibility automation. A private production connection is separate work. HTTP tests alone do not establish ChatGPT MCP or physical Galaxy interoperability.
+Combat and automatic dice, native system overlay, weapon Room schema 3 and its migrations, campaign Room schema 2 and its migration, saved snapshots, transactional material consumption, audit records, JSON validation/restore, and the separate sandbox HTTP/outbox implementation are preserved. The source gates verify 33 recovered files and 79 preview foundation files plus the owner signing block.
 
-## Installation and data boundaries
+Illustration values never confer mechanics. The six approved attack illustrations are selection references; unsupported armor attacks remain unavailable. The read-only armor capability reference does not reconfigure the independently saved weapon engine. Manual character/companion records do not change combat modifiers or invent HP, charges, ownership, rests or campaign outcomes. No real Notion campaign import is performed.
 
-Debug preview: `com.yazsras.astravar.v2debug`, `2.0.0-preview`, code `20`. Coexists with production `com.yazsras.astravar` and Inventory Beta `com.yazsras.astravar.debug`. Do not uninstall either working application. Android sandboxes are separate; explicitly preview/restore a chosen export to transfer supported data. Campaign and weapon backups remain separate. Production signing configuration is preserved; this branch delivers debug APKs only.
+## Installation
+
+This branch targets **Astravar 2.0 UI Rebuild**, `2.0.1-ui-rebuild`, code **21**, package **`com.yazsras.astravar.v2uidebug`**. It installs separately from the release (`com.yazsras.astravar`), Inventory Beta (`com.yazsras.astravar.debug`) and original 2.0 Preview (`com.yazsras.astravar.v2debug`). **Keep all working apps installed.** It does not update the original Preview or automatically share its data.
+
+Export source data before transferring it. Campaign and weapon JSON use separate tools; campaign restore previews validated missing records and rejects conflicting IDs. The fictional outbox is not included in either backup. See [Samsung installation and transfer instructions](docs/ASTRAVAR_2_PHONE_INSTALL.md) and [build/signing guidance](docs/BUILD_AND_SIGNING.md).
+
+## Public fictional sync
+
+The optional debug client retains the existing disposable Cloudflare origin and fixed `astravar-public-disposable` / `sandbox-merchant-0001` scope. Its database, pending commands, receipts and cursor remain separate from campaign/weapon records. Retries preserve original IDs and payloads; conflicts remain visible. Only fixed fictional templates can be sent.
+
+**No real inventory, character, Eek, Connections, currency or Notion data is uploaded.** No paid service, new authentication project, analytics, D&D Beyond scraping or accessibility automation is introduced. Experimental private MCP-tool failures are separate from the native client. Host tests alone do not establish new APK/device or ChatGPT MCP interoperability.
 
 ## Build and verify
 
-JDK 17, checksum-pinned Gradle 8.13, Android SDK 36/build tools 35.0.0; Room 2.8.4.
+JDK 17, checksum-pinned Gradle 8.13, Android SDK 36 / build-tools 35.0.0; Room 2.8.4.
 
 ```sh
 python3 -m unittest discover -s scripts/tests -v
 python3 scripts/verify_v2_protected_source.py
-./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+python3 scripts/verify_ui_foundation.py
+./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug -PastravarScreenshots="$PWD/validation/screenshots"
 ```
 
-`SandboxLiveSyncTest` is explicitly skipped by default. `ASTRAVAR_LIVE_SANDBOX=true` permits its fixed fictional live write/read-back. Other network tests use deterministic transports. Reports distinguish host tests from physical S26 validation.
+`SandboxLiveSyncTest` is skipped by default. Explicit `ASTRAVAR_LIVE_SANDBOX=true` enables its single fixed fictional live write, durable-command recovery, exact retry and read-back test. Other HTTP tests use deterministic transports.
 
-Actions uploads `Astravar-2.0-debug-apk` containing the installable APK, SHA-256, binary metadata, signature/alignment checks and source commit. No release publication or automatic PR merge.
+Use the exact commit’s Actions artifacts and delivery verification report for current build/test results, native renders and device limitations. Previous preview reports are historical evidence for their named APKs.
 
-See [asset provenance](docs/ASTRAVAR_2_ASSET_PROVENANCE.md), [design limits](docs/ASTRAVAR_2_DESIGN_LIMITS.md), [mechanics](docs/ASTRAVAR_RULES.md), [decisions](docs/DECISIONS.md), and [signing](docs/BUILD_AND_SIGNING.md).
+After a successful UI-branch run, Actions provides **`Astravar-2.0-UI-Rebuild-apk`** containing `Astravar-2.0-UI-Rebuild-debug.apk`, SHA-256, APK metadata, signature/alignment checks and source commit. The separate `android-verification` artifact contains reports and native UI captures. No production release or automatic PR merge occurs.
 
-Unofficial tabletop companion; not affiliated with Wizards of the Coast, D&D Beyond or Samsung.
+See [mechanics](docs/ASTRAVAR_RULES.md) and [decisions](docs/DECISIONS.md). Unofficial tabletop companion; not affiliated with Wizards of the Coast, D&D Beyond or Samsung.
