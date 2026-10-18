@@ -12,7 +12,7 @@ class EmergencyScalingTest {
             assertEquals(21*count,profile.shatterDice)
             val state=Campaign(onboarded=true,attuned=true,profile=profile,installedId="core",cores=listOf(Core("core","Core")))
             for((ability,expected) in listOf(Ability.DISCHARGE to 3*count,Ability.SHATTER to 21*count)) {
-                val plan=Engine.plan(state,"blast",ability,direct=true,point="Door")
+                val plan=historicalPlan(state,"blast",ability,direct=true,point="Door")
                 assertEquals(Dice(count,12,5),Engine.components(plan).first().damage.dice)
                 assertEquals(Dice(2*count,12,5),Engine.components(plan,true).first().damage.dice)
                 assertEquals(Dice(expected,12),Engine.components(plan).last().damage.dice)

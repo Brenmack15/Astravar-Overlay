@@ -10,7 +10,7 @@ class HistoryRetentionTest {
         profile=Profile(baseDamageDiceCount=5,elementalSelectorDiceCount=7),slots=mapOf(2 to 3),notes="Preserve 🦉 resources")
     private fun shot(i: Int,n: Int=4,a: Ability=Ability.ARCANE): PendingShot {
         val s=campaign().copy(revision=i.toLong(),profile=Profile(baseDamageDiceCount=n))
-        val p=Engine.plan(s,"roll-$i",a,elements=listOf(DamageType.LIGHTNING),point="Gate")
+        val p=historicalPlan(s,"roll-$i",a,elements=listOf(DamageType.LIGHTNING),point="Gate")
         val roll=DiceRoller.roll(p,die={if(it==20) 14 else 7},atMillis=i.toLong())
         val result=DiceRoller.resolution(p,roll,targets=if(p.blast) listOf(TargetSave("Target",true)) else emptyList())
         return PendingShot(p,result,roll)
