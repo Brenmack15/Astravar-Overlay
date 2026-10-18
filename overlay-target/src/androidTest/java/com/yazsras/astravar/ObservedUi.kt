@@ -174,6 +174,7 @@ internal class ObservedUi(private val device: UiDevice) {
         val deadline = SystemClock.uptimeMillis() + 30_000
         var previousFrame: Bitmap? = null
         var previousBounds: List<Rect>? = null
+        var stableSince: Long? = null
         var lastObserved = "No route observation yet"
         try {
             while (SystemClock.uptimeMillis() < deadline) {
@@ -188,9 +189,22 @@ internal class ObservedUi(private val device: UiDevice) {
                     }
                     lastObserved = "selected $tab=${tabBounds != null}; visible markers=${bodyBounds.count { it != null }}/${markers.size}; bounds=$geometry"
                     if (ready) {
-                        sample = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+                        // Read an unchanged software copy: the platform may return
+                        // a hardware bitmap whose pixels cannot be inspected.
+                        val captured = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+                        try {
+                            sample = captured?.copy(Bitmap.Config.ARGB_8888, false)
+                        } finally {
+                            captured?.recycle()
+                        }
                         val frame = sample
-                        if (frame != null && previousBounds == geometry && previousFrame?.sameAs(frame) == true) {
+                        val ink = frame?.let { bitmap -> bodyBounds.filterNotNull().map { marker -> foregroundInk(bitmap, marker) } }
+                        val rendered = ink != null && ink.all { (count, required) -> count >= required }
+                        lastObserved += "; marker foreground counts=$ink"
+                        val now = SystemClock.uptimeMillis()
+                        val unchanged = rendered && previousBounds == geometry && previousFrame?.sameAs(frame) == true
+                        stableSince = if (unchanged) stableSince ?: now else if (rendered) now else null
+                        if (frame != null && unchanged && now - (stableSince ?: now) >= 1_000) {
                             FileOutputStream(file).use { output ->
                                 assertTrue("Stable $tab frame must be saved", frame.compress(Bitmap.CompressFormat.PNG, 100, output))
                             }
@@ -201,17 +215,19 @@ internal class ObservedUi(private val device: UiDevice) {
                         previousFrame?.recycle()
                         previousFrame = frame
                         sample = null
-                        previousBounds = geometry
+                        previousBounds = geometry.takeIf { rendered }
                     } else {
                         previousFrame?.recycle()
                         previousFrame = null
                         previousBounds = null
+                        stableSince = null
                     }
                 } catch (_: StaleObjectException) {
                     lastObserved = "Window changed while observing $tab route"
                     previousFrame?.recycle()
                     previousFrame = null
                     previousBounds = null
+                    stableSince = null
                 } finally {
                     sample?.recycle()
                 }
@@ -224,6 +240,22 @@ internal class ObservedUi(private val device: UiDevice) {
             previousFrame?.recycle()
         }
         error("No stable $tab frame within 30 seconds; last observation: $lastObserved")
+    }
+
+    private fun foregroundInk(frame: Bitmap, bounds: Rect): Pair<Int, Int> {
+        val area = Rect(bounds)
+        assertTrue("A body marker must lie inside the actual captured frame",
+            !area.isEmpty && area.left >= 0 && area.top >= 0 && area.right <= frame.width && area.bottom <= frame.height)
+        val pixels = IntArray(area.width() * area.height())
+        frame.getPixels(pixels, 0, area.width(), area.left, area.top, area.width(), area.height())
+        // These page markers use light white/cyan/muted text on navy. Require
+        // actual foreground pixels as well as AX text: an empty navy frame must
+        // fail even if it is unchanged. No pixels are altered for the saved PNG.
+        val count = pixels.count { color ->
+            ((color shr 16 and 255) + (color shr 8 and 255) + (color and 255)) / 3 >= 128
+        }
+        val required = maxOf(16, kotlin.math.ceil(pixels.size * .002).toInt())
+        return count to required
     }
 
     fun awaitMainAfterSavedDialogs(packageName: String) {
