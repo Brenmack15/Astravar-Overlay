@@ -6,7 +6,7 @@
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/1.json": "8f92801eb01d6ed7d6ff4c5508e9fc4131146fbbcf9a9f8aad92e2596536ec30",
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/2.json": "50a395a8b87a7a119312af1b1edba8246f68aed77be8900baa29a5caff964361",
     "app/schemas/com.yazsras.astravar.data.SandboxSyncDb/1.json": "23de63787037f830e1295ba7cd7efbc7d62cf18e3ba836c4e511bec8fd6cef03",
-    "app/src/main/AndroidManifest.xml": "d88d22d7f808b617a5c6fbe0a581789a5ecf79a54116c69732bbf951e12d82dd",
+    "app/src/main/AndroidManifest.xml": "8af945d068b6404169dc126415408805be91f2f97b52319fe314ff7bb375d12f",
     "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": "feeb234e91cacd9c81d01bef14bb506d3195f3af377ed1c14e1ad27529800160",
     "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": "68aa9fa9b027df3abca4ca07eca032c04f5a5b1cd3948d4b2c5a758a867e2ac1",
     "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": "90dbcfe730c9bea800101449551cad81942a979b168566d792fc3ee8978e5871",
@@ -81,5 +81,11 @@
     "rules/src/test/kotlin/com/yazsras/astravar/rules/SelectorMigrationTest.kt": "c7a1b535fdb76b48f0bc3b4df865b957411942b443e4ae155ca03d71210d491d",
     "rules/src/test/kotlin/com/yazsras/astravar/rules/WeaponWorkflowTest.kt": "36d788ce7e2e7174e8b391c3e330c6e81c23ff0656b9fd8896277571a55ac425"
   },
-  "owner_signing_block_sha256": "9f749325c6e42970c42ff72ce35cdb31af58a7a30000a404223b4841e267a1f3"
+  "owner_signing_block_sha256": "9f749325c6e42970c42ff72ce35cdb31af58a7a30000a404223b4841e267a1f3",
+  "authorized_branding_change": {
+    "reference": "f44612e5756daa2b2cfa94a51c26156cc63547fc",
+    "file": "app/src/main/AndroidManifest.xml",
+    "previous_sha256": "d88d22d7f808b617a5c6fbe0a581789a5ecf79a54116c69732bbf951e12d82dd",
+    "scope": "Application label and launcher icon/roundIcon only; owner approved identity handoff. All other foundation hashes and owner signing hash unchanged."
+  }
 }

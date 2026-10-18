@@ -1,0 +1,21 @@
+{
+  "source": "Owner-supplied Astravar_App_Identity_Icon_Handoff.zip",
+  "reference_commit": "f44612e5756daa2b2cfa94a51c26156cc63547fc",
+  "approved_original_sha256": "95f3c0cb6f56a5f8ca53682609cf7672e4b38e8631a11c2cdce3f27afac4b5a7",
+  "files": {
+    "app/src/main/res/drawable-nodpi/astravar_launcher_foreground.png": "af39869ad94a0894170801ebf6b2ba071c6bcd67ce34c12ebc556c4dbdf4dc3a",
+    "app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml": "60f30a387f1c51fa86d9f3f8702fd76bc1c5e6a0ac7183c3b8e7734ec715ca84",
+    "app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml": "60f30a387f1c51fa86d9f3f8702fd76bc1c5e6a0ac7183c3b8e7734ec715ca84",
+    "app/src/main/res/mipmap-hdpi/ic_launcher.png": "27100e42b55e1e991da94bc6441276c60efdc570a6c5aa0916cdaa43f6d4e314",
+    "app/src/main/res/mipmap-hdpi/ic_launcher_round.png": "91305d0185fa54049ed8b7bb63eff77c8f859b6458a8156b2595d7028f8f7d55",
+    "app/src/main/res/mipmap-mdpi/ic_launcher.png": "c4ba42f74fd0f2f2935bbb847448b34871f53728d87c48bb50c313b8e95a7374",
+    "app/src/main/res/mipmap-mdpi/ic_launcher_round.png": "0fd3f993a3aca4cdade961927932debaa1aecf41e26c1098896813a7eb8b754a",
+    "app/src/main/res/mipmap-xhdpi/ic_launcher.png": "61fa1b6fa2402b25cb637fb93e7988c090eda6328d1b2c42f202c6dfd429af33",
+    "app/src/main/res/mipmap-xhdpi/ic_launcher_round.png": "83e07f3893c5a7200f32b47b9c193d812e6bdf7a85e80cc7d0708cc76e4c566b",
+    "app/src/main/res/mipmap-xxhdpi/ic_launcher.png": "11c876341f5c80f749a759c2cc29322b704145f28b2f29eb31b23863946a04d7",
+    "app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png": "4c038c13decf0adc66a74760606d0369adc9f10a4d7e811f53dbc16ba1618044",
+    "app/src/main/res/mipmap-xxxhdpi/ic_launcher.png": "b009b9ceb1921880056e0bdc3cf3682d5362b19dd984af53c8e95430152420d0",
+    "app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png": "1e101185e615787c72ff45da37d39a2bbed79a2581d9e3b1ea7a858fc3c47ee1",
+    "app/src/main/res/values/astravar_launcher_colors.xml": "9aa7e4dccb7d23a9760036cc0cb40d020a00b8d7dcd181f1b9cd9ef31079e002"
+  }
+}
