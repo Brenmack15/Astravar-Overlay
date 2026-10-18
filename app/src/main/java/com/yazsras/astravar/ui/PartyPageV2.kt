@@ -89,7 +89,7 @@ fun PartyPageV2(repository: CampaignLedgerRepository, campaign: Campaign?, openI
             }
         }
     }
-    if (detailsOpen && current?.id == "eek") PlayerSheet("Eek details", onDismiss = { detailsOpen = false }) {
+    if (detailsOpen && current?.id == "eek") RebuildToolSheet("Eek details", onDismiss = { detailsOpen = false }) {
         EekPageV2(repository)
     }
 }

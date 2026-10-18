@@ -119,6 +119,7 @@ import java.util.UUID
             }
         }
         PlayerEntry("Equipment & upgrades", "${equipment.size} linked record${if (equipment.size == 1) "" else "s"}", "Weapon", { mode = "equipmentList" })
+        Text("Give, take, equip and install items in Party → Eek → Equipment.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
         PlayerEntry("Capabilities", "Accepted companion reference", "Core", { mode = "capabilities" })
         PlayerEntry("History", "Sourced status, resources and equipment", "History", { mode = "history" })
     }

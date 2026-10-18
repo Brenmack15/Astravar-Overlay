@@ -38,6 +38,10 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** Selecting stored magic preserves the chosen spell-bearing attack on both surfaces. */
+fun payloadModeAfterSelection(current: Ability): Ability =
+    if (current in listOf(Ability.SPELL, Ability.SPELL_GAUNTLET, Ability.DISCHARGE)) current else Ability.SPELL
+
 fun rollFeedback(view: View,roll: ShotRoll?) {
     val feedback=if(Build.VERSION.SDK_INT>=30) {if(roll?.natural==1) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.CONFIRM} else HapticFeedbackConstants.VIRTUAL_KEY
     view.performHapticFeedback(feedback)

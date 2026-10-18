@@ -14,6 +14,7 @@ import com.yazsras.astravar.data.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 /** Presentation state only; repositories own revision checks and transactional persistence. */
 internal class LocalRecordActions(private val scope: CoroutineScope) {
@@ -71,6 +72,8 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
     val audit by records.audit.collectAsState(initial = emptyList())
     val actions = rememberLocalRecordActions()
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var projectDraftId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
+    var projectCommandId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
     var mode by rememberSaveable { mutableStateOf("") }
     val projectDraft = rememberUiDraftText()
     var projectSnapshot by projectDraft
@@ -153,6 +156,8 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
         else -> false
     }
     fun load(project: InventionProject?) {
+        projectDraftId = project?.id ?: UUID.randomUUID().toString()
+        projectCommandId = UUID.randomUUID().toString()
         projectSnapshot = project?.let { Json.encodeToString(it) }; selectedId = project?.id
         stageSnapshot = null; requirementSnapshot = null
         craftReviewJson = null; craftLabelsJson = "[]"; consumedJson = "{}"
@@ -232,8 +237,8 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
             when(mode) {
                 "create", "edit" -> PlayerButton(onClick = {
                     val before = editorProject; val provenance = source
-                    val model = before?.copy(title = title, description = description, status = status) ?: InventionProject(title = title, description = description, status = status)
-                    actions.run { val receipt = records.saveProject(model, before?.revision, provenance); projectSnapshot = Json.encodeToString(model.copy(revision = receipt.resultingRevision, source = provenance, updatedAt = receipt.createdAt)); selectedId = model.id; mode = "detail"; "Invention saved · no resources consumed" }
+                    val model = before?.copy(title = title, description = description, status = status) ?: InventionProject(title = title, description = description, status = status, id = projectDraftId)
+                    actions.run { val receipt = records.saveProject(model, before?.revision, provenance, projectCommandId); projectSnapshot = Json.encodeToString(model.copy(revision = receipt.resultingRevision, source = provenance, updatedAt = receipt.createdAt)); selectedId = model.id; mode = "detail"; "Invention saved · no resources consumed" }
                 }, enabled = !actions.busy && projectDraftValid && !stale && title.isNotBlank() && source.isNotBlank()) { Text(if (mode == "create") "Save invention" else "Save invention changes") }
                 "detail" -> PlayerButton(onClick = { selected?.let(::load); mode = "edit" }, enabled = !actions.busy) { Text("Edit invention") }
                 "stage" -> PlayerButton(onClick = {

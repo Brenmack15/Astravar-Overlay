@@ -27,12 +27,25 @@ import com.yazsras.astravar.rules.*
 import kotlin.math.cos
 import kotlin.math.sin
 
+/** Shared native/overlay selection policy; combinations remain constrained by the engine. */
+fun elementSelectionAfterChoice(profile: Profile, current: List<DamageType>, chosen: DamageType): List<DamageType> {
+    if (chosen == DamageType.FORCE) return emptyList()
+    require(chosen in Engine.elements(profile)) { "Choose an unlocked element" }
+    if (profile.elementCapacity == 1) return listOf(chosen)
+    // Accepted Dual Resonance combines basic elements only. An unlocked advanced
+    // element is still usable by itself; selecting it replaces the pair, and
+    // choosing a basic element afterwards starts a new basic selection.
+    if (profile.elementCapacityOverride == null && (chosen !in Engine.basic || current.any { it !in Engine.basic }))
+        return listOf(chosen)
+    return if (chosen in current) current - chosen else (current + chosen).takeLast(profile.elementCapacity)
+}
+
 /** The approved clockwise order surrounds neutral Force; availability remains engine-owned. */
 @Composable
 fun ElementWheelV2(profile: Profile, selected: List<DamageType>, close: () -> Unit, choose: (DamageType) -> Unit) {
     val ring = listOf(DamageType.FIRE, DamageType.COLD, DamageType.LIGHTNING, DamageType.ACID,
         DamageType.POISON, DamageType.THUNDER, DamageType.NECROTIC, DamageType.PSYCHIC, DamageType.RADIANT)
-    val allowed = if (profile.elementCapacity > 1 && profile.elementCapacityOverride == null) Engine.basic else Engine.elements(profile)
+    val allowed = Engine.elements(profile)
     var showUnlocks by rememberSaveable { mutableStateOf(false) }
     PlayerSheet("Choose an element", close) {
         BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio(.9f).testTag("element-wheel")) {
@@ -64,6 +77,7 @@ fun ElementWheelV2(profile: Profile, selected: List<DamageType>, close: () -> Un
                 close()
             }
         }
+        if (profile.elementCapacity > 1 && profile.elementCapacityOverride == null) Text("Dual Resonance combines two basic elements. An unlocked advanced element replaces that pair and is used alone.", style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
         TextButton(onClick = { showUnlocks = !showUnlocks }, modifier = Modifier.heightIn(min = 48.dp)) {
             Text("Radiant, Psychic & Necrotic unlocks")
         }

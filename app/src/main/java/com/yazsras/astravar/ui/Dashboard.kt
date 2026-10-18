@@ -178,7 +178,7 @@ import kotlinx.serialization.encodeToString
         "Element" -> ElementWheelV2(s.profile,prefs.elements,{overlay=null}) {type->
             a.run("") {
                 if(type==DamageType.FORCE) {preferences.elements(emptyList());if(!blast && !melee) preferences.mode(Ability.ARCANE)}
-                else {preferences.elements(if(s.profile.elementCapacity==1) listOf(type) else if(type in prefs.elements) prefs.elements-type else (prefs.elements+type).takeLast(s.profile.elementCapacity));if(!blast && !melee) preferences.mode(Ability.ELEMENTAL)}
+                else {preferences.elements(elementSelectionAfterChoice(s.profile,prefs.elements,type));if(!blast && !melee) preferences.mode(Ability.ELEMENTAL)}
             };overlay=null
         }
         "Core" -> CorePicker(s,a) {overlay=null}
@@ -253,6 +253,11 @@ private data class ApprovedAttackChoice(val art:ApprovedAttackArt,val name:Strin
         ApprovedAttackChoice(ApprovedAttackArt.SPELL_STRIKE,"Spell-imbued strike","Melee + spell",Ability.SPELL_GAUNTLET),
         ApprovedAttackChoice(ApprovedAttackArt.DISCHARGE,"Discharge","Save-based area",Ability.DISCHARGE))
     PlayerSheet("Choose attack",onDismiss) {
+        val reasons=listOfNotNull(meleeLock,Engine.guardianLockReason(profile),chargeLock).distinct()
+        if(reasons.isNotEmpty()) PlayerDisclosure("Gauntlet requirements") {
+            reasons.forEach { Text(it,style=MaterialTheme.typography.bodySmall,color=Frost) }
+            Text("Review Config → Rules & profile → Gauntlet configuration. Accepted modifiers and damage types stay explicit.",style=MaterialTheme.typography.bodySmall,color=Muted)
+        }
         choices.chunked(2).forEach {row->Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
             row.forEach {choice->
                 val lock=if(choice.charge) chargeLock else if(choice.mode==Ability.GUARDIAN) Engine.guardianLockReason(profile) else if(choice.mode in listOf(Ability.GAUNTLET,Ability.SPELL_GAUNTLET)) meleeLock else null
@@ -262,11 +267,11 @@ private data class ApprovedAttackChoice(val art:ApprovedAttackArt,val name:Strin
                     onClick=if(available) {{if(choice.charge && !charged) onCharge?.invoke() else onSelect(choice.mode)}} else null,padding=12.dp,spacing=4.dp) {
                     ApprovedAttackMedallion(choice.art,Modifier.size(64.dp).alpha(if(available) 1f else .45f))
                     Text(choice.name,style=MaterialTheme.typography.titleMedium,color=if(available) MaterialTheme.colorScheme.onSurface else Muted)
-                    Text(lock ?: if(active) "Selected · ${choice.classification}" else choice.classification,style=MaterialTheme.typography.bodySmall,color=Muted)
+                    Text(if(lock!=null) if(choice.charge && meleeLock==null) "Locked · confirm charged damage type" else if(choice.mode==Ability.GUARDIAN && meleeLock==null) "Locked · confirm Guardian attack bonus" else "Locked · configure melee profile"
+                        else if(active) "Selected · ${choice.classification}" else choice.classification,style=MaterialTheme.typography.bodySmall,color=Muted)
                 }
             }
         }}
-        if(meleeLock!=null || chargeLock!=null) Text("Review Config → Rules & profile → Gauntlet configuration for the exact missing accepted values. No ability modifiers or damage types are guessed.",style=MaterialTheme.typography.bodySmall,color=Frost)
         PlayerDisclosure("Existing weapon modes") {
             PlayerEntry("Arcane shot","Neutral Force · existing ranged attack","Weapon",{onSelect(Ability.ARCANE)})
         }

@@ -177,7 +177,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                 val blast=prefs.mode in listOf(Ability.DISCHARGE,Ability.SHATTER)
                 if(type==DamageType.FORCE) {app.preferences.elements(emptyList());if(!blast) app.preferences.mode(Ability.ARCANE)}
                 else {
-                    app.preferences.elements(if(s!!.profile.elementCapacity==1) listOf(type) else if(type in prefs.elements) prefs.elements-type else (prefs.elements+type).takeLast(s!!.profile.elementCapacity))
+                    app.preferences.elements(elementSelectionAfterChoice(s!!.profile,prefs.elements,type))
                     if(!blast) app.preferences.mode(Ability.ELEMENTAL)
                 }
             };elementPicker=false
