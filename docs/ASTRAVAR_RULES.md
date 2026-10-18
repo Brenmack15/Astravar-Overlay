@@ -2,6 +2,16 @@
 
 Source: the supplied ASTRAVAR_ANDROID_MASTER_PROMPT, read in full before implementation. These are campaign homebrew mechanics, not a replacement official Artificer class. Later explicit player corrections take precedence over this editable profile. Past shots keep their profile snapshot; stored payloads keep their loading snapshot.
 
+## Current 2.1 player-first correction — 18 October 2026
+
+Astravar has one permanent internal nexus. New Shatter, spare-core installation and replacement are retired; their serialized values and historical outcomes remain readable. The shared engine rejects new execution rather than relying on hidden UI controls. An old installation record is preserved for reviewed adoption and never auto-completed by advancing time.
+
+Integrated Gauntlet, Spell-Imbued Gauntlet, Charged Gauntlet and ordinary Guardian fallback use the accepted Armor Mk.I architecture through an explicitly sourced, versioned melee configuration. Current numerical values are not inferred from a reference sheet. Individual damage profiles retain per-type versions and approval, inherit defaults when unapproved and never unlock gated elements. The spell-firing limit persists until the player confirms the next turn even with optional general action limits off. See [Player-first rules and source boundaries](PLAYER_FIRST_RULES.md) for exact behavior, regression coverage and outstanding source conflicts.
+
+The current inherited Discharge formula, range, radius and resource accounting differ from the later armor reference. They are deliberately not migrated silently. The ten-minute recovery remains explicit in-world time. The source conflict must be reconciled before treating the inherited implementation as complete Armor Mk.I rules. Charged Gauntlet's additional flat damage type also needs an explicit sourced ruling; no Force/Thunder type is invented.
+
+The sections below document the existing engine and historical rule versions. Shatter, swapping and replacement descriptions are archival, not authorization for new actions.
+
 ## Accepted
 
 - Zerg must be attuned and a usable core installed. Starter character configuration is Artificer 5, INT +4, proficiency +3, save DC 15. Those values do not establish current resources.
