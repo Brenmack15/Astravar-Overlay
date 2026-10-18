@@ -191,18 +191,34 @@ class OverlayService: Service() {
         val mark=glyph(if(kind=="core") R.drawable.ic_core else R.drawable.ic_payload,23,if(kind=="core") OverlayInk.BLUE else OverlayInk.GOLD)
         setCompoundDrawables(mark,null,null,null);setPadding(dp(6),dp(4),dp(4),dp(4))
     }
-    private fun rollDial(p: ShotPlan,r: ShotRoll?,resolution: Resolution?=null)=panel(if(r?.natural==20 || resolution?.outcome==Outcome.CRITICAL) OverlayInk.GOLD else if(r?.natural==1) OverlayInk.RED else OverlayInk.BLUE).apply {
-        val attack=r?.attackTotal ?: resolution?.attackTotal
-        val accent=if(r?.natural==20 || resolution?.outcome==Outcome.CRITICAL) OverlayInk.GOLD else if(r?.natural==1) OverlayInk.RED else OverlayInk.BLUE
-        addView(FrameLayout(uiContext).apply {
-            background=OverlayResultDial(accent)
-            addView(heading(if(attack!=null) "ATTACK ROLL" else "DEX SAVE",11f).apply {gravity=Gravity.CENTER;setTextColor(OverlayInk.TEXT)},FrameLayout.LayoutParams(-1,dp(24),Gravity.TOP))
-            addView(text((attack ?: p.profile.saveDc).toString(),48f).apply {
-                typeface=displayTypeface;gravity=Gravity.CENTER;setTextColor(if(r?.natural==1) OverlayInk.RED else OverlayInk.GOLD)
-                setPadding(0,dp(5),0,0)
-            },FrameLayout.LayoutParams(-1,dp(76),Gravity.CENTER))
-            addView(text(r?.attackDescription(p) ?: if(attack!=null) "Player-entered attack result" else "DM supplies the saving throw",13f).apply {gravity=Gravity.CENTER},FrameLayout.LayoutParams(-1,dp(25),Gravity.BOTTOM))
-        },LinearLayout.LayoutParams(-1,dp(120)))
+    private fun rollDial(p: ShotPlan, r: ShotRoll?, resolution: Resolution? = null): LinearLayout {
+        val accent = when {
+            r?.natural == 20 || resolution?.outcome == Outcome.CRITICAL -> OverlayInk.GOLD
+            r?.natural == 1 -> OverlayInk.RED
+            else -> OverlayInk.BLUE
+        }
+        val attack = r?.attackTotal ?: resolution?.attackTotal
+        val resultPanel = panel(accent)
+        val dial = FrameLayout(uiContext)
+        dial.background = OverlayResultDial(accent)
+        val title = heading(if (attack != null) "ATTACK ROLL" else "DEX SAVE", 11f).apply {
+            gravity = Gravity.CENTER
+            setTextColor(OverlayInk.TEXT)
+        }
+        dial.addView(title, FrameLayout.LayoutParams(-1, dp(24), Gravity.TOP))
+        val value = text((attack ?: p.profile.saveDc).toString(), 48f).apply {
+            typeface = displayTypeface
+            gravity = Gravity.CENTER
+            setTextColor(if (r?.natural == 1) OverlayInk.RED else OverlayInk.GOLD)
+            setPadding(0, dp(5), 0, 0)
+        }
+        dial.addView(value, FrameLayout.LayoutParams(-1, dp(76), Gravity.CENTER))
+        val description = text(r?.attackDescription(p) ?: if (attack != null) "Player-entered attack result" else "DM supplies the saving throw", 13f).apply {
+            gravity = Gravity.CENTER
+        }
+        dial.addView(description, FrameLayout.LayoutParams(-1, dp(25), Gravity.BOTTOM))
+        resultPanel.addView(dial, LinearLayout.LayoutParams(-1, dp(120)))
+        return resultPanel
     }
     private fun damagePanel(damage: Map<DamageType,Int>,label: String)=panel(OverlayInk.BLUE).apply {
         val row=LinearLayout(uiContext).apply {gravity=Gravity.CENTER_VERTICAL;isBaselineAligned=false}
@@ -363,11 +379,23 @@ class OverlayService: Service() {
                 Ability.entries.filterNot { it == Ability.SHATTER }.forEach {mode->
                     val melee=mode in listOf(Ability.GAUNTLET,Ability.SPELL_GAUNTLET,Ability.GUARDIAN)
                     val lock=if(mode==Ability.GUARDIAN) Engine.guardianLockReason(s.profile) else if(melee) Engine.meleeLockReason(s.profile) else null
-                    content.addView(button(mode.title + (lock?.let { "\n$it" } ?: ""),false) {run("Mode selected") {
-                        app.preferences.mode(mode)
-                        if(melee) {distance=5;app.preferences.aim(5,targetPoint,false,immediateId,manualSlot)}
-                        panelPage=if(mode==Ability.ELEMENTAL) "elements" else if(mode==Ability.DISCHARGE) "target" else "combat";editingTarget=panelPage=="target"
-                    }}.apply { isEnabled=!busy && lock==null })
+                    val option = button(mode.title + (lock?.let { "\n$it" } ?: ""), false) {
+                        run("Mode selected") {
+                            app.preferences.mode(mode)
+                            if (melee) {
+                                distance = 5
+                                app.preferences.aim(5, targetPoint, false, immediateId, manualSlot)
+                            }
+                            panelPage = when (mode) {
+                                Ability.ELEMENTAL -> "elements"
+                                Ability.DISCHARGE -> "target"
+                                else -> "combat"
+                            }
+                            editingTarget = panelPage == "target"
+                        }
+                    }
+                    option.isEnabled = !busy && lock == null
+                    content.addView(option)
                 }
                 if(Engine.meleeLockReason(s.profile)!=null) content.addView(text("Configure accepted melee values in Config → Rules & profile → Gauntlet configuration.",12f))
                 content.addView(button("Back") {panelPage="combat";render()})
