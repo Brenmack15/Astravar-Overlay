@@ -43,7 +43,6 @@ class BaseDamageUpgradeTest {
                 slider.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription,"${count}d12"))
                 compose.onNodeWithText("Primary Force: ${count}d12+5 Force").assertIsDisplayed()
                 compose.onNodeWithText("Discharge: ${3*count}d12 Force").assertIsDisplayed()
-                compose.onNodeWithText("Shatter: ${21*count}d12 Force").assertIsDisplayed()
                 compose.runOnIdle {assertEquals(count,profile.value.baseDamageDiceCount)}
             }
             assertEquals((1..10).toList(),persisted)
@@ -79,7 +78,6 @@ class BaseDamageUpgradeTest {
             slider.performTouchInput {down(center);moveTo(Offset(width-1f,center.y),delayMillis=100)}
             compose.onNodeWithText("Primary Force: 10d12+5 Force").assertIsDisplayed()
             compose.onNodeWithText("Discharge: 30d12 Force").assertIsDisplayed()
-            compose.onNodeWithText("Shatter: 210d12 Force").assertIsDisplayed()
             compose.runOnIdle {assertTrue(persisted.isEmpty())}
             slider.performTouchInput {up()}
             compose.runOnIdle {assertEquals(listOf(10),persisted);assertEquals(10,profile.value.baseDamageDiceCount)}

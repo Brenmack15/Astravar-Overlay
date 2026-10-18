@@ -43,7 +43,6 @@ class ElementalDamageUpgradeTest {
                 slider.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription,"${m}d8"))
                 compose.onNodeWithText("3d12+5 Force + ${m}d8 Lightning").assertIsDisplayed()
                 compose.onNodeWithText("Discharge: 9d12 Force + ${m}d8 Lightning").assertIsDisplayed()
-                compose.onNodeWithText("Shatter: 63d12 Force + ${m}d8 Lightning").assertIsDisplayed()
                 compose.runOnIdle {assertEquals(m,profile.value.elementalSelectorDiceCount);assertEquals(3,profile.value.baseDamageDiceCount)}
             }
             assertEquals((1..10).toList(),commits)

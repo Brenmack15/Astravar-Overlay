@@ -28,18 +28,17 @@ class ForcePresentationTest {
             activity.get().setContent {AstravarTheme {WeaponDamageUpgrades(Profile(baseDamageDiceCount=4,level=10,confirmed=setOf(Upgrade.DUAL_RESONANCE)),elements=elements.value,onBaseCountSelected={},onSelectorCountSelected={})}}
             compose.onNodeWithText("NEUTRAL SHOT").assertIsDisplayed()
             compose.onNodeWithText("Discharge: 12d12 Force").assertIsDisplayed()
-            compose.onNodeWithText("Shatter: 84d12 Force").assertIsDisplayed()
             compose.runOnIdle {elements.value=listOf(DamageType.FIRE,DamageType.LIGHTNING)}
             compose.onNodeWithText("4d12+5 Force + 2d8 Fire + 2d8 Lightning").assertIsDisplayed()
             compose.onNodeWithText("Discharge: 12d12 Force + 2d8 Fire + 2d8 Lightning").assertIsDisplayed()
-            compose.onNodeWithText("Shatter: 84d12 Force + 2d8 Fire + 2d8 Lightning").assertIsDisplayed()
         } finally {activity.pause().stop().destroy()}
     }
 
     @Test(timeout=60000) fun largePoolStartsSummarizedAndExpandsOneTextComponentPerDamageType() {
         val s=Campaign(onboarded=true,attuned=true,installedId="core",profile=Profile(baseDamageDiceCount=10),cores=listOf(Core("core","Core")))
-        val p=Engine.plan(s,"large",Ability.SHATTER,elements=listOf(DamageType.LIGHTNING),point="Gate")
-        val rolled=DiceRoller.fire(s,p,die={it}).pending.single()
+        // An immutable legacy result remains renderable, though Shatter cannot be planned or committed now.
+        val p=ShotPlan("legacy-large",s.revision,Ability.SHATTER,"core",s.profile,emptyList(),elements=listOf(DamageType.LIGHTNING),targetPoint="Historical gate",blastDiceCount=210)
+        val rolled=PendingShot(p,rolled=DiceRoller.roll(p,die={it}))
         val activity=Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent {AstravarTheme {Column {DiceDetails(rolled)}}}
