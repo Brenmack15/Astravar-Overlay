@@ -248,6 +248,51 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
                 errors += "Receipt ${receipt.commandId} is not linked to its original audited outcome."
             }
         }
+
+        // A merge may add genuinely missing historical rows, but cannot create a competing
+        // history branch or claim a state newer than the retained final record.
+        val finalRows = mutableMapOf<Pair<String, String>, Pair<Long, String>>()
+        fun finalRow(type: String, id: String, revision: Long, json: String) { finalRows[type to id] = revision to json }
+        (incoming.items + current.items).forEach { finalRow("item", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.projects + c.projects).forEach { finalRow("project", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.stages + c.stages).forEach { finalRow("stage", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.requirements + c.requirements).forEach { finalRow("requirement", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.entities + c.entities).forEach { finalRow("connection", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.facts + c.facts).forEach { finalRow("fact", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.milestones + c.milestones).forEach { finalRow("milestone", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.companionStates + c.companionStates).forEach { finalRow("companion", it.companionId, it.revision, campaignJson.encodeToString(it)) }
+        (r.companionResources + c.companionResources).forEach { finalRow("resource", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.characterProfiles + c.characterProfiles).forEach { finalRow("character-profile", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.characterAbilities + c.characterAbilities).forEach { finalRow("character-ability", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.itemDetails + c.itemDetails).forEach { finalRow("item-details", it.itemId, it.revision, campaignJson.encodeToString(it)) }
+        (r.itemProperties + c.itemProperties).forEach { finalRow("item-property", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.links + c.links).forEach { finalRow("link", it.id, it.revision, campaignJson.encodeToString(it)) }
+        fun sameJson(a: String?, b: String?): Boolean = try {
+            a != null && b != null && campaignJson.parseToJsonElement(a) == campaignJson.parseToJsonElement(b)
+        } catch (_: Exception) { false }
+        fun checkHistory(type: String, id: String, history: List<CampaignAudit>) {
+            val finalState = finalRows[type to id] ?: return
+            if (history.groupBy { it.resultingRevision }.any { (_, rows) -> rows.size > 1 }) {
+                errors += "History for $type $id contains competing commands at the same revision."
+            }
+            history.forEach { event ->
+                if (event.resultingRevision > finalState.first ||
+                    (event.resultingRevision == finalState.first && !sameJson(event.afterJson, finalState.second))) {
+                    errors += "History for $type $id is newer than or disagrees with its final saved state."
+                }
+            }
+            history.sortedBy { it.resultingRevision }.zipWithNext().forEach { (before, after) ->
+                if (after.priorRevision == before.resultingRevision && !sameJson(before.afterJson, after.beforeJson)) {
+                    errors += "History for $type $id has incompatible adjacent snapshots."
+                }
+            }
+        }
+        (incoming.events + current.events).distinctBy { it.commandId }.groupBy { it.itemId }.forEach { (id, rows) ->
+            checkHistory("item", id, rows.map { event -> CampaignAudit(event.commandId, event.commandId, "item", id,
+                event.kind, event.source, event.priorRevision, event.resultingRevision, event.createdAt, event.beforeJson, event.afterJson) })
+        }
+        (r.audit + c.audit).distinctBy { it.id }.filter { it.recordType != "backup" }
+            .groupBy { it.recordType to it.recordId }.forEach { (key, rows) -> checkHistory(key.first, key.second, rows) }
         return errors.distinct()
     }
 }
