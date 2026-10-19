@@ -224,4 +224,131 @@ class CampaignImportInstrumentationTest {
         find("0 of 0 references")
         instrumentation.sendStatus(0, Bundle().apply { putString("stream", "\nCHECKPOINT: separate player consent recovered the verified pre-import snapshot; imported references removed and immutable receipts retained\n") })
     }
+
+    /** Supplemental test-only fixture. Run after the large archive rollback; never replaces an existing profile. */
+    @Test fun cMappedCampaignRecordsReachPlayerViews() {
+        assertEquals("This fixture must run only on an emulator", "1", device.executeShellCommand("getprop ro.kernel.qemu").trim())
+        val text = instrumentation.context.assets.open("fictional-mapped-campaign.json")
+            .bufferedReader(Charsets.UTF_8).use { it.readText() }
+        require(text.toByteArray(Charsets.UTF_8).size < 256 * 1024) { "The supplemental fixture must remain small and wholly fictional." }
+        val envelope = JSONObject(text)
+        val payload = JSONObject(envelope.getString("payload"))
+        assertEquals("fictional-native-typed", payload.getString("campaignId"))
+        assertEquals(sha(envelope.getString("payload")), envelope.getString("payloadSha256"))
+        File(files, "native-mapped-fixture.json").writeText(text)
+        writeDownload("astravar-native-mapped-campaign.json", text)
+        val observations = JSONArray()
+        val screenshots = JSONArray()
+        fun captureMapped(name: String, tab: String, vararg visibleMarkers: String, dialogTitle: String? = null) {
+            visibleMarkers.forEach { find(it) }
+            val fileName = "native-mapped-$name.png"
+            val selectors = visibleMarkers.map { By.text(it).pkg(product) }
+            if (dialogTitle == null) ui.captureStablePage(File(files, fileName), product, tab, selectors)
+            else ui.captureStableDialog(File(files, fileName), product, dialogTitle, selectors)
+            observations.put(JSONObject().put("route", name).put("primaryTab", tab)
+                .put("visibleMarkers", JSONArray(visibleMarkers.toList())).put("stableRenderedFrame", true)
+                .put("dialogTitle", dialogTitle ?: JSONObject.NULL).put("primaryTabVerifiedBeforeOpening", dialogTitle != null))
+            screenshots.put(fileName)
+        }
+
+        launchImportPage()
+        chooseDocument("astravar-native-mapped-campaign.json")
+        assertTrue("The mapped fixture must preview one source without replacing local records",
+            device.wait(Until.hasObject(By.textStartsWith("1 reference records, 0 relationships").pkg(product)), 10_000))
+        assertFalse("A mapped preview is not import authorization", device.findObject(By.text("Confirm local import").pkg(product)).isEnabled)
+        saveBackup("astravar-native-mapped-preimport-backup.json")
+        tap("I reviewed the archive and want to add approved records locally.")
+        assertTrue("The reviewed conflict-free mapped fixture can be confirmed after its verified backup",
+            device.findObject(By.text("Confirm local import").pkg(product)).isEnabled)
+        tap("Confirm local import")
+        awaitText("Import saved. Independent database readback passed.")
+
+        ui.ensurePrimaryTab(product, "Armor")
+        find("Fictional Mapped Operator")
+        assertTrue("Armor must display the imported manual ability independently of weapon mechanics",
+            device.wait(Until.hasObject(By.descContains("Intelligence score 14").pkg(product)), 10_000))
+        captureMapped("armor", "Armor", "Fictional Mapped Operator", "Ability scores")
+        tap("Armor source references")
+        find("1 of 1 references")
+        observations.put(JSONObject().put("route", "armor-source-entry").put("primaryTab", "Campaign")
+            .put("visibleMarker", "1 of 1 references"))
+
+        ui.ensurePrimaryTab(product, "Party")
+        tap("Fictional Mapped Operator")
+        find("Fictional Mapped Operator")
+        if (!device.hasObject(By.text("Fictional archival operator").pkg(product))) tap("Identity & progression")
+        captureMapped("party", "Party", "Class / role", "Fictional archival operator")
+        tap("Equipment")
+        captureMapped("equipment", "Party", "Fictional Mapped Lens", "Carried · quantity unknown")
+        tap("Currency")
+        captureMapped("currency", "Party", "Fictional Mapped Purse", "? cp · 2 sp · 7 gp")
+        tap("‹ Party")
+        tap("Fictional Mapped Owl")
+        find("Fictional Mapped Owl")
+        if (!device.hasObject(By.text("Fictional archival owl").pkg(product))) tap("Identity & progression")
+        captureMapped("companion", "Party", "Class / role", "Fictional archival owl")
+        tap("Party source dossiers")
+        find("1 of 1 references")
+        observations.put(JSONObject().put("route", "party-source-entry").put("primaryTab", "Campaign")
+            .put("visibleMarker", "1 of 1 references"))
+
+        campaignEntry("Inventory")
+        tap("Fictional Mapped Lens")
+        captureMapped("inventory", "Campaign", "Unknown quantity · Carried", "Fictional lens description preserved.", dialogTitle = "Fictional Mapped Lens")
+        tap("Properties & Mechanics")
+        find("Fictional optical property")
+        find("Fictional optical note; no automatic bonus.")
+        tap("Close")
+        tap("Inventory source archive")
+        find("1 of 1 references")
+        observations.put(JSONObject().put("route", "inventory-source-entry").put("primaryTab", "Campaign")
+            .put("visibleMarker", "1 of 1 references"))
+
+        campaignEntry("Inventions")
+        tap("Fictional Proposed Device")
+        captureMapped("invention", "Campaign", "Concept & Blueprint", "Fictional proposal only; no equipment was constructed.", dialogTitle = "Fictional Proposed Device")
+        tap("Physical output")
+        find("No linked physical output or equipment")
+        tap("Close")
+
+        campaignEntry("Connections")
+        tap("Fictional Mapped Contact")
+        captureMapped("connection", "Campaign", "Fictional contact notes preserved.", "Known Information", dialogTitle = "Fictional Mapped Contact")
+        find("Fictional historical fact preserved.")
+        tap("Close")
+
+        campaignEntry("Checkpoints")
+        captureMapped("checkpoint", "Campaign", "Fictional Mapped Checkpoint", "Fictional room; no time advances.")
+
+        campaignEntry("Reference Library")
+        find("1 of 1 references")
+        tap("Fictional Typed Source")
+        captureMapped("reference", "Campaign", "Original source text", "Fictional typed snapshot source. No gameplay is executed.", dialogTitle = "Fictional Typed Source")
+        tap("Close")
+
+        // Every view above is read-only. The original receipt must still verify after the entire sweep.
+        campaignEntry("Campaign import")
+        tap("Verify saved import")
+        awaitText("Database readback matches every imported identity, relationship and content hash.")
+        File(files, "native-mapped-ui-observations.json").writeText(JSONObject()
+            .put("marker", "ASTRAVAR_FICTIONAL_TYPED_NATIVE_UI_V1").put("synthetic_only", true)
+            .put("package", product).put("packageSha256", envelope.getString("payloadSha256"))
+            .put("observations", observations).put("screenshots", screenshots)
+            .put("postViewDatabaseReadbackPassed", true).put("gameplayActionsInvoked", false).toString(2))
+        instrumentation.sendStatus(0, Bundle().apply { putString("stream", "\nCHECKPOINT: fictional typed archive selected with SAF and separately confirmed; Armor, Party, companion sheet, equipment, currency, Inventory, Inventions, Connections, Checkpoints, Reference Library and all three source entry points rendered imported records; post-view database readback passed without gameplay mutations\n") })
+    }
+
+    /** Invoke only after the host has independently copied and verified the applied mapped database. */
+    @Test fun dMappedCampaignRecordsRollbackAfterReadback() {
+        launchImportPage()
+        reviewRollback("Fictional typed migration")
+        assertFalse("Typed recovery requires its own player confirmation", device.findObject(By.text("Confirm rollback").pkg(product)).isEnabled)
+        tap("I understand this restores the verified pre-import campaign backup.")
+        tap("Confirm rollback")
+        awaitText("Recovered the verified pre-import campaign snapshot. Original import and recovery receipts are retained.")
+        campaignEntry("Reference Library")
+        find("0 of 0 references")
+        ui.captureStablePage(File(files, "native-mapped-rollback.png"), product, "Campaign", listOf(By.text("0 of 0 references").pkg(product)))
+        instrumentation.sendStatus(0, Bundle().apply { putString("stream", "\nCHECKPOINT: separately confirmed typed archive recovery restored the pre-import campaign; immutable receipts retained and Reference Library read back empty\n") })
+    }
 }

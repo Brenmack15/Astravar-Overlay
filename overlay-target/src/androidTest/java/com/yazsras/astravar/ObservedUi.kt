@@ -242,6 +242,71 @@ internal class ObservedUi(private val device: UiDevice) {
         error("No stable $tab frame within 30 seconds; last observation: $lastObserved")
     }
 
+    /** Dialogs own an accessibility window and can hide the selected navigation behind them. */
+    fun captureStableDialog(file: File, packageName: String, title: String, markers: List<BySelector>) {
+        require(markers.isNotEmpty()) { "A dialog capture needs specific body markers." }
+        val deadline = SystemClock.uptimeMillis() + 30_000
+        var previousFrame: Bitmap? = null
+        var previousBounds: List<Rect>? = null
+        var stableSince: Long? = null
+        var lastObserved = "No dialog observation yet"
+        try {
+            while (SystemClock.uptimeMillis() < deadline) {
+                var sample: Bitmap? = null
+                try {
+                    clearObservationCache()
+                    val close = device.findObjects(By.text("Close").pkg(packageName)).lastOrNull()
+                    var root = close
+                    var depth = 0
+                    while (root?.parent != null && depth++ < 24) root = root?.parent
+                    // All markers must belong to the same observed window as its real Close control.
+                    val titleBounds = root?.findObjects(By.text(title).pkg(packageName))?.lastOrNull()?.let { Rect(it.visibleBounds) }
+                    val closeBounds = close?.let(::interactiveBounds)
+                    val bodyBounds = markers.map { selector -> root?.findObjects(selector)?.lastOrNull()?.let { Rect(it.visibleBounds) } }
+                    val geometry = listOfNotNull(titleBounds, closeBounds) + bodyBounds.filterNotNull()
+                    val ready = titleBounds != null && closeBounds != null && bodyBounds.all { it != null } && geometry.all {
+                        !it.isEmpty && it.left >= 0 && it.top >= 0 && it.right <= device.displayWidth && it.bottom <= device.displayHeight
+                    }
+                    lastObserved = "dialog title=${titleBounds != null}; Close=${closeBounds != null}; body=${bodyBounds.count { it != null }}/${markers.size}; bounds=$geometry"
+                    if (ready) {
+                        val captured = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+                        try { sample = captured?.copy(Bitmap.Config.ARGB_8888, false) }
+                        finally { captured?.recycle() }
+                        val frame = sample
+                        val ink = frame?.let { bitmap -> (listOfNotNull(titleBounds) + bodyBounds.filterNotNull()).map { foregroundInk(bitmap, it) } }
+                        val rendered = ink != null && ink.all { (count, required) -> count >= required }
+                        val now = SystemClock.uptimeMillis()
+                        val unchanged = rendered && previousBounds == geometry && previousFrame?.sameAs(frame) == true
+                        stableSince = if (unchanged) stableSince ?: now else if (rendered) now else null
+                        lastObserved += "; marker foreground counts=$ink"
+                        if (frame != null && unchanged && now - (stableSince ?: now) >= 1_000) {
+                            FileOutputStream(file).use { output ->
+                                assertTrue("Stable dialog frame must be saved", frame.compress(Bitmap.CompressFormat.PNG, 100, output))
+                            }
+                            clearObservationCache()
+                            device.dumpWindowHierarchy(File(file.parentFile, file.nameWithoutExtension + ".xml"))
+                            return
+                        }
+                        previousFrame?.recycle()
+                        previousFrame = frame
+                        sample = null
+                        previousBounds = geometry.takeIf { rendered }
+                    } else {
+                        previousFrame?.recycle(); previousFrame = null; previousBounds = null; stableSince = null
+                    }
+                } catch (_: StaleObjectException) {
+                    lastObserved = "Window changed while observing dialog $title"
+                    previousFrame?.recycle(); previousFrame = null; previousBounds = null; stableSince = null
+                } finally { sample?.recycle() }
+                val idleRemaining = deadline - SystemClock.uptimeMillis()
+                if (idleRemaining > 0) device.waitForIdle(minOf(1_000L, idleRemaining))
+                val pollRemaining = deadline - SystemClock.uptimeMillis()
+                if (pollRemaining > 0) SystemClock.sleep(minOf(100L, pollRemaining))
+            }
+        } finally { previousFrame?.recycle() }
+        error("No stable dialog $title within 30 seconds; last observation: $lastObserved")
+    }
+
     private fun foregroundInk(frame: Bitmap, bounds: Rect): Pair<Int, Int> {
         val area = Rect(bounds)
         assertTrue("A body marker must lie inside the actual captured frame",
