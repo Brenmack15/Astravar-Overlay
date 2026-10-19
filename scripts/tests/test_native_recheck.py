@@ -129,9 +129,10 @@ class NativeRecheckTest(unittest.TestCase):
         self.assertGreater(script.index("scripts/history-preservation-fixture.py verify"), positions[-1])
         self.assertIn('ASTRAVAR_NATIVE_CLASS_TIMEOUT=720 ' + calls[3], script)
         self.assertIn('grep -q "^OK ($astravar_count test"', script)
-        self.assertEqual(len(native.ALLOWED_FILES), 7)
+        self.assertEqual(len(native.ALLOWED_FILES), 8)
         self.assertIn("scripts/ci-player-first-emulator.sh", native.ALLOWED_FILES)
         self.assertIn("app/src/test/java/com/yazsras/astravar/ui/RebuildVisualAcceptanceTest.kt", native.ALLOWED_FILES)
+        self.assertIn("overlay-target/src/androidTest/java/com/yazsras/astravar/UpdatePreservationInstrumentationTest.kt", native.ALLOWED_FILES)
 
     def test_product_deletion_and_mode_change_are_rejected(self):
         repo, base, tree = self.repository()
