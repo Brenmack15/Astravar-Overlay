@@ -195,6 +195,9 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
             require(envelope.payloadSha256.matches(Regex("[0-9a-f]{64}")) && campaignHash(envelope.payload) == envelope.payloadSha256) { "Archive integrity check failed. Select the original complete file." }
             rejectDuplicateJsonMembers(envelope.payload)
             val incoming = campaignJson.decodeFromString<CampaignArchivePayload>(envelope.payload)
+            require(incoming.records.sumOf { it.relationIds.size.toLong() } <= CAMPAIGN_JSON_MAX_CONTAINER_VALUES) {
+                "Archive relationships exceed the supported campaign complexity limit. No records were imported."
+            }
             val conflicts = validatePayload(incoming).toMutableList()
             val incomingRows = rows(incoming, envelope.payloadSha256)
             val known = (current.archive.references + incomingRows).map { it.id }.toSet()
@@ -518,9 +521,14 @@ internal fun normalizedNotionIdentity(value: String): String {
     return if (suffix.matches(Regex("[0-9a-f]{32}"))) suffix else path.replace("-", "")
 }
 
-/** Validate JSON syntax and duplicate object keys without materializing large scalar strings or a JSON tree. */
+internal const val CAMPAIGN_JSON_MAX_VALUES = 100_000
+internal const val CAMPAIGN_JSON_MAX_CONTAINER_VALUES = 50_000
+internal const val CAMPAIGN_JSON_MAX_OBJECT_MEMBERS = 1_000
+
+/** Check complexity before typed decoding, without materializing scalar strings or a JSON tree. */
 internal fun rejectDuplicateJsonMembers(text: String): Set<String> {
     var at = 0
+    var values = 0
     var rootKeys: Set<String> = emptySet()
     fun spaces() { while (at < text.length && text[at] in " \t\r\n") at++ }
     fun token(key: Boolean = false): String {
@@ -546,6 +554,7 @@ internal fun rejectDuplicateJsonMembers(text: String): Set<String> {
     }
     fun value(depth: Int) {
         require(depth <= 128) { "JSON nesting exceeds the safe archive limit." }
+        require(++values <= CAMPAIGN_JSON_MAX_VALUES) { "JSON structure exceeds the supported campaign complexity limit. No records were imported." }
         spaces(); require(at < text.length) { "Truncated JSON." }
         when (text[at]) {
             '{' -> {
@@ -553,6 +562,7 @@ internal fun rejectDuplicateJsonMembers(text: String): Set<String> {
                 if (depth == 0) rootKeys = keys
                 if (at < text.length && text[at] == '}') { at++; return }
                 while (true) {
+                    require(keys.size < CAMPAIGN_JSON_MAX_OBJECT_MEMBERS) { "JSON object exceeds the supported campaign member limit. No records were imported." }
                     spaces(); val key = token(key = true)
                     require(keys.add(key)) { "Duplicate JSON member '$key' is not allowed." }
                     spaces(); require(at < text.length && text[at++] == ':')
@@ -563,7 +573,9 @@ internal fun rejectDuplicateJsonMembers(text: String): Set<String> {
             }
             '[' -> {
                 at++; spaces(); if (at < text.length && text[at] == ']') { at++; return }
+                var count = 0
                 while (true) {
+                    require(++count <= CAMPAIGN_JSON_MAX_CONTAINER_VALUES) { "JSON array exceeds the supported campaign record limit. No records were imported." }
                     value(depth + 1); spaces(); require(at < text.length)
                     val next = text[at++]; if (next == ']') break
                     require(next == ',')
