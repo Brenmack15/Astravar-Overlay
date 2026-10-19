@@ -82,7 +82,7 @@
     "rules/src/test/kotlin/com/yazsras/astravar/rules/WeaponWorkflowTest.kt": "36d788ce7e2e7174e8b391c3e330c6e81c23ff0656b9fd8896277571a55ac425",
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/3.json": "d030a6759b35784528732ff331ed20b27cb3c41561db0b7031d839b962f49901",
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/4.json": "076ebbba19127c09137b7095d84cc89bc9fb64c25ab74951677b9d2537cd3c5f",
-    "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": "4d6923a856264dd07841e6c85560fd3ee39de08b077774a712caf3b78079360e"
+    "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": "0b26e5c7c15176ae3da9ef8a0dc01bccb2031ceb14a11f3f82f500e246c13c06"
   },
   "owner_signing_block_sha256": "9f749325c6e42970c42ff72ce35cdb31af58a7a30000a404223b4841e267a1f3",
   "authorized_branding_change": {
@@ -272,7 +272,7 @@
   },
   "authorized_campaign_archive_memory_changes": {
     "baseline": "0416314bbc8c29fe464cb11e50b55d61c012609d",
-    "scope": "Streaming UTF-8 and exact-byte JSON hashing/backup serialization; archive typed readback without copying retained sources. No combat mechanics, historical Room schema or owner signing block changes.",
+    "scope": "Streaming UTF-8 and exact-byte JSON hashing/backup serialization; predecode JSON complexity limits; typed readback without copying retained sources. No combat mechanics, historical Room schema or owner signing block changes.",
     "files": {
       "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": {
         "previous_sha256": "73ec243b9c12bceac07c8fd560d6fc6a4fad3a2485d09424efb6c1dd47f3a9cb",
@@ -288,7 +288,7 @@
       },
       "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": {
         "previous_sha256": "559357699d2887a8e75ff2722ae09f5772e3df23259fb78460aed96837fab96a",
-        "sha256": "4d6923a856264dd07841e6c85560fd3ee39de08b077774a712caf3b78079360e"
+        "sha256": "0b26e5c7c15176ae3da9ef8a0dc01bccb2031ceb14a11f3f82f500e246c13c06"
       }
     }
   }
