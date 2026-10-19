@@ -15,16 +15,17 @@ import stat
 import subprocess
 import zipfile
 
-BASE_COMMIT = "1417dd5e045151c8a16b349ccf2c058371c8be16"
-BASE_TREE = "f6aea137f996a50082f2ca21045d5c69f2f317fc"
-RUN_ID = 39163162978
-ARTIFACT_ID = 12150294180
-ARTIFACT_SHA256 = "106b675781ed445d412047302e352b9d104aacc1f33f0d4fbd73976fb63e2a79"
-ARTIFACT_BYTES = 69839026
-CI_CERTIFICATE = "e54ceedb4515f44bba2f42a639ef7a18bca5d0578c3b37a9df1d49a7552cd5f0"
+BASE_COMMIT = "0e71338cf4ac016ccd0025b6a6750811479eb442"
+BASE_TREE = "afede2cb1d07bd306e07df002a464ce0de2d52a9"
+RUN_ID = 39189882687
+ARTIFACT_ID = 12160001923
+ARTIFACT_NAME = "Astravar-2.1-migration-native-source"
+ARTIFACT_SHA256 = "2ea5ce750ee2e466616b3f8d65d9b554621b9ef5061416d0be322cb44ea9778b"
+ARTIFACT_BYTES = 40102824
+CI_CERTIFICATE = "b5d9d4e5549c0659806768b9c31e027585c19c350b8b99eed893b020b3b8b98b"
 APK_HASHES = {
-    "Astravar-2.1-CI-ONLY-code24.apk": "1074cfe92d26cbe4c8f74356b2ff4ad5487f5236b631557d67aa2eb4e3d4cacf",
-    "Astravar-2.1-CI-ONLY-code25.apk": "49fd43af05151aa39254825d29ba494b7c493fc8b5f51169a3a2e00c1519e9a6",
+    "Astravar-2.1-CI-ONLY-code24.apk": "d7487719f6274037966917f773f581b4ce1a09aea8589cc3309fec828ccb47f7",
+    "Astravar-2.1-CI-ONLY-code26.apk": "e79cdc612ef1285e31b87db3be05936d7b079b9d118b8b939fe288269a4cd31b",
 }
 ALLOWED_FILES = {
     ".github/workflows/android-2.1-native-recheck.yml",
@@ -72,7 +73,7 @@ def source_guard(repo, base_commit=BASE_COMMIT, base_tree=BASE_TREE):
 
 def verify_artifact_metadata(metadata):
     workflow = metadata.get("workflow_run", {})
-    expected = {"id": ARTIFACT_ID, "name": "Astravar-2.1-verification", "size_in_bytes": ARTIFACT_BYTES,
+    expected = {"id": ARTIFACT_ID, "name": ARTIFACT_NAME, "size_in_bytes": ARTIFACT_BYTES,
                 "digest": "sha256:" + ARTIFACT_SHA256, "expired": False}
     if any(metadata.get(k) != v for k, v in expected.items()):
         raise ValueError("Artifact ID/digest/size/expiry metadata differs from the pinned artifact")
@@ -120,7 +121,7 @@ def prepare(repo, archive, metadata_path, sdk, output):
     # Write only known APKs, never extract arbitrary archive paths or old failures.
     output.mkdir(parents=True)
     from inspect_release_apk import inspect
-    for code in (24, 25):
+    for code in (24, 26):
         name = f"Astravar-2.1-CI-ONLY-code{code}.apk"
         apk = output / name
         apk.write_bytes(payloads[name])
