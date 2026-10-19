@@ -88,12 +88,12 @@ snapshot() {
   grep -q 'databases/' "$astravar_destination"
 }
 snapshot validation/update-before.sha256
-timeout -k 5s "${ASTRAVAR_INSTALL_TIMEOUT:-40}s" adb install -r "${ASTRAVAR_UPDATE_NEXT_APK:-validation/Astravar-2.1-CI-ONLY-code29.apk}" | tee validation/update-install.txt
+timeout -k 5s "${ASTRAVAR_INSTALL_TIMEOUT:-40}s" adb install -r "${ASTRAVAR_UPDATE_NEXT_APK:-validation/Astravar-2.1-CI-ONLY-code30.apk}" | tee validation/update-install.txt
 grep -q Success validation/update-install.txt
 snapshot validation/update-after.sha256
 diff -u validation/update-before.sha256 validation/update-after.sha256 >validation/update-store-diff.txt
 timeout 10s adb shell dumpsys package com.yazsras.astravar >validation/updated-package.txt
-grep -q 'versionCode=29' validation/updated-package.txt
+grep -q 'versionCode=30' validation/updated-package.txt
 run_class UpdatePreservationInstrumentationTest 1 validation/native-update-readback.txt
 # Exercise the updated source without reseeding demo data or executing another
 # campaign action; the strict current-state/hash verification below still applies.
@@ -126,4 +126,4 @@ run_class CampaignImportInstrumentationTest#bGuardedRollbackRestoresVerifiedSnap
 timeout 15s adb shell am force-stop com.yazsras.astravar
 copy_campaign_database validation/campaign-rolled-back
 python3 scripts/native-campaign-import-readback.py rolled-back --database validation/campaign-rolled-back/astravar-campaign-ledger.db --manifest validation/campaign-before.json --fixture validation/native-campaign-fixture.json --synthetic-demo | tee validation/campaign-rollback-result.json
-printf '%s\n' "PASS: matching certificate verified separately (${ASTRAVAR_TEST_SIGNER_LABEL:-CI-only}), version24→29, campaign schema3→4, all persisted store bytes retained before startup; independent native UI readback verified fictional inventory and recent rolls; copied-database readback verified every seeded raw historical hash, including old Shatter and malformed records." >validation/update-preservation-result.txt
+printf '%s\n' "PASS: matching certificate verified separately (${ASTRAVAR_TEST_SIGNER_LABEL:-CI-only}), version24→30, campaign schema3→4, all persisted store bytes retained before startup; independent native UI readback verified fictional inventory and recent rolls; copied-database readback verified every seeded raw historical hash, including old Shatter and malformed records." >validation/update-preservation-result.txt
