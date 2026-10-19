@@ -148,6 +148,36 @@ class CampaignImportInstrumentationTest {
         awaitText("Backup verified for this review.")
     }
 
+    /** Save the embedded stress attachment through SAF, then hash the actual shared-storage file independently. */
+    private fun saveLargeAttachment() {
+        tap("Archive source & attachments")
+        tap("fictional-large-reference.bin")
+        tap("Save verified attachment")
+        val name = device.wait(Until.findObject(By.clazz("android.widget.EditText")), 15_000)
+        assertNotNull("CreateDocument must expose the attachment filename", name)
+        name.text = "astravar-native-saved-attachment.bin"
+        val save = device.wait(Until.findObject(By.text(Pattern.compile("(?i)save"))), 10_000)
+        assertNotNull("The attachment must be saved through the real system picker", save)
+        save.click()
+        // This status follows source metadata within the reference dialog and can require a scroll.
+        find("Attachment saved and independently verified.")
+        val digest = MessageDigest.getInstance("SHA-256")
+        val bytes = ByteArray(8192)
+        val size = 15 * 1024 * 1024
+        var offset = 0
+        while (offset < size) {
+            val count = minOf(bytes.size, size - offset)
+            repeat(count) { index -> bytes[index] = ((offset + index) % 251).toByte() }
+            digest.update(bytes, 0, count); offset += count
+        }
+        val expected = digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
+        val actual = device.executeShellCommand("sha256sum /sdcard/Download/astravar-native-saved-attachment.bin")
+            .trim().substringBefore(' ')
+        assertEquals("The independently saved attachment must preserve all original bytes", expected, actual)
+        assertEquals("The actual saved file retains all 15 MiB", size.toString(),
+            device.executeShellCommand("stat -c %s /sdcard/Download/astravar-native-saved-attachment.bin").trim())
+    }
+
     private fun secondaryFixture(): String {
         val body = "Fictional secondary import tests recovery of a large existing source."
         val row = JSONObject().put("externalId", "fictional-secondary-note").put("title", "Fictional secondary note")
@@ -211,6 +241,7 @@ class CampaignImportInstrumentationTest {
         find("Fictional historical note. No resources changed.")
         find("Relationships (1)")
         assertTrue(device.takeScreenshot(File(files, "native-campaign-original-source.png")))
+        saveLargeAttachment()
         tap("Fictional Archive Contact")
         find("Fictional contact dossier. No encounter begins.")
         tap("Close")
@@ -230,7 +261,7 @@ class CampaignImportInstrumentationTest {
         assertTrue(device.wait(Until.hasObject(By.textContains("Already imported on this device").pkg(product)), 10_000))
         assertFalse("Duplicate archives cannot add the same records again", actionEnabled("Confirm local import"))
         tap("Close")
-        instrumentation.sendStatus(0, Bundle().apply { putString("stream", "\nCHECKPOINT: fictional archive selected through DocumentsUI; invalid integrity and interrupted preview preserved state; backup and explicit confirmation imported 320 fictional records/2225 relations; library, original text, relations and duplicate guard verified\n") })
+        instrumentation.sendStatus(0, Bundle().apply { putString("stream", "\nCHECKPOINT: fictional archive selected through DocumentsUI; invalid integrity and interrupted preview preserved state; backup and explicit confirmation imported 320 fictional records/2225 relations; library, original text, relations, explicit 15 MiB attachment save with independent file hash, and duplicate guard verified\n") })
     }
 
     @Test fun bGuardedRollbackRestoresVerifiedSnapshot() {
