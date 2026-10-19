@@ -312,5 +312,119 @@ class NativeRecheckTest(unittest.TestCase):
             native.verify_artifact_metadata(dict(self.metadata(), name="Astravar-2.1-verification"))
 
 
+class NativeRecheckCode32Test(unittest.TestCase):
+    git = NativeRecheckTest.git
+    repository = NativeRecheckTest.repository
+    commit = NativeRecheckTest.commit
+    metadata = NativeRecheckTest.metadata
+    source_run = NativeRecheckTest.source_run
+    source_jobs = NativeRecheckTest.source_jobs
+    archive = NativeRecheckTest.archive
+    verify_synthetic_archive = NativeRecheckTest.verify_synthetic_archive
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        native.configure_profile("code32")
+        self.addCleanup(native.configure_profile, "code31")
+
+    def reviewed_files(self, repo, omit=None):
+        for name in native.ALLOWED_FILES - {omit}:
+            path = repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("reviewed fictional harness repair\n")
+        self.commit(repo)
+
+    def test_only_named_pinned_profiles_can_be_selected_and_legacy_is_preserved(self):
+        self.assertEqual(native.VERSION_CODE, 32)
+        self.assertEqual(native.BASE_COMMIT, "80e5dd2dc6645338ece59a7bb2c11cba0a3f7c06")
+        self.assertEqual(native.BASE_TREE, "f957c7ac94f68d611cec02eaa85a3d8ed6456661")
+        self.assertTrue(native.STRICT_CHANGED_FILES)
+        self.assertEqual(len(native.ALLOWED_FILES), 6)
+        native.configure_profile("code31")
+        self.assertEqual(native.VERSION_CODE, 31)
+        self.assertEqual(native.BASE_COMMIT, "55a6b2db8065152606a421ca6e3f7a5b46da55c1")
+        self.assertEqual(native.RUN_ID, 39254633105)
+        self.assertFalse(native.STRICT_CHANGED_FILES)
+        self.assertEqual(len(native.ALLOWED_FILES), 8)
+        with self.assertRaisesRegex(ValueError, "Only the pinned"):
+            native.configure_profile("unreviewed")
+
+    def test_exact_six_committed_files_are_required_and_product_changes_fail(self):
+        repo, base, tree = self.repository()
+        self.reviewed_files(repo)
+        proof = native.source_guard(repo, base, tree)
+        self.assertEqual(set(proof["changed_paths"]), native.ALLOWED_FILES)
+        self.assertEqual(proof["reused_product_version_code"], 32)
+        self.assertEqual(proof["profile"], "code32")
+        self.git(repo, "reset", "--hard", base)
+        self.reviewed_files(repo, omit="docs/ASTRAVAR_2_1_NATIVE_RECHECK_CODE32.md")
+        with self.assertRaisesRegex(ValueError, "exact reviewed"):
+            native.source_guard(repo, base, tree)
+        self.git(repo, "reset", "--hard", base)
+        self.reviewed_files(repo)
+        (repo / "app/src/main/Product.kt").write_text("unreviewed product change\n")
+        self.commit(repo)
+        with self.assertRaisesRegex(ValueError, "full verification"):
+            native.source_guard(repo, base, tree)
+
+    def test_profile32_requires_its_completed_successful_build_and_artifact(self):
+        native.verify_artifact_metadata(self.metadata())
+        proof = native.verify_source_run(self.source_run(), self.source_jobs())
+        self.assertEqual(proof["source_run_id"], 39270984985)
+        self.assertEqual(proof["product_build_step_conclusion"], "success")
+        self.assertIn("offscreen status", proof["limitation"])
+        wrong = self.metadata()
+        wrong["id"] = native.CODE31_PROFILE["ARTIFACT_ID"]
+        with self.assertRaises(ValueError): native.verify_artifact_metadata(wrong)
+        jobs = self.source_jobs()
+        jobs["jobs"][0]["steps"][1]["conclusion"] = "failure"
+        with self.assertRaisesRegex(ValueError, "product build"):
+            native.verify_source_run(self.source_run(), jobs)
+
+    def test_profile32_archive_payload_and_mapping_are_independently_checked(self):
+        archive, payloads = self.archive()
+        self.assertIn("Astravar-2.1-CI-ONLY-code32.apk", payloads)
+        self.assertNotIn("Astravar-2.1-CI-ONLY-code31.apk", payloads)
+        self.assertEqual(self.verify_synthetic_archive(archive, payloads), payloads)
+        changed = dict(payloads, **{"mapping.txt": b"unreviewed map"})
+        with self.assertRaisesRegex(ValueError, "R8 mapping checksum"):
+            self.verify_synthetic_archive(archive, changed)
+
+    def test_profile32_actual_inspection_requires_32_and_its_one_test_certificate(self):
+        info = {"package": "com.yazsras.astravar", "version_code": 32, "version_name": "2.1.0",
+                "label": "Astravar", "certificate_sha256": native.CI_CERTIFICATE, "debuggable": False,
+                "owner_signature_verified": False, "launcher_artwork_bytes_verified": True,
+                "alignment_16kb_verified": True, "apk_sha256": native.APK_HASHES["Astravar-2.1-CI-ONLY-code32.apk"]}
+        native.verify_product_inspection(info, 32)
+        with self.assertRaises(ValueError): native.verify_product_inspection(dict(info, version_code=31), 32)
+        with self.assertRaises(ValueError): native.verify_product_inspection(dict(info, certificate_sha256=native.CODE31_PROFILE["CI_CERTIFICATE"]), 32)
+
+    def test_exact_subject_skips_only_its_full_job_and_isolates_concurrency(self):
+        import re
+        root = MODULE.parents[1]
+        workflow = (root / ".github/workflows/android-2.1-native-recheck32.yml").read_text()
+        calls = re.findall(r"python3 scripts/native_recheck.py([^\n]*)", workflow)
+        self.assertEqual(len(calls), 6)
+        self.assertTrue(all(call.startswith(" --profile code32 ") for call in calls))
+        self.assertIn("ci: run verified native code32 harness recheck", workflow)
+        self.assertIn("source scripts/ci-player-first-emulator.sh", workflow)
+        self.assertIn("CampaignImportInstrumentationTest#cMappedCampaignRecordsReachPlayerViews 1", workflow)
+        self.assertIn("CampaignImportInstrumentationTest#dMappedCampaignRecordsRollbackAfterReadback 1", workflow)
+        full = (root / ".github/workflows/android-2.1.yml").read_text()
+        condition = re.search(r"    if: >-\n      (.+)\n", full).group(1)
+        suffix = re.search(r"group: \"astravar-21-\$\{\{ github.ref_name \}\}\$\{\{ (.+) \}\}\"", full).group(1)
+        def evaluate(expression, event, message):
+            expression = expression.replace("github.event_name", "event").replace("github.event.head_commit.message", "message").replace("&&", " and ").replace("||", " or ")
+            return eval(expression, {"__builtins__": {}}, dict(event=event, message=message))
+        subject = "ci: run verified native code32 harness recheck"
+        self.assertFalse(evaluate(condition, "push", subject))
+        self.assertEqual(evaluate(suffix, "push", subject), "-native32-harness-only")
+        for event, message in [("push", "ci: verify migration native interfaces"), ("push", "normal change"), ("workflow_dispatch", None)]:
+            self.assertTrue(evaluate(condition, event, message))
+            self.assertEqual(evaluate(suffix, event, message), "")
+
+
 if __name__ == "__main__":
     unittest.main()
