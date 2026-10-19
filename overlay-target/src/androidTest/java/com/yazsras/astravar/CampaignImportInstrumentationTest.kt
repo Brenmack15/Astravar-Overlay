@@ -181,7 +181,10 @@ class CampaignImportInstrumentationTest {
                     assertTrue("Archive chooser observations require a fresh accessibility cache",
                         instrumentation.uiAutomation.clearCache())
                     val labels = device.findObjects(chooser)
-                    val scroll = device.findObjects(By.scrollable(true).pkg(product)).lastOrNull()
+                    // A short import page has a real ScrollView viewport with
+                    // scrollable=false. Require that unique observed container,
+                    // independently of whether its current contents can scroll.
+                    val scroll = device.findObjects(By.clazz("android.widget.ScrollView").pkg(product)).singleOrNull()
                     val viewport = scroll?.let { Rect(it.visibleBounds) }
                     lastObserved = "direction=$direction scrolls=$scrolls/18; reachedEdge=$reachedEdge; labels=${labels.size}; viewport=$viewport"
                     if (labels.size == 1 && viewport != null) {
@@ -220,7 +223,7 @@ class CampaignImportInstrumentationTest {
                         // Observe once after an edge/final scroll, then reverse
                         // without spending the entire deadline scrolling down.
                         if (reachedEdge || scrolls >= 18 || SystemClock.uptimeMillis() >= deadline) break
-                        if (scroll != null) {
+                        if (scroll != null && scroll.isScrollable) {
                             scrolls++
                             reachedEdge = !scroll.scroll(direction, .6f)
                         }
