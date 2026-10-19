@@ -66,13 +66,13 @@ internal class CampaignOpenDocumentContractV21 : ActivityResultContracts.OpenDoc
                 try {
                     val backup = importer.exportPreImportBackup(requested)
                     withContext(Dispatchers.IO) {
-                        require(backup.toByteArray(Charsets.UTF_8).size <= CampaignDocumentIoV21.MAX_DOCUMENT_BYTES) {
+                        require(CampaignDocumentIoV21.utf8Size(backup) <= CampaignDocumentIoV21.MAX_DOCUMENT_BYTES) {
                             "Backup is too large for verified document transfer. Import remains blocked."
                         }
                         val output = context.contentResolver.openOutputStream(uri, "wt") ?: error("Cannot open the chosen backup document.")
-                        output.use { it.write(backup.toByteArray(Charsets.UTF_8)) }
+                        output.use { CampaignDocumentIoV21.writeUtf8(backup, it) }
                         val input = context.contentResolver.openInputStream(uri) ?: error("Cannot reopen the saved backup for verification.")
-                        CampaignDocumentIoV21.verifySavedCopy(backup, CampaignDocumentIoV21.readUtf8(input))
+                        CampaignDocumentIoV21.verifySavedUtf8(backup, input)
                     }
                     verifiedBackupHash = requested
                     status = "Pre-import backup saved and independently read back. Review the archive and confirm below."
