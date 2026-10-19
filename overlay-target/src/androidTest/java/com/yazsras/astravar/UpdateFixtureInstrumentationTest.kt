@@ -26,8 +26,10 @@ class UpdateFixtureInstrumentationTest {
         }
         fun enter(label: String, value: String) {
             tap(label)
-            assertNotNull("Focused field for $label", ui.bounds(By.clazz("android.widget.EditText").focused(true).pkg(product), label, timeoutMs = 10_000))
-            ui.enterFocusedField(value, product, label)
+            // IME changes can leave UiAutomator's cached Compose focus stale.
+            // Observe actual focus afresh; never retry the tap or weaken input checks.
+            assertNotNull("Focused field for $label", ui.bounds(By.clazz("android.widget.EditText").focused(true).pkg(product), label, timeoutMs = 10_000, refreshCache = true))
+            ui.setFocusedField(value, product, label)
             device.pressBack()
         }
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
