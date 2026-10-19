@@ -32,7 +32,7 @@ import java.util.UUID
             RecordValue("Scene", checkpoint.scene.ifBlank { "Unknown" })
             RecordValue("Last confirmed action", checkpoint.lastConfirmedAction.ifBlank { "Unknown" })
             RecordValue("Unresolved choice / roll", checkpoint.unresolvedChoice.ifBlank { "Not recorded" })
-            if (checkpoint.objective.isNotBlank()) RecordValue("Current objective", checkpoint.objective)
+            if (checkpoint.objective.isNotBlank()) RecordValue("Objective at checkpoint", checkpoint.objective)
             if (checkpoint.gameTime.isNotBlank()) RecordValue("In-world time", checkpoint.gameTime)
             if (checkpoint.unknowns.isNotEmpty()) RecordValue("Unknowns / conflicts", checkpoint.unknowns.joinToString("\n"))
             if (checkpoint.recordReferences.isNotEmpty()) RecordValue("Record references", checkpoint.recordReferences.joinToString("\n"))
