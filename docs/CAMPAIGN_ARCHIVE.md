@@ -139,9 +139,17 @@ uses bounded 8 KiB array-backed character and byte buffers, carries surrogate
 pairs across input windows, and retains the same encoded-byte hashes and saved
 document verification. No timeout or heap increase substitutes for the fix.
 
-Fresh source builds rerun the original code24 baseline and code32 update,
+Code33 separates confirmed physical invention output from research associations.
+Only a directed project-to-item `Confirmed craft output` link appears as physical
+output; all other links remain visible as references and associations. This does
+not construct equipment or alter any saved project/link records.
+Historical checkpoint cards label the saved objective as `Objective at checkpoint`.
+The typed native sweep observes offscreen Equipment and Currency tabs through
+fresh, bounded read-only scrolling within each original action deadline.
+
+Fresh source builds rerun the original code24 baseline and code33 update,
 unchanged large fictional fixtures, explicit backup/import/rollback assertions
-and the same Android heap. No code30/code31 native result is reused as code32
+and the same Android heap. No earlier product/native result is reused as code33
 acceptance. The full
 unit/regression/lint gate remains separate; a successful JVM test alone does not
 certify native import or recovery. CI artifacts retain the exact release R8
