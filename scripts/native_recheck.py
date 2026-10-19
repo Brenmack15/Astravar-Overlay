@@ -15,24 +15,28 @@ import stat
 import subprocess
 import zipfile
 
-BASE_COMMIT = "3197627aaf88420df986063cbe35e34ca058b972"
-BASE_TREE = "a3a1b632bce71073ed65bf7852c5349a0638be8a"
-RUN_ID = 39241681704
-SOURCE_JOB_ID = 118024256685
+BASE_COMMIT = "55a6b2db8065152606a421ca6e3f7a5b46da55c1"
+BASE_TREE = "cfa8022812ba104db55baeaa725e0c9024d93e5e"
+RUN_ID = 39254633105
+SOURCE_JOB_ID = 118066694474
 SOURCE_BUILD_STEP = "Build fresh baseline and migration APKs with one disposable CI signer"
 SOURCE_NATIVE_STEP = "Native update, complete archive recovery and mapped campaign interfaces"
-ARTIFACT_ID = 12182178961
+ARTIFACT_ID = 12187774293
 ARTIFACT_NAME = "Astravar-2.1-migration-native-source"
-ARTIFACT_SHA256 = "66c453933e540c6836babbf0c1725a573d4bfafbbf636b4d835cf5e07d7a6d56"
-ARTIFACT_BYTES = 30221745
-CI_CERTIFICATE = "f9e5c97b0b518519b35025d5c6d57a8424270f7935efad06d4f131a94295854f"
+ARTIFACT_SHA256 = "39a5b21c1610ab18393dba0eaa0571cdc656e2aa2df4dc14e41d3e0649cfab18"
+ARTIFACT_BYTES = 43312032
+CI_CERTIFICATE = "d20336a85953ee13a5f8566755dc1a0653440a55d04d56e6aee8051bfd18d77e"
 APK_HASHES = {
-    "Astravar-2.1-CI-ONLY-code24.apk": "77293b84946b773d5560a456dd9d5dd743238d48e86cede89a72d7eb0ea5ebd3",
-    "Astravar-2.1-CI-ONLY-code30.apk": "f2fcb5a0bfc848f1efb4f2eb6f0e76eab1a9210ec21e85c1fae475f5f3b72125",
+    "Astravar-2.1-CI-ONLY-code24.apk": "9894fc4a262d0fb77ad785b0ba2de952be8d59c46bd56348b8ecf192af9c9493",
+    "Astravar-2.1-CI-ONLY-code31.apk": "00f3203df318a38b520bc41e58a728f8f262961d5ba2e2fb1ac325ff08c45b8d",
 }
+MAPPING_ARTIFACT_PATH = "app/build/outputs/mapping/release/mapping.txt"
+MAPPING_SHA256 = "d01ace9fee7d2307779af4b24c1cce3e1e6346b707f36b59a9f8ad5079ab637f"
 ALLOWED_FILES = {
     ".github/workflows/android-2.1-native-recheck.yml",
     "scripts/native_recheck.py",
+    "scripts/ci-player-first-emulator.sh",
+    "app/src/test/java/com/yazsras/astravar/ui/RebuildVisualAcceptanceTest.kt",
     "scripts/tests/test_native_recheck.py",
     "docs/ASTRAVAR_2_1_NATIVE_RECHECK.md",
     "overlay-target/src/androidTest/java/com/yazsras/astravar/OverlayInstrumentationTest.kt",
@@ -130,6 +134,10 @@ def verified_archive_payloads(archive):
         for name, data in payloads.items():
             if hashlib.sha256(data).hexdigest() != APK_HASHES[name]:
                 raise ValueError("Pinned product APK checksum mismatch: " + name)
+        mapping = z.read(MAPPING_ARTIFACT_PATH)
+        if hashlib.sha256(mapping).hexdigest() != MAPPING_SHA256:
+            raise ValueError("Pinned product R8 mapping checksum mismatch")
+        payloads["mapping.txt"] = mapping
         return payloads
 
 
@@ -156,14 +164,15 @@ def prepare(repo, archive, metadata_path, source_run_path, source_jobs_path, sdk
     # Write only known APKs, never extract arbitrary archive paths or old failures.
     output.mkdir(parents=True)
     from inspect_release_apk import inspect
-    for code in (24, 30):
+    for code in (24, 31):
         name = f"Astravar-2.1-CI-ONLY-code{code}.apk"
         apk = output / name
         apk.write_bytes(payloads[name])
         info = inspect(apk, sdk, "com.yazsras.astravar", "2.1.0", code)
         verify_product_inspection(info, code)
         (output / f"release-code{code}.json").write_text(json.dumps(info, indent=2) + "\n")
-    proof.update(reused_artifact_id=ARTIFACT_ID, reused_run_id=RUN_ID, reused_artifact_sha256=ARTIFACT_SHA256,
+    (output / "reused-product-mapping.txt").write_bytes(payloads["mapping.txt"])
+    proof.update(reused_product_mapping_sha256=MAPPING_SHA256, reused_artifact_id=ARTIFACT_ID, reused_run_id=RUN_ID, reused_artifact_sha256=ARTIFACT_SHA256,
                  reused_product_certificate_sha256=CI_CERTIFICATE, owner_signed=False)
     (output / "native-recheck-source.json").write_text(json.dumps(proof, indent=2) + "\n")
     (output / "reused-artifact-metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
