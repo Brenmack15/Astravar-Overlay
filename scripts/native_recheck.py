@@ -82,10 +82,42 @@ CODE32_PROFILE = {
 CODE31_PROFILE = {name: globals()[name] for name in CODE32_PROFILE}
 
 
+CODE33_PROFILE = {
+    "BASE_COMMIT": "f35e18c83b07cdb5dd4f73925d110abd68812390",
+    "BASE_TREE": "337f10402b53b08e87c7748da8f2b103e3e280f7",
+    "RUN_ID": 39301833455,
+    "SOURCE_JOB_ID": 118228773043,
+    "ARTIFACT_ID": 12212558254,
+    "ARTIFACT_NAME": "Astravar-2.1-migration-native-source",
+    "ARTIFACT_SHA256": "f41d163eb7597b267a2109b25d0981c3c4fbaf98d4760ea575d444b24e16d8cf",
+    "ARTIFACT_BYTES": 48981256,
+    "CI_CERTIFICATE": "3509b880d0214fc87aacbd3b78b796cccf7283395a93aacd32c7265c09aa1f54",
+    "APK_HASHES": {
+        "Astravar-2.1-CI-ONLY-code24.apk": "defb8d3b2680dfc261ee3d950fb2ecf6f91298116f402ecf5b5ef4caee6c83b2",
+        "Astravar-2.1-CI-ONLY-code33.apk": "0c2d9fa2ec613653ae428a1a3cddabaf961b3307c74b18936791e203241b2bac",
+    },
+    "MAPPING_ARTIFACT_PATH": "app/build/outputs/mapping/release/mapping.txt",
+    "MAPPING_SHA256": "9ce9d379b3cc694a30ba5c6a77cf5d00579a8fdd4cf7a31cba64865c3439b903",
+    "ALLOWED_FILES": {
+        "overlay-target/src/androidTest/java/com/yazsras/astravar/CampaignImportInstrumentationTest.kt",
+        "scripts/native_recheck.py",
+        "scripts/tests/test_native_recheck.py",
+        ".github/workflows/android-2.1-native-recheck33.yml",
+        ".github/workflows/android-2.1.yml",
+        "docs/ASTRAVAR_2_1_NATIVE_RECHECK_CODE33.md",
+    },
+    "VERSION_CODE": 33,
+    "STRICT_CHANGED_FILES": True,
+    "PROFILE_NAME": "code33",
+    "SOURCE_FAILURE_LIMITATION": "Original run passed the nine native scenarios, then typed companion-header observation stopped before the remaining typed views and recovery; all eleven checks require this new strict recheck.",
+}
+
+
 def configure_profile(name):
-    if name not in ("code31", "code32"):
-        raise ValueError("Only the pinned code31 or code32 profile is supported")
-    globals().update(CODE32_PROFILE if name == "code32" else CODE31_PROFILE)
+    profiles = {"code31": CODE31_PROFILE, "code32": CODE32_PROFILE, "code33": CODE33_PROFILE}
+    if name not in profiles:
+        raise ValueError("Only the pinned code31, code32 or code33 profile is supported")
+    globals().update(profiles[name])
 
 
 def run_git(repo, *args):
@@ -111,7 +143,7 @@ def source_guard(repo, base_commit=None, base_tree=None):
     if forbidden:
         raise ValueError("Product/source changes require full verification: " + ", ".join(forbidden))
     if STRICT_CHANGED_FILES and set(paths) != ALLOWED_FILES:
-        raise ValueError("Native code32 recheck requires its exact reviewed harness changes; missing: " + ", ".join(sorted(ALLOWED_FILES - set(paths))))
+        raise ValueError(f"Native {PROFILE_NAME} recheck requires its exact reviewed harness changes; missing: " + ", ".join(sorted(ALLOWED_FILES - set(paths))))
     return {
         "profile": PROFILE_NAME, "reused_product_version_code": VERSION_CODE,
         "test_source_commit": run_git(repo, "rev-parse", "HEAD").decode().strip(),
@@ -265,7 +297,7 @@ def verify_targets(repo, sdk, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["guard", "prepare", "verify-targets", "snapshot-mapped", "verify-mapped"])
-    parser.add_argument("--profile", choices=["code31", "code32"], default="code31")
+    parser.add_argument("--profile", choices=["code31", "code32", "code33"], default="code31")
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--archive", type=Path)
     parser.add_argument("--artifact-metadata", type=Path)
