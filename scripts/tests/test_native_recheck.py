@@ -1,5 +1,6 @@
 """Fail-closed acceptance checks for immutable-product native harness reuse."""
 import hashlib
+import copy
 import importlib.util
 import json
 from pathlib import Path
@@ -33,7 +34,7 @@ class NativeRecheckTest(unittest.TestCase):
         self.git(repo, "config", "user.email", "fictional@example.invalid")
         for name in ["app/src/main/Product.kt", "rules/src/Rules.kt", "app/src/main/res/icon.xml",
                      "app/build.gradle.kts", "scripts/ci-player-first-emulator.sh",
-                     "overlay-target/src/androidTest/NativeTest.kt",
+                     "overlay-target/src/androidTest/java/com/yazsras/astravar/OverlayInstrumentationTest.kt",
                      "overlay-target/src/main/java/com/yazsras/astravar/target/TargetActivity.kt"]:
             path = repo / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -48,7 +49,6 @@ class NativeRecheckTest(unittest.TestCase):
 
     def test_committed_instrumentation_and_exact_recheck_files_are_allowed(self):
         repo, base, tree = self.repository()
-        (repo / "overlay-target/src/androidTest/NativeTest.kt").write_text("new test\n")
         for name in native.ALLOWED_FILES:
             path = repo / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -57,12 +57,12 @@ class NativeRecheckTest(unittest.TestCase):
         result = native.source_guard(repo, base, tree)
         self.assertEqual(result["reused_product_source_commit"], base)
         self.assertEqual(result["test_source_commit"], self.git(repo, "rev-parse", "HEAD"))
-        self.assertEqual(len(result["changed_paths"]), len(native.ALLOWED_FILES) + 1)
+        self.assertEqual(len(result["changed_paths"]), len(native.ALLOWED_FILES))
 
-    def test_only_exact_controlled_activity_fixture_is_allowed_among_main_sources(self):
+    def test_only_exact_overlay_test_fixture_is_allowed(self):
         repo, base, tree = self.repository()
-        fixture = "overlay-target/src/main/java/com/yazsras/astravar/target/TargetActivity.kt"
-        (repo / fixture).write_text("controlled second-app IME insets repair\n")
+        fixture = "overlay-target/src/androidTest/java/com/yazsras/astravar/OverlayInstrumentationTest.kt"
+        (repo / fixture).write_text("bounded font configuration observation\n")
         self.commit(repo)
         result = native.source_guard(repo, base, tree)
         self.assertEqual(result["changed_paths"], [fixture])
@@ -70,7 +70,10 @@ class NativeRecheckTest(unittest.TestCase):
         self.assertEqual(result["reused_product_source_tree"], tree)
 
         forbidden = [
+            "overlay-target/src/main/java/com/yazsras/astravar/target/TargetActivity.kt",
             "overlay-target/src/main/java/com/yazsras/astravar/target/OtherActivity.kt",
+            "overlay-target/src/androidTest/OtherTest.kt",
+            "overlay-target/src/androidTest/java/com/yazsras/astravar/CampaignImportInstrumentationTest.kt",
             fixture + ".bak",
             "overlay-target/src/main/AndroidManifest.xml",
             "overlay-target/src/main/res/layout/target.xml",
@@ -85,7 +88,7 @@ class NativeRecheckTest(unittest.TestCase):
             with self.subTest(forbidden_path=name):
                 self.git(repo, "reset", "--hard", base)
                 # An allowed fixture repair must never mask a second source change.
-                (repo / fixture).write_text("controlled second-app IME insets repair\n")
+                (repo / fixture).write_text("bounded font configuration observation\n")
                 path = repo / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("unapproved adjacent source or product change\n")
@@ -122,7 +125,7 @@ class NativeRecheckTest(unittest.TestCase):
 
     def test_dirty_tracked_and_untracked_sources_are_rejected(self):
         repo, base, tree = self.repository()
-        path = repo / "overlay-target/src/androidTest/NativeTest.kt"
+        path = repo / "overlay-target/src/androidTest/java/com/yazsras/astravar/OverlayInstrumentationTest.kt"
         path.write_text("uncommitted\n")
         with self.assertRaisesRegex(ValueError, "clean committed"):
             native.source_guard(repo, base, tree)
@@ -158,11 +161,65 @@ class NativeRecheckTest(unittest.TestCase):
             with self.subTest(field=key), self.assertRaises(ValueError):
                 native.verify_artifact_metadata(metadata)
 
-    def archive(self, *, source=None, extra=None):
+    def source_run(self):
+        return {"id": native.RUN_ID, "head_sha": native.BASE_COMMIT, "status": "completed",
+                "conclusion": "failure", "run_attempt": 1,
+                "path": ".github/workflows/android-2.1-migration-native.yml",
+                "head_branch": "feat/astravar-2.1-player-first"}
+
+    def source_jobs(self):
+        return {"jobs": [{"id": native.SOURCE_JOB_ID, "run_id": native.RUN_ID,
+                          "head_sha": native.BASE_COMMIT, "name": "migration-native",
+                          "status": "completed", "conclusion": "failure", "steps": [
+                              {"name": "Verify reviewed memory fix and exact fresh source", "status": "completed", "conclusion": "success"},
+                              {"name": native.SOURCE_BUILD_STEP, "status": "completed", "conclusion": "success"},
+                              {"name": native.SOURCE_NATIVE_STEP, "status": "completed", "conclusion": "failure"},
+                              {"name": "Upload artifact", "status": "completed", "conclusion": "success"}]}]}
+
+    def test_completed_source_run_with_successful_product_build_is_required(self):
+        result = native.verify_source_run(self.source_run(), self.source_jobs())
+        self.assertEqual(result["product_build_step_conclusion"], "success")
+        self.assertEqual(result["source_run_conclusion"], "failure")
+        for key, value in [("id", 1), ("head_sha", "wrong"), ("status", "in_progress"),
+                           ("conclusion", "success"), ("run_attempt", 2), ("path", "other.yml"),
+                           ("head_branch", "main")]:
+            with self.subTest(run_field=key), self.assertRaisesRegex(ValueError, "source run"):
+                native.verify_source_run(dict(self.source_run(), **{key: value}), self.source_jobs())
+        for key, value in [("id", 1), ("run_id", 1), ("head_sha", "wrong"), ("name", "verify"),
+                           ("status", "in_progress"), ("conclusion", "cancelled")]:
+            jobs = self.source_jobs()
+            jobs["jobs"][0][key] = value
+            with self.subTest(job_field=key), self.assertRaisesRegex(ValueError, "source job"):
+                native.verify_source_run(self.source_run(), jobs)
+
+    def test_failed_incomplete_missing_duplicate_build_or_other_failed_step_is_rejected(self):
+        valid = self.source_jobs()
+        mutations = []
+        for status, conclusion in [("completed", "failure"), ("in_progress", None)]:
+            jobs = copy.deepcopy(valid)
+            jobs["jobs"][0]["steps"][1].update(status=status, conclusion=conclusion)
+            mutations.append(jobs)
+        for action in ["remove", "duplicate", "extra_failure", "pending", "no_native_failure", "extra_job"]:
+            jobs = copy.deepcopy(valid)
+            steps = jobs["jobs"][0]["steps"]
+            if action == "remove":steps.pop(1)
+            elif action == "duplicate":steps.append(dict(steps[1]))
+            elif action == "extra_failure":steps[0]["conclusion"] = "failure"
+            elif action == "pending":steps[3].update(status="pending", conclusion=None)
+            elif action == "no_native_failure":steps[2]["conclusion"] = "success"
+            else:jobs["jobs"].append(copy.deepcopy(jobs["jobs"][0]))
+            mutations.append(jobs)
+        for index, jobs in enumerate(mutations):
+            with self.subTest(case=index), self.assertRaises(ValueError):
+                native.verify_source_run(self.source_run(), jobs)
+    def archive(self, *, source=None, extra=None, tree=None):
         archive = self.root / "synthetic.zip"
         payloads = {name: ("fictional " + name).encode() for name in native.APK_HASHES}
         with zipfile.ZipFile(archive, "w") as z:
             z.writestr("validation/SOURCE_COMMIT.txt", source or native.BASE_COMMIT)
+            z.writestr("validation/fresh-native-source-proof.json", json.dumps({
+                "sourceCommit": native.BASE_COMMIT, "sourceTree": tree or native.BASE_TREE,
+                "ownerSigningUsed": False, "realCampaignDataUsed": False}))
             for name, data in payloads.items():
                 z.writestr("validation/" + name, data)
             if extra:
@@ -185,6 +242,9 @@ class NativeRecheckTest(unittest.TestCase):
             self.verify_synthetic_archive(archive, wrong)
         archive, payloads = self.archive(source="wrong source")
         with self.assertRaisesRegex(ValueError, "SOURCE_COMMIT"):
+            self.verify_synthetic_archive(archive, payloads)
+        archive, payloads = self.archive(tree="wrong tree")
+        with self.assertRaisesRegex(ValueError, "source tree"):
             self.verify_synthetic_archive(archive, payloads)
 
     def test_zip_traversal_duplicate_and_symlink_are_rejected(self):
@@ -212,14 +272,14 @@ class NativeRecheckTest(unittest.TestCase):
             with self.subTest(field=key), self.assertRaises(ValueError):
                 native.verify_product_inspection(info, 24)
 
-    def test_current_code26_and_exact_new_artifact_name_are_required(self):
-        info = {"package": "com.yazsras.astravar", "version_code": 26, "version_name": "2.1.0",
+    def test_current_code30_and_exact_new_artifact_name_are_required(self):
+        info = {"package": "com.yazsras.astravar", "version_code": 30, "version_name": "2.1.0",
                 "label": "Astravar", "certificate_sha256": native.CI_CERTIFICATE, "debuggable": False,
                 "owner_signature_verified": False, "launcher_artwork_bytes_verified": True,
-                "alignment_16kb_verified": True, "apk_sha256": native.APK_HASHES["Astravar-2.1-CI-ONLY-code26.apk"]}
-        native.verify_product_inspection(info, 26)
+                "alignment_16kb_verified": True, "apk_sha256": native.APK_HASHES["Astravar-2.1-CI-ONLY-code30.apk"]}
+        native.verify_product_inspection(info, 30)
         with self.assertRaises(ValueError):
-            native.verify_product_inspection(dict(info, version_code=25), 26)
+            native.verify_product_inspection(dict(info, version_code=26), 30)
         with self.assertRaises(ValueError):
             native.verify_artifact_metadata(dict(self.metadata(), name="Astravar-2.1-verification"))
 
