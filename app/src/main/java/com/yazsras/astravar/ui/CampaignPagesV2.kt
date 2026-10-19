@@ -273,6 +273,15 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
                     Text("A design is separate from its physical output.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 }
                 "detail" -> selected?.let { project ->
+                    val (physicalOutputs, associations) = links.filter {
+                        (it.fromType == "project" && it.fromId == project.id) ||
+                            (it.toType == "project" && it.toId == project.id)
+                    }.partition {
+                        // This is the directed relationship written by an explicitly confirmed craft.
+                        // A project status or a research/material link does not establish equipment.
+                        it.fromType == "project" && it.fromId == project.id &&
+                            it.toType == "item" && it.label == "Confirmed craft output"
+                    }
                     Text(project.status, color = Frost, style = MaterialTheme.typography.labelLarge)
                     ExpandableRecordSection("Concept & Blueprint", true) {
                         Text(project.description.ifBlank { "No design notes recorded" }, color = if (project.description.isBlank()) Muted else MaterialTheme.colorScheme.onSurface)
@@ -298,10 +307,25 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
                         PlayerTextButton(onClick = { requirementSnapshot = null; materialId = null; materialLabel = ""; materialQuantity = ""; materialNotes = ""; source = project.source; baselineSource = source; mode = "material" }) { Text("Add material") }
                     }
                     ExpandableRecordSection("Physical output") {
-                        val related = links.filter { (it.fromType == "project" && it.fromId == project.id) || (it.toType == "project" && it.toId == project.id) }
-                        if (related.isEmpty()) Text("No linked physical output or equipment", color = Muted)
-                        related.forEach { link -> val itemId = if (link.fromType == "item") link.fromId else if (link.toType == "item") link.toId else null; RecordValue(link.label, items.firstOrNull { it.id == itemId }?.title ?: "Linked record") }
+                        if (physicalOutputs.isEmpty()) Text("No linked physical output or equipment", color = Muted)
+                        physicalOutputs.forEach { link ->
+                            RecordValue(link.label, items.firstOrNull { it.id == link.toId }?.title ?: "item · ${link.toId}")
+                        }
                         PlayerTextButton(onClick = ::beginCraft) { Text("Confirm a resolved craft") }
+                    }
+                    ExpandableRecordSection("References & associations") {
+                        if (associations.isEmpty()) Text("No linked references or associations", color = Muted)
+                        associations.forEach { link ->
+                            val outgoing = link.fromType == "project" && link.fromId == project.id
+                            val type = if (outgoing) link.toType else link.fromType
+                            val id = if (outgoing) link.toId else link.fromId
+                            val title = when (type) {
+                                "item" -> items.firstOrNull { it.id == id }?.title
+                                "project" -> projects.firstOrNull { it.id == id }?.title
+                                else -> null
+                            }
+                            RecordValue(link.label, title ?: "$type · $id")
+                        }
                     }
                     ExpandableRecordSection("History") {
                         val relatedIds = setOf(project.id) + stages.map { it.id } + requirements.map { it.id } + links.filter { it.fromId == project.id || it.toId == project.id }.map { it.id }
