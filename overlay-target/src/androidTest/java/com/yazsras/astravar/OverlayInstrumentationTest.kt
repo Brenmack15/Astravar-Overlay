@@ -7,6 +7,8 @@ import android.view.Surface
 import android.view.accessibility.AccessibilityWindowInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import androidx.test.uiautomator.*
 import org.junit.Test
 import org.junit.Rule
@@ -82,6 +84,54 @@ class OverlayInstrumentationTest {
         device.waitForIdle()
     }
     private fun tapTarget(text:String) = ui.tap(By.text(text).pkg(targetPackage), text)
+    private data class ConfiguredTargetControl(val generation: Int, val bounds: Rect)
+
+    /** Read-only lifecycle/configuration observation; never changes or invokes a target control. */
+    private fun resumedTargetGeneration(expectedFontScale: Float): Int? {
+        var generation: Int? = null
+        instrumentation.runOnMainSync {
+            val activity = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED)
+                .singleOrNull { it.javaClass.name == "com.yazsras.astravar.target.TargetActivity" }
+            if (activity != null && !activity.isFinishing && !activity.isDestroyed &&
+                activity.window.decorView.isAttachedToWindow && activity.hasWindowFocus() &&
+                kotlin.math.abs(activity.resources.configuration.fontScale - expectedFontScale) < .001f &&
+                activity.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
+                generation = System.identityHashCode(activity)
+            }
+        }
+        return generation
+    }
+
+    /** A font reset recreates this controlled Activity. Observe the new generation before one touch. */
+    private fun protectedTargetAfterConfiguration(expectedFontScale: Float, previousGeneration: Int? = null): ConfiguredTargetControl {
+        val deadline = SystemClock.uptimeMillis() + 30_000
+        var previous: ConfiguredTargetControl? = null
+        var stableSince: Long? = null
+        val selector = By.text("Toggle protected screen").pkg(targetPackage).enabled(true).clickable(true)
+        while (SystemClock.uptimeMillis() < deadline) {
+            val remaining = deadline - SystemClock.uptimeMillis()
+            if (remaining <= 0) break
+            val observed = ui.snapshot(selector, "resumed target at font scale $expectedFontScale with stable protection control",
+                timeoutMs = remaining, refreshCache = true) { node ->
+                val generation = resumedTargetGeneration(expectedFontScale)
+                val bounds = Rect(node.visibleBounds)
+                if (generation != null && generation != previousGeneration && device.displayRotation == Surface.ROTATION_0 &&
+                    !bounds.isEmpty && bounds.left >= 0 && bounds.top >= 0 &&
+                    bounds.right <= device.displayWidth && bounds.bottom <= device.displayHeight)
+                    ConfiguredTargetControl(generation, bounds) else null
+            }
+            val now = SystemClock.uptimeMillis()
+            stableSince = if (previous == observed) stableSince ?: now else now
+            if (previous == observed && now - (stableSince ?: now) >= 1_000) {
+                checkpoint("Resumed target generation ${observed.generation}, applied font scale $expectedFontScale; fresh protection-control geometry stable for one second: ${observed.bounds}")
+                return observed
+            }
+            previous = observed
+            val budget = deadline - SystemClock.uptimeMillis()
+            if (budget > 0) device.waitForIdle(minOf(1_000L, budget))
+        }
+        error("Target protection control did not settle after font scale $expectedFontScale within 30 seconds")
+    }
     private fun crystalAfterConfiguration(expectedFontScale: Float): Rect {
         val deadline = SystemClock.uptimeMillis() + 30_000
         val selector = By.descStartsWith("Expand Astravar crystal").pkg(appPackage)
@@ -186,8 +236,10 @@ class OverlayInstrumentationTest {
         shell("settings put system font_scale 1.3")
         assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))
         expand(expectedFontScale = 1.3f);screenshot("large-text-result");tapPanel("Collapse")
-        shell("settings put system font_scale 1.0");device.waitForIdle()
-        tapTarget("Toggle protected screen")
+        val targetBeforeFontReset = protectedTargetAfterConfiguration(1.3f)
+        shell("settings put system font_scale 1.0")
+        val protectionControl = protectedTargetAfterConfiguration(1.0f, targetBeforeFontReset.generation)
+        ui.touch(protectionControl.bounds, "Toggle protected screen after the target font configuration applies")
         assertTrue("Protected target button must reflect its secure state",device.wait(Until.hasObject(By.text("Protected screen ON").pkg(targetPackage)),10000))
         assertTrue(device.wait(Until.gone(By.descStartsWith("Expand Astravar crystal")),30000))
         tapTarget("Protected screen ON")
