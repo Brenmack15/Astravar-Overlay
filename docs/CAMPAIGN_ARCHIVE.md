@@ -118,13 +118,24 @@ retain the original Notion archive until the owner explicitly approves cutover.
 ## Large archive memory handling
 
 An actual 192 MiB Android emulator exposed excessive temporary serialization
-allocations in the code-26 candidate. Code 30 streams UTF-8 digests and JSON
-encoding, reads large SQLite text in bounded chunks, and compares typed records
-without materializing another JSON tree containing the retained archive.
-Existing SHA-256 and schema-4 backup bytes remain compatible. Document output is
-written and independently verified through bounded buffers. The unchanged large
-fictional archive remains an acceptance test; a successful JVM test alone does
-not certify native import or recovery on Android.
+allocations in the code-26 candidate. Code 30 streamed UTF-8 digests and JSON
+encoding and passed the primary large import, readback and 15 MiB attachment
+save. Its second pre-import backup exhausted the heap while reconstructing a
+second complete copy of the persisted backup. That candidate remains blocked.
+
+Code 31 corrects repeated-backup memory handling while retaining strict UTF-8,
+SHA-256 verification, source text and schema-4 recovery compatibility. Persisted
+backup verification must not retain a redundant complete document. Backup
+decoding uses bounded string-unescape chunks and the generated data
+serializers so a large retained source does not require a growing temporary
+string builder. The same bounded decoder serves ordinary campaign restore,
+archive recovery and the private read-only package check. Fresh source
+builds rerun the original code24 baseline and code31 update, unchanged large
+fictional fixtures, explicit backup/import/rollback assertions and the same
+Android heap. No code30 native result is reused as code31 acceptance. The full
+unit/regression/lint gate remains separate; a successful JVM test alone does not
+certify native import or recovery. CI artifacts retain the exact release R8
+mapping for the built APK so native failures can be resolved accurately.
 
 Before typed JSON decoding, both archive and backup reviews enforce a 100,000
 value budget, 50,000 values per array, 1,000 members per object and bounded
