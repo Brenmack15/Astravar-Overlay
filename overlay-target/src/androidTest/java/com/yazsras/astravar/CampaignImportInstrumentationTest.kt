@@ -174,9 +174,13 @@ class CampaignImportInstrumentationTest {
         var lastObserved = "No fresh chooser observation"
         for (direction in listOf(Direction.DOWN, Direction.UP)) {
             var scrolls = 0
-            var reachedEdge = false
+            val searchDeadline = if (direction == Direction.DOWN) deadline - 15_000 else deadline
+            var lastScrollResult: Boolean? = null
+            var beforeScroll: Pair<Rect, Rect>? = null
+            var awaitingScrollObservation = false
             while (SystemClock.uptimeMillis() < deadline) {
                 var observed: Pair<Rect, Rect>? = null
+                var chooserGeometry: Pair<Rect, Rect>? = null
                 try {
                     assertTrue("Archive chooser observations require a fresh accessibility cache",
                         instrumentation.uiAutomation.clearCache())
@@ -186,13 +190,14 @@ class CampaignImportInstrumentationTest {
                     // independently of whether its current contents can scroll.
                     val scroll = device.findObjects(By.clazz("android.widget.ScrollView").pkg(product)).singleOrNull()
                     val viewport = scroll?.let { Rect(it.visibleBounds) }
-                    lastObserved = "direction=$direction scrolls=$scrolls/18; reachedEdge=$reachedEdge; labels=${labels.size}; viewport=$viewport"
+                    lastObserved = "direction=$direction scrolls=$scrolls/18; labels=${labels.size}; viewport=$viewport"
                     if (labels.size == 1 && viewport != null) {
                         var action: UiObject2? = labels.single()
                         var depth = 0
                         while (action != null && !action.isScrollable && depth++ < 12) {
                             if (action.isClickable) {
                                 val bounds = Rect(action.visibleBounds)
+                                chooserGeometry = bounds to viewport
                                 lastObserved += "; enabled=${action.isEnabled}; chooser=$bounds"
                                 if (action.isEnabled && bounds.width() >= minimumTap && bounds.height() >= minimumTap &&
                                     viewport.contains(bounds) && bounds.left >= 0 && bounds.top >= 0 &&
@@ -203,6 +208,13 @@ class CampaignImportInstrumentationTest {
                             }
                             action = action.parent
                         }
+                    }
+                    if (awaitingScrollObservation) {
+                        val movement = if (beforeScroll == null || chooserGeometry == null) "unknown"
+                            else if (beforeScroll != chooserGeometry) "changed" else "unchanged"
+                        lastObserved += "; scrollResult=$lastScrollResult; freshChooserGeometry=$movement; before=$beforeScroll; after=$chooserGeometry"
+                        android.util.Log.d("AstravarNativeChooser", lastObserved)
+                        awaitingScrollObservation = false
                     }
                     if (observed != null) {
                         val now = SystemClock.uptimeMillis()
@@ -220,12 +232,14 @@ class CampaignImportInstrumentationTest {
                         }
                     } else {
                         previous = null; stableSince = null
-                        // Observe once after an edge/final scroll, then reverse
-                        // without spending the entire deadline scrolling down.
-                        if (reachedEdge || scrolls >= 18 || SystemClock.uptimeMillis() >= deadline) break
+                        if (SystemClock.uptimeMillis() >= searchDeadline || scrolls >= 18 || SystemClock.uptimeMillis() >= deadline) break
                         if (scroll != null && scroll.isScrollable) {
                             scrolls++
-                            reachedEdge = !scroll.scroll(direction, .6f)
+                            beforeScroll = chooserGeometry
+                            awaitingScrollObservation = true
+                            // False also means no accessibility event arrived;
+                            // reserve observation time for both search directions.
+                            lastScrollResult = scroll.scroll(direction, .6f)
                         }
                     }
                 } catch (_: StaleObjectException) {
