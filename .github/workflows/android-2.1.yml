@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 90
     env:
       ASTRAVAR_VERSION_NAME: '2.1.0'
-      ASTRAVAR_VERSION_CODE: '32'
+      ASTRAVAR_VERSION_CODE: '33'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -39,7 +39,28 @@ jobs:
           mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/19.0"
           export PATH="$ANDROID_HOME/cmdline-tools/19.0/bin:$ANDROID_HOME/platform-tools:$PATH"
           printf 'y\n%.0s' {1..100} | timeout -k 5s 60s sdkmanager --licenses >/dev/null
-          timeout -k 10s 360s sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'emulator' 'platform-tools' 'system-images;android-36;google_apis;x86_64'
+          # Both attempts share the original single 360s package-install budget.
+          # Keep logs outside validation until prepare has created that directory.
+          mkdir -p "$RUNNER_TEMP/astravar-sdk-install-logs"
+          timeout -k 10s 360s bash <<'ASTRAVAR_SDK_INSTALL'
+          set -e
+          for astravar_sdk_attempt in 1 2; do
+            set +e
+            sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'emulator' 'platform-tools' 'system-images;android-36;google_apis;x86_64' 2>&1 | tee "$RUNNER_TEMP/astravar-sdk-install-logs/attempt-$astravar_sdk_attempt.log"
+            astravar_sdk_pipeline_status=("${PIPESTATUS[@]}")
+            set -e
+            astravar_sdk_status=${astravar_sdk_pipeline_status[0]}
+            printf 'attempt=%s sdkmanager_exit=%s log_exit=%s\n' "$astravar_sdk_attempt" "$astravar_sdk_status" "${astravar_sdk_pipeline_status[1]}" >> "$RUNNER_TEMP/astravar-sdk-install-logs/results.log"
+            if test "${astravar_sdk_pipeline_status[1]}" -ne 0; then exit "${astravar_sdk_pipeline_status[1]}"; fi
+            if test "$astravar_sdk_status" -eq 0; then exit 0; fi
+            if test "$astravar_sdk_attempt" -eq 1; then
+              # Only the incomplete installer cache in this fresh job's SDK.
+              test "$ANDROID_HOME" = "$RUNNER_TEMP/android-sdk"
+              rm -rf -- "$ANDROID_HOME/.temp"
+            fi
+          done
+          exit "$astravar_sdk_status"
+          ASTRAVAR_SDK_INSTALL
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "$ANDROID_HOME/cmdline-tools/19.0/bin" >> "$GITHUB_PATH"
@@ -78,14 +99,14 @@ jobs:
           python3 scripts/inspect_release_apk.py validation/Astravar-2.1-CI-ONLY-code24.apk --package com.yazsras.astravar --version-name 2.1.0 --version-code 24 --output validation/release-code24.json
           ./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest -PastravarScreenshots="$GITHUB_WORKSPACE/validation/screenshots"
           mkdir -p validation
-          cp app/build/outputs/apk/release/app-release.apk validation/Astravar-2.1-CI-ONLY-code32.apk
+          cp app/build/outputs/apk/release/app-release.apk validation/Astravar-2.1-CI-ONLY-code33.apk
           cp app/build/outputs/apk/debug/app-debug.apk validation/Astravar-2.1-QA-debug.apk
-          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-CI-ONLY-code32.apk --package com.yazsras.astravar --version-name 2.1.0 --version-code 32 --output validation/release-code32.json
-          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-QA-debug.apk --package com.yazsras.astravar.v2uidebug --version-name 2.1.0-ui-rebuild --version-code 32 --output validation/debug-code32.json
+          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-CI-ONLY-code33.apk --package com.yazsras.astravar --version-name 2.1.0 --version-code 33 --output validation/release-code33.json
+          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-QA-debug.apk --package com.yazsras.astravar.v2uidebug --version-name 2.1.0-ui-rebuild --version-code 33 --output validation/debug-code33.json
           python3 - <<'PY'
           import json
           a=json.load(open('validation/release-code24.json'))
-          b=json.load(open('validation/release-code32.json'))
+          b=json.load(open('validation/release-code33.json'))
           assert a['certificate_sha256']==b['certificate_sha256']
           assert b['version_code']>a['version_code']
           assert not a['owner_signature_verified'], 'CI must never use the owner key'
@@ -96,6 +117,13 @@ jobs:
       - name: Native overlay, font scaling and in-place update preservation
         timeout-minutes: 30
         run: bash scripts/ci-player-first-emulator.sh
+      - name: Preserve SDK package-install attempt diagnostics
+        if: always()
+        run: |
+          if test -d "$RUNNER_TEMP/astravar-sdk-install-logs"; then
+            mkdir -p validation/sdk-install
+            cp -R "$RUNNER_TEMP/astravar-sdk-install-logs/." validation/sdk-install/
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
