@@ -1,6 +1,7 @@
 package com.yazsras.astravar
 
 import android.content.ContentValues
+import android.graphics.Rect
 import android.os.Bundle
 import android.os.Environment
 import android.os.SystemClock
@@ -236,15 +237,91 @@ class CampaignImportInstrumentationTest {
     }
 
     private fun reviewRollback(title: String) {
-        find(title)
-        var current = requireNotNull(device.findObject(By.text(title).pkg(product))).parent
-        repeat(10) {
-            val container = current ?: error("Import receipt card is missing")
-            val button = container.findObject(By.text("Review rollback").pkg(product))
-            if (button != null) { button.click(); return }
-            current = container.parent
+        val deadline = SystemClock.uptimeMillis() + 30_000
+        val titleSelector = By.text(title).pkg(product)
+        // hasChild scopes its supplied selector to depth one; keep the global
+        // exact-title selector independent of that direct-child constraint.
+        val cardSelector = By.clazz("android.view.View").pkg(product).hasChild(By.text(title).pkg(product))
+        val actionSelector = By.text("Review rollback").pkg(product)
+        val minimumTap = (48 * instrumentation.targetContext.resources.displayMetrics.density).toInt()
+        var previous: Triple<Rect, Rect, Rect>? = null
+        var stableSince: Long? = null
+        var lastObserved = "No fresh receipt observation"
+        fun missing(): Nothing = error("Missing scoped rollback action for receipt '$title'; minimum=${minimumTap}px; $lastObserved")
+        for (direction in listOf(Direction.DOWN, Direction.UP)) {
+            var scrolls = 0
+            var reachedEdge = false
+            while (true) {
+                if (SystemClock.uptimeMillis() >= deadline) missing()
+                var observed: Triple<Rect, Rect, Rect>? = null
+                try {
+                    assertTrue("Receipt observations require a fresh accessibility cache",
+                        instrumentation.uiAutomation.clearCache())
+                    val titles = device.findObjects(titleSelector)
+                    val cards = device.findObjects(cardSelector)
+                    val scroll = device.findObjects(By.scrollable(true).pkg(product)).lastOrNull()
+                    lastObserved = "direction=$direction scrolls=$scrolls/18; reachedEdge=$reachedEdge; titles=${titles.size}; direct-title cards=${cards.size}; viewport=${scroll?.visibleBounds}"
+                    if (titles.size == 1 && cards.size == 1) {
+                        val card = cards.single()
+                        val parent = card.parent
+                        // The captured receipt is a direct child of the page's
+                        // ScrollView. Never climb into a container of other cards.
+                        val directTitles = card.children.filter { it.text == title && it.applicationPackage == product }
+                        if (!card.isScrollable && parent != null && parent.isScrollable && directTitles.size == 1) {
+                            val labels = card.findObjects(actionSelector)
+                            lastObserved += "; fixed receipt card=${card.visibleBounds}; scoped rollback labels=${labels.size}"
+                            if (labels.size == 1) {
+                                var action: UiObject2? = labels.single()
+                                var depth = 0
+                                while (action != null && action != card && !action.isScrollable && depth++ < 12) {
+                                    if (action.isClickable) {
+                                        val bounds = Rect(action.visibleBounds)
+                                        val viewport = Rect(parent.visibleBounds)
+                                        val titleBounds = Rect(directTitles.single().visibleBounds)
+                                        lastObserved += "; enabled=${action.isEnabled}; action=$bounds"
+                                        if (action.isEnabled && bounds.width() >= minimumTap && bounds.height() >= minimumTap &&
+                                            !titleBounds.isEmpty && viewport.contains(titleBounds) &&
+                                            viewport.contains(bounds) && bounds.left >= 0 && bounds.top >= 0 &&
+                                            bounds.right <= device.displayWidth && bounds.bottom <= device.displayHeight) {
+                                            observed = Triple(titleBounds, Rect(card.visibleBounds), bounds)
+                                        }
+                                        break
+                                    }
+                                    action = action.parent
+                                }
+                            }
+                        } else lastObserved += "; direct receipt-card structure is absent"
+                    }
+                    if (observed != null) {
+                        val now = SystemClock.uptimeMillis()
+                        stableSince = if (previous == observed) stableSince ?: now else now
+                        previous = observed
+                        if (now - requireNotNull(stableSince) >= 1_000) {
+                            val bounds = observed.third
+                            val x = bounds.centerX(); val y = bounds.centerY()
+                            assertTrue("Scoped rollback review must be observed before its original deadline", SystemClock.uptimeMillis() < deadline)
+                            assertTrue("Dispatch one review click for the exact observed receipt '$title'", device.click(x, y))
+                            val remaining = deadline - SystemClock.uptimeMillis()
+                            if (remaining > 0) device.waitForIdle(minOf(1_000L, remaining))
+                            return
+                        }
+                    } else {
+                        previous = null; stableSince = null
+                        if (reachedEdge || scrolls >= 18 || SystemClock.uptimeMillis() >= deadline) break
+                        if (scroll != null) {
+                            scrolls++
+                            reachedEdge = !scroll.scroll(direction, .35f)
+                        }
+                    }
+                } catch (_: StaleObjectException) {
+                    previous = null; stableSince = null
+                    lastObserved = "Receipt window changed during scoped observation or read-only scroll"
+                }
+                val remaining = deadline - SystemClock.uptimeMillis()
+                if (remaining > 0) SystemClock.sleep(minOf(100L, remaining))
+            }
         }
-        error("The observed import receipt has no rollback control")
+        missing()
     }
 
     @Test fun aDocumentPickerPreviewConfirmationAndLibrary() {
