@@ -90,9 +90,9 @@ class CampaignImportInstrumentationTest {
             }
             null
         }
-    private fun awaitText(text: String) {
+    private fun awaitText(text: String, timeoutMillis: Long = 180_000) {
         val selector = By.text(text).pkg(product)
-        val deadline = SystemClock.uptimeMillis() + 180_000
+        val deadline = SystemClock.uptimeMillis() + timeoutMillis
         var direction = Direction.DOWN
         var scrolls = 0
         var nextScrollAt = 0L
@@ -481,7 +481,7 @@ class CampaignImportInstrumentationTest {
         tap("Confirm rollback")
         awaitText("Recovered the verified pre-import campaign snapshot. Original import and recovery receipts are retained.")
         chooseDocument(fixtureName)
-        assertTrue(device.wait(Until.hasObject(By.textContains("Already imported on this device").pkg(product)), 10_000))
+        awaitText("Already imported on this device. Close this preview to verify the existing receipt. No records or equipment will be added again.", 10_000)
         assertFalse("Duplicate archives cannot add the same records again", actionEnabled("Confirm local import"))
         tap("Close")
         instrumentation.sendStatus(0, Bundle().apply { putString("stream", "\nCHECKPOINT: fictional archive selected through DocumentsUI; invalid integrity and interrupted preview preserved state; backup and explicit confirmation imported 320 fictional records/2225 relations; library, original text, relations, explicit 15 MiB attachment save with independent file hash, and duplicate guard verified\n") })
