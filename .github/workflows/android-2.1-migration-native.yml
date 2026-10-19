@@ -18,37 +18,54 @@ jobs:
     timeout-minutes: 70
     env:
       ASTRAVAR_VERSION_NAME: '2.1.0'
-      ASTRAVAR_VERSION_CODE: '26'
+      ASTRAVAR_VERSION_CODE: '28'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
-      - name: Verify unchanged migration product and reviewed test-only scope
+      - name: Verify reviewed memory fix and exact fresh source
         run: |
           mkdir -p validation
           python3 - <<'PY'
           import json, subprocess
           from pathlib import Path
           def git(*args): return subprocess.check_output(['git', *args], text=True).strip()
-          base = 'f8243bffda93aaf635875fbb09a1cbfdba72e88b'
-          tree = 'a73393ba71bbb21e94997927e1ea38b9f5502545'
+          base = '0416314bbc8c29fe464cb11e50b55d61c012609d'
+          tree = 'ddef717ddd796e558b3af423ff11e42290ba991e'
           assert git('rev-parse', base+'^{tree}') == tree
           subprocess.run(['git', 'merge-base', '--is-ancestor', base, 'HEAD'], check=True)
           assert not git('status', '--porcelain', '--untracked-files=all')
           changed = git('diff', '--name-only', '--no-renames', base, 'HEAD').splitlines()
           allowed = {
               '.github/workflows/android-2.1-migration-native.yml',
-              'app/src/test/java/com/yazsras/astravar/ui/CombatProfileV21Test.kt',
-              'scripts/native_recheck.py', 'scripts/native-campaign-import-readback.py',
-              'scripts/tests/test_native_recheck.py', 'scripts/tests/test_native_campaign_import_readback.py',
-              'docs/ASTRAVAR_2_1_NATIVE_RECHECK.md',
+              '.github/workflows/android-2.1.yml',
+              'app/build.gradle.kts',
+              'app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt',
+              'app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt',
+              'app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt',
+              'app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt',
+              'app/src/main/java/com/yazsras/astravar/data/CampaignStreamCodec.kt',
+              'app/src/main/java/com/yazsras/astravar/ui/CampaignArchiveImportV21.kt',
+              'app/src/main/java/com/yazsras/astravar/ui/CampaignDocumentIoV21.kt',
+              'app/src/main/java/com/yazsras/astravar/ui/CampaignReferenceLibraryV21.kt',
+              'app/src/test/java/com/yazsras/astravar/data/CampaignArchivePrivatePreviewTest.kt',
+              'app/src/test/java/com/yazsras/astravar/data/CampaignArchiveTest.kt',
+              'app/src/test/java/com/yazsras/astravar/data/CampaignStreamCodecTest.kt',
+              'app/src/test/java/com/yazsras/astravar/ui/CampaignArchiveUiV21Test.kt',
+              'app/src/test/java/com/yazsras/astravar/ui/CampaignDocumentIoV21Test.kt',
+              'docs/CAMPAIGN_ARCHIVE.md',
+              'overlay-target/src/androidTest/java/com/yazsras/astravar/CampaignImportInstrumentationTest.kt',
+              'overlay-target/src/androidTest/java/com/yazsras/astravar/ObservedUi.kt',
+              'overlay-target/src/androidTest/java/com/yazsras/astravar/UpdateFixtureInstrumentationTest.kt',
+              'scripts/ci-player-first-emulator.sh',
+              'scripts/ui_foundation_sha256.json',
           }
-          assert all(p in allowed or p.startswith('overlay-target/src/androidTest/') for p in changed), changed
+          assert set(changed) <= allowed, changed
           proof = dict(sourceCommit=git('rev-parse','HEAD'), sourceTree=git('rev-parse','HEAD^{tree}'),
-                       unchangedProductSource=base, unchangedProductTree=tree, changedPaths=changed,
+                       reviewedMemoryFixBaseline=base, reviewedMemoryFixBaselineTree=tree, changedPaths=changed,
                        ownerSigningUsed=False, realCampaignDataUsed=False,
-                       scope='Fresh unchanged-product native build; all unit regressions remain a separate full-workflow gate.')
+                       scope='Fresh source build of the reviewed archive memory fix; no APK reuse. All unit regressions remain a separate full-workflow gate.')
           Path('validation/fresh-native-source-proof.json').write_text(json.dumps(proof, indent=2)+'\n')
           PY
           python3 -m unittest discover -s scripts/tests -v
@@ -91,13 +108,13 @@ jobs:
           (cd "$RUNNER_TEMP/astravar-schema3-baseline" && ASTRAVAR_VERSION_CODE=24 bash ./gradlew --no-daemon --console=plain :app:assembleRelease)
           cp "$RUNNER_TEMP/astravar-schema3-baseline/app/build/outputs/apk/release/app-release.apk" validation/Astravar-2.1-CI-ONLY-code24.apk
           bash ./gradlew --no-daemon --console=plain :app:assembleRelease :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
-          cp app/build/outputs/apk/release/app-release.apk validation/Astravar-2.1-CI-ONLY-code26.apk
+          cp app/build/outputs/apk/release/app-release.apk validation/Astravar-2.1-CI-ONLY-code28.apk
           python3 scripts/inspect_release_apk.py validation/Astravar-2.1-CI-ONLY-code24.apk --package com.yazsras.astravar --version-name 2.1.0 --version-code 24 --output validation/release-code24.json
-          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-CI-ONLY-code26.apk --package com.yazsras.astravar --version-name 2.1.0 --version-code 26 --output validation/release-code26.json
+          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-CI-ONLY-code28.apk --package com.yazsras.astravar --version-name 2.1.0 --version-code 28 --output validation/release-code28.json
           python3 scripts/native_recheck.py verify-targets --output validation/native-test-apks.json
           python3 - <<'PY'
           import json
-          a=json.load(open('validation/release-code24.json'));b=json.load(open('validation/release-code26.json'))
+          a=json.load(open('validation/release-code24.json'));b=json.load(open('validation/release-code28.json'))
           assert a['certificate_sha256']==b['certificate_sha256']
           assert b['version_code']>a['version_code']
           assert not a['owner_signature_verified'] and not b['owner_signature_verified']
