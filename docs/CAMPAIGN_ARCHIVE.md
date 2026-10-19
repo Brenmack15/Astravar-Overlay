@@ -118,7 +118,7 @@ retain the original Notion archive until the owner explicitly approves cutover.
 ## Large archive memory handling
 
 An actual 192 MiB Android emulator exposed excessive temporary serialization
-allocations in the code-26 candidate. Code 29 streams UTF-8 digests and JSON
+allocations in the code-26 candidate. Code 30 streams UTF-8 digests and JSON
 encoding, reads large SQLite text in bounded chunks, and compares typed records
 without materializing another JSON tree containing the retained archive.
 Existing SHA-256 and schema-4 backup bytes remain compatible. Document output is
@@ -133,3 +133,7 @@ created. Unsupported complexity produces a readable rejection with no imported
 records. A generated backup must satisfy the same restore limits before it can
 be saved as a verified recovery file. These limits leave the complete campaign
 and large fictional acceptance archive intact; they do not truncate content.
+
+Physical-item identity validation includes every normalized Notion item alias,
+including aliases on preserved local records. A source identity linked to two
+physical item IDs blocks the import even when the display titles differ.
