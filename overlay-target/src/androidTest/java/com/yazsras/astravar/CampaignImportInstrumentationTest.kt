@@ -625,6 +625,82 @@ class CampaignImportInstrumentationTest {
         error("Missing exact fictional Owl header within its original 30s budget; $lastObserved")
     }
 
+    /** Observe one of the typed source entry points before its single navigation click. */
+    private fun openMappedSourceEntry(label: String) {
+        require(label in listOf("Armor source references", "Party source dossiers", "Inventory source archive")) {
+            "Only the three exact typed source entry points use this observation helper."
+        }
+        val deadline = SystemClock.uptimeMillis() + 30_000
+        val selector = By.text(label).pkg(product)
+        val minimumTap = (48 * instrumentation.targetContext.resources.displayMetrics.density).toInt()
+        var previous: Pair<Rect, Rect>? = null
+        var stableSince: Long? = null
+        var lastObserved = "No fresh typed source entry observation: $label"
+        for (direction in listOf(Direction.UP, Direction.DOWN)) {
+            val searchDeadline = if (direction == Direction.UP) deadline - 15_000 else deadline
+            var scrolls = 0
+            var lastScrollResult: Boolean? = null
+            while (SystemClock.uptimeMillis() < searchDeadline) {
+                var observed: Pair<Rect, Rect>? = null
+                try {
+                    assertTrue("Typed source entry observations require a fresh accessibility cache",
+                        instrumentation.uiAutomation.clearCache())
+                    val labels = device.findObjects(selector)
+                    val scroll = device.findObjects(By.clazz("android.widget.ScrollView").pkg(product)).singleOrNull()
+                    val viewport = scroll?.let { Rect(it.visibleBounds) }
+                    lastObserved = "label=$label direction=$direction scrolls=$scrolls/18; scrollResult=$lastScrollResult; labels=${labels.size}; viewport=$viewport"
+                    if (labels.size == 1 && viewport != null) {
+                        var action: UiObject2? = labels.single()
+                        var depth = 0
+                        while (action != null && !action.isScrollable && depth++ < 12) {
+                            if (action.isClickable) {
+                                val bounds = Rect(action.visibleBounds)
+                                lastObserved += "; enabled=${action.isEnabled}; action=$bounds"
+                                if (action.isEnabled && bounds.width() >= minimumTap && bounds.height() >= minimumTap &&
+                                    viewport.contains(bounds) && listOf(bounds, viewport).all { !it.isEmpty &&
+                                        it.left >= 0 && it.top >= 0 && it.right <= device.displayWidth && it.bottom <= device.displayHeight }) {
+                                    observed = bounds to viewport
+                                }
+                                break
+                            }
+                            action = action.parent
+                        }
+                    }
+                    android.util.Log.d("AstravarNativeSource", lastObserved)
+                    if (observed != null) {
+                        val now = SystemClock.uptimeMillis()
+                        stableSince = if (previous == observed) stableSince ?: now else now
+                        previous = observed
+                        if (now - requireNotNull(stableSince) >= 1_000) {
+                            val bounds = observed.first
+                            assertTrue("Typed source entry '$label' must be observed before its original deadline",
+                                SystemClock.uptimeMillis() < deadline)
+                            assertTrue("Dispatch the observed typed source entry '$label' once",
+                                device.click(bounds.centerX(), bounds.centerY()))
+                            val remaining = deadline - SystemClock.uptimeMillis()
+                            if (remaining > 0) device.waitForIdle(minOf(1_000L, remaining))
+                            return
+                        }
+                    } else {
+                        previous = null; stableSince = null
+                        if (SystemClock.uptimeMillis() >= searchDeadline || scrolls >= 18) break
+                        if (scroll != null && scroll.isScrollable) {
+                            scrolls++
+                            // False is diagnostic; it never establishes a page edge.
+                            lastScrollResult = scroll.scroll(direction, .6f)
+                        }
+                    }
+                } catch (_: StaleObjectException) {
+                    previous = null; stableSince = null
+                    lastObserved = "Product window changed during typed source entry observation or read-only scroll: $label"
+                }
+                val remaining = searchDeadline - SystemClock.uptimeMillis()
+                if (remaining > 0) SystemClock.sleep(minOf(100L, remaining))
+            }
+        }
+        error("Missing enabled typed source entry '$label' within its original 30s budget; $lastObserved")
+    }
+
     /** Supplemental test-only fixture. Run after the large archive rollback; never replaces an existing profile. */
     @Test fun cMappedCampaignRecordsReachPlayerViews() {
         assertEquals("This fixture must run only on an emulator", "1", device.executeShellCommand("getprop ro.kernel.qemu").trim())
@@ -667,7 +743,7 @@ class CampaignImportInstrumentationTest {
         assertTrue("Armor must display the imported manual ability independently of weapon mechanics",
             device.wait(Until.hasObject(By.descContains("Intelligence score 14").pkg(product)), 10_000))
         captureMapped("armor", "Armor", "Fictional Mapped Operator", "Ability scores")
-        tap("Armor source references")
+        openMappedSourceEntry("Armor source references")
         find("1 of 1 references")
         observations.put(JSONObject().put("route", "armor-source-entry").put("primaryTab", "Campaign")
             .put("visibleMarker", "1 of 1 references"))
@@ -686,7 +762,7 @@ class CampaignImportInstrumentationTest {
         observeMappedOwlHeader()
         if (!device.hasObject(By.text("Fictional archival owl").pkg(product))) tap("Identity & progression")
         captureMapped("companion", "Party", "Class / role", "Fictional archival owl")
-        tap("Party source dossiers")
+        openMappedSourceEntry("Party source dossiers")
         find("1 of 1 references")
         observations.put(JSONObject().put("route", "party-source-entry").put("primaryTab", "Campaign")
             .put("visibleMarker", "1 of 1 references"))
@@ -698,7 +774,7 @@ class CampaignImportInstrumentationTest {
         find("Fictional optical property")
         find("Fictional optical note; no automatic bonus.")
         tap("Close")
-        tap("Inventory source archive")
+        openMappedSourceEntry("Inventory source archive")
         find("1 of 1 references")
         observations.put(JSONObject().put("route", "inventory-source-entry").put("primaryTab", "Campaign")
             .put("visibleMarker", "1 of 1 references"))
