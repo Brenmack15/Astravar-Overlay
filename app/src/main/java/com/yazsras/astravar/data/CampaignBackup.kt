@@ -21,8 +21,8 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
     private val records = db.recordsDao()
     private val party = db.partyDao()
 
-    private suspend fun snapshot() = LedgerExport(exportedAt = 0, items = items.allItems(), events = items.allEvents(),
-        records = CampaignRecordsRepository(db).snapshot())
+    internal suspend fun snapshot() = LedgerExport(exportedAt = 0, items = items.allItems(), events = items.allEvents(),
+        records = CampaignRecordsRepository(db).snapshot(), archive = CampaignArchiveRepository(db).snapshot())
 
     private fun hash(value: LedgerExport) = campaignHash(campaignJson.encodeToString(value))
 
@@ -32,7 +32,7 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
             supportedCampaignBackup(text)
             val header = campaignJson.parseToJsonElement(text).jsonObject
             require(header["format"]?.jsonPrimitive?.content == "astravar-campaign-items" &&
-                (header["schema"]?.jsonPrimitive?.intOrNull ?: -1) in 1..3) { "Backup must declare its format and supported schema." }
+                (header["schema"]?.jsonPrimitive?.intOrNull ?: -1) in 1..4) { "Backup must declare its format and supported schema." }
             val incoming = campaignJson.decodeFromString<LedgerExport>(text)
             val conflicts = validate(incoming, current)
             ImportPreview(conflicts.isEmpty(), "${incoming.items.size} items, ${incoming.events.size} inventory events, " +
@@ -60,6 +60,14 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         val conflicts = validate(incoming, current)
         require(conflicts.isEmpty()) { conflicts.joinToString("\n") }
 
+        mergeRows(incoming, current)
+        val now = System.currentTimeMillis()
+        records.insert(CampaignAudit(commandId, commandId, "backup", preview.fingerprint, "RESTORE", "User-confirmed local file restore",
+            0, 1, now, afterJson = preview.summary))
+        CommandReceipt(commandId, fp, "RESTORE", preview.fingerprint, 1, now, outcomeJson = preview.summary).also { records.insert(it) }
+    }
+
+    internal suspend fun mergeRows(incoming: LedgerExport, current: LedgerExport) {
         val currentItems = current.items.associateBy { it.id }
         incoming.items.filter { it.id !in currentItems }.forEach { items.insertItem(it) }
         val currentEvents = current.events.associateBy { it.commandId }
@@ -88,10 +96,7 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         merge(r.consumptions, c.consumptions, { it.id }) { records.insert(it) }
         merge(r.audit, c.audit, { it.id }) { records.insert(it) }
         merge(r.receipts, c.receipts, { it.commandId }) { records.insert(it) }
-        val now = System.currentTimeMillis()
-        records.insert(CampaignAudit(commandId, commandId, "backup", preview.fingerprint, "RESTORE", "User-confirmed local file restore",
-            0, 1, now, afterJson = preview.summary))
-        CommandReceipt(commandId, fp, "RESTORE", preview.fingerprint, 1, now, outcomeJson = preview.summary).also { records.insert(it) }
+        CampaignArchiveRepository(db).mergeState(incoming.archive, current.archive)
     }
 
     private suspend fun <T> merge(incoming: List<T>, current: List<T>, id: (T) -> String, insert: suspend (T) -> Unit) {
@@ -99,9 +104,9 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         incoming.filter { id(it) !in present }.forEach { insert(it) }
     }
 
-    private fun validate(incoming: LedgerExport, current: LedgerExport): List<String> {
+    internal fun validate(incoming: LedgerExport, current: LedgerExport): List<String> {
         val errors = mutableListOf<String>()
-        if (incoming.format != "astravar-campaign-items" || incoming.schema !in 1..3) {
+        if (incoming.format != "astravar-campaign-items" || incoming.schema !in 1..4) {
             return listOf("Unsupported backup format or schema. No data will be imported.")
         }
         if (incoming.schema == 1 && incoming.records != CampaignRecordsExport()) errors += "Schema 1 cannot contain v2 records."
@@ -117,8 +122,14 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         }
         checkRows("Item", incoming.items, current.items) { it.id }
         checkRows("Inventory event", incoming.events, current.events) { it.commandId }
+        errors += CampaignArchiveRepository.validateState(incoming.archive, current.archive)
+        if (incoming.schema < 4 && incoming.archive != CampaignArchiveState()) errors += "Archive reference records require backup schema 4."
         val r = incoming.records
         val c = current.records
+        val notionIdentities = (incoming.items + current.items).distinctBy { it.id }.mapNotNull { it.notionPageId?.takeIf { value -> value.isNotBlank() }?.let { sourceId -> normalizedNotionIdentity(sourceId) to it.id } }
+        if (notionIdentities.groupBy { it.first }.any { (_, rows) -> rows.map { it.second }.distinct().size > 1 }) errors += "One Notion item identity maps to multiple physical equipment records."
+        val walletIdentities = (r.wallets + c.wallets).distinctBy { it.id }.groupBy { Triple(it.campaignId, it.holderProfileId, it.name) }
+        if (walletIdentities.any { (_, rows) -> rows.size > 1 }) errors += "Wallet identities conflict; balances will not be combined."
         if (incoming.schema < 3 && (r.partySheets.isNotEmpty() || r.placements.isNotEmpty() || r.wallets.isNotEmpty() || r.checkpoints.isNotEmpty() || r.externalReferences.isNotEmpty() || r.receipts.any { it.kind == "transaction" })) {
             errors += "Legacy backup schemas cannot contain v3 party records."
         }

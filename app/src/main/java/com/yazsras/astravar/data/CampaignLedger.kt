@@ -77,11 +77,12 @@ data class LedgerDraft(
 @Serializable
 data class LedgerExport(
     val format: String = "astravar-campaign-items",
-    val schema: Int = 3,
+    val schema: Int = 4,
     val exportedAt: Long,
     val items: List<LedgerItem>,
     val events: List<LedgerEvent>,
-    val records: CampaignRecordsExport = CampaignRecordsExport()
+    val records: CampaignRecordsExport = CampaignRecordsExport(),
+    val archive: CampaignArchiveState = CampaignArchiveState()
 )
 
 @Dao
@@ -121,17 +122,20 @@ interface LedgerDao {
     CharacterProfile::class, CharacterAbility::class,
     CampaignLink::class, CampaignAudit::class, CommandReceipt::class,
     CraftExecution::class, CraftConsumption::class, PartySheetRecord::class, ItemPlacement::class,
-    PartyWallet::class, CampaignCheckpoint::class, ExternalRecordReference::class], version = 3, exportSchema = true)
+    PartyWallet::class, CampaignCheckpoint::class, ExternalRecordReference::class,
+    CampaignReferenceRecord::class, CampaignReferenceRelation::class, CampaignImportReceipt::class,
+    CampaignImportBackup::class, CampaignArchiveSource::class], version = 4, exportSchema = true)
 @TypeConverters(PartyConverters::class)
 abstract class CampaignLedgerDb : RoomDatabase() {
     abstract fun ledgerDao(): LedgerDao
     abstract fun recordsDao(): CampaignRecordsDao
     abstract fun partyDao(): PartyRecordsDao
+    abstract fun archiveDao(): CampaignArchiveDao
 
     companion object {
         fun open(context: Context): CampaignLedgerDb = Room.databaseBuilder(
             context.applicationContext, CampaignLedgerDb::class.java, "astravar-campaign-ledger.db"
-        ).addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3).build() // NEVER fallbackToDestructiveMigration()
+        ).addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4).build() // NEVER fallbackToDestructiveMigration()
     }
 }
 
@@ -139,6 +143,7 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
     private val dao = db.ledgerDao()
     val records = CampaignRecordsRepository(db)
     val party = PartyRecordsRepository(db)
+    val archive = CampaignArchiveRepository(db)
     val items: Flow<List<LedgerItem>> = dao.observeItems()
     fun eventsForItem(itemId: String): Flow<List<LedgerEvent>> = dao.eventsForItem(itemId)
 
@@ -292,14 +297,14 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
     /** Player-controlled JSON export includes compact embedded item icons and the full audit history. */
     suspend fun export(): String = db.withTransaction {
         supportedCampaignBackup(json.encodeToString(LedgerExport(exportedAt = System.currentTimeMillis(),
-            items = dao.allItems(), events = dao.allEvents(), records = records.snapshot())))
+            items = dao.allItems(), events = dao.allEvents(), records = records.snapshot(), archive = archive.snapshot())))
     }
 
     /** Historical compatibility export only: does not include new inventions/connections/companion records. */
     suspend fun exportLegacy(): String = db.withTransaction {
         val value = LedgerExport(schema = 1, exportedAt = System.currentTimeMillis(), items = dao.allItems(), events = dao.allEvents())
         val objectValue = json.encodeToJsonElement(LedgerExport.serializer(), value) as kotlinx.serialization.json.JsonObject
-        supportedCampaignBackup(kotlinx.serialization.json.JsonObject(objectValue.filterKeys { it != "records" }).toString())
+        supportedCampaignBackup(kotlinx.serialization.json.JsonObject(objectValue.filterKeys { it != "records" && it != "archive" }).toString())
     }
 
     /** Import preview is read-only; restore never replaces an existing different record. */
