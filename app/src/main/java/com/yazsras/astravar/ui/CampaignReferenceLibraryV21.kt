@@ -33,6 +33,20 @@ internal fun campaignReferenceMatchesV21(record: CampaignReferenceRecord, query:
     listOf(record.title, record.category, record.body, record.propertiesJson, record.externalId, record.sourceUrl)
         .any { it.contains(query.trim(), ignoreCase = true) }
 
+/** A source details screen retains metadata, never a second copy of embedded file bodies. */
+internal data class CampaignSourceAttachmentMetadataV21(
+    val id: String, val fileName: String, val mimeType: String, val sourceUrl: String,
+    val sha256: String?, val status: String, val embedded: Boolean
+)
+internal data class CampaignSourceMetadataV21(
+    val title: String, val sourceRootUrl: String, val sourceRootRevision: String,
+    val issues: List<String>, val attachments: List<CampaignSourceAttachmentMetadataV21>
+)
+internal fun campaignSourceMetadataV21(source: CampaignArchivePayload) = CampaignSourceMetadataV21(
+    source.title, source.sourceRootUrl, source.sourceRootRevision, source.issues,
+    source.attachments.map { CampaignSourceAttachmentMetadataV21(it.id, it.fileName, it.mimeType,
+        it.sourceUrl, it.sha256, it.status, it.base64 != null) })
+
 @Composable fun CampaignReferenceLibraryV21(repository: CampaignLedgerRepository) {
     val references by repository.archive.references.collectAsState(initial = emptyList())
     val relations by repository.archive.relations.collectAsState(initial = emptyList())
@@ -127,13 +141,13 @@ internal fun campaignReferenceMatchesV21(record: CampaignReferenceRecord, query:
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
     val scope = rememberCoroutineScope()
-    var archive by remember(packageHash) { mutableStateOf<CampaignArchivePayload?>(null) }
+    var archive by remember(packageHash) { mutableStateOf<CampaignSourceMetadataV21?>(null) }
     var status by remember(packageHash) { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var selectedAttachmentId by remember { mutableStateOf<String?>(null) }
     var limit by rememberSaveable(packageHash) { mutableIntStateOf(40) }
     LaunchedEffect(repository, packageHash) {
-        try { archive = repository.archive.sourceArchive(packageHash) }
+        try { archive = repository.archive.sourceArchive(packageHash)?.let(::campaignSourceMetadataV21) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { status = "Archive details could not be read: ${e.message}" }
     }
@@ -170,7 +184,7 @@ internal fun campaignReferenceMatchesV21(record: CampaignReferenceRecord, query:
             PlayerDisclosure(attachment.fileName) {
                 Text("${attachment.mimeType} · ${attachment.status}", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
                 SelectionContainer { Text("Original attachment ID · ${attachment.id}\nSource · ${attachment.sourceUrl.ifBlank { "Unknown" }}\nSHA-256 · ${attachment.sha256 ?: "Unknown"}", style = MaterialTheme.typography.bodySmall) }
-                if (attachment.base64 != null) PlayerOutlinedButton(onClick = {
+                if (attachment.embedded) PlayerOutlinedButton(onClick = {
                     selectedAttachmentId = attachment.id
                     val name = attachment.fileName.substringAfterLast('/').substringAfterLast('\\').take(180)
                         .replace(Regex("[\\p{Cntrl}]"), "_").ifBlank { "campaign-attachment.bin" }
