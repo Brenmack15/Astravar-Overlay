@@ -322,17 +322,21 @@ class CampaignImportInstrumentationTest {
         fun missing(): Nothing = error("Missing scoped rollback action for receipt '$title'; minimum=${minimumTap}px; $lastObserved")
         for (direction in listOf(Direction.DOWN, Direction.UP)) {
             var scrolls = 0
-            var reachedEdge = false
+            val searchDeadline = if (direction == Direction.DOWN) deadline - 15_000 else deadline
+            var lastScrollResult: Boolean? = null
+            var beforeScroll: Pair<Rect, Rect>? = null
+            var awaitingScrollObservation = false
             while (true) {
                 if (SystemClock.uptimeMillis() >= deadline) missing()
                 var observed: Triple<Rect, Rect, Rect>? = null
+                var receiptGeometry: Pair<Rect, Rect>? = null
                 try {
                     assertTrue("Receipt observations require a fresh accessibility cache",
                         instrumentation.uiAutomation.clearCache())
                     val titles = device.findObjects(titleSelector)
                     val cards = device.findObjects(cardSelector)
                     val scroll = device.findObjects(By.scrollable(true).pkg(product)).lastOrNull()
-                    lastObserved = "direction=$direction scrolls=$scrolls/18; reachedEdge=$reachedEdge; titles=${titles.size}; direct-title cards=${cards.size}; viewport=${scroll?.visibleBounds}"
+                    lastObserved = "direction=$direction scrolls=$scrolls/18; titles=${titles.size}; direct-title cards=${cards.size}; viewport=${scroll?.visibleBounds}"
                     if (titles.size == 1 && cards.size == 1) {
                         val card = cards.single()
                         val parent = card.parent
@@ -340,6 +344,7 @@ class CampaignImportInstrumentationTest {
                         // ScrollView. Never climb into a container of other cards.
                         val directTitles = card.children.filter { it.text == title && it.applicationPackage == product }
                         if (!card.isScrollable && parent != null && parent.isScrollable && directTitles.size == 1) {
+                            receiptGeometry = Rect(directTitles.single().visibleBounds) to Rect(card.visibleBounds)
                             val labels = card.findObjects(actionSelector)
                             lastObserved += "; fixed receipt card=${card.visibleBounds}; scoped rollback labels=${labels.size}"
                             if (labels.size == 1) {
@@ -364,6 +369,13 @@ class CampaignImportInstrumentationTest {
                             }
                         } else lastObserved += "; direct receipt-card structure is absent"
                     }
+                    if (awaitingScrollObservation) {
+                        val movement = if (beforeScroll == null || receiptGeometry == null) "unknown"
+                            else if (beforeScroll != receiptGeometry) "changed" else "unchanged"
+                        lastObserved += "; scrollResult=$lastScrollResult; freshReceiptGeometry=$movement; before=$beforeScroll; after=$receiptGeometry"
+                        android.util.Log.d("AstravarNativeReceipt", lastObserved)
+                        awaitingScrollObservation = false
+                    }
                     if (observed != null) {
                         val now = SystemClock.uptimeMillis()
                         stableSince = if (previous == observed) stableSince ?: now else now
@@ -379,10 +391,15 @@ class CampaignImportInstrumentationTest {
                         }
                     } else {
                         previous = null; stableSince = null
-                        if (reachedEdge || scrolls >= 18 || SystemClock.uptimeMillis() >= deadline) break
+                        if (SystemClock.uptimeMillis() >= searchDeadline || scrolls >= 18 || SystemClock.uptimeMillis() >= deadline) break
                         if (scroll != null) {
                             scrolls++
-                            reachedEdge = !scroll.scroll(direction, .35f)
+                            beforeScroll = receiptGeometry
+                            awaitingScrollObservation = true
+                            // False also means no accessibility event arrived;
+                            // only fresh geometry records observed movement. A
+                            // bounded search slice reserves time for both directions.
+                            lastScrollResult = scroll.scroll(direction, .35f)
                         }
                     }
                 } catch (_: StaleObjectException) {
