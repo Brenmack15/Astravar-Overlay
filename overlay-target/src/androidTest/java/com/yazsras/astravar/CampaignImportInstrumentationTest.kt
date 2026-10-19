@@ -572,6 +572,59 @@ class CampaignImportInstrumentationTest {
         error("Missing enabled typed Party tab '$label' within its original 30s budget; $lastObserved")
     }
 
+    /** Read-only header reacquisition after the single fictional Owl navigation. */
+    private fun observeMappedOwlHeader() {
+        val deadline = SystemClock.uptimeMillis() + 30_000
+        val selector = By.text("Fictional Mapped Owl").pkg(product)
+        var previous: Pair<Rect, Rect>? = null
+        var stableSince: Long? = null
+        var lastObserved = "No fresh fictional Owl header observation"
+        for (direction in listOf(Direction.UP, Direction.DOWN)) {
+            val searchDeadline = if (direction == Direction.UP) deadline - 15_000 else deadline
+            var scrolls = 0
+            var lastScrollResult: Boolean? = null
+            while (SystemClock.uptimeMillis() < searchDeadline) {
+                try {
+                    assertTrue("Fictional Owl header observations require a fresh accessibility cache",
+                        instrumentation.uiAutomation.clearCache())
+                    val labels = device.findObjects(selector)
+                    val scroll = device.findObjects(By.clazz("android.widget.ScrollView").pkg(product)).singleOrNull()
+                    val viewport = scroll?.let { Rect(it.visibleBounds) }
+                    val title = labels.singleOrNull()?.let { Rect(it.visibleBounds) }
+                    lastObserved = "direction=$direction scrolls=$scrolls/18; scrollResult=$lastScrollResult; labels=${labels.size}; viewport=$viewport; title=$title"
+                    val observed = if (title != null && viewport != null && viewport.contains(title) &&
+                        listOf(title, viewport).all { !it.isEmpty && it.left >= 0 && it.top >= 0 &&
+                            it.right <= device.displayWidth && it.bottom <= device.displayHeight }) title to viewport else null
+                    android.util.Log.d("AstravarNativeOwl", lastObserved)
+                    if (observed != null) {
+                        val now = SystemClock.uptimeMillis()
+                        stableSince = if (previous == observed) stableSince ?: now else now
+                        previous = observed
+                        if (now - requireNotNull(stableSince) >= 1_000) {
+                            assertTrue("The exact fictional Owl header must be observed before its original deadline",
+                                SystemClock.uptimeMillis() < deadline)
+                            return
+                        }
+                    } else {
+                        previous = null; stableSince = null
+                        if (SystemClock.uptimeMillis() >= searchDeadline || scrolls >= 18) break
+                        if (scroll != null && scroll.isScrollable) {
+                            scrolls++
+                            // False is diagnostic; it never establishes a page edge.
+                            lastScrollResult = scroll.scroll(direction, .6f)
+                        }
+                    }
+                } catch (_: StaleObjectException) {
+                    previous = null; stableSince = null
+                    lastObserved = "Party window changed during fictional Owl header observation or read-only scroll"
+                }
+                val remaining = searchDeadline - SystemClock.uptimeMillis()
+                if (remaining > 0) SystemClock.sleep(minOf(100L, remaining))
+            }
+        }
+        error("Missing exact fictional Owl header within its original 30s budget; $lastObserved")
+    }
+
     /** Supplemental test-only fixture. Run after the large archive rollback; never replaces an existing profile. */
     @Test fun cMappedCampaignRecordsReachPlayerViews() {
         assertEquals("This fixture must run only on an emulator", "1", device.executeShellCommand("getprop ro.kernel.qemu").trim())
@@ -630,7 +683,7 @@ class CampaignImportInstrumentationTest {
         captureMapped("currency", "Party", "Fictional Mapped Purse", "? cp · 2 sp · 7 gp")
         tap("‹ Party")
         tap("Fictional Mapped Owl")
-        find("Fictional Mapped Owl")
+        observeMappedOwlHeader()
         if (!device.hasObject(By.text("Fictional archival owl").pkg(product))) tap("Identity & progression")
         captureMapped("companion", "Party", "Class / role", "Fictional archival owl")
         tap("Party source dossiers")
