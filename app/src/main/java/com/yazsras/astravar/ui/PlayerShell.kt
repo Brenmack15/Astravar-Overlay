@@ -83,7 +83,9 @@ val rebuildDestinations = listOf("Armor", "Combat", "Party", "Campaign", "Config
         listOf(Triple("Inventory", "Items & equipment", "Core"),
             Triple("Inventions", "Blueprints & construction", "Settings"),
             Triple("Connections", "People, groups & milestones", "Emblem"),
-            Triple("Checkpoints", "Sourced session records & unresolved decisions", "History")).forEach { (name, detail, icon) ->
+            Triple("Checkpoints", "Sourced session records & unresolved decisions", "History"),
+            Triple("Reference Library", "Imported campaign sources, history & relationships", "History"),
+            Triple("Campaign import", "Review a private archive, backup & import locally", "Settings")).forEach { (name, detail, icon) ->
             PlayerCard(onClick = { open(name) }) {
                 PlayerEntry(name, detail, icon, { open(name) })
             }
@@ -104,6 +106,7 @@ val rebuildDestinations = listOf("Armor", "Combat", "Party", "Campaign", "Config
         SectionCaption("App & data")
         PlayerEntry("Overlay & appearance", "Floating controls & app preferences", "Settings", { open("Overlay & appearance") })
         PlayerEntry("Campaign backup", "Items, projects, connections & companion", "History", { open("Campaign backup") })
+        PlayerEntry("Campaign import", "Private source archive · preview, backup & receipts", "History", { open("Campaign import") })
         PlayerEntry("Owner connection", "Authenticated connection & offline queue", "Settings", { open("Owner connection") })
         PlayerEntry("Weapon backup", "Separate combat save", "History", { open("Weapon backup") })
         PlayerEntry("Fictional sync", "Public disposable test records", "More", { open("Fictional sync") })

@@ -120,11 +120,13 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                             elements=if(prefs.mode==Ability.ARCANE || prefs.mode==Ability.SPELL) emptyList() else prefs.elements,
                             selectElement={elementPicker=true},
                             characterProfileId=if(remoteTestEnabled) RemoteStatProtocol.PROFILE_ID else "local-player",
-                            onOverlayVisibilityChanged={armorModalOpen=it})
+                            onOverlayVisibilityChanged={armorModalOpen=it},
+                            openReferences={tab="Campaign";campaignPage="Reference Library"})
                         "Combat" -> if(current.onboarded) Dashboard(current,actions,startOverlay,grantOverlay,stopOverlay,app.preferences,prefs)
                             else WeaponSetupV2(current,actions,{tool="Rules & profile"},{tool="Weapon backup"})
                         "Party" -> if (remoteTestEnabled) Page { Text("Party records are isolated from the disposable Remote Stat Test. Disable Remote Updates to edit party records.") }
-                            else PartyPageV2(app.campaignLedger, current) {tab="Campaign";campaignPage="Inventory"}
+                            else PartyPageV2(app.campaignLedger, current,
+                                openReferences={tab="Campaign";campaignPage="Reference Library"}) {tab="Campaign";campaignPage="Inventory"}
                         "Campaign" -> {
                             val page=campaignPage
                             if(page==null) RebuildCampaignHub {campaignPage=it}
@@ -135,10 +137,12 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                                 }
                                 Box(Modifier.weight(1f)) {screenStates.SaveableStateProvider("campaign-$page") {
                                     when(page) {
-                                        "Inventory" -> CampaignLedgerPage(app.campaignLedger)
+                                        "Inventory" -> CampaignLedgerPage(app.campaignLedger) {campaignPage="Reference Library"}
                                         "Inventions" -> InventionsPageV2(app.campaignLedger)
                                         "Checkpoints" -> CampaignCheckpointPanel(app.campaignLedger)
                                         "Eek" -> EekPageV2(app.campaignLedger)
+                                        "Reference Library" -> CampaignReferenceLibraryV21(app.campaignLedger)
+                                        "Campaign import" -> CampaignArchiveImportV21(app.campaignLedger)
                                         else -> ConnectionsPageV2(app.campaignLedger)
                                     }
                                 }}
@@ -159,6 +163,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                         }
                         "Owner connection" -> OwnerSyncConfigPage()
                         "Campaign backup" -> CampaignBackupPageV2(app.campaignLedger)
+                        "Campaign import" -> CampaignArchiveImportV21(app.campaignLedger)
                         "Weapon backup" -> Page {BackupPage(current,actions)}
                         "Rules & profile" -> RulesPage(current,actions,if(prefs.mode in listOf(Ability.ARCANE,Ability.SPELL)) emptyList() else prefs.elements)
                         "Resources & recovery" -> ResourcesPage(current,history,actions)

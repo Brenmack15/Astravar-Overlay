@@ -87,7 +87,7 @@ import kotlinx.coroutines.withContext
         PlayerCard {
             Text("Save a copy", style = MaterialTheme.typography.titleLarge)
             Text("Inventory, party sheets, wallets, checkpoints, workshop, Connections and their histories.", color = RebuildPalette.Muted)
-            Action("Export campaign backup", !busy) { exporter.launch("astravar-campaign-v3.json") }
+            Action("Export campaign backup", !busy) { exporter.launch("astravar-campaign-v4.json") }
         }
         PlayerCard {
             Text("Restore from a file", style = MaterialTheme.typography.titleLarge)
@@ -103,13 +103,13 @@ import kotlinx.coroutines.withContext
     }
     if (info) PlayerSheet("Backup details", onDismiss = { info = false }) {
         PlayerDisclosure("Campaign contents", initiallyOpen = true) {
-            Text("Inventory and images, item properties and history, character status and ability scores, party sheets and equipment, wallets, checkpoints, external source IDs, inventions and materials, Connections and milestones, Eek, linked records, crafting lineage and audit receipts.")
+            Text("Inventory and images, item properties and history, character status and ability scores, party sheets and equipment, wallets, checkpoints, external source IDs, inventions and materials, Connections and milestones, Eek, linked records, crafting lineage, source reference archives, attachments, import receipts and verified recovery snapshots.")
         }
         PlayerDisclosure("Separate backups") {
             Text("The weapon save and public fictional sync queue are not included. Keep the existing weapon backup too.")
         }
         PlayerDisclosure("Restore safeguards") {
-            Text("Inventory Beta and campaign schema 2/3 files are supported. Conflicting records are never silently overwritten. Export a current backup in this session before confirming a restore.")
+            Text("Inventory Beta and campaign schema 2/3/4 files are supported. Conflicting records are never silently overwritten. Export a current backup in this session before confirming a restore.")
             Text("Backup files contain private campaign data. Keep them out of public GitHub and the public sandbox.")
         }
     }
@@ -137,7 +137,7 @@ import kotlinx.coroutines.withContext
             Text("Only validated missing records will be added. Existing records and weapon data stay intact.", color = RebuildPalette.Muted)
             if (!backupCreated) {
                 Text("Save a current campaign backup to enable restore.", color = RebuildPalette.GoldBright)
-                PlayerOutlinedButton(onClick = { exporter.launch("astravar-campaign-v3.json") }, enabled = !busy,
+                PlayerOutlinedButton(onClick = { exporter.launch("astravar-campaign-v4.json") }, enabled = !busy,
                     modifier = Modifier.fillMaxWidth()) { Text("Save current backup") }
             }
             candidate.backup?.let { incoming ->

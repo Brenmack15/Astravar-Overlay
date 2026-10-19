@@ -68,13 +68,14 @@ val campaignDestinationsV2 = listOf("Astravar", "Inventory", "Campaign", "More")
 @Composable fun ArmorOverviewV2(
     state: Campaign, ledger: CampaignLedgerRepository, combat: () -> Unit, systems: () -> Unit,
     eek: () -> Unit, inventory: () -> Unit, elements: List<DamageType> = emptyList(), selectElement: () -> Unit = combat,
-    characterProfileId: String = "local-player", onOverlayVisibilityChanged: (Boolean) -> Unit = {}
+    characterProfileId: String = "local-player", onOverlayVisibilityChanged: (Boolean) -> Unit = {}, openReferences: (() -> Unit)? = null
 ) {
     var capabilitiesOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var characterEditorOpen by remember { mutableStateOf(false) }
     SideEffect { onOverlayVisibilityChanged(capabilitiesOpen || characterEditorOpen) }
     Page {
         CharacterOverviewV2(ledger, state, characterProfileId) { characterEditorOpen = it }
+        if (openReferences != null) PlayerEntry("Armor source references", "Accepted mechanics, dossiers and unresolved source details", "History", openReferences)
         val largeText = androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.15f
         val systemCard = if (largeText) Modifier.heightIn(min = 148.dp) else Modifier.height(132.dp)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {

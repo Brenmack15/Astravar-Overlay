@@ -45,7 +45,12 @@ private inline fun <reified T> reviewRows(values: List<T>, crossinline id: (T) -
             BackupReviewCategory("Craft executions", reviewRows(r.crafts, { it.commandId }, { it.projectId }, { it.source })),
             BackupReviewCategory("Material consumptions", reviewRows(r.consumptions, { it.id }, { it.itemId })),
             BackupReviewCategory("Audit history", reviewRows(r.audit, { it.id }, { "${it.recordType} · ${it.kind}" }, { it.source }, { it.resultingRevision })),
-            BackupReviewCategory("Command receipts", reviewRows(r.receipts, { it.commandId }, { "${it.kind} · ${it.recordId}" }, { audits[it.commandId]?.source.orEmpty() }, { it.resultingRevision }))
+            BackupReviewCategory("Command receipts", reviewRows(r.receipts, { it.commandId }, { "${it.kind} · ${it.recordId}" }, { audits[it.commandId]?.source.orEmpty() }, { it.resultingRevision })),
+            BackupReviewCategory("Campaign reference records", reviewRows(backup.archive.references, { it.id }, { it.title }, { it.sourceUrl })),
+            BackupReviewCategory("Campaign source relationships", reviewRows(backup.archive.relations, { it.id }, { "${it.kind} · ${it.fromId} → ${it.toId}" })),
+            BackupReviewCategory("Campaign import receipts", reviewRows(backup.archive.receipts, { it.packageHash }, { "${it.title} · ${it.state}" })),
+            BackupReviewCategory("Campaign recovery snapshots", reviewRows(backup.archive.backups, { it.packageHash }, { "Verified pre-import backup" })),
+            BackupReviewCategory("Campaign original source archives", reviewRows(backup.archive.sources, { it.packageHash }, { "Original import payload" }))
         ).filter { it.rows.isNotEmpty() }
     }
     var query by rememberSaveable { mutableStateOf("") }
@@ -79,9 +84,9 @@ private val reviewJson = Json { prettyPrint = true }
 /** Embedded artwork is inspectable by its exact encoded-content digest without printing megabytes of Base64. */
 private fun sanitizeBackupReview(value: JsonElement, field: String = ""): JsonElement = when {
     value is JsonNull -> value
-    value is JsonPrimitive && value.isString && field in setOf("imageBase64", "portraitBase64") -> JsonPrimitive(
-        "Embedded artwork · ${value.content.length} encoded characters · SHA-256 ${campaignHash(value.content)}")
-    value is JsonPrimitive && value.isString && field in setOf("contentJson", "beforeJson", "afterJson", "outcomeJson") ->
+    value is JsonPrimitive && value.isString && field in setOf("imageBase64", "portraitBase64", "base64") -> JsonPrimitive(
+        "Embedded content · ${value.content.length} encoded characters · SHA-256 ${campaignHash(value.content)}")
+    value is JsonPrimitive && value.isString && field in setOf("contentJson", "beforeJson", "afterJson", "outcomeJson", "payloadJson", "snapshotJson") ->
         runCatching { sanitizeBackupReview(Json.parseToJsonElement(value.content)) }.getOrDefault(value)
     value is JsonObject -> JsonObject(value.mapValues { (key, child) -> sanitizeBackupReview(child, key) })
     value is JsonArray -> JsonArray(value.map { sanitizeBackupReview(it) })

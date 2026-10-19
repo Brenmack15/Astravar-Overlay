@@ -25,7 +25,7 @@ internal fun partyMemberName(id: String?): String = astravarPartyMembers.firstOr
 /** Stable profile IDs share the existing status, abilities, inventory and audit stores. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun PartyPageV2(repository: CampaignLedgerRepository, campaign: Campaign?, openInventory: () -> Unit) {
+fun PartyPageV2(repository: CampaignLedgerRepository, campaign: Campaign?, openReferences: (() -> Unit)? = null, openInventory: () -> Unit) {
     val profiles by repository.records.characterProfiles.collectAsState(initial = emptyList())
     val states by repository.records.companionStates.collectAsState(initial = emptyList())
     val sheets by repository.party.sheets.collectAsState(initial = emptyList())
@@ -39,6 +39,7 @@ fun PartyPageV2(repository: CampaignLedgerRepository, campaign: Campaign?, openI
         PlayerHeading(if (current == null) "Party & family" else current.label) {
             if (current != null) PlayerTextButton(onClick = { selected = null }) { Text("‹ Party") }
         }
+        if (openReferences != null) PlayerEntry("Party source dossiers", "Read imported character, companion and homebrew references", "History", openReferences)
         if (current == null) {
             Text("Character sheets, shared equipment and sourced progression. Missing values remain unknown.",
                 color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)

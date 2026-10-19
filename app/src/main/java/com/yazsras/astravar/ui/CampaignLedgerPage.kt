@@ -33,7 +33,7 @@ import java.util.UUID
 
 /** Presentation only: stable identities, revisions, events and transactions remain repository-owned. */
 @Composable
-fun CampaignLedgerPage(repository: CampaignLedgerRepository) {
+fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (() -> Unit)? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val records = repository.records
@@ -198,6 +198,7 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository) {
             PlayerButton(onClick = { load(null); mode = "create" }, enabled = !busy) { Text("Add Item") }
         }
         PlayerSearch(query, { query = it }, "Search inventory")
+        if (openReferences != null) PlayerEntry("Inventory source archive", "Original descriptions, acquisitions and historical records", "History", openReferences)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             (listOf("All") + items.map { it.category }.distinct().sorted()).forEach { name ->
                 PlayerFilterChip(selected = filter == name, onClick = { filter = name }, label = { Text(name) })
