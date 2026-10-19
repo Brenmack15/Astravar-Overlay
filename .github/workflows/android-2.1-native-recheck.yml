@@ -22,7 +22,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'ci: run verified native harness recheck'
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -61,11 +61,11 @@ jobs:
           # the archive digest and original run/source are checked before use.
           curl --connect-timeout 15 --max-time 150 -fsSL \
             -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GH_TOKEN" -H 'X-GitHub-Api-Version: 2026-03-10' \
-            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/artifacts/12150294180 \
+            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/artifacts/12160001923 \
             -o "$RUNNER_TEMP/native-recheck-artifact.json"
           curl --connect-timeout 15 --max-time 150 -fsSL \
             -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GH_TOKEN" -H 'X-GitHub-Api-Version: 2026-03-10' \
-            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/artifacts/12150294180/zip \
+            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/artifacts/12160001923/zip \
             -o "$RUNNER_TEMP/native-recheck-product.zip"
           python3 scripts/native_recheck.py prepare --archive "$RUNNER_TEMP/native-recheck-product.zip" --artifact-metadata "$RUNNER_TEMP/native-recheck-artifact.json"
       - name: Build only fresh native target and instrumentation with matching test signer
@@ -74,11 +74,24 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon --console=plain :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
           python3 scripts/native_recheck.py verify-targets --output validation/native-test-apks.json
-      - name: Native overlay, font scaling and in-place update preservation
-        timeout-minutes: 25
+      - name: Native upgrade, full archive recovery and mapped campaign interfaces
+        timeout-minutes: 35
         env:
           ASTRAVAR_TEST_SIGNER_LABEL: reused immutable CI-only signer; not owner signing
-        run: bash scripts/ci-player-first-emulator.sh
+        run: |
+          # Keep the unchanged runner's verified emulator and EXIT cleanup
+          # until all supplemental typed tests and independent SQL reads finish.
+          source scripts/ci-player-first-emulator.sh
+          python3 scripts/native_recheck.py snapshot-mapped --database validation/campaign-rolled-back/astravar-campaign-ledger.db --output validation/campaign-mapped-before.json --synthetic-demo
+          ASTRAVAR_NATIVE_CLASS_TIMEOUT=720 run_class CampaignImportInstrumentationTest#cMappedCampaignRecordsReachPlayerViews 1 validation/native-mapped-campaign-ui.txt
+          timeout 15s adb shell am force-stop com.yazsras.astravar
+          copy_campaign_database validation/campaign-mapped
+          timeout 30s adb pull /sdcard/Android/data/com.yazsras.astravar.target/files/native-mapped-fixture.json validation/native-mapped-fixture.json >/dev/null
+          python3 scripts/native_recheck.py verify-mapped --database validation/campaign-mapped/astravar-campaign-ledger.db --manifest validation/campaign-mapped-before.json --fixture validation/native-mapped-fixture.json --output validation/native-mapped-readback.json --synthetic-demo
+          run_class CampaignImportInstrumentationTest#dMappedCampaignRecordsRollbackAfterReadback 1 validation/native-mapped-campaign-rollback.txt
+          timeout 15s adb shell am force-stop com.yazsras.astravar
+          copy_campaign_database validation/campaign-mapped-rolled-back
+          python3 scripts/native_recheck.py verify-mapped --rolled-back --database validation/campaign-mapped-rolled-back/astravar-campaign-ledger.db --manifest validation/campaign-mapped-before.json --fixture validation/native-mapped-fixture.json --output validation/native-mapped-rollback-readback.json --synthetic-demo
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
