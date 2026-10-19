@@ -3,11 +3,14 @@ package com.yazsras.astravar
 import android.content.ContentValues
 import android.os.Bundle
 import android.os.Environment
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Base64
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Direction
+import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
@@ -87,9 +90,49 @@ class CampaignImportInstrumentationTest {
             null
         }
     private fun awaitText(text: String) {
-        assertTrue("Large fictional document operation must finish: $text",
-            device.wait(Until.hasObject(By.text(text).pkg(product)), 180_000))
-        find(text)
+        val selector = By.text(text).pkg(product)
+        val deadline = SystemClock.uptimeMillis() + 180_000
+        var direction = Direction.DOWN
+        var scrolls = 0
+        var nextScrollAt = 0L
+        var visible = false
+        var lastObserved = "No fresh status observation"
+        while (SystemClock.uptimeMillis() < deadline) {
+            try {
+                assertTrue("Status observations require a fresh accessibility cache",
+                    instrumentation.uiAutomation.clearCache())
+                val matches = device.findObjects(selector)
+                val bounds = matches.lastOrNull()?.visibleBounds
+                lastObserved = "${matches.size} exact status matches; visibleBounds=$bounds"
+                if (bounds != null && !bounds.isEmpty && bounds.left >= 0 && bounds.top >= 0 &&
+                    bounds.right <= device.displayWidth && bounds.bottom <= device.displayHeight && SystemClock.uptimeMillis() < deadline) {
+                    visible = true
+                    break
+                }
+                // Completion text can follow the backup button below the sheet
+                // viewport, or precede receipts on the underlying import page.
+                // Scroll only to observe it; never retry a campaign action.
+                if (SystemClock.uptimeMillis() >= nextScrollAt && SystemClock.uptimeMillis() < deadline) {
+                    val scroll = device.findObjects(By.scrollable(true).pkg(product)).lastOrNull()
+                    if (scroll != null) {
+                        val viewport = scroll.visibleBounds
+                        val moved = scroll.scroll(direction, .6f)
+                        scrolls++
+                        lastObserved += "; viewport=$viewport; $direction scroll $scrolls/18; moved=$moved"
+                        if (!moved || scrolls >= 18) {
+                            direction = if (direction == Direction.DOWN) Direction.UP else Direction.DOWN
+                            scrolls = 0
+                        }
+                    } else lastObserved += "; no product scrollable viewport"
+                    nextScrollAt = SystemClock.uptimeMillis() + 500
+                }
+            } catch (_: StaleObjectException) {
+                lastObserved = "Product window changed during status observation or read-only scroll"
+            }
+            val remaining = deadline - SystemClock.uptimeMillis()
+            if (remaining > 0) SystemClock.sleep(minOf(250L, remaining))
+        }
+        assertTrue("Large fictional document operation must finish: $text; last observation: $lastObserved", visible)
     }
 
     private fun campaignEntry(name: String) {
