@@ -24,11 +24,14 @@ The fixture correction clears accessibility caches, observes fresh panel-scoped 
 
 The separate full run `39254639530` stopped at a unit fixture assertion: its own coroutine persisted an empty element selection and then Arcane mode, while its wait observed only the first write. The test now waits for both fields in one persisted preference snapshot before retaining the original exact assertions. This document records the failures; it does not assert that the pending recheck or full rerun passed.
 
+The following immutable harness run `39258925397` passed its baseline overlay and update fixture but stopped before campaign import at the ChatGPT prompt-search check. Its focused native field contained `Resum` after the fixture dispatched `input text Resume` once; the exact `Resume` readback correctly failed. The app remained alive and its resume prompt was visible. The one-line test correction uses the existing focused-field accessibility `SET_TEXT` helper, retaining the exact query, fresh equality assertion, copy/navigation checks and separate native keyboard-under-overlay tests. No product input behavior changes.
+
 ## Source guard and acceptance
 
-The source guard requires a clean committed descendant of the pinned product source. Only these seven files may differ:
+The source guard requires a clean committed descendant of the pinned product source. Only these eight files may differ:
 
 - `overlay-target/src/androidTest/java/com/yazsras/astravar/OverlayInstrumentationTest.kt`
+- `overlay-target/src/androidTest/java/com/yazsras/astravar/UpdatePreservationInstrumentationTest.kt`
 - `app/src/test/java/com/yazsras/astravar/ui/RebuildVisualAcceptanceTest.kt`
 - `scripts/ci-player-first-emulator.sh`
 - `.github/workflows/android-2.1-native-recheck.yml`
