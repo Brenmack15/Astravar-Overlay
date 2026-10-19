@@ -10,6 +10,8 @@ The following run completed the separately confirmed secondary rollback and obse
 
 The chooser's initial empty page can fit without scrolling. Its actual accessibility `android.widget.ScrollView` then reports `scrollable=false`, despite containing a visible enabled 48-dp chooser. The observer identifies the unique product ScrollView by its class and package to measure that real viewport, and sends scroll gestures only when it is scrollable. It does not substitute screen-wide bounds. The same unique control, enabled state, minimum size, stable geometry, original deadline and single-click checks remain in force.
 
+A subsequent baseline-code24 setup stopped before upgrade or import: Android explicitly rejected its single `ACTION_SET_TEXT` during an IME/window-add transition. The exact text readback correctly failed on the still-empty field. The failed artifact is retained. This fresh-emulator retry changes only this validation note; the fixture, shared observer, chooser, workflow, application and all eleven required native checks remain unchanged. No failed input is retried within a test and no assertion is waived.
+
 ## Immutable inputs
 
 | Input | Exact value |
