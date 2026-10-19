@@ -162,12 +162,12 @@ snapshot() {
   grep -q 'databases/' "$astravar_destination"
 }
 snapshot validation/update-before.sha256
-timeout -k 5s "${ASTRAVAR_INSTALL_TIMEOUT:-40}s" adb install -r "${ASTRAVAR_UPDATE_NEXT_APK:-validation/Astravar-2.1-CI-ONLY-code32.apk}" | tee validation/update-install.txt
+timeout -k 5s "${ASTRAVAR_INSTALL_TIMEOUT:-40}s" adb install -r "${ASTRAVAR_UPDATE_NEXT_APK:-validation/Astravar-2.1-CI-ONLY-code33.apk}" | tee validation/update-install.txt
 grep -q Success validation/update-install.txt
 snapshot validation/update-after.sha256
 diff -u validation/update-before.sha256 validation/update-after.sha256 >validation/update-store-diff.txt
 timeout 10s adb shell dumpsys package com.yazsras.astravar >validation/updated-package.txt
-grep -q 'versionCode=32' validation/updated-package.txt
+grep -q 'versionCode=33' validation/updated-package.txt
 run_class UpdatePreservationInstrumentationTest 1 validation/native-update-readback.txt
 # Importer acceptance uses only the explicitly fictional native fixture. Pull the
 # campaign ledger separately so host SQLite reads can detect row/hash changes.
@@ -202,4 +202,4 @@ run_class OverlayInstrumentationTest#cRollRestorationMainHistoryAndLivePermissio
 timeout 15s adb shell am force-stop com.yazsras.astravar
 copy_combat_database validation/history-after
 python3 scripts/history-preservation-fixture.py verify --database validation/history-after/astravar.db --manifest validation/history-fixture.json --synthetic-demo | tee validation/history-verification-result.json
-printf '%s\n' "PASS: matching certificate verified separately (${ASTRAVAR_TEST_SIGNER_LABEL:-CI-only}), version24→32, campaign schema3→4, all persisted store bytes retained before startup; independent native UI readback verified fictional inventory and recent rolls; copied-database readback verified every seeded raw historical hash, including old Shatter and malformed records." >validation/update-preservation-result.txt
+printf '%s\n' "PASS: matching certificate verified separately (${ASTRAVAR_TEST_SIGNER_LABEL:-CI-only}), version24→33, campaign schema3→4, all persisted store bytes retained before startup; independent native UI readback verified fictional inventory and recent rolls; copied-database readback verified every seeded raw historical hash, including old Shatter and malformed records." >validation/update-preservation-result.txt
