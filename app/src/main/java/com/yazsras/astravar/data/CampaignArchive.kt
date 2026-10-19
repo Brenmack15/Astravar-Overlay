@@ -6,11 +6,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import java.util.Base64
-import java.nio.ByteBuffer
-import java.nio.charset.CodingErrorAction
 
 /** A complete local archive. The digest covers the exact UTF-8 payload bytes, not reserialized JSON. */
 @Serializable data class CampaignArchiveEnvelope(
@@ -62,7 +59,7 @@ data class CampaignArchiveSource(@PrimaryKey val packageHash: String, val payloa
 data class CampaignArchivePreview(
     val valid: Boolean, val summary: String, val conflicts: List<String>, val warnings: List<String>,
     val fingerprint: String, val currentFingerprint: String, val archive: CampaignArchivePayload? = null,
-    internal val payloadJson: String = ""
+    internal val payloadJson: String = "", internal val archiveFingerprint: String = ""
 )
 data class CampaignArchiveVerification(val valid: Boolean, val summary: String, val errors: List<String>)
 
@@ -87,8 +84,7 @@ private suspend fun readArchiveText(size: Long, chunk: suspend (Long, Int) -> By
         check(bytes.size == count) { "Stored archive was truncated during readback." }
         bytes.copyInto(output, (offset - 1).toInt()); offset += count
     }
-    return Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
-        .decode(ByteBuffer.wrap(output)).toString()
+    return validatedCampaignUtf8(output)
 }
 
 @Dao interface CampaignArchiveDao {
@@ -159,9 +155,9 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
 
     internal suspend fun snapshot(includeBackups: Boolean = true) = CampaignArchiveState(
         dao.allReferences(), dao.allRelations(), dao.allReceipts(), if (includeBackups) dao.allBackups() else emptyList(), dao.allSources())
-    private suspend fun campaignSnapshot() = CampaignBackup(db).snapshot()
-    private fun stateHash(value: LedgerExport) = campaignHash(campaignJson.encodeToString(value.copy(exportedAt = 0,
-        archive = value.archive.copy(receipts = emptyList(), backups = emptyList()))))
+    private suspend fun campaignSnapshot() = CampaignBackup(db).snapshot(includeBackups = false)
+    private fun stateHash(value: LedgerExport) = campaignSerializedHash(LedgerExport.serializer(), value.copy(exportedAt = 0,
+        archive = value.archive.copy(receipts = emptyList(), backups = emptyList())))
     private fun referenceId(campaignId: String, externalId: String) = "$campaignId::$externalId"
     private fun rows(archive: CampaignArchivePayload, hash: String) = archive.records.map {
         CampaignReferenceRecord(referenceId(archive.campaignId, it.externalId), archive.campaignId, it.externalId, it.title,
@@ -219,7 +215,7 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
                 "${incoming.mapped?.records?.wallets?.size ?: 0} wallet snapshots. " +
                 if (prior != null) "Already imported; repeating this import adds nothing." else "Existing different records are preserved. History does not execute gameplay."
             CampaignArchivePreview(conflicts.isEmpty(), summary, conflicts.distinct(), warnings.distinct(), envelope.payloadSha256,
-                stateHash(current), incoming, envelope.payload).also { backupReview = if (it.valid) it.fingerprint to it.currentFingerprint else null }
+                stateHash(current), incoming, envelope.payload, campaignSerializedHash(CampaignArchivePayload.serializer(), incoming)).also { backupReview = if (it.valid) it.fingerprint to it.currentFingerprint else null }
         } catch (e: Exception) {
             CampaignArchivePreview(false, "Campaign archive could not be validated.", listOf(e.message ?: "Invalid archive."), emptyList(), "", stateHash(current))
         }
@@ -236,7 +232,7 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
         }
         // Backup bodies exclude other backup bodies to prevent exponential nesting; those remain in the local recovery store.
         val snapshot = current.copy(exportedAt = 0, archive = current.archive.copy(backups = emptyList()))
-        val text = supportedCampaignBackup(campaignJson.encodeToString(snapshot))
+        val text = campaignBackupJson(snapshot)
         check(campaignJson.decodeFromString<LedgerExport>(text) == snapshot) { "Recovery backup serialization did not verify." }
         val record = CampaignImportBackup(packageHash, text, campaignHash(text), review.second, System.currentTimeMillis())
         dao.insert(record)
@@ -253,7 +249,8 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
             return@withTransaction it
         }
         val incoming = requireNotNull(preview.archive)
-        require(campaignHash(preview.payloadJson) == preview.fingerprint && campaignJson.decodeFromString<CampaignArchivePayload>(preview.payloadJson) == incoming) { "Preview content changed. Select the package again." }
+        require(campaignHash(preview.payloadJson) == preview.fingerprint &&
+            campaignSerializedHash(CampaignArchivePayload.serializer(), incoming) == preview.archiveFingerprint) { "Preview content changed. Select the package again." }
         require(validatePayload(incoming).isEmpty()) { "Archive validation failed." }
         val current = campaignSnapshot()
         check(stateHash(current) == preview.currentFingerprint) { "Local data changed after preview. Select the file again." }
@@ -287,17 +284,24 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
         val receipt = dao.receipt(packageHash)
             ?: return@withTransaction CampaignArchiveVerification(false, "No import receipt exists.", listOf("Package has not been imported."))
         if (dao.receipt("rollback:$packageHash") != null) return@withTransaction CampaignArchiveVerification(false, "Package was rolled back.", listOf("The imported state is no longer active."))
-        val source = dao.source(packageHash)
-        val errors = mutableListOf<String>()
-        if (source == null || campaignHash(source.payloadJson) != packageHash) errors += "Stored source archive failed integrity verification."
-        else {
-            val archive = campaignJson.decodeFromString<CampaignArchivePayload>(source.payloadJson)
-            errors += verifyRecords(archive, packageHash)
-            archive.mapped?.let { errors += verifyMapped(it, campaignSnapshot()) }
-        }
+        // The source decoder's coroutine frame ends before state readback starts, releasing its attachment strings.
+        val errors = verifySavedSource(packageHash).toMutableList()
         // Changes made after import are permitted; report those explicitly instead of falsely verifying an unchanged snapshot.
         if (stateHash(campaignSnapshot()) != receipt.readbackSha256) errors += "Campaign records changed after this import; the original receipt remains preserved."
         CampaignArchiveVerification(errors.isEmpty(), if (errors.isEmpty()) "Database readback matches every imported identity, relationship and content hash." else "Review the database readback differences.", errors.distinct())
+    }
+
+    private suspend fun verifySavedSource(packageHash: String): List<String> {
+        val source = dao.source(packageHash)
+        if (source == null || campaignHash(source.payloadJson) != packageHash)
+            return listOf("Stored source archive failed integrity verification.")
+        val archive = campaignJson.decodeFromString<CampaignArchivePayload>(source.payloadJson)
+        val errors = verifyRecords(archive, packageHash).toMutableList()
+        archive.mapped?.let { mapped ->
+            // Mapped equality needs fresh typed rows, not another copy of every retained archive/attachment.
+            errors += verifyMapped(mapped, CampaignBackup(db).snapshot(includeArchive = false))
+        }
+        return errors
     }
 
     /** Guarded full campaign recovery is allowed only before any subsequent campaign edit/import. */
@@ -350,52 +354,79 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
         return errors
     }
 
+    /** Identity checks read typed DAO lists; never serialize the retained source/attachments to count rows. */
     private fun verifyMergedCounts(before: LedgerExport, incoming: LedgerExport, after: LedgerExport): List<String> {
         val errors = mutableListOf<String>()
-        val a = campaignJson.encodeToJsonElement(before).jsonObject
-        val b = campaignJson.encodeToJsonElement(incoming).jsonObject
-        val c = campaignJson.encodeToJsonElement(after).jsonObject
-        fun identity(label: String, row: JsonElement): String {
-            val value = row.jsonObject
-            return when (label) {
-                "events", "crafts", "receipts" -> value.getValue("commandId").jsonPrimitive.content
-                "archive.receipts", "archive.sources", "archive.backups" -> value.getValue("packageHash").jsonPrimitive.content
-                "companionStates" -> value.getValue("companionId").jsonPrimitive.content
-                "partySheets" -> value.getValue("profileId").jsonPrimitive.content
-                "placements", "itemDetails" -> value.getValue("itemId").jsonPrimitive.content
-                "characterAbilities" -> value.getValue("profileId").jsonPrimitive.content + ":" + value.getValue("key").jsonPrimitive.content
-                else -> value.getValue("id").jsonPrimitive.content
-            }
-        }
-        fun check(label: String, old: JsonArray, added: JsonArray, saved: JsonArray) {
-            val expected = (old + added).map { identity(label, it) }.toSet()
-            val actual = saved.map { identity(label, it) }.toSet()
+        fun <T> check(label: String, old: List<T>, added: List<T>, saved: List<T>, identity: (T) -> String) {
+            val expected = (old.asSequence() + added.asSequence()).map(identity).toSet()
+            val actual = saved.map(identity).toSet()
             if (expected != actual || saved.size != actual.size) errors += "$label source/destination count or identities differ."
         }
-        listOf("items", "events").forEach { check(it, a.getValue(it).jsonArray, b.getValue(it).jsonArray, c.getValue(it).jsonArray) }
-        listOf("records", "archive").forEach { group ->
-            a.getValue(group).jsonObject.forEach { (key, old) ->
-                check(if (group == "archive") "archive.$key" else key, old.jsonArray,
-                    b.getValue(group).jsonObject.getValue(key).jsonArray, c.getValue(group).jsonObject.getValue(key).jsonArray)
-            }
-        }
+        check("items", before.items, incoming.items, after.items) { it.id }
+        check("events", before.events, incoming.events, after.events) { it.commandId }
+        val a = before.records; val b = incoming.records; val c = after.records
+        check("projects", a.projects, b.projects, c.projects) { it.id }
+        check("stages", a.stages, b.stages, c.stages) { it.id }
+        check("requirements", a.requirements, b.requirements, c.requirements) { it.id }
+        check("entities", a.entities, b.entities, c.entities) { it.id }
+        check("facts", a.facts, b.facts, c.facts) { it.id }
+        check("milestones", a.milestones, b.milestones, c.milestones) { it.id }
+        check("links", a.links, b.links, c.links) { it.id }
+        check("companionStates", a.companionStates, b.companionStates, c.companionStates) { it.companionId }
+        check("companionResources", a.companionResources, b.companionResources, c.companionResources) { it.id }
+        check("itemDetails", a.itemDetails, b.itemDetails, c.itemDetails) { it.itemId }
+        check("itemProperties", a.itemProperties, b.itemProperties, c.itemProperties) { it.id }
+        check("audit", a.audit, b.audit, c.audit) { it.id }
+        check("receipts", a.receipts, b.receipts, c.receipts) { it.commandId }
+        check("crafts", a.crafts, b.crafts, c.crafts) { it.commandId }
+        check("consumptions", a.consumptions, b.consumptions, c.consumptions) { it.id }
+        check("characterProfiles", a.characterProfiles, b.characterProfiles, c.characterProfiles) { it.id }
+        check("characterAbilities", a.characterAbilities, b.characterAbilities, c.characterAbilities) { it.id }
+        check("partySheets", a.partySheets, b.partySheets, c.partySheets) { it.profileId }
+        check("placements", a.placements, b.placements, c.placements) { it.itemId }
+        check("wallets", a.wallets, b.wallets, c.wallets) { it.id }
+        check("checkpoints", a.checkpoints, b.checkpoints, c.checkpoints) { it.id }
+        check("externalReferences", a.externalReferences, b.externalReferences, c.externalReferences) { it.id }
+        val x = before.archive; val y = incoming.archive; val z = after.archive
+        check("archive.references", x.references, y.references, z.references) { it.id }
+        check("archive.relations", x.relations, y.relations, z.relations) { it.id }
+        check("archive.receipts", x.receipts, y.receipts, z.receipts) { it.packageHash }
+        check("archive.sources", x.sources, y.sources, z.sources) { it.packageHash }
         return errors
     }
 
-    /** Compares complete values from new DAO queries, not validation against an inferred ID union. */
+    /** Complete typed equality against fresh DAO results, without building an archive-sized JSON tree. */
     private fun verifyMapped(expected: LedgerExport, actual: LedgerExport): List<String> {
         val errors = mutableListOf<String>()
-        val source = campaignJson.encodeToJsonElement(expected).jsonObject
-        val saved = campaignJson.encodeToJsonElement(actual).jsonObject
-        fun compare(label: String, values: JsonArray, local: JsonArray) {
+        fun <T> compare(label: String, values: List<T>, local: List<T>) {
             val savedRows = local.toSet()
             values.forEachIndexed { index, row -> if (row !in savedRows) errors += "$label record $index is missing or differs during independent readback." }
         }
-        compare("Inventory", source.getValue("items").jsonArray, saved.getValue("items").jsonArray)
-        compare("Inventory history", source.getValue("events").jsonArray, saved.getValue("events").jsonArray)
-        source.getValue("records").jsonObject.forEach { (label, rows) ->
-            compare(label, rows.jsonArray, saved.getValue("records").jsonObject.getValue(label).jsonArray)
-        }
+        compare("Inventory", expected.items, actual.items)
+        compare("Inventory history", expected.events, actual.events)
+        val a = expected.records; val b = actual.records
+        compare("projects", a.projects, b.projects)
+        compare("stages", a.stages, b.stages)
+        compare("requirements", a.requirements, b.requirements)
+        compare("entities", a.entities, b.entities)
+        compare("facts", a.facts, b.facts)
+        compare("milestones", a.milestones, b.milestones)
+        compare("links", a.links, b.links)
+        compare("companionStates", a.companionStates, b.companionStates)
+        compare("companionResources", a.companionResources, b.companionResources)
+        compare("itemDetails", a.itemDetails, b.itemDetails)
+        compare("itemProperties", a.itemProperties, b.itemProperties)
+        compare("audit", a.audit, b.audit)
+        compare("receipts", a.receipts, b.receipts)
+        compare("crafts", a.crafts, b.crafts)
+        compare("consumptions", a.consumptions, b.consumptions)
+        compare("characterProfiles", a.characterProfiles, b.characterProfiles)
+        compare("characterAbilities", a.characterAbilities, b.characterAbilities)
+        compare("partySheets", a.partySheets, b.partySheets)
+        compare("placements", a.placements, b.placements)
+        compare("wallets", a.wallets, b.wallets)
+        compare("checkpoints", a.checkpoints, b.checkpoints)
+        compare("externalReferences", a.externalReferences, b.externalReferences)
         return errors
     }
 
@@ -487,17 +518,28 @@ internal fun normalizedNotionIdentity(value: String): String {
     return if (suffix.matches(Regex("[0-9a-f]{32}"))) suffix else path.replace("-", "")
 }
 
-/** kotlinx JSON rejects unknown fields but accepts duplicate member names. Reject those before decoding. */
-internal fun rejectDuplicateJsonMembers(text: String) {
+/** Validate JSON syntax and duplicate object keys without materializing large scalar strings or a JSON tree. */
+internal fun rejectDuplicateJsonMembers(text: String): Set<String> {
     var at = 0
-    fun spaces() { while (at < text.length && text[at].isWhitespace()) at++ }
-    fun token(): String {
+    var rootKeys: Set<String> = emptySet()
+    fun spaces() { while (at < text.length && text[at] in " \t\r\n") at++ }
+    fun token(key: Boolean = false): String {
         require(at < text.length && text[at] == '"') { "Malformed JSON string." }
         val start = at++
         while (at < text.length) {
-            when (text[at++]) {
-                '\\' -> { require(at < text.length); at++ }
-                '"' -> return campaignJson.decodeFromString(text.substring(start, at))
+            require(!key || at - start <= 4096) { "JSON member name exceeds the safe archive limit." }
+            val char = text[at++]
+            when {
+                char == '\\' -> {
+                    require(at < text.length) { "Truncated JSON escape." }
+                    when (text[at++]) {
+                        '"', '\\', '/', 'b', 'f', 'n', 'r', 't' -> Unit
+                        'u' -> repeat(4) { require(at < text.length && text[at++] in "0123456789abcdefABCDEF") { "Invalid JSON Unicode escape." } }
+                        else -> error("Invalid JSON escape.")
+                    }
+                }
+                char == '"' -> return if (key) campaignJson.decodeFromString(text.substring(start, at)) else ""
+                char.code < 0x20 -> error("Unescaped JSON control character.")
             }
         }
         error("Unterminated JSON string.")
@@ -508,9 +550,10 @@ internal fun rejectDuplicateJsonMembers(text: String) {
         when (text[at]) {
             '{' -> {
                 at++; spaces(); val keys = mutableSetOf<String>()
+                if (depth == 0) rootKeys = keys
                 if (at < text.length && text[at] == '}') { at++; return }
                 while (true) {
-                    spaces(); val key = token()
+                    spaces(); val key = token(key = true)
                     require(keys.add(key)) { "Duplicate JSON member '$key' is not allowed." }
                     spaces(); require(at < text.length && text[at++] == ':')
                     value(depth + 1); spaces(); require(at < text.length)
@@ -529,12 +572,14 @@ internal fun rejectDuplicateJsonMembers(text: String) {
             '"' -> token()
             else -> {
                 val start = at
-                while (at < text.length && text[at] !in ",]}" && !text[at].isWhitespace()) at++
+                while (at < text.length && text[at] !in ",]} \t\r\n") {
+                    require(at - start < 1024) { "JSON primitive exceeds the safe archive limit." }; at++
+                }
                 val primitive = text.substring(start, at)
                 require(primitive in setOf("true", "false", "null") || primitive.matches(Regex("-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?"))) { "Invalid JSON primitive." }
             }
         }
     }
     value(0); spaces(); require(at == text.length) { "Trailing JSON content." }
-    campaignJson.parseToJsonElement(text) // validates scalar syntax, number grammar and control characters
+    return rootKeys
 }
