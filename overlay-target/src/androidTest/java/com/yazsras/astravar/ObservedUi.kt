@@ -62,8 +62,8 @@ internal class ObservedUi(private val device: UiDevice) {
         return null
     }
 
-    fun bounds(selector: BySelector, description: String, timeoutMs: Long = 30_000): Rect =
-        snapshot(selector, description, timeoutMs) { Rect(it.visibleBounds) }
+    fun bounds(selector: BySelector, description: String, timeoutMs: Long = 30_000, refreshCache: Boolean = false): Rect =
+        snapshot(selector, description, timeoutMs, refreshCache = refreshCache) { Rect(it.visibleBounds) }
 
     fun controlBounds(selector: BySelector, description: String, timeoutMs: Long = 30_000): Rect =
         snapshot(selector, description, timeoutMs) { interactiveBounds(it) }
@@ -349,7 +349,7 @@ internal class ObservedUi(private val device: UiDevice) {
         require(value.matches(Regex("[A-Za-z0-9 .;_-]+"))) { "Native fixture input must use the controlled ASCII alphabet" }
         val selector = By.clazz("android.widget.EditText").focused(true).pkg(packageName)
         assertTrue("Native input must target the focused field: $description",
-            snapshot(selector, description, timeoutMs = 10_000) { it.isFocused })
+            snapshot(selector, description, timeoutMs = 10_000, refreshCache = true) { it.isFocused })
         // Accessibility may expose an empty field's hint as its text. Replace
         // through native keys once, without interpreting that hint as content.
         assertTrue("Native select-all must dispatch once: $description",
@@ -360,6 +360,21 @@ internal class ObservedUi(private val device: UiDevice) {
         val argument = value.replace(" ", "%s")
         device.executeShellCommand("input text $argument")
         assertEquals("Native keyboard input must reach the focused field: $description", value,
-            snapshot(selector, description, timeoutMs = 10_000) { it.text.orEmpty().takeIf { current -> current == value } })
+            snapshot(selector, description, timeoutMs = 10_000, refreshCache = true) { it.text.orEmpty().takeIf { current -> current == value } })
+    }
+
+    /** Fixture editor input through the focused native field's SET_TEXT action. */
+    fun setFocusedField(value: String, packageName: String, description: String) {
+        val selector = By.clazz("android.widget.EditText").focused(true).pkg(packageName)
+        val field = snapshot(selector, description, timeoutMs = 10_000, refreshCache = true) {
+            it.takeIf { observed -> observed.isFocused && observed.isEnabled }
+        }
+        // One accessibility input action avoids IME dictionary recasing fixture
+        // provenance. The following fresh observation independently checks text.
+        field.text = value
+        assertEquals("Native editor input must reach the focused field: $description", value,
+            snapshot(selector, description, timeoutMs = 10_000, refreshCache = true) {
+                it.text.orEmpty().takeIf { current -> current == value }
+            })
     }
 }
