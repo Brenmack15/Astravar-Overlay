@@ -2,29 +2,25 @@ name: Astravar 2.1 native verification
 on:
   push:
     branches: ['feat/astravar-2.1-player-first']
-  pull_request:
-    branches: ['feat/astravar-2.0-ui-rebuild']
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  # Push and draft-PR runs for one development branch share the same queue.
-  # Both still check out the exact head; opening a PR need not duplicate the build.
-  group: astravar-21-${{ github.head_ref || github.ref_name }}
+  # One full run per pushed development head; manual runs use the same queue.
+  group: astravar-21-${{ github.ref_name }}
   cancel-in-progress: true
 jobs:
   verify:
-    if: github.event_name != 'pull_request' || github.head_ref == 'feat/astravar-2.1-player-first'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
       ASTRAVAR_VERSION_NAME: '2.1.0'
-      ASTRAVAR_VERSION_CODE: '31'
+      ASTRAVAR_VERSION_CODE: '32'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          # PR evidence must test the actual development head, never a temporary merge.
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Verify the exact pushed or manually selected source commit.
+          ref: ${{ github.sha }}
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
           distribution: temurin
@@ -79,14 +75,14 @@ jobs:
           python3 scripts/inspect_release_apk.py validation/Astravar-2.1-CI-ONLY-code24.apk --package com.yazsras.astravar --version-name 2.1.0 --version-code 24 --output validation/release-code24.json
           ./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest -PastravarScreenshots="$GITHUB_WORKSPACE/validation/screenshots"
           mkdir -p validation
-          cp app/build/outputs/apk/release/app-release.apk validation/Astravar-2.1-CI-ONLY-code31.apk
+          cp app/build/outputs/apk/release/app-release.apk validation/Astravar-2.1-CI-ONLY-code32.apk
           cp app/build/outputs/apk/debug/app-debug.apk validation/Astravar-2.1-QA-debug.apk
-          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-CI-ONLY-code31.apk --package com.yazsras.astravar --version-name 2.1.0 --version-code 31 --output validation/release-code31.json
-          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-QA-debug.apk --package com.yazsras.astravar.v2uidebug --version-name 2.1.0-ui-rebuild --version-code 31 --output validation/debug-code31.json
+          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-CI-ONLY-code32.apk --package com.yazsras.astravar --version-name 2.1.0 --version-code 32 --output validation/release-code32.json
+          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-QA-debug.apk --package com.yazsras.astravar.v2uidebug --version-name 2.1.0-ui-rebuild --version-code 32 --output validation/debug-code32.json
           python3 - <<'PY'
           import json
           a=json.load(open('validation/release-code24.json'))
-          b=json.load(open('validation/release-code31.json'))
+          b=json.load(open('validation/release-code32.json'))
           assert a['certificate_sha256']==b['certificate_sha256']
           assert b['version_code']>a['version_code']
           assert not a['owner_signature_verified'], 'CI must never use the owner key'
