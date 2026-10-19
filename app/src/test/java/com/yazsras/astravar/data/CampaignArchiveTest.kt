@@ -101,6 +101,15 @@ class CampaignArchiveTest {
         repo.archive.commit(preview, true)
         assertEquals(1, db.ledgerDao().allItems().size)
     }
+    @Test fun changingReviewedArchiveObjectsCannotBypassExactPayloadConfirmation() = runBlocking {
+        val preview = repo.archive.preview(archive())
+        repo.archive.exportPreImportBackup(preview.fingerprint)
+        val changed = preview.copy(archive = requireNotNull(preview.archive).copy(title = "Different synthetic title"))
+        try { repo.archive.commit(changed, true); fail("Changed reviewed content must fail") } catch (_: IllegalArgumentException) {}
+        assertTrue(db.archiveDao().allSources().isEmpty())
+        assertTrue(db.archiveDao().allReceipts().isEmpty())
+    }
+
     @Test fun changedLocalRecordBlocksImportAndDoesNotOverwrite() = runBlocking {
         val data = mapped(); val local = data.items.single().copy(description = "New local discovery")
         db.ledgerDao().insertItem(local)
@@ -132,6 +141,16 @@ class CampaignArchiveTest {
         try { repo.archive.rollback(receipt.packageHash, true); fail("Later work must be protected") } catch (_: IllegalStateException) {}
         assertEquals(1, db.archiveDao().allReferences().size); assertEquals(1, db.ledgerDao().allItems().size)
     }
+    @Test fun backupRequiresExplicitFormatAndSchemaDespiteSerializableDefaults() = runBlocking {
+        val value = LedgerExport(exportedAt = 0, items = emptyList(), events = emptyList())
+        val valid = campaignJson.encodeToString(value)
+        listOf(valid.replace("\"format\":\"astravar-campaign-items\",", ""), valid.replace("\"schema\":4,", "")).forEach {
+            val preview = repo.previewImport(it)
+            assertFalse(preview.valid)
+            assertTrue(preview.conflicts.any { error -> error.contains("declare its format and supported schema") })
+        }
+    }
+
     @Test fun malformedUnsupportedTamperedAndDuplicateJsonAreRejectedReadOnly() = runBlocking {
         val valid = archive()
         val invalids = listOf("{}", valid.replace("\"schema\":1", "\"schema\":99"), valid.replace("Fictional campaign", "Tampered campaign"),
