@@ -9,6 +9,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import org.json.JSONArray
 import org.json.JSONObject
@@ -67,6 +68,24 @@ class CampaignImportInstrumentationTest {
 
     private fun tap(text: String) = ui.tapText(text, product, scrollAttempts = 18, preferLast = true)
     private fun find(text: String) = ui.textBounds(text, product, scrollAttempts = 18, preferLast = true)
+    private fun actionEnabled(text: String): Boolean =
+        ui.snapshot(By.text(text).pkg(product), "actual clickable action enabled state: $text", refreshCache = true) { label ->
+            // Compose labels remain enabled inside a disabled clickable button.
+            // Observe the nearest actual action target; never infer from its TextView.
+            var current: UiObject2? = label
+            repeat(12) {
+                val observed = current ?: return@snapshot null
+                if (observed.isClickable) {
+                    val bounds = observed.visibleBounds
+                    return@snapshot observed.isEnabled.takeIf {
+                        !bounds.isEmpty && bounds.left >= 0 && bounds.top >= 0 &&
+                            bounds.right <= device.displayWidth && bounds.bottom <= device.displayHeight
+                    }
+                }
+                current = observed.parent
+            }
+            null
+        }
     private fun awaitText(text: String) {
         assertTrue("Large fictional document operation must finish: $text",
             device.wait(Until.hasObject(By.text(text).pkg(product)), 180_000))
@@ -167,11 +186,11 @@ class CampaignImportInstrumentationTest {
         launchImportPage()
         chooseDocument("astravar-native-invalid-campaign.json")
         assertTrue(device.wait(Until.hasObject(By.textContains("Archive integrity check failed").pkg(product)), 10_000))
-        assertFalse("Invalid archive cannot be confirmed", device.findObject(By.text("Confirm local import").pkg(product)).isEnabled)
+        assertFalse("Invalid archive cannot be confirmed", actionEnabled("Confirm local import"))
         tap("Close")
 
         chooseDocument(fixtureName)
-        assertFalse("Preview alone cannot authorize an import", device.findObject(By.text("Confirm local import").pkg(product)).isEnabled)
+        assertFalse("Preview alone cannot authorize an import", actionEnabled("Confirm local import"))
         // Terminate a read-only preview, then recover through ordinary navigation. Nothing was committed.
         device.executeShellCommand("am force-stop $product")
         launchImportPage()
@@ -209,7 +228,7 @@ class CampaignImportInstrumentationTest {
         awaitText("Recovered the verified pre-import campaign snapshot. Original import and recovery receipts are retained.")
         chooseDocument(fixtureName)
         assertTrue(device.wait(Until.hasObject(By.textContains("Already imported on this device").pkg(product)), 10_000))
-        assertFalse("Duplicate archives cannot add the same records again", device.findObject(By.text("Confirm local import").pkg(product)).isEnabled)
+        assertFalse("Duplicate archives cannot add the same records again", actionEnabled("Confirm local import"))
         tap("Close")
         instrumentation.sendStatus(0, Bundle().apply { putString("stream", "\nCHECKPOINT: fictional archive selected through DocumentsUI; invalid integrity and interrupted preview preserved state; backup and explicit confirmation imported 320 fictional records/2225 relations; library, original text, relations and duplicate guard verified\n") })
     }
@@ -217,7 +236,7 @@ class CampaignImportInstrumentationTest {
     @Test fun bGuardedRollbackRestoresVerifiedSnapshot() {
         launchImportPage()
         reviewRollback("Fictional native campaign migration")
-        assertFalse("Rollback requires separate consent", device.findObject(By.text("Confirm rollback").pkg(product)).isEnabled)
+        assertFalse("Rollback requires separate consent", actionEnabled("Confirm rollback"))
         tap("I understand this restores the verified pre-import campaign backup.")
         tap("Confirm rollback")
         awaitText("Recovered the verified pre-import campaign snapshot. Original import and recovery receipts are retained.")
@@ -257,11 +276,11 @@ class CampaignImportInstrumentationTest {
         chooseDocument("astravar-native-mapped-campaign.json")
         assertTrue("The mapped fixture must preview one source without replacing local records",
             device.wait(Until.hasObject(By.textStartsWith("1 reference records, 0 relationships").pkg(product)), 10_000))
-        assertFalse("A mapped preview is not import authorization", device.findObject(By.text("Confirm local import").pkg(product)).isEnabled)
+        assertFalse("A mapped preview is not import authorization", actionEnabled("Confirm local import"))
         saveBackup("astravar-native-mapped-preimport-backup.json")
         tap("I reviewed the archive and want to add approved records locally.")
         assertTrue("The reviewed conflict-free mapped fixture can be confirmed after its verified backup",
-            device.findObject(By.text("Confirm local import").pkg(product)).isEnabled)
+            actionEnabled("Confirm local import"))
         tap("Confirm local import")
         awaitText("Import saved. Independent database readback passed.")
 
@@ -344,7 +363,7 @@ class CampaignImportInstrumentationTest {
     @Test fun dMappedCampaignRecordsRollbackAfterReadback() {
         launchImportPage()
         reviewRollback("Fictional typed migration")
-        assertFalse("Typed recovery requires its own player confirmation", device.findObject(By.text("Confirm rollback").pkg(product)).isEnabled)
+        assertFalse("Typed recovery requires its own player confirmation", actionEnabled("Confirm rollback"))
         tap("I understand this restores the verified pre-import campaign backup.")
         tap("Confirm rollback")
         awaitText("Recovered the verified pre-import campaign snapshot. Original import and recovery receipts are retained.")
