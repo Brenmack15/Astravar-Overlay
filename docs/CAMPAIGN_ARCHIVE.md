@@ -129,10 +129,20 @@ backup verification must not retain a redundant complete document. Backup
 decoding uses bounded string-unescape chunks and the generated data
 serializers so a large retained source does not require a growing temporary
 string builder. The same bounded decoder serves ordinary campaign restore,
-archive recovery and the private read-only package check. Fresh source
-builds rerun the original code24 baseline and code31 update, unchanged large
-fictional fixtures, explicit backup/import/rollback assertions and the same
-Android heap. No code30 native result is reused as code31 acceptance. The full
+archive recovery and the private read-only package check.
+
+A later code31 native failure captured a CPU-bound Android ICU UTF-8 encoder
+while writing the large second backup: its String-backed character buffer made
+repeated encoding copy the remaining large input. The chosen document remained
+partial while the app kept working. Code32
+uses bounded 8 KiB array-backed character and byte buffers, carries surrogate
+pairs across input windows, and retains the same encoded-byte hashes and saved
+document verification. No timeout or heap increase substitutes for the fix.
+
+Fresh source builds rerun the original code24 baseline and code32 update,
+unchanged large fictional fixtures, explicit backup/import/rollback assertions
+and the same Android heap. No code30/code31 native result is reused as code32
+acceptance. The full
 unit/regression/lint gate remains separate; a successful JVM test alone does not
 certify native import or recovery. CI artifacts retain the exact release R8
 mapping for the built APK so native failures can be resolved accurately.
