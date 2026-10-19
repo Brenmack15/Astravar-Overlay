@@ -125,7 +125,13 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         if (incoming.schema < 4 && incoming.archive != CampaignArchiveState()) errors += "Archive reference records require backup schema 4."
         val r = incoming.records
         val c = current.records
-        val notionIdentities = (incoming.items + current.items).distinctBy { it.id }.mapNotNull { it.notionPageId?.takeIf { value -> value.isNotBlank() }?.let { sourceId -> normalizedNotionIdentity(sourceId) to it.id } }
+        val notionIdentities = buildList {
+            (incoming.items + current.items).forEach { item ->
+                item.notionPageId?.takeIf(String::isNotBlank)?.let { add(normalizedNotionIdentity(it) to item.id) }
+            }
+            (r.externalReferences + c.externalReferences).filter { it.namespace.equals("notion", ignoreCase = true) && it.recordType == "item" }
+                .forEach { add(normalizedNotionIdentity(it.externalId) to it.recordId) }
+        }
         if (notionIdentities.groupBy { it.first }.any { (_, rows) -> rows.map { it.second }.distinct().size > 1 }) errors += "One Notion item identity maps to multiple physical equipment records."
         val walletIdentities = (r.wallets + c.wallets).distinctBy { it.id }.groupBy { Triple(it.campaignId, it.holderProfileId, it.name) }
         if (walletIdentities.any { (_, rows) -> rows.size > 1 }) errors += "Wallet identities conflict; balances will not be combined."
