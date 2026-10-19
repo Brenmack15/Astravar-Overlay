@@ -21,13 +21,17 @@ class CampaignStreamCodecTest {
         }
     }
 
-    @Test fun streamingJsonHashAndBackupPreserveCanonicalSchemaFourBytesDefaultsNullsAndEscapes() {
+    @Test fun backupEscapesKeepSchemaFourValuesWhileSourceDigestsKeepCanonicalUtf8Bytes() {
         val value = snapshot("Fictional é 日本語 🦉 \"quoted\" \\path\n\u0000").copy(
             items = listOf(LedgerItem("fictional-item", "Fictional unknown quantity", source = "Synthetic fixture", createdAt = 1, updatedAt = 1)))
         val oldJson = campaignJson.encodeToString(value)
         assertEquals(oldHash(oldJson), campaignSerializedHash(LedgerExport.serializer(), value))
-        assertEquals(oldJson, campaignBackupJson(value))
-        assertEquals(value, campaignJson.decodeFromString<LedgerExport>(campaignBackupJson(value)))
+        val backup = campaignBackupJson(value)
+        assertTrue("Backup text must remain ASCII on ART", backup.all { it.code <= 127 })
+        assertTrue(backup.contains("Fictional \\u00e9 \\u65e5\\u672c\\u8a9e \\ud83e\\udd89"))
+        assertEquals(oldHash(backup), campaignBackupSerializedHash(value))
+        assertEquals(value, campaignJson.decodeFromString<LedgerExport>(backup))
+        assertEquals(oldJson, campaignJson.encodeToString(campaignJson.decodeFromString<LedgerExport>(backup)))
     }
 
     @Test fun everyJsonControlAndSurrogateBoundaryRetainsThePriorCanonicalDigest() {
@@ -35,6 +39,10 @@ class CampaignStreamCodecTest {
             "a".repeat(8191) + "\uDC00z", "a".repeat(8191) + "🦉z").forEach { content ->
             val value = snapshot(content)
             assertEquals(oldHash(campaignJson.encodeToString(value)), campaignSerializedHash(LedgerExport.serializer(), value))
+            val backup = campaignBackupJson(value)
+            assertTrue(backup.all { it.code <= 127 })
+            assertEquals(value, campaignJson.decodeFromString<LedgerExport>(backup))
+            assertEquals(oldHash(backup), campaignBackupSerializedHash(value))
         }
     }
 
@@ -57,8 +65,20 @@ class CampaignStreamCodecTest {
         val value = snapshot(payload)
         val json = campaignBackupJson(value)
         assertEquals(oldHash(json), campaignSerializedHash(LedgerExport.serializer(), value))
-        assertEquals(payload, campaignJson.decodeFromString<LedgerExport>(json).archive.sources.single().payloadJson)
+        assertEquals(payload, campaignDecodeBackup(json).archive.sources.single().payloadJson)
         assertEquals(oldHash(payload), campaignHash(payload))
+    }
+
+    @Test fun largeUnicodeSourceProducesCompactBackupAndRestoresTheOriginalPayload() {
+        // A single non-ASCII character widens a complete ART String; the retained native source
+        // contains those characters as well as its large ASCII attachment. Backup escapes avoid
+        // allocating another source-sized UTF-16 String without changing restored content.
+        val payload = "{\"fictional\":\"é🦉" + "a".repeat(21 * 1024 * 1024) + "\"}"
+        val value = snapshot(payload)
+        val backup = campaignBackupJson(value)
+        assertTrue(backup.all { it.code <= 127 })
+        assertEquals(oldHash(backup), campaignBackupSerializedHash(value))
+        assertEquals(payload, campaignDecodeBackup(backup).archive.sources.single().payloadJson)
     }
 
     @Test fun jsonScannerSkipsLargeStringValuesAndDecodesOnlyObjectKeys() {
@@ -91,11 +111,11 @@ class CampaignStreamCodecTest {
         }
     }
 
-    @Test fun unicodeBackupByteLimitStopsInTheMeasuringPassBeforeOutputAllocation() {
-        // Fewer than 32 million UTF-16 characters, but more than the SAF workflow's 32 MiB bytes.
+    @Test fun escapedUnicodeBackupLimitStopsInTheMeasuringPassBeforeOutputAllocation() {
+        // Input fits the old character limit, but its lossless ASCII escapes exceed transfer bounds.
         val oversized = snapshot("é".repeat(CAMPAIGN_BACKUP_MAX_BYTES / 2))
         try { campaignBackupJson(oversized); fail("Oversized UTF-8 backup accepted") } catch (error: IllegalArgumentException) {
-            assertTrue(error.message.orEmpty().contains("32 MiB document-transfer"))
+            assertTrue(error.message.orEmpty().contains("32-million-character"))
         }
     }
 
