@@ -3,6 +3,8 @@ import importlib.util
 import json
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -78,3 +80,116 @@ class IndependentNativeCampaignReadbackTest(unittest.TestCase):
         self.assertEqual(["APPLIED","ROLLED_BACK"],result["receipt_states"])
         self.mutate("DELETE FROM campaign_import_receipts WHERE state='APPLIED'")
         with self.assertRaises(KeyError):readback.run(self.args("rolled-back"))
+
+
+class IndependentMappedNativeReadbackTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.database = self.root / "astravar-campaign-ledger.db"
+        self.manifest = self.root / "mapped-before.json"
+        repo = Path(__file__).resolve().parents[2]
+        self.fixture = repo / "overlay-target/src/androidTest/assets/fictional-mapped-campaign.json"
+        self.envelope = json.loads(self.fixture.read_text())
+        self.source = json.loads(self.envelope["payload"])
+        self.package = self.envelope["payloadSha256"]
+        schema = json.loads((repo / "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/4.json").read_text())
+        with sqlite3.connect(self.database) as db:
+            db.execute("PRAGMA user_version=4")
+            for entity in schema["database"]["entities"]:
+                db.execute(entity["createSql"].replace("${TABLE_NAME}", entity["tableName"]))
+            original = dict(self.source["mapped"]["items"][0], id="fictional-before-item", title="Fictional existing unknown item",
+                            notionPageId=None, itemState="Unknown", location="Unknown", owner="Unknown")
+            self.insert(db, "ledger_items", original)
+            self.insert(db, "campaign_import_backups", dict(packageHash="b" * 64, snapshotJson="{}", snapshotSha256=readback.sha("{}"),
+                        sourceStateSha256="fictional-earlier-state", createdAt=1))
+        args = argparse.Namespace(action="snapshot", database=self.database, manifest=self.manifest, synthetic_demo=True)
+        readback.run(args)
+        self.groups = {"ledger_items": self.source["mapped"]["items"], "ledger_events": self.source["mapped"]["events"]}
+        self.groups.update({table: self.source["mapped"]["records"][label] for label, table in readback.MAPPED_TABLES.items()})
+        with sqlite3.connect(self.database) as db:
+            for table, rows in self.groups.items():
+                for row in rows:
+                    self.insert(db, table, row)
+            for row in self.source["records"]:
+                self.insert(db, "campaign_references", {key: row[key] for key in ("externalId", "title", "category", "body", "propertiesJson", "sourceUrl", "sourceRevision", "contentSha256")} |
+                            dict(id=self.source["campaignId"] + "::" + row["externalId"], campaignId=self.source["campaignId"], packageHash=self.package))
+            self.insert(db, "campaign_archive_sources", dict(packageHash=self.package, payloadJson=self.envelope["payload"]))
+            self.insert(db, "campaign_import_receipts", dict(packageHash=self.package, campaignId=self.source["campaignId"], title=self.source["title"], importedAt=1,
+                        recordCount=len(self.source["records"]), relationCount=0, state="APPLIED", readbackSha256="fictional-after", summary="Fictional typed test"))
+            self.insert(db, "campaign_import_backups", dict(packageHash=self.package, snapshotJson="{}", snapshotSha256=readback.sha("{}"),
+                        sourceStateSha256="fictional-before", createdAt=2))
+
+    @staticmethod
+    def insert(db, table, row):
+        values = [json.dumps(value, ensure_ascii=False, separators=(",", ":")) if isinstance(value, list) else value for value in row.values()]
+        db.execute('INSERT INTO "' + table + '" (' + ','.join('"' + key + '"' for key in row) + ') VALUES (' + ','.join('?' for _ in row) + ')', values)
+
+    def verify(self, **kwargs):
+        return readback.verify_mapped(self.database, self.manifest, self.fixture, synthetic_demo=True, **kwargs)
+
+    def test_complete_mapped_values_and_every_original_table_are_verified(self):
+        result = self.verify()
+        self.assertTrue(result["mapped_complete_values_verified"])
+        self.assertTrue(result["null_values_preserved"])
+        self.assertTrue(result["preexisting_rows_and_archive_evidence_unchanged"])
+        self.assertEqual(1, result["mapped_counts"]["ledger_items"])
+
+    def test_workflow_cli_preserves_complete_baseline_and_verifies_copied_database(self):
+        command = Path(__file__).resolve().parents[1] / "native_recheck.py"
+        output = self.root / "readback.json"
+        subprocess.check_call([sys.executable, str(command), "verify-mapped", "--database", str(self.database),
+                               "--manifest", str(self.manifest), "--fixture", str(self.fixture),
+                               "--output", str(output), "--synthetic-demo"], stdout=subprocess.DEVNULL)
+        self.assertTrue(json.loads(output.read_text())["mapped_complete_values_verified"])
+        captured = self.root / "captured.json"
+        subprocess.check_call([sys.executable, str(command), "snapshot-mapped", "--database", str(self.database),
+                               "--output", str(captured), "--synthetic-demo"], stdout=subprocess.DEVNULL)
+        self.assertIn("campaign_import_backups", json.loads(captured.read_text())["allTables"])
+
+    def test_unknown_hp_quantity_or_wallet_cannot_become_zero(self):
+        for table, field, key, identity in [("ledger_items", "quantity", "id", "fictional-mapped-lens"),
+                                             ("character_profiles", "currentHp", "id", "local-player"),
+                                             ("party_wallets", "copper", "id", "fictional-mapped-wallet")]:
+            with self.subTest(table=table):
+                with sqlite3.connect(self.database) as db:
+                    db.execute(f'UPDATE "{table}" SET "{field}"=0 WHERE "{key}"=?', (identity,))
+                with self.assertRaisesRegex(AssertionError, "Mapped readback differs"):
+                    self.verify()
+                with sqlite3.connect(self.database) as db:
+                    db.execute(f'UPDATE "{table}" SET "{field}"=NULL WHERE "{key}"=?', (identity,))
+
+    def test_preexisting_original_and_immutable_backup_changes_are_detected(self):
+        with sqlite3.connect(self.database) as db:
+            db.execute("UPDATE campaign_import_backups SET snapshotJson='tampered' WHERE packageHash=?", ("b" * 64,))
+        with self.assertRaisesRegex(AssertionError, "preexisting typed row or immutable archive"):
+            self.verify()
+
+    def test_missing_relationship_target_or_historical_row_is_detected(self):
+        with sqlite3.connect(self.database) as db:
+            db.execute("DELETE FROM ledger_events WHERE commandId='fictional-mapped-acquisition'")
+        with self.assertRaisesRegex(AssertionError, "Imported typed row missing"):
+            self.verify()
+        with sqlite3.connect(self.database) as db:
+            self.insert(db, "ledger_events", self.groups["ledger_events"][0])
+            db.execute("DELETE FROM character_profiles WHERE id='local-player'")
+        with self.assertRaisesRegex(AssertionError, "Imported typed row missing"):
+            self.verify()
+
+    def test_rollback_restores_every_table_and_retains_audit_receipts(self):
+        with sqlite3.connect(self.database) as db:
+            for table, rows in self.groups.items():
+                columns = list(db.execute(f'PRAGMA table_info("{table}")'))
+                keys = [row[1] for row in sorted(columns, key=lambda row: row[5]) if row[5]]
+                for row in rows:
+                    db.execute('DELETE FROM "' + table + '" WHERE ' + ' AND '.join('"' + key + '"=?' for key in keys), [row[key] for key in keys])
+            db.execute("DELETE FROM campaign_references WHERE packageHash=?", (self.package,))
+            db.execute("DELETE FROM campaign_archive_sources WHERE packageHash=?", (self.package,))
+            self.insert(db, "campaign_import_receipts", dict(packageHash="rollback:" + self.package, campaignId=self.source["campaignId"], title=self.source["title"], importedAt=2,
+                        recordCount=1, relationCount=0, state="ROLLED_BACK", readbackSha256="fictional-before", summary="Fictional recovery"))
+        self.assertEqual("mapped-rollback-verified", self.verify(rolled_back=True)["status"])
+        with sqlite3.connect(self.database) as db:
+            db.execute("DELETE FROM campaign_import_receipts WHERE packageHash=?", (self.package,))
+        with self.assertRaises(AssertionError):
+            self.verify(rolled_back=True)
