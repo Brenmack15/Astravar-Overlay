@@ -37,9 +37,9 @@ class CampaignMigrationTest {
         legacy.version = 1
         legacy.close()
         val migrated = Room.databaseBuilder(context, CampaignLedgerDb::class.java, name)
-            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3).allowMainThreadQueries().build()
+            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4).allowMainThreadQueries().build()
         try {
-            assertEquals(3, migrated.openHelper.writableDatabase.version)
+            assertEquals(4, migrated.openHelper.writableDatabase.version)
             val item = migrated.ledgerDao().allItems().single()
             assertEquals("synthetic-legacy-id", item.id)
             assertNull(item.quantity)
