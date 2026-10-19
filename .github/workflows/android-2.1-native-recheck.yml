@@ -23,6 +23,9 @@ jobs:
       github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'ci: run verified native harness recheck'
     runs-on: ubuntu-latest
     timeout-minutes: 65
+    env:
+      ASTRAVAR_VERSION_CODE: '30'
+      ASTRAVAR_VERSION_NAME: '2.1.0'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -61,13 +64,21 @@ jobs:
           # the archive digest and original run/source are checked before use.
           curl --connect-timeout 15 --max-time 150 -fsSL \
             -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GH_TOKEN" -H 'X-GitHub-Api-Version: 2026-03-10' \
-            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/artifacts/12160001923 \
+            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/artifacts/12182178961 \
             -o "$RUNNER_TEMP/native-recheck-artifact.json"
           curl --connect-timeout 15 --max-time 150 -fsSL \
             -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GH_TOKEN" -H 'X-GitHub-Api-Version: 2026-03-10' \
-            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/artifacts/12160001923/zip \
+            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/artifacts/12182178961/zip \
             -o "$RUNNER_TEMP/native-recheck-product.zip"
-          python3 scripts/native_recheck.py prepare --archive "$RUNNER_TEMP/native-recheck-product.zip" --artifact-metadata "$RUNNER_TEMP/native-recheck-artifact.json"
+          curl --connect-timeout 15 --max-time 150 -fsSL \
+            -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GH_TOKEN" -H 'X-GitHub-Api-Version: 2026-03-10' \
+            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/runs/39241681704 \
+            -o "$RUNNER_TEMP/native-recheck-source-run.json"
+          curl --connect-timeout 15 --max-time 150 -fsSL \
+            -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GH_TOKEN" -H 'X-GitHub-Api-Version: 2026-03-10' \
+            'https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/runs/39241681704/jobs?filter=all&per_page=100' \
+            -o "$RUNNER_TEMP/native-recheck-source-jobs.json"
+          python3 scripts/native_recheck.py prepare --archive "$RUNNER_TEMP/native-recheck-product.zip" --artifact-metadata "$RUNNER_TEMP/native-recheck-artifact.json" --source-run-metadata "$RUNNER_TEMP/native-recheck-source-run.json" --source-jobs-metadata "$RUNNER_TEMP/native-recheck-source-jobs.json"
       - name: Build only fresh native target and instrumentation with matching test signer
         timeout-minutes: 12
         run: |
