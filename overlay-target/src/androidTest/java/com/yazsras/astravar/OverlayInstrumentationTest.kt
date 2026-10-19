@@ -1,7 +1,9 @@
 package com.yazsras.astravar
 
 import android.graphics.Rect
+import android.content.res.Configuration
 import android.os.SystemClock
+import android.view.Surface
 import android.view.accessibility.AccessibilityWindowInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -80,8 +82,39 @@ class OverlayInstrumentationTest {
         device.waitForIdle()
     }
     private fun tapTarget(text:String) = ui.tap(By.text(text).pkg(targetPackage), text)
-    private fun expand() {
-        ui.tap(By.descStartsWith("Expand Astravar crystal").pkg(appPackage), "Expand Astravar crystal")
+    private fun crystalAfterConfiguration(expectedFontScale: Float): Rect {
+        val deadline = SystemClock.uptimeMillis() + 30_000
+        val selector = By.descStartsWith("Expand Astravar crystal").pkg(appPackage)
+        var previous: Rect? = null
+        var stableSince: Long? = null
+        while (SystemClock.uptimeMillis() < deadline) {
+            val remaining = deadline - SystemClock.uptimeMillis()
+            if (remaining <= 0) break
+            val bounds = ui.snapshot(selector, "crystal after applied font scale $expectedFontScale and natural orientation",
+                timeoutMs = remaining, refreshCache = true) { node ->
+                val applied = instrumentation.targetContext.resources.configuration
+                val visible = Rect(node.visibleBounds)
+                if (kotlin.math.abs(applied.fontScale - expectedFontScale) < .001f &&
+                    applied.orientation == Configuration.ORIENTATION_PORTRAIT &&
+                    device.displayRotation == Surface.ROTATION_0 && node.isEnabled && node.isClickable &&
+                    !visible.isEmpty && visible.left >= 0 && visible.top >= 0 &&
+                    visible.right <= device.displayWidth && visible.bottom <= device.displayHeight) visible else null
+            }
+            val now = SystemClock.uptimeMillis()
+            stableSince = if (previous == bounds) stableSince ?: now else now
+            if (previous == bounds && now - (stableSince ?: now) >= 1_000) {
+                checkpoint("Applied font scale $expectedFontScale and natural orientation; fresh clickable crystal geometry stable for one second: $bounds")
+                return bounds
+            }
+            previous = bounds
+            val budget = deadline - SystemClock.uptimeMillis()
+            if (budget > 0) device.waitForIdle(minOf(1_000L, budget))
+        }
+        error("Crystal geometry did not settle after the applied font configuration within 30 seconds")
+    }
+    private fun expand(expectedFontScale: Float? = null) {
+        if (expectedFontScale == null) ui.tap(By.descStartsWith("Expand Astravar crystal").pkg(appPackage), "Expand Astravar crystal")
+        else ui.touch(crystalAfterConfiguration(expectedFontScale), "Expand Astravar crystal after applied font configuration")
         assertTrue(device.wait(Until.hasObject(By.desc("Drag or collapse Astravar panel").pkg(appPackage)),30000))
     }
     private fun navigate(name:String) = ui.ensurePrimaryTab(appPackage,name)
@@ -152,7 +185,7 @@ class OverlayInstrumentationTest {
         device.setOrientationNatural();device.waitForIdle()
         shell("settings put system font_scale 1.3")
         assertTrue(device.wait(Until.hasObject(By.descStartsWith("Expand Astravar crystal")),30000))
-        expand();screenshot("large-text-result");tapPanel("Collapse")
+        expand(expectedFontScale = 1.3f);screenshot("large-text-result");tapPanel("Collapse")
         shell("settings put system font_scale 1.0");device.waitForIdle()
         tapTarget("Toggle protected screen")
         assertTrue("Protected target button must reflect its secure state",device.wait(Until.hasObject(By.text("Protected screen ON").pkg(targetPackage)),10000))

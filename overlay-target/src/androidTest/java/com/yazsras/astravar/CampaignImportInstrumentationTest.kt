@@ -160,7 +160,9 @@ class CampaignImportInstrumentationTest {
         File(files, "native-campaign-fixture.json").writeText(text)
         writeDownload(fixtureName, text)
         writeDownload("astravar-native-secondary-campaign.json", secondaryFixture())
-        val invalid = JSONObject(text).put("payloadSha256", "0".repeat(64)).toString()
+        // Corrupt the small archive to exercise the same integrity rejection
+        // without retaining another parsed and serialized copy of the stress fixture.
+        val invalid = JSONObject(secondaryFixture()).put("payloadSha256", "0".repeat(64)).toString()
         writeDownload("astravar-native-invalid-campaign.json", invalid)
         launchImportPage()
         chooseDocument("astravar-native-invalid-campaign.json")
