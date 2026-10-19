@@ -165,7 +165,76 @@ class CampaignImportInstrumentationTest {
 
     /** Uses the actual system document picker; no product intent or database bypass. */
     private fun chooseDocument(name: String) {
-        tap("Choose campaign archive")
+        val deadline = SystemClock.uptimeMillis() + 30_000
+        val chooser = By.text("Choose campaign archive").pkg(product)
+        val minimumTap = (48 * instrumentation.targetContext.resources.displayMetrics.density).toInt()
+        var previous: Pair<Rect, Rect>? = null
+        var stableSince: Long? = null
+        var clicked = false
+        var lastObserved = "No fresh chooser observation"
+        for (direction in listOf(Direction.DOWN, Direction.UP)) {
+            var scrolls = 0
+            var reachedEdge = false
+            while (SystemClock.uptimeMillis() < deadline) {
+                var observed: Pair<Rect, Rect>? = null
+                try {
+                    assertTrue("Archive chooser observations require a fresh accessibility cache",
+                        instrumentation.uiAutomation.clearCache())
+                    val labels = device.findObjects(chooser)
+                    val scroll = device.findObjects(By.scrollable(true).pkg(product)).lastOrNull()
+                    val viewport = scroll?.let { Rect(it.visibleBounds) }
+                    lastObserved = "direction=$direction scrolls=$scrolls/18; reachedEdge=$reachedEdge; labels=${labels.size}; viewport=$viewport"
+                    if (labels.size == 1 && viewport != null) {
+                        var action: UiObject2? = labels.single()
+                        var depth = 0
+                        while (action != null && !action.isScrollable && depth++ < 12) {
+                            if (action.isClickable) {
+                                val bounds = Rect(action.visibleBounds)
+                                lastObserved += "; enabled=${action.isEnabled}; chooser=$bounds"
+                                if (action.isEnabled && bounds.width() >= minimumTap && bounds.height() >= minimumTap &&
+                                    viewport.contains(bounds) && bounds.left >= 0 && bounds.top >= 0 &&
+                                    bounds.right <= device.displayWidth && bounds.bottom <= device.displayHeight) {
+                                    observed = bounds to viewport
+                                }
+                                break
+                            }
+                            action = action.parent
+                        }
+                    }
+                    if (observed != null) {
+                        val now = SystemClock.uptimeMillis()
+                        stableSince = if (previous == observed) stableSince ?: now else now
+                        previous = observed
+                        if (now - requireNotNull(stableSince) >= 1_000) {
+                            val bounds = observed.first
+                            val x = bounds.centerX(); val y = bounds.centerY()
+                            assertTrue("Archive chooser must be observed before its original deadline", SystemClock.uptimeMillis() < deadline)
+                            assertTrue("Dispatch the observed archive chooser once", device.click(x, y))
+                            clicked = true
+                            val remaining = deadline - SystemClock.uptimeMillis()
+                            if (remaining > 0) device.waitForIdle(minOf(1_000L, remaining))
+                            break
+                        }
+                    } else {
+                        previous = null; stableSince = null
+                        // Observe once after an edge/final scroll, then reverse
+                        // without spending the entire deadline scrolling down.
+                        if (reachedEdge || scrolls >= 18 || SystemClock.uptimeMillis() >= deadline) break
+                        if (scroll != null) {
+                            scrolls++
+                            reachedEdge = !scroll.scroll(direction, .6f)
+                        }
+                    }
+                } catch (_: StaleObjectException) {
+                    previous = null; stableSince = null
+                    lastObserved = "Product window changed during chooser observation or read-only scroll"
+                }
+                val remaining = deadline - SystemClock.uptimeMillis()
+                if (remaining > 0) SystemClock.sleep(minOf(100L, remaining))
+            }
+            if (clicked) break
+        }
+        assertTrue("Archive chooser must be enabled and visible within its original 30s budget; $lastObserved", clicked)
         val picker = device.wait(Until.findObject(By.text(name)), 3_000)
         if (picker == null) {
             val roots = device.wait(Until.findObject(By.desc(Pattern.compile("(?i)show (roots|navigation drawer)"))), 10_000)
