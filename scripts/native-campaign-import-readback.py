@@ -15,15 +15,18 @@ def sha(value):
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def normalized(db):
+def normalized(db, *, include_archive=False, omit_keys=None):
     result = {}
+    omit_keys = omit_keys or {}
     for (name,) in db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"):
-        if name.startswith("sqlite_") or name in ARCHIVE_TABLES or name == "room_master_table":
+        if name.startswith("sqlite_") or (name in ARCHIVE_TABLES and not include_archive) or name == "room_master_table":
             continue
         if not name.replace("_", "").isalnum():
             raise ValueError("Unexpected table name")
+        keys = [row[1] for row in sorted(db.execute(f'PRAGMA table_info("{name}")'), key=lambda row: row[5]) if row[5]]
         rows = [json.dumps(list(row), ensure_ascii=False, separators=(",", ":"))
-                for row in db.execute(f'SELECT * FROM "{name}"')]
+                for row in db.execute(f'SELECT * FROM "{name}"')
+                if tuple(row[key] for key in keys) not in omit_keys.get(name, set())]
         result[name] = {"count": len(rows), "sha256": sha("\n".join(sorted(rows)))}
     return result
 
@@ -39,7 +42,8 @@ def run(args):
         if db.execute("PRAGMA user_version").fetchone()[0] != 4:
             raise ValueError("Expected additive campaign Room schema 4")
         if args.action == "snapshot":
-            result = {"marker": MARKER, "synthetic_only": True, "tables": normalized(db)}
+            result = {"marker": MARKER, "synthetic_only": True, "tables": normalized(db),
+                      "allTables": normalized(db, include_archive=True)}
             args.manifest.write_text(json.dumps(result, indent=2) + "\n")
             return {"marker": MARKER, "status": "baseline-captured", "tables": len(result["tables"])}
         expected = json.loads(args.manifest.read_text())
@@ -101,6 +105,105 @@ def run(args):
                 "preexisting_table_count": len(expected["tables"]), "preexisting_rows_unchanged": True,
                 "original_content_and_source_hashes_verified": True, "backup_integrity_verified": True, "large_source_and_backup_rows_verified": oversized,
                 "package_sha256": package_hash, "receipt_states": sorted(row["state"] for row in receipts.values())}
+
+
+MAPPED_TABLES = {
+    "projects": "invention_projects", "stages": "project_stages", "requirements": "material_requirements",
+    "entities": "connection_entities", "facts": "connection_facts", "milestones": "connection_milestones",
+    "links": "campaign_links", "companionStates": "companion_states", "companionResources": "companion_resources",
+    "itemDetails": "item_details", "itemProperties": "item_properties", "audit": "campaign_audit",
+    "receipts": "command_receipts", "crafts": "craft_executions", "consumptions": "craft_consumptions",
+    "characterProfiles": "character_profiles", "characterAbilities": "character_abilities",
+    "partySheets": "party_sheets", "placements": "item_placements", "wallets": "party_wallets",
+    "checkpoints": "campaign_checkpoints", "externalReferences": "external_record_references",
+}
+
+
+def verify_mapped(database, manifest, fixture, *, rolled_back=False, synthetic_demo=False):
+    """Compare complete fictional typed snapshots and all untouched rows from fresh SQLite queries."""
+    if not synthetic_demo:
+        raise ValueError("Explicit --synthetic-demo acknowledgement is required")
+    if database.name != "astravar-campaign-ledger.db" or database.is_symlink() or not database.is_file():
+        raise ValueError("Use a regular copied fictional campaign ledger database")
+    baseline = json.loads(manifest.read_text())
+    assert baseline["marker"] == MARKER and baseline["synthetic_only"] is True
+    assert "allTables" in baseline, "Capture a fresh complete baseline immediately before the typed test"
+    envelope = json.loads(fixture.read_text())
+    assert envelope["format"] == "astravar-campaign-archive" and envelope["schema"] == 1
+    package = sha(envelope["payload"])
+    assert package == envelope["payloadSha256"]
+    source = json.loads(envelope["payload"])
+    assert source["campaignId"] == "fictional-native-typed"
+    assert source["sourceRootUrl"].startswith("https://example.invalid/")
+    assert all(row["sourceUrl"].startswith("https://example.invalid/") and row["visibility"] == "player" for row in source["records"])
+    mapped = source["mapped"]
+    assert mapped["format"] == "astravar-campaign-items" and mapped["schema"] == 4
+    assert set(mapped["records"]) == set(MAPPED_TABLES)
+    groups = {"ledger_items": mapped["items"], "ledger_events": mapped["events"]}
+    groups.update({table: mapped["records"][label] for label, table in MAPPED_TABLES.items()})
+    assert groups["ledger_items"] and groups["character_profiles"]
+    assert all(row.get("source", "").startswith("FICTIONAL ") for rows in groups.values() for row in rows), "Only marked fictional rows are accepted"
+    with sqlite3.connect(database) as db:
+        db.row_factory = sqlite3.Row
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+        omitted = {}
+        for table, rows in groups.items():
+            columns = list(db.execute(f'PRAGMA table_info("{table}")'))
+            keys = [row[1] for row in sorted(columns, key=lambda row: row[5]) if row[5]]
+            assert columns and keys, "Missing typed table or primary key: " + table
+            expected_columns = {row[1] for row in columns}
+            actual = {tuple(row[key] for key in keys): dict(row) for row in db.execute(f'SELECT * FROM "{table}"')}
+            incoming_keys = {tuple(row[key] for key in keys) for row in rows}
+            assert len(incoming_keys) == len(rows), "Duplicate fixture identity: " + table
+            omitted[table] = incoming_keys
+            for row in rows:
+                key = tuple(row[key] for key in keys)
+                if rolled_back:
+                    assert key not in actual, "Typed row survived rollback: " + table
+                    continue
+                assert set(row) == expected_columns, "Fixture must supply complete typed values: " + table
+                assert key in actual, "Imported typed row missing: " + table
+                saved = actual[key]
+                for field, expected in row.items():
+                    found = saved[field]
+                    if field in ("recordReferences", "unknowns"):
+                        found = json.loads(found)
+                    if isinstance(expected, bool):
+                        expected = int(expected)
+                    assert found == expected, f"Mapped readback differs: {table}.{field} {key}"
+        reference_ids = {(source["campaignId"] + "::" + row["externalId"],) for row in source["records"]}
+        edge_ids = {(sha(source["campaignId"] + "::" + row["externalId"] + "\0" + source["campaignId"] + "::" + target),)
+                    for row in source["records"] for target in row["relationIds"]}
+        omitted.update(campaign_references=reference_ids, campaign_reference_relations=edge_ids,
+                       campaign_archive_sources={(package,)}, campaign_import_backups={(package,)},
+                       campaign_import_receipts={(package,), ("rollback:" + package,)})
+        assert normalized(db, include_archive=True, omit_keys=omitted) == baseline["allTables"], "A preexisting typed row or immutable archive evidence changed"
+        receipt = db.execute("SELECT * FROM campaign_import_receipts WHERE packageHash=?", (package,)).fetchone()
+        assert receipt and receipt["state"] == "APPLIED"
+        assert receipt["recordCount"] == len(reference_ids) and receipt["relationCount"] == len(edge_ids)
+        backup = db.execute("SELECT * FROM campaign_import_backups WHERE packageHash=?", (package,)).fetchone()
+        assert backup and sha(backup["snapshotJson"]) == backup["snapshotSha256"]
+        rollback = db.execute("SELECT * FROM campaign_import_receipts WHERE packageHash=?", ("rollback:" + package,)).fetchone()
+        actual_references = {row["externalId"]: dict(row) for row in db.execute("SELECT * FROM campaign_references WHERE campaignId=?", (source["campaignId"],))}
+        if rolled_back:
+            assert rollback and rollback["state"] == "ROLLED_BACK" and rollback["readbackSha256"] == backup["sourceStateSha256"]
+            assert not actual_references
+            assert not db.execute("SELECT 1 FROM campaign_archive_sources WHERE packageHash=?", (package,)).fetchone()
+        else:
+            assert not rollback and len(actual_references) == len(source["records"])
+            for row in source["records"]:
+                saved = actual_references[row["externalId"]]
+                assert saved["id"] == source["campaignId"] + "::" + row["externalId"] and saved["packageHash"] == package
+                assert all(saved[field] == row[field] for field in ("title", "category", "body", "propertiesJson", "sourceUrl", "sourceRevision", "contentSha256"))
+                assert sha(saved["body"]) == saved["contentSha256"]
+            retained = db.execute("SELECT payloadJson FROM campaign_archive_sources WHERE packageHash=?", (package,)).fetchone()
+            assert retained and retained[0] == envelope["payload"] and sha(retained[0]) == package
+        return {"marker": MARKER, "status": "mapped-rollback-verified" if rolled_back else "mapped-applied-verified",
+                "synthetic_only": True, "mapped_counts": {table: len(rows) for table, rows in groups.items()},
+                "mapped_complete_values_verified": not rolled_back, "null_values_preserved": not rolled_back,
+                "preexisting_all_table_count": len(baseline["allTables"]), "preexisting_rows_and_archive_evidence_unchanged": True,
+                "source_records": len(source["records"]), "source_payload_and_content_hashes_verified": not rolled_back,
+                "backup_integrity_verified": True, "package_sha256": package}
 
 
 if __name__ == "__main__":

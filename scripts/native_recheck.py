@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import runpy
 import stat
 import subprocess
 import zipfile
@@ -29,6 +30,8 @@ ALLOWED_FILES = {
     ".github/workflows/android-2.1-native-recheck.yml",
     "scripts/native_recheck.py",
     "scripts/tests/test_native_recheck.py",
+    "scripts/native-campaign-import-readback.py",
+    "scripts/tests/test_native_campaign_import_readback.py",
     "docs/ASTRAVAR_2_1_NATIVE_RECHECK.md",
     # Controlled second-app keyboard/protection fixture, never the product app.
     "overlay-target/src/main/java/com/yazsras/astravar/target/TargetActivity.kt",
@@ -133,7 +136,7 @@ def prepare(repo, archive, metadata_path, sdk, output):
     (output / "RECHECK_SCOPE.txt").write_text(
         "NATIVE HARNESS RECHECK ONLY. Product APKs are immutable CI-only builds from " + BASE_COMMIT +
         "; native test source is " + proof["test_source_commit"] + ".\n"
-        "The original complete run passed Python/rules/Android/lint/build checks but failed native tests.\n"
+        "The immutable source run provides the product APKs; its recorded outcome is reported separately.\n"
         "This recheck does not rebuild or certify product changes, rerun full verification, prove owner signing, or publish a production release.\n"
         "Never install these disposable CI-signed APKs over an owner-signed app or uninstall existing apps to bypass a certificate mismatch.\n")
     return proof
@@ -163,12 +166,17 @@ def verify_targets(repo, sdk, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["guard", "prepare", "verify-targets"])
+    parser.add_argument("command", choices=["guard", "prepare", "verify-targets", "snapshot-mapped", "verify-mapped"])
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--archive", type=Path)
     parser.add_argument("--artifact-metadata", type=Path)
     parser.add_argument("--sdk", type=Path, default=os.environ.get("ANDROID_HOME"))
     parser.add_argument("--output", type=Path, default=Path("validation"))
+    parser.add_argument("--database", type=Path)
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--fixture", type=Path)
+    parser.add_argument("--rolled-back", action="store_true")
+    parser.add_argument("--synthetic-demo", action="store_true")
     args = parser.parse_args()
     if args.command == "guard":
         result = source_guard(args.repo)
@@ -176,10 +184,23 @@ def main():
         if not args.archive or not args.artifact_metadata or not args.sdk:
             parser.error("prepare requires --archive, --artifact-metadata and --sdk/ANDROID_HOME")
         result = prepare(args.repo, args.archive, args.artifact_metadata, args.sdk, args.output)
-    else:
+    elif args.command == "verify-targets":
         if not args.sdk:
             parser.error("verify-targets requires --sdk/ANDROID_HOME")
         result = verify_targets(args.repo, args.sdk, args.output)
+    elif args.command == "snapshot-mapped":
+        if not args.database or args.output == Path("validation"):
+            parser.error("snapshot-mapped requires --database and a JSON --output path")
+        helper = runpy.run_path(str(Path(__file__).with_name("native-campaign-import-readback.py")))
+        result = helper["run"](argparse.Namespace(action="snapshot", database=args.database,
+                                                  manifest=args.output, synthetic_demo=args.synthetic_demo))
+    else:
+        if not args.database or not args.manifest or not args.fixture or args.output == Path("validation"):
+            parser.error("verify-mapped requires --database, --manifest, --fixture and a JSON --output path")
+        helper = runpy.run_path(str(Path(__file__).with_name("native-campaign-import-readback.py")))
+        result = helper["verify_mapped"](args.database, args.manifest, args.fixture,
+                                         rolled_back=args.rolled_back, synthetic_demo=args.synthetic_demo)
+        args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2))
 
 
