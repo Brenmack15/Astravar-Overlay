@@ -8,6 +8,8 @@ The first corrected run observed the second verified backup and completed the se
 
 The following run completed the separately confirmed secondary rollback and observed its recovery status. It then stopped before reopening the archive picker for the duplicate-import check: the page was at its bottom, while the chooser was above the viewport. The generic observer spent its original deadline scrolling down after reaching the bottom, without reversing. The chooser observation now refreshes accessibility state and reverses at a scroll edge within its original 30-second and 18-per-direction limits. It requires the unique enabled, visible chooser before one click; the real DocumentsUI selection and duplicate-import assertions remain unchanged. No import or rollback action is retried.
 
+The chooser's initial empty page can fit without scrolling. Its actual accessibility `android.widget.ScrollView` then reports `scrollable=false`, despite containing a visible enabled 48-dp chooser. The observer identifies the unique product ScrollView by its class and package to measure that real viewport, and sends scroll gestures only when it is scrollable. It does not substitute screen-wide bounds. The same unique control, enabled state, minimum size, stable geometry, original deadline and single-click checks remain in force.
+
 ## Immutable inputs
 
 | Input | Exact value |
