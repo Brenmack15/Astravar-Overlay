@@ -53,7 +53,7 @@ class CampaignArchivePrivatePreviewTest {
             val projectedText = campaignBackupJson(projection)
             val projectedBytes = projectedText.toByteArray(Charsets.UTF_8).size
             assertTrue("Projected initial campaign backup exceeds the document-reader byte limit.", projectedBytes <= 32 * 1024 * 1024)
-            assertTrue("Projected backup must round-trip the complete schema4 model.", campaignJson.decodeFromString<LedgerExport>(projectedText) == projection)
+            assertTrue("Projected backup must round-trip the complete schema4 model.", campaignDecodeBackup(projectedText) == projection)
             val referenceRows = db.archiveDao().allReferences().size
             val itemRows = db.ledgerDao().allItems().size
             val receiptRows = db.archiveDao().allReceipts().size
