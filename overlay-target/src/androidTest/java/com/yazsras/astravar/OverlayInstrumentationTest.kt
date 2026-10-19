@@ -50,31 +50,51 @@ class OverlayInstrumentationTest {
         val selector = By.text(text).pkg(appPackage).enabled(true).clickable(true)
         val deadline = SystemClock.uptimeMillis() + 30_000
         val minimumTap = (48 * instrumentation.targetContext.resources.displayMetrics.density).toInt()
+        var previous: Rect? = null
+        var stableSince: Long? = null
+        var lastObservation = "No panel observation yet"
+        fun missing(): Nothing = error("Missing enabled overlay control after fresh-window search: $text; minimum=${minimumTap}px; $lastObservation")
         // Drag persistence and preference commits replace the overlay's window.
-        // Requery fresh nodes across that handoff, and never use UiScrollable's
+        // Clear cached nodes across that handoff, and never use UiScrollable's
         // active-window search: the controlled underlying app owns input focus.
         for (direction in listOf(Direction.DOWN, Direction.UP)) {
-            repeat(8) {
+            var scrolls = 0
+            while (true) {
                 val remaining = deadline - SystemClock.uptimeMillis()
-                if (remaining <= 0) error("Missing enabled overlay control after fresh-window search: $text")
-                device.wait(Until.findObject(selector), minOf(1_500L, remaining))
+                if (remaining <= 0) missing()
                 try {
+                    require(android.os.Build.VERSION.SDK_INT >= 34) { "Fresh native overlay observations require Android API34 or later" }
+                    assertTrue("The overlay accessibility observation cache must be cleared", instrumentation.uiAutomation.clearCache())
                     val header = device.findObject(By.desc("Drag or collapse Astravar panel").pkg(appPackage))
                     val panel = header?.parent
-                    panel?.findObject(selector)?.let { control ->
-                        val bounds = Rect(control.visibleBounds)
-                        if (bounds.width() >= minimumTap && bounds.height() >= minimumTap) return bounds
-                    }
                     val scroll = panel?.findObject(By.clazz("android.widget.ScrollView").pkg(appPackage))
-                    scroll?.scroll(direction, .6f)
+                    val bounds = panel?.findObject(selector)?.let { Rect(it.visibleBounds) }
+                    val viewport = scroll?.let { Rect(it.visibleBounds) }
+                    lastObservation = "direction=$direction scrolls=$scrolls/8; panel=${panel != null}; viewport=$viewport; control=$bounds"
+                    if (bounds != null && bounds.width() >= minimumTap && bounds.height() >= minimumTap) {
+                        val now = SystemClock.uptimeMillis()
+                        if (previous != bounds) { previous = Rect(bounds); stableSince = now }
+                        if (now - requireNotNull(stableSince) >= 1_000) return bounds
+                        // Once the full touch target is visible, observe it settling instead of
+                        // spending another scroll attempt or changing search direction.
+                    } else {
+                        previous = null; stableSince = null
+                        if (scrolls >= 8) break
+                        if (scroll != null) { scrolls++; scroll.scroll(direction, .6f) }
+                    }
                 } catch (_: StaleObjectException) {
+                    previous = null; stableSince = null
+                    lastObservation = "Overlay window changed during panel lookup or scroll"
                     // Only lookup/scroll is retried. A resource-spending click is
                     // performed once, from the verified detached bounds.
                 }
-                device.waitForIdle()
+                val idleRemaining = deadline - SystemClock.uptimeMillis()
+                if (idleRemaining > 0) device.waitForIdle(minOf(1_000L, idleRemaining))
+                val pollRemaining = deadline - SystemClock.uptimeMillis()
+                if (pollRemaining > 0) SystemClock.sleep(minOf(100L, pollRemaining))
             }
         }
-        error("Missing enabled overlay control: $text")
+        missing()
     }
     private fun tapPanel(text:String) {
         val bounds = panelControlBounds(text)
