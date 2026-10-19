@@ -528,8 +528,7 @@ class CampaignImportInstrumentationTest {
 
         launchImportPage()
         chooseDocument("astravar-native-mapped-campaign.json")
-        assertTrue("The mapped fixture must preview one source without replacing local records",
-            device.wait(Until.hasObject(By.textStartsWith("1 reference records, 0 relationships").pkg(product)), 10_000))
+        awaitText("1 reference records, 0 relationships, 0 attachments; 1 mapped inventory items, 2 characters, 1 wallet snapshots. Existing different records are preserved. History does not execute gameplay.", 10_000)
         assertFalse("A mapped preview is not import authorization", actionEnabled("Confirm local import"))
         saveBackup("astravar-native-mapped-preimport-backup.json")
         tap("I reviewed the archive and want to add approved records locally.")
