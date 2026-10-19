@@ -95,13 +95,6 @@ diff -u validation/update-before.sha256 validation/update-after.sha256 >validati
 timeout 10s adb shell dumpsys package com.yazsras.astravar >validation/updated-package.txt
 grep -q 'versionCode=31' validation/updated-package.txt
 run_class UpdatePreservationInstrumentationTest 1 validation/native-update-readback.txt
-# Exercise the updated source without reseeding demo data or executing another
-# campaign action; the strict current-state/hash verification below still applies.
-run_class OverlayInstrumentationTest#bNotificationStop 1 validation/native-updated-notification-stop.txt
-run_class OverlayInstrumentationTest#cRollRestorationMainHistoryAndLivePermissionRecovery 1 validation/native-updated-overlay-recovery.txt
-timeout 15s adb shell am force-stop com.yazsras.astravar
-copy_combat_database validation/history-after
-python3 scripts/history-preservation-fixture.py verify --database validation/history-after/astravar.db --manifest validation/history-fixture.json --synthetic-demo | tee validation/history-verification-result.json
 # Importer acceptance uses only the explicitly fictional native fixture. Pull the
 # campaign ledger separately so host SQLite reads can detect row/hash changes.
 copy_campaign_database() {
@@ -126,4 +119,13 @@ run_class CampaignImportInstrumentationTest#bGuardedRollbackRestoresVerifiedSnap
 timeout 15s adb shell am force-stop com.yazsras.astravar
 copy_campaign_database validation/campaign-rolled-back
 python3 scripts/native-campaign-import-readback.py rolled-back --database validation/campaign-rolled-back/astravar-campaign-ledger.db --manifest validation/campaign-before.json --fixture validation/native-campaign-fixture.json --synthetic-demo | tee validation/campaign-rollback-result.json
+# Run the legacy post-update overlay checks after importer recovery so a
+# fixture failure cannot hide the primary backup/import/rollback acceptance.
+# Exercise the updated source without reseeding demo data or executing another
+# campaign action; the strict current-state/hash verification below still applies.
+run_class OverlayInstrumentationTest#bNotificationStop 1 validation/native-updated-notification-stop.txt
+run_class OverlayInstrumentationTest#cRollRestorationMainHistoryAndLivePermissionRecovery 1 validation/native-updated-overlay-recovery.txt
+timeout 15s adb shell am force-stop com.yazsras.astravar
+copy_combat_database validation/history-after
+python3 scripts/history-preservation-fixture.py verify --database validation/history-after/astravar.db --manifest validation/history-fixture.json --synthetic-demo | tee validation/history-verification-result.json
 printf '%s\n' "PASS: matching certificate verified separately (${ASTRAVAR_TEST_SIGNER_LABEL:-CI-only}), version24→31, campaign schema3→4, all persisted store bytes retained before startup; independent native UI readback verified fictional inventory and recent rolls; copied-database readback verified every seeded raw historical hash, including old Shatter and malformed records." >validation/update-preservation-result.txt
