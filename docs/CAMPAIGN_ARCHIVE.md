@@ -114,3 +114,14 @@ offline package inspection and also refuses campaign paths inside a Git checkout
 Only fictional fixtures belong in automated source-controlled tests. A successful
 local import is separate from approval to make Astravar the authoritative store;
 retain the original Notion archive until the owner explicitly approves cutover.
+
+## Large archive memory handling
+
+An actual 192 MiB Android emulator exposed excessive temporary serialization
+allocations in the code-26 candidate. Code 28 streams UTF-8 digests and JSON
+encoding, reads large SQLite text in bounded chunks, and compares typed records
+without materializing another JSON tree containing the retained archive.
+Existing SHA-256 and schema-4 backup bytes remain compatible. Document output is
+written and independently verified through bounded buffers. The unchanged large
+fictional archive remains an acceptance test; a successful JVM test alone does
+not certify native import or recovery on Android.
