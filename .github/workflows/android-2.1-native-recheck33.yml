@@ -1,0 +1,141 @@
+name: Astravar 2.1 code33 native harness recheck
+on:
+  push:
+    branches: ['feat/astravar-2.1-player-first']
+    paths:
+      - 'overlay-target/src/androidTest/java/com/yazsras/astravar/CampaignImportInstrumentationTest.kt'
+      - '.github/workflows/android-2.1-native-recheck33.yml'
+      - '.github/workflows/android-2.1.yml'
+      - 'scripts/native_recheck.py'
+      - 'scripts/tests/test_native_recheck.py'
+      - 'docs/ASTRAVAR_2_1_NATIVE_RECHECK_CODE33.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: astravar-21-native-recheck33-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-recheck:
+    # Dispatch requires default-branch adoption, which is not authorized here.
+    # An exact final-publication subject enables the reviewed branch push only.
+    if: >-
+      github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'ci: run verified native code33 harness recheck'
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      ASTRAVAR_VERSION_CODE: '33'
+      ASTRAVAR_VERSION_NAME: '2.1.0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Refuse product changes before reusing any APK
+        run: |
+          python3 scripts/native_recheck.py --profile code33 guard
+          python3 -m unittest discover -s scripts/tests -p test_native_recheck.py -v
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install checksum-verified SDK and accelerated emulator
+        timeout-minutes: 9
+        run: |
+          export ANDROID_HOME="$RUNNER_TEMP/android-sdk"
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          curl --connect-timeout 15 --max-time 150 -fsSL https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip -o "$RUNNER_TEMP/android-cli.zip"
+          echo '7ec965280a073311c339e571cd5de778b9975026cfcbe79f2b1cdcb1e15317ee  '"$RUNNER_TEMP/android-cli.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/android-cli.zip" -d "$ANDROID_HOME/cmdline-tools"
+          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/19.0"
+          export PATH="$ANDROID_HOME/cmdline-tools/19.0/bin:$ANDROID_HOME/platform-tools:$PATH"
+          printf 'y\n%.0s' {1..100} | timeout -k 5s 60s sdkmanager --licenses >/dev/null
+          # Both attempts share the original single 360s package-install budget.
+          # Keep logs outside validation until prepare has created that directory.
+          mkdir -p "$RUNNER_TEMP/astravar-sdk-install-logs"
+          timeout -k 10s 360s bash <<'ASTRAVAR_SDK_INSTALL'
+          set -e
+          for astravar_sdk_attempt in 1 2; do
+            set +e
+            sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'emulator' 'platform-tools' 'system-images;android-36;google_apis;x86_64' 2>&1 | tee "$RUNNER_TEMP/astravar-sdk-install-logs/attempt-$astravar_sdk_attempt.log"
+            astravar_sdk_pipeline_status=("${PIPESTATUS[@]}")
+            set -e
+            astravar_sdk_status=${astravar_sdk_pipeline_status[0]}
+            printf 'attempt=%s sdkmanager_exit=%s log_exit=%s\n' "$astravar_sdk_attempt" "$astravar_sdk_status" "${astravar_sdk_pipeline_status[1]}" >> "$RUNNER_TEMP/astravar-sdk-install-logs/results.log"
+            if test "${astravar_sdk_pipeline_status[1]}" -ne 0; then exit "${astravar_sdk_pipeline_status[1]}"; fi
+            if test "$astravar_sdk_status" -eq 0; then exit 0; fi
+            if test "$astravar_sdk_attempt" -eq 1; then
+              # Only the incomplete installer cache in this fresh job's SDK.
+              test "$ANDROID_HOME" = "$RUNNER_TEMP/android-sdk"
+              rm -rf -- "$ANDROID_HOME/.temp"
+            fi
+          done
+          exit "$astravar_sdk_status"
+          ASTRAVAR_SDK_INSTALL
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/cmdline-tools/19.0/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+      - name: Verify immutable product artifact, source and actual APK identities
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Read-only Actions REST API. curl follows the short-lived ZIP redirect;
+          # the archive digest and original run/source are checked before use.
+          curl --connect-timeout 15 --max-time 150 -fsSL \
+            -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GH_TOKEN" -H 'X-GitHub-Api-Version: 2026-03-10' \
+            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/artifacts/12212558254 \
+            -o "$RUNNER_TEMP/native-recheck-artifact.json"
+          curl --connect-timeout 15 --max-time 150 -fsSL \
+            -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GH_TOKEN" -H 'X-GitHub-Api-Version: 2026-03-10' \
+            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/artifacts/12212558254/zip \
+            -o "$RUNNER_TEMP/native-recheck-product.zip"
+          curl --connect-timeout 15 --max-time 150 -fsSL \
+            -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GH_TOKEN" -H 'X-GitHub-Api-Version: 2026-03-10' \
+            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/runs/39301833455 \
+            -o "$RUNNER_TEMP/native-recheck-source-run.json"
+          curl --connect-timeout 15 --max-time 150 -fsSL \
+            -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GH_TOKEN" -H 'X-GitHub-Api-Version: 2026-03-10' \
+            'https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/runs/39301833455/jobs?filter=all&per_page=100' \
+            -o "$RUNNER_TEMP/native-recheck-source-jobs.json"
+          python3 scripts/native_recheck.py --profile code33 prepare --archive "$RUNNER_TEMP/native-recheck-product.zip" --artifact-metadata "$RUNNER_TEMP/native-recheck-artifact.json" --source-run-metadata "$RUNNER_TEMP/native-recheck-source-run.json" --source-jobs-metadata "$RUNNER_TEMP/native-recheck-source-jobs.json"
+      - name: Build only fresh native target and instrumentation with matching test signer
+        timeout-minutes: 12
+        run: |
+          bash ./gradlew --no-daemon --console=plain :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
+          python3 scripts/native_recheck.py --profile code33 verify-targets --output validation/native-test-apks.json
+      - name: Native upgrade, full archive recovery and mapped campaign interfaces
+        timeout-minutes: 35
+        env:
+          ASTRAVAR_TEST_SIGNER_LABEL: reused immutable CI-only signer; not owner signing
+        run: |
+          # Keep the unchanged runner's verified emulator and EXIT cleanup
+          # until all supplemental typed tests and independent SQL reads finish.
+          source scripts/ci-player-first-emulator.sh
+          python3 scripts/native_recheck.py --profile code33 snapshot-mapped --database validation/campaign-rolled-back/astravar-campaign-ledger.db --output validation/campaign-mapped-before.json --synthetic-demo
+          ASTRAVAR_NATIVE_CLASS_TIMEOUT=720 run_class CampaignImportInstrumentationTest#cMappedCampaignRecordsReachPlayerViews 1 validation/native-mapped-campaign-ui.txt
+          timeout 15s adb shell am force-stop com.yazsras.astravar
+          copy_campaign_database validation/campaign-mapped
+          timeout 30s adb pull /sdcard/Android/data/com.yazsras.astravar.target/files/native-mapped-fixture.json validation/native-mapped-fixture.json >/dev/null
+          python3 scripts/native_recheck.py --profile code33 verify-mapped --database validation/campaign-mapped/astravar-campaign-ledger.db --manifest validation/campaign-mapped-before.json --fixture validation/native-mapped-fixture.json --output validation/native-mapped-readback.json --synthetic-demo
+          run_class CampaignImportInstrumentationTest#dMappedCampaignRecordsRollbackAfterReadback 1 validation/native-mapped-campaign-rollback.txt
+          timeout 15s adb shell am force-stop com.yazsras.astravar
+          copy_campaign_database validation/campaign-mapped-rolled-back
+          python3 scripts/native_recheck.py --profile code33 verify-mapped --rolled-back --database validation/campaign-mapped-rolled-back/astravar-campaign-ledger.db --manifest validation/campaign-mapped-before.json --fixture validation/native-mapped-fixture.json --output validation/native-mapped-rollback-readback.json --synthetic-demo
+      - name: Preserve SDK package-install attempt diagnostics
+        if: always()
+        run: |
+          if test -d "$RUNNER_TEMP/astravar-sdk-install-logs"; then
+            mkdir -p validation/sdk-install
+            cp -R "$RUNNER_TEMP/astravar-sdk-install-logs/." validation/sdk-install/
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: Astravar-2.1-native-recheck33
+          path: |
+            validation/
+            overlay-target/build/reports/
+          retention-days: 14
