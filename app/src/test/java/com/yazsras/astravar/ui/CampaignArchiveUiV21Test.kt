@@ -146,4 +146,20 @@ class CampaignArchiveUiV21Test {
         listOf("javascript:alert(1)", "file:///private/data", "content://private", "http://example.invalid", "https://user:password@example.invalid", "https:///missing-host")
             .forEach { assertNull(it, safeCampaignSourceLinkV21(it)) }
     }
+
+    @Test fun sourceDetailsRetainAttachmentMetadataWithoutEmbeddedPayloadCopies() {
+        val source = fixture(listOf(record("synthetic-source", "Synthetic source", "Original body"))).copy(
+            attachments = listOf(CampaignArchiveAttachment("synthetic-embedded", "fictional.bin", "application/octet-stream",
+                "https://example.invalid/fictional", "0".repeat(64), "RmljdGlvbmFs", "embedded"),
+                CampaignArchiveAttachment("synthetic-external", "external.txt", sourceUrl = "https://example.invalid/external")))
+        val metadata = campaignSourceMetadataV21(source)
+        assertEquals(source.title, metadata.title)
+        assertEquals(source.sourceRootRevision, metadata.sourceRootRevision)
+        assertEquals(source.issues, metadata.issues)
+        assertTrue(metadata.attachments[0].embedded)
+        assertFalse(metadata.attachments[1].embedded)
+        assertEquals(source.attachments[0].sha256, metadata.attachments[0].sha256)
+        assertEquals(source.attachments[0].sourceUrl, metadata.attachments[0].sourceUrl)
+        assertFalse("Visible source state must not retain the file body", metadata.toString().contains("RmljdGlvbmFs"))
+    }
 }
