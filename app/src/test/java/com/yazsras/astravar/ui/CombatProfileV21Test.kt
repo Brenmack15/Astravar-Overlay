@@ -72,7 +72,12 @@ class CombatProfileV21Test {
             compose.waitUntil(10_000) { compose.onAllNodesWithText("Change").fetchSemanticsNodes().isNotEmpty() }
             compose.onAllNodesWithText("Change").onFirst().performClick()
             compose.onNodeWithText("Gauntlet strike").assertHasClickAction().performClick()
-            compose.waitUntil(10_000) { runBlocking { f.preferences.flow.first().mode == Ability.GAUNTLET } }
+            // Selecting melee persists mode and aim in separate suspend edits.
+            // Wait for the completed action rather than its intermediate mode emission.
+            compose.waitUntil(10_000) {
+                val selected = runBlocking { f.preferences.flow.first() }
+                selected.mode == Ability.GAUNTLET && selected.distance == 5 && !f.actions.busy
+            }
             assertEquals(5, runBlocking { f.preferences.flow.first().distance })
             compose.onNodeWithText("Prepare charged strike").performScrollTo().performClick()
             compose.waitUntil(10_000) { f.repo.state.value?.gauntletCharge != null && !f.actions.busy }
