@@ -39,6 +39,13 @@ internal fun <T> campaignSerializedHash(serializer: SerializationStrategy<T>, va
     return digest.digest().toCampaignHex()
 }
 
+/** Backup JSON uses ASCII escapes so one Unicode source character cannot widen its entire ART String. */
+internal fun campaignBackupSerializedHash(value: LedgerExport): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    campaignEncodeJson(LedgerExport.serializer(), value, DigestOutputStream(DiscardCampaignBytes, digest), asciiStrings = true)
+    return digest.digest().toCampaignHex()
+}
+
 /**
  * kotlinx.serialization 1.9's JVM encodeToStream still grows a CharArray to the entire largest String.
  * The campaign schema uses classes, lists and primitives, so this deliberately narrow encoder drives
@@ -46,12 +53,12 @@ internal fun <T> campaignSerializedHash(serializer: SerializationStrategy<T>, va
  * Unsupported future descriptor kinds fail closed rather than silently changing the archive format.
  */
 @OptIn(ExperimentalSerializationApi::class)
-internal fun <T> campaignEncodeJson(serializer: SerializationStrategy<T>, value: T, output: OutputStream) {
-    OutputStreamWriter(output, Charsets.UTF_8).use { writer -> serializer.serialize(CampaignJsonEncoder(writer), value) }
+internal fun <T> campaignEncodeJson(serializer: SerializationStrategy<T>, value: T, output: OutputStream, asciiStrings: Boolean = false) {
+    OutputStreamWriter(output, Charsets.UTF_8).use { writer -> serializer.serialize(CampaignJsonEncoder(writer, asciiStrings = asciiStrings), value) }
 }
 
 @OptIn(ExperimentalSerializationApi::class)
-private class CampaignJsonEncoder(private val writer: Writer, private val kind: SerialKind? = null) : AbstractEncoder() {
+private class CampaignJsonEncoder(private val writer: Writer, private val kind: SerialKind? = null, private val asciiStrings: Boolean = false) : AbstractEncoder() {
     override val serializersModule: SerializersModule get() = campaignJson.serializersModule
     private var first = true
     override fun beginStructure(descriptor: SerialDescriptor): CompositeEncoder {
@@ -59,7 +66,7 @@ private class CampaignJsonEncoder(private val writer: Writer, private val kind: 
             "Campaign stream encoder does not support ${descriptor.kind}."
         }
         writer.write(if (descriptor.kind == StructureKind.LIST) "[" else "{")
-        return CampaignJsonEncoder(writer, descriptor.kind)
+        return CampaignJsonEncoder(writer, descriptor.kind, asciiStrings)
     }
     override fun endStructure(descriptor: SerialDescriptor) { writer.write(if (descriptor.kind == StructureKind.LIST) "]" else "}") }
     override fun encodeElement(descriptor: SerialDescriptor, index: Int): Boolean {
@@ -94,7 +101,11 @@ private class CampaignJsonEncoder(private val writer: Writer, private val kind: 
                 '\n' -> "\\n"
                 '\u000C' -> "\\f"
                 '\r' -> "\\r"
-                else -> if (char.code < 0x20) "\\u00" + HEX[char.code shr 4] + HEX[char.code and 15] else null
+                else -> when {
+                    char.code < 0x20 -> "\\u00" + HEX[char.code shr 4] + HEX[char.code and 15]
+                    asciiStrings && char.code > 0x7f -> "\\u" + HEX[(char.code shr 12) and 15] + HEX[(char.code shr 8) and 15] + HEX[(char.code shr 4) and 15] + HEX[char.code and 15]
+                    else -> null
+                }
             }
             if (escape != null) {
                 writeRange(value, start, at)
@@ -124,13 +135,14 @@ private fun ByteArray.toCampaignHex() = joinToString("") { "%02x".format(it) }
 
 /**
  * A backup must still be a String for the existing Room/SAF API. Measure JSON first, then write into one
- * exact byte array. This avoids the doubling CharArray in encodeToString (88 MB for the native fixture)
- * and preserves the schema-four JSON byte format. No temporary or unencrypted external file is used.
+ * exact byte array. ASCII JSON escapes preserve every decoded schema-four value and original source
+ * String while allowing ART to retain a compact backup String. Canonical source/state digests continue
+ * using the original UTF-8 encoder. No temporary or unencrypted external file is used.
  */
 @OptIn(ExperimentalSerializationApi::class)
 internal fun campaignBackupJson(value: LedgerExport): String {
     val size = CampaignJsonSize()
-    campaignEncodeJson(LedgerExport.serializer(), value, size)
+    campaignEncodeJson(LedgerExport.serializer(), value, size, asciiStrings = true)
     val bytes = ByteArray(size.bytes.toInt())
     val output = object : OutputStream() {
         var at = 0
@@ -144,9 +156,9 @@ internal fun campaignBackupJson(value: LedgerExport): String {
         }
         override fun close() { check(at == bytes.size) { "Backup serialization was truncated." } }
     }
-    campaignEncodeJson(LedgerExport.serializer(), value, output)
+    campaignEncodeJson(LedgerExport.serializer(), value, output, asciiStrings = true)
     output.close()
-    return supportedCampaignBackup(String(bytes, Charsets.UTF_8)).also { rejectDuplicateJsonMembers(it) }
+    return supportedCampaignBackup(String(bytes, Charsets.US_ASCII)).also { rejectDuplicateJsonMembers(it) }
 }
 
 internal const val CAMPAIGN_BACKUP_MAX_BYTES = 32 * 1024 * 1024
