@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 70
     env:
       ASTRAVAR_VERSION_NAME: '2.1.0'
-      ASTRAVAR_VERSION_CODE: '29'
+      ASTRAVAR_VERSION_CODE: '30'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -108,13 +108,13 @@ jobs:
           (cd "$RUNNER_TEMP/astravar-schema3-baseline" && ASTRAVAR_VERSION_CODE=24 bash ./gradlew --no-daemon --console=plain :app:assembleRelease)
           cp "$RUNNER_TEMP/astravar-schema3-baseline/app/build/outputs/apk/release/app-release.apk" validation/Astravar-2.1-CI-ONLY-code24.apk
           bash ./gradlew --no-daemon --console=plain :app:assembleRelease :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
-          cp app/build/outputs/apk/release/app-release.apk validation/Astravar-2.1-CI-ONLY-code29.apk
+          cp app/build/outputs/apk/release/app-release.apk validation/Astravar-2.1-CI-ONLY-code30.apk
           python3 scripts/inspect_release_apk.py validation/Astravar-2.1-CI-ONLY-code24.apk --package com.yazsras.astravar --version-name 2.1.0 --version-code 24 --output validation/release-code24.json
-          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-CI-ONLY-code29.apk --package com.yazsras.astravar --version-name 2.1.0 --version-code 29 --output validation/release-code29.json
+          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-CI-ONLY-code30.apk --package com.yazsras.astravar --version-name 2.1.0 --version-code 30 --output validation/release-code30.json
           python3 scripts/native_recheck.py verify-targets --output validation/native-test-apks.json
           python3 - <<'PY'
           import json
-          a=json.load(open('validation/release-code24.json'));b=json.load(open('validation/release-code29.json'))
+          a=json.load(open('validation/release-code24.json'));b=json.load(open('validation/release-code30.json'))
           assert a['certificate_sha256']==b['certificate_sha256']
           assert b['version_code']>a['version_code']
           assert not a['owner_signature_verified'] and not b['owner_signature_verified']
