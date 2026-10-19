@@ -146,7 +146,7 @@ internal fun campaignBackupJson(value: LedgerExport): String {
     }
     campaignEncodeJson(LedgerExport.serializer(), value, output)
     output.close()
-    return supportedCampaignBackup(String(bytes, Charsets.UTF_8))
+    return supportedCampaignBackup(String(bytes, Charsets.UTF_8)).also { rejectDuplicateJsonMembers(it) }
 }
 
 internal const val CAMPAIGN_BACKUP_MAX_BYTES = 32 * 1024 * 1024
