@@ -7,8 +7,8 @@
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/2.json": "50a395a8b87a7a119312af1b1edba8246f68aed77be8900baa29a5caff964361",
     "app/schemas/com.yazsras.astravar.data.SandboxSyncDb/1.json": "23de63787037f830e1295ba7cd7efbc7d62cf18e3ba836c4e511bec8fd6cef03",
     "app/src/main/AndroidManifest.xml": "2a3a68963357e470043a0da0269422b8c007013ce0569e0b5cb8a4214f9d3fc7",
-    "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": "334842742182ceaf538616509d8ee6028f810b40ba3e78a7eee0f679d8bfb013",
-    "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": "ba147dddd03c46773384c4323d47854c5ef4edcb5d97fc658cc0cb05f8feabe5",
+    "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": "73ec243b9c12bceac07c8fd560d6fc6a4fad3a2485d09424efb6c1dd47f3a9cb",
+    "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": "87f3d0615d6b46a59b8499d67e33d2c2d0d0863f2cfb44d1b5b6733e01832c79",
     "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": "6f53990746acf85f474ea6c5fcdc4a9162cef331cd2c52e69e19fa501011dc54",
     "app/src/main/java/com/yazsras/astravar/data/HistoryStorage.kt": "c7968f73293f5d8f46fa148be3fbbb74352565e914ef3b1762f88800104dbb62",
     "app/src/main/java/com/yazsras/astravar/data/SandboxSync.kt": "25f71e8aac585b24f83975796e9a4a7aa01b7c6a8c6f94607544bdf8775f5cf9",
@@ -79,7 +79,10 @@
     "rules/src/test/kotlin/com/yazsras/astravar/rules/HistoryRetentionTest.kt": "42162dbe3ae23bae6333b71b3abe6c36313f5aca68ea2c770f77b392b9885aff",
     "rules/src/test/kotlin/com/yazsras/astravar/rules/PrimaryForceTest.kt": "f7f8c9339d4250c53b194aa9aaf570d302b2146ecc8b47e0498a3fd58b7e5d21",
     "rules/src/test/kotlin/com/yazsras/astravar/rules/SelectorMigrationTest.kt": "c7a1b535fdb76b48f0bc3b4df865b957411942b443e4ae155ca03d71210d491d",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/WeaponWorkflowTest.kt": "36d788ce7e2e7174e8b391c3e330c6e81c23ff0656b9fd8896277571a55ac425"
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/WeaponWorkflowTest.kt": "36d788ce7e2e7174e8b391c3e330c6e81c23ff0656b9fd8896277571a55ac425",
+    "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/3.json": "d030a6759b35784528732ff331ed20b27cb3c41561db0b7031d839b962f49901",
+    "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/4.json": "076ebbba19127c09137b7095d84cc89bc9fb64c25ab74951677b9d2537cd3c5f",
+    "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": "559357699d2887a8e75ff2722ae09f5772e3df23259fb78460aed96837fab96a"
   },
   "owner_signing_block_sha256": "9f749325c6e42970c42ff72ce35cdb31af58a7a30000a404223b4841e267a1f3",
   "authorized_branding_change": {
@@ -107,13 +110,31 @@
       },
       "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": {
         "previous_pinned_sha256": "feeb234e91cacd9c81d01bef14bb506d3195f3af377ed1c14e1ad27529800160",
-        "reviewed_sha256": "334842742182ceaf538616509d8ee6028f810b40ba3e78a7eee0f679d8bfb013",
-        "reason": "Strict additive schema3 backup preview/restore including party, placement and transaction receipts."
+        "reviewed_sha256": "73ec243b9c12bceac07c8fd560d6fc6a4fad3a2485d09424efb6c1dd47f3a9cb",
+        "reason": "Strict additive schema3 backup preview/restore including party, placement and transaction receipts.",
+        "additional_reviews": [
+          {
+            "previous_reviewed_sha256": "334842742182ceaf538616509d8ee6028f810b40ba3e78a7eee0f679d8bfb013",
+            "reviewed_sha256": "73ec243b9c12bceac07c8fd560d6fc6a4fad3a2485d09424efb6c1dd47f3a9cb",
+            "reason": "Extend merge-only backup validation and restore to schema4 references, source archives, import receipts and verified recovery snapshots; retain all typed records, provenance and previous schemas.",
+            "source_baseline": "b02222006e631e145194609e248cbb7adf5f21db",
+            "authorization": "Owner ASTRAVAR2.1 Complete Notion Campaign Migration directive,18October2026"
+          }
+        ]
       },
       "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": {
         "previous_pinned_sha256": "68aa9fa9b027df3abca4ca07eca032c04f5a5b1cd3948d4b2c5a758a867e2ac1",
-        "reviewed_sha256": "ba147dddd03c46773384c4323d47854c5ef4edcb5d97fc658cc0cb05f8feabe5",
-        "reason": "Additive campaign Room2-to-3 migration and guards for structured inventory ownership."
+        "reviewed_sha256": "87f3d0615d6b46a59b8499d67e33d2c2d0d0863f2cfb44d1b5b6733e01832c79",
+        "reason": "Additive campaign Room2-to-3 migration and guards for structured inventory ownership.",
+        "additional_reviews": [
+          {
+            "previous_reviewed_sha256": "ba147dddd03c46773384c4323d47854c5ef4edcb5d97fc658cc0cb05f8feabe5",
+            "reviewed_sha256": "87f3d0615d6b46a59b8499d67e33d2c2d0d0863f2cfb44d1b5b6733e01832c79",
+            "reason": "Additive CampaignLedgerDb3-to-4 tables and ordinary schema4 exports for complete offline campaign archives; existing campaign and weapon records remain intact.",
+            "source_baseline": "b02222006e631e145194609e248cbb7adf5f21db",
+            "authorization": "Owner ASTRAVAR2.1 Complete Notion Campaign Migration directive,18October2026"
+          }
+        ]
       },
       "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": {
         "previous_pinned_sha256": "90dbcfe730c9bea800101449551cad81942a979b168566d792fc3ee8978e5871",
@@ -217,6 +238,35 @@
         "reviewed_sha256": "ff179553fdd944ffa020211589a47cdf13d387ed5a2217b67131e7c66f1d97e9",
         "reason": "Clarify that the unchanged twenty-entry limit applies to the working/undo projection, not destruction of immutable history or complete backups.",
         "source_commit": "ddf1a50"
+      }
+    }
+  },
+  "authorized_notion_campaign_migration": {
+    "authorization": "Owner ASTRAVAR2.1 Complete Notion Campaign Migration directive,18October2026",
+    "source_baseline": "b02222006e631e145194609e248cbb7adf5f21db",
+    "scope": "Explicitly reviewed schema4 campaign import, complete local reference preservation and recovery; original schemas, weapon engine, artwork and owner signing configuration remain pinned. No real source exports are included.",
+    "files": {
+      "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": {
+        "source_baseline_sha256": "334842742182ceaf538616509d8ee6028f810b40ba3e78a7eee0f679d8bfb013",
+        "reviewed_sha256": "73ec243b9c12bceac07c8fd560d6fc6a4fad3a2485d09424efb6c1dd47f3a9cb",
+        "reason": "Extend merge-only backup validation and restore to schema4 references, source archives, import receipts and verified recovery snapshots; retain all typed records, provenance and previous schemas."
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": {
+        "source_baseline_sha256": "ba147dddd03c46773384c4323d47854c5ef4edcb5d97fc658cc0cb05f8feabe5",
+        "reviewed_sha256": "87f3d0615d6b46a59b8499d67e33d2c2d0d0863f2cfb44d1b5b6733e01832c79",
+        "reason": "Additive CampaignLedgerDb3-to-4 tables and ordinary schema4 exports for complete offline campaign archives; existing campaign and weapon records remain intact."
+      },
+      "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/3.json": {
+        "reviewed_sha256": "d030a6759b35784528732ff331ed20b27cb3c41561db0b7031d839b962f49901",
+        "reason": "Frozen schema3 retained unchanged from verified source baseline."
+      },
+      "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/4.json": {
+        "reviewed_sha256": "076ebbba19127c09137b7095d84cc89bc9fb64c25ab74951677b9d2537cd3c5f",
+        "reason": "Owner-authorized additive offline campaign archive import and recovery implementation; verification evidence recorded separately."
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": {
+        "reviewed_sha256": "559357699d2887a8e75ff2722ae09f5772e3df23259fb78460aed96837fab96a",
+        "reason": "Owner-authorized additive offline campaign import and verified recovery. Canonical Notion identity deduplication and bounded SQLite BLOB substring reads retain oversized source, backup and reference UTF-8 without CursorWindow row failures. Verification evidence recorded separately."
       }
     }
   }
