@@ -296,8 +296,8 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
 
     /** Player-controlled JSON export includes compact embedded item icons and the full audit history. */
     suspend fun export(): String = db.withTransaction {
-        supportedCampaignBackup(json.encodeToString(LedgerExport(exportedAt = System.currentTimeMillis(),
-            items = dao.allItems(), events = dao.allEvents(), records = records.snapshot(), archive = archive.snapshot())))
+        campaignBackupJson(LedgerExport(exportedAt = System.currentTimeMillis(),
+            items = dao.allItems(), events = dao.allEvents(), records = records.snapshot(), archive = archive.snapshot()))
     }
 
     /** Historical compatibility export only: does not include new inventions/connections/companion records. */
