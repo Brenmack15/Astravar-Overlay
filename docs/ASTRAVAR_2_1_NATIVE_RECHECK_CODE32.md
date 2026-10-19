@@ -12,6 +12,8 @@ The chooser's initial empty page can fit without scrolling. Its actual accessibi
 
 A subsequent baseline-code24 setup stopped before upgrade or import: Android explicitly rejected its single `ACTION_SET_TEXT` during an IME/window-add transition. The exact text readback correctly failed on the still-empty field. The failed artifact is retained. This fresh-emulator retry changes only this validation note; the fixture, shared observer, chooser, workflow, application and all eleven required native checks remain unchanged. No failed input is retried within a test and no assertion is waived.
 
+The next unchanged-runtime run stopped during SDK setup, before product preparation or any native test: the official emulator download could not be opened as a ZIP. SDK package installation now permits at most two identical attempts within its original single 360-second timeout. Between failed and final attempts it removes only the incomplete `.temp` download cache inside that fresh job’s SDK, after verifying the exact SDK root. Command-line-tool checksum verification, SDK versions, step limits and all eleven native checks remain unchanged. Attempt diagnostics are retained after preparation or failure; no product or test action is retried.
+
 ## Immutable inputs
 
 | Input | Exact value |
