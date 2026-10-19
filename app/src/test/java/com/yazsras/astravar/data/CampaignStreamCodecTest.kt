@@ -79,6 +79,18 @@ class CampaignStreamCodecTest {
         }
     }
 
+    @Test fun jsonComplexityLimitsRejectBeforeTypedCollectionsAreAllocated() {
+        val boundary = "[" + "null,".repeat(CAMPAIGN_JSON_MAX_CONTAINER_VALUES - 1) + "null]"
+        assertTrue(rejectDuplicateJsonMembers(boundary).isEmpty())
+        val tooMany = "[null," + boundary.drop(1)
+        val distributed = "{\"a\":$boundary,\"b\":$boundary}"
+        val members = "{" + (0..CAMPAIGN_JSON_MAX_OBJECT_MEMBERS).joinToString(",") { "\"k$it\":null" } + "}"
+        listOf(tooMany to "record limit", distributed to "complexity limit", members to "member limit").forEach { (text, expected) ->
+            try { rejectDuplicateJsonMembers(text); fail("Unsupported JSON collection accepted") }
+            catch (error: IllegalArgumentException) { assertTrue(error.message.orEmpty(), error.message.orEmpty().contains(expected)) }
+        }
+    }
+
     @Test fun unicodeBackupByteLimitStopsInTheMeasuringPassBeforeOutputAllocation() {
         // Fewer than 32 million UTF-16 characters, but more than the SAF workflow's 32 MiB bytes.
         val oversized = snapshot("é".repeat(CAMPAIGN_BACKUP_MAX_BYTES / 2))
