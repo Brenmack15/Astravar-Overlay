@@ -141,7 +141,7 @@ class NativeRecheckTest(unittest.TestCase):
             native.source_guard(repo, base, tree)
 
     def metadata(self):
-        return {"id": native.ARTIFACT_ID, "name": "Astravar-2.1-verification", "expired": False,
+        return {"id": native.ARTIFACT_ID, "name": native.ARTIFACT_NAME, "expired": False,
                 "size_in_bytes": native.ARTIFACT_BYTES, "digest": "sha256:" + native.ARTIFACT_SHA256,
                 "workflow_run": {"id": native.RUN_ID, "head_sha": native.BASE_COMMIT}}
 
@@ -211,6 +211,17 @@ class NativeRecheckTest(unittest.TestCase):
             info = dict(original, **{key: value})
             with self.subTest(field=key), self.assertRaises(ValueError):
                 native.verify_product_inspection(info, 24)
+
+    def test_current_code26_and_exact_new_artifact_name_are_required(self):
+        info = {"package": "com.yazsras.astravar", "version_code": 26, "version_name": "2.1.0",
+                "label": "Astravar", "certificate_sha256": native.CI_CERTIFICATE, "debuggable": False,
+                "owner_signature_verified": False, "launcher_artwork_bytes_verified": True,
+                "alignment_16kb_verified": True, "apk_sha256": native.APK_HASHES["Astravar-2.1-CI-ONLY-code26.apk"]}
+        native.verify_product_inspection(info, 26)
+        with self.assertRaises(ValueError):
+            native.verify_product_inspection(dict(info, version_code=25), 26)
+        with self.assertRaises(ValueError):
+            native.verify_artifact_metadata(dict(self.metadata(), name="Astravar-2.1-verification"))
 
 
 if __name__ == "__main__":
