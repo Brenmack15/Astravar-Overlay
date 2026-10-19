@@ -51,7 +51,28 @@ jobs:
           mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/19.0"
           export PATH="$ANDROID_HOME/cmdline-tools/19.0/bin:$ANDROID_HOME/platform-tools:$PATH"
           printf 'y\n%.0s' {1..100} | timeout -k 5s 60s sdkmanager --licenses >/dev/null
-          timeout -k 10s 360s sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'emulator' 'platform-tools' 'system-images;android-36;google_apis;x86_64'
+          # Both attempts share the original single 360s package-install budget.
+          # Keep logs outside validation until prepare has created that directory.
+          mkdir -p "$RUNNER_TEMP/astravar-sdk-install-logs"
+          timeout -k 10s 360s bash <<'ASTRAVAR_SDK_INSTALL'
+          set -e
+          for astravar_sdk_attempt in 1 2; do
+            set +e
+            sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'emulator' 'platform-tools' 'system-images;android-36;google_apis;x86_64' 2>&1 | tee "$RUNNER_TEMP/astravar-sdk-install-logs/attempt-$astravar_sdk_attempt.log"
+            astravar_sdk_pipeline_status=("${PIPESTATUS[@]}")
+            set -e
+            astravar_sdk_status=${astravar_sdk_pipeline_status[0]}
+            printf 'attempt=%s sdkmanager_exit=%s log_exit=%s\n' "$astravar_sdk_attempt" "$astravar_sdk_status" "${astravar_sdk_pipeline_status[1]}" >> "$RUNNER_TEMP/astravar-sdk-install-logs/results.log"
+            if test "${astravar_sdk_pipeline_status[1]}" -ne 0; then exit "${astravar_sdk_pipeline_status[1]}"; fi
+            if test "$astravar_sdk_status" -eq 0; then exit 0; fi
+            if test "$astravar_sdk_attempt" -eq 1; then
+              # Only the incomplete installer cache in this fresh job's SDK.
+              test "$ANDROID_HOME" = "$RUNNER_TEMP/android-sdk"
+              rm -rf -- "$ANDROID_HOME/.temp"
+            fi
+          done
+          exit "$astravar_sdk_status"
+          ASTRAVAR_SDK_INSTALL
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "$ANDROID_HOME/cmdline-tools/19.0/bin" >> "$GITHUB_PATH"
@@ -103,6 +124,13 @@ jobs:
           timeout 15s adb shell am force-stop com.yazsras.astravar
           copy_campaign_database validation/campaign-mapped-rolled-back
           python3 scripts/native_recheck.py --profile code32 verify-mapped --rolled-back --database validation/campaign-mapped-rolled-back/astravar-campaign-ledger.db --manifest validation/campaign-mapped-before.json --fixture validation/native-mapped-fixture.json --output validation/native-mapped-rollback-readback.json --synthetic-demo
+      - name: Preserve SDK package-install attempt diagnostics
+        if: always()
+        run: |
+          if test -d "$RUNNER_TEMP/astravar-sdk-install-logs"; then
+            mkdir -p validation/sdk-install
+            cp -R "$RUNNER_TEMP/astravar-sdk-install-logs/." validation/sdk-install/
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
