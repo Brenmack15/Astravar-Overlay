@@ -52,6 +52,24 @@ class CampaignArchiveTest {
             checkpoints = listOf(CampaignCheckpoint("fictional-checkpoint", "Fictional unresolved checkpoint", unresolvedChoice = "Player has not decided.", source = "Fictional source"))))
     }
 
+    @Test fun unsupportedRelationshipCountsAreReadableAndLeaveTheDatabaseUntouched() = runBlocking {
+        val perRecord = CAMPAIGN_JSON_MAX_CONTAINER_VALUES / 2 + 1
+        val relationships = List(perRecord) { "fictional-target-$it" }
+        val examples = listOf(
+            payload(listOf(reference("fictional-wide", relations = relationships + relationships))),
+            payload(listOf(reference("fictional-a", relations = relationships), reference("fictional-b", relations = relationships))))
+        examples.forEach { incoming ->
+            val preview = repo.archive.preview(archive(incoming))
+            assertFalse(preview.valid)
+            assertTrue(preview.conflicts.toString(), preview.conflicts.any { it.contains("limit") })
+            assertTrue(db.archiveDao().allReferences().isEmpty())
+            assertTrue(db.archiveDao().allRelations().isEmpty())
+            assertTrue(db.archiveDao().allReceipts().isEmpty())
+            assertTrue(db.archiveDao().allBackups().isEmpty())
+            assertTrue(db.ledgerDao().allItems().isEmpty())
+        }
+    }
+
     @Test fun previewIsReadOnlyAndRealCommitRequiresConfirmationAndVerifiedBackup() = runBlocking {
         val preview = repo.archive.preview(archive())
         assertTrue(preview.valid)
