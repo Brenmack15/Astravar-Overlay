@@ -310,7 +310,11 @@ class RebuildVisualAcceptanceTest {
             assertEquals(listOf(DamageType.FIRE), runBlocking { fixture.preferences.flow.first().elements })
             compose.onNodeWithText("Active element").performClick()
             compose.onNodeWithContentDescription("Neutral Force").performClick()
-            settleUntil { runBlocking { fixture.preferences.flow.first().elements.isEmpty() } }
+            settleUntil {
+                runBlocking {
+                    fixture.preferences.flow.first().let { it.elements.isEmpty() && it.mode == Ability.ARCANE }
+                }
+            }
             assertEquals(Ability.ARCANE, runBlocking { fixture.preferences.flow.first().mode })
             assertEquals(seed.profile, fixture.repository.state.value!!.profile)
         }
