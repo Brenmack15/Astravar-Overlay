@@ -233,6 +233,34 @@ class CampaignArchiveTest {
         assertEquals(id, normalizedNotionIdentity("https://notion.so/Page$id?pvs=4#heading"))
         assertEquals(id, normalizedNotionIdentity("https://notion.so/Page-11111111-1111-1111-1111-111111111111"))
     }
+    @Test fun incomingNotionAliasBlocksAnOlderLocalItemWithAnotherTitleAndNoExternalReference() = runBlocking {
+        val data = mapped()
+        val item = data.items.single()
+        val alias = "22222222222222222222222222222222"
+        val incoming = data.copy(records = data.records.copy(externalReferences = listOf(
+            ExternalRecordReference("fictional-alias", "notion", alias, "item", item.id, source = "Fictional source"))))
+        assertTrue(repo.archive.preview(archive(payload(mapped = incoming))).valid)
+        db.ledgerDao().insertItem(item.copy(id = "fictional-older-local", title = "Different older display title",
+            notionPageId = "https://notion.so/Other-22222222-2222-2222-2222-222222222222"))
+        val blocked = repo.archive.preview(archive(payload(mapped = incoming)))
+        assertFalse(blocked.valid)
+        assertTrue(blocked.conflicts.any { it.contains("Notion item identity") })
+        assertEquals(listOf("fictional-older-local"), db.ledgerDao().allItems().map { it.id })
+        assertTrue(db.archiveDao().allReceipts().isEmpty())
+    }
+    @Test fun preservedLocalNotionAliasBlocksAnIncomingPrimaryIdentityEvenWithAnotherTitle() = runBlocking {
+        val data = mapped()
+        val alias = "22222222222222222222222222222222"
+        val local = data.items.single().copy(id = "fictional-existing-local", title = "Different older display title")
+        db.ledgerDao().insertItem(local)
+        db.partyDao().put(ExternalRecordReference("fictional-local-alias", "notion", alias, "item", local.id, source = "Fictional source"))
+        val incoming = data.copy(items = listOf(data.items.single().copy(notionPageId = alias)))
+        val blocked = repo.archive.preview(archive(payload(mapped = incoming)))
+        assertFalse(blocked.valid)
+        assertTrue(blocked.conflicts.any { it.contains("Notion item identity") })
+        assertEquals(listOf(local.id), db.ledgerDao().allItems().map { it.id })
+        assertTrue(db.archiveDao().allReceipts().isEmpty())
+    }
     @Test fun possiblePhysicalDuplicateAndWalletSnapshotRequireIdentityReconciliation() = runBlocking {
         val data = mapped()
         db.ledgerDao().insertItem(data.items.single().copy(id = "fictional-existing-stack", notionPageId = null))
