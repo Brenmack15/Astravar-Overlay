@@ -107,6 +107,36 @@ class CampaignArchiveTest {
         assertEquals(3L, db.partyDao().allWallets().single().gold)
         assertEquals(1, db.archiveDao().allReceipts().size)
     }
+    @Test fun duplicatePreviewStillReportsLocalConflictsAndHashesTheCompleteRetainedSource() = runBlocking {
+        val incoming = payload(mapped = mapped())
+        val receipt = import(incoming)
+        val retainedSources = db.archiveDao().allSources()
+        val before = repo.archive.preview(archive(incoming))
+        assertTrue(before.conflicts.toString(), before.valid)
+        assertTrue(before.summary.contains("Already imported"))
+        val localBody = "Fictional player correction; café 星図 🧭 stays a local record."
+        db.openHelper.writableDatabase.execSQL("UPDATE campaign_references SET body=?,contentSha256=? WHERE externalId=?",
+            arrayOf(localBody, campaignHash(localBody), incoming.records.single().externalId))
+        db.openHelper.writableDatabase.execSQL("UPDATE ledger_items SET description=? WHERE id=?",
+            arrayOf("Fictional later equipment correction", incoming.mapped!!.items.single().id))
+        val current = CampaignBackup(db).snapshot(includeBackups = false)
+        val normalized = current.copy(exportedAt = 0, archive = current.archive.copy(receipts = emptyList(), backups = emptyList()))
+        val expectedFingerprint = campaignHash(campaignJson.encodeToString(normalized))
+        val duplicate = repo.archive.preview(archive(incoming))
+        assertFalse(duplicate.valid)
+        assertTrue(duplicate.summary.contains("Already imported"))
+        assertTrue(duplicate.conflicts.toString(), duplicate.conflicts.any { it.contains("conflicts with a preserved local record") })
+        assertTrue(duplicate.conflicts.toString(), duplicate.conflicts.any { it.contains("differs from local data") })
+        assertEquals(expectedFingerprint, duplicate.currentFingerprint)
+        assertNotEquals(before.currentFingerprint, duplicate.currentFingerprint)
+        val invalid = repo.archive.preview("{}")
+        assertFalse(invalid.valid)
+        assertEquals(expectedFingerprint, invalid.currentFingerprint)
+        assertEquals(retainedSources, db.archiveDao().allSources())
+        assertEquals(receipt.packageHash, campaignHash(db.archiveDao().allSources().single().payloadJson))
+        assertEquals(localBody, db.archiveDao().allReferences().single().body)
+        assertEquals(1, db.archiveDao().allReceipts().size)
+    }
     @Test fun interruptedImportRollsBackAllRowsAndRetainsVerifiedRecoveryBackup() = runBlocking {
         val preview = repo.archive.preview(archive(payload(mapped = mapped())))
         repo.archive.exportPreImportBackup(preview.fingerprint)
@@ -152,6 +182,79 @@ class CampaignArchiveTest {
         assertEquals(2, db.archiveDao().allReceipts().size)
         assertEquals(recovery, repo.archive.rollback(receipt.packageHash, true))
         assertFalse(repo.archive.preview(archive(payload(mapped = mapped()))).valid)
+    }
+    @Test fun legacyUnicodeRecoveryBytesRemainReusableForCommitAndRollback() = runBlocking {
+        val prior = reference("fictional-prior", "Fictional café — 星図 🧭; an unresolved discovery stays unchanged.")
+        val first = import(payload(listOf(prior)))
+        val preview = repo.archive.preview(archive(payload(listOf(reference("fictional-later")))))
+        assertTrue(preview.conflicts.toString(), preview.valid)
+        val current = CampaignBackup(db).snapshot(includeBackups = false)
+        val snapshot = current.copy(exportedAt = 0, archive = current.archive.copy(backups = emptyList()))
+        // This is the exact pre-ASCII schema-four encoding used by previously saved recovery rows.
+        val legacyText = campaignJson.encodeToString(snapshot)
+        assertTrue(legacyText.contains("café — 星図 🧭"))
+        db.archiveDao().insert(CampaignImportBackup(preview.fingerprint, legacyText, campaignHash(legacyText), preview.currentFingerprint, 1))
+        assertEquals(legacyText, repo.archive.exportPreImportBackup(preview.fingerprint))
+        val imported = repo.archive.commit(preview, true)
+        assertTrue(repo.archive.verify(imported.packageHash).valid)
+        repo.archive.rollback(imported.packageHash, true)
+        assertEquals(prior.body, db.archiveDao().allReferences().single().body)
+        assertEquals(legacyText, requireNotNull(db.archiveDao().backup(preview.fingerprint)).snapshotJson)
+        assertTrue(repo.archive.verify(first.packageHash).valid)
+    }
+    @Test fun preparedBackupRemainsUsableAfterAnotherImportAndRollbackAddsOnlyReceipts() = runBlocking {
+        val original = reference("fictional-original", "Fictional café 星図 🧭 history remains exact.")
+        val first = import(payload(listOf(original)))
+        val pending = payload(listOf(reference("fictional-pending")))
+        val initialReview = repo.archive.preview(archive(pending))
+        assertTrue(initialReview.conflicts.toString(), initialReview.valid)
+        val savedText = repo.archive.exportPreImportBackup(initialReview.fingerprint)
+        val savedRow = requireNotNull(db.archiveDao().backup(initialReview.fingerprint))
+        val temporary = import(payload(listOf(reference("fictional-temporary"))))
+        val temporaryRecovery = repo.archive.rollback(temporary.packageHash, true)
+        assertEquals(listOf(original.externalId), db.archiveDao().allReferences().map { it.externalId })
+        val receiptsBeforePending = db.archiveDao().allReceipts()
+        assertEquals(setOf(first.packageHash, temporary.packageHash, temporaryRecovery.packageHash), receiptsBeforePending.map { it.packageHash }.toSet())
+        val reviewedAgain = repo.archive.preview(archive(pending))
+        assertTrue(reviewedAgain.conflicts.toString(), reviewedAgain.valid)
+        assertEquals(initialReview.currentFingerprint, reviewedAgain.currentFingerprint)
+        assertEquals(savedText, repo.archive.exportPreImportBackup(reviewedAgain.fingerprint))
+        val applied = repo.archive.commit(reviewedAgain, true)
+        assertTrue(repo.archive.verify(applied.packageHash).valid)
+        assertEquals(savedRow, db.archiveDao().backup(reviewedAgain.fingerprint))
+        repo.archive.rollback(applied.packageHash, true)
+        assertEquals(original.body, db.archiveDao().allReferences().single().body)
+        assertTrue(db.archiveDao().allReceipts().containsAll(receiptsBeforePending))
+        assertTrue(repo.archive.verify(first.packageHash).valid)
+    }
+    @Test fun independentBackupByteReadbackRejectsSameLengthCorruptionBeforeCommit() = runBlocking {
+        val preview = repo.archive.preview(archive(payload(mapped = mapped())))
+        val original = repo.archive.exportPreImportBackup(preview.fingerprint)
+        val corrupted = original.replace("astravar-campaign-items", "astravar-campaign-itfms")
+        assertNotEquals(original, corrupted)
+        assertEquals(original.length, corrupted.length)
+        db.openHelper.writableDatabase.execSQL("UPDATE campaign_import_backups SET snapshotJson=? WHERE packageHash=?",
+            arrayOf(corrupted, preview.fingerprint))
+        try { repo.archive.commit(preview, true); fail("Stored backup byte corruption must block import") } catch (_: IllegalStateException) {}
+        assertTrue(db.ledgerDao().allItems().isEmpty())
+        assertTrue(db.partyDao().allWallets().isEmpty())
+        assertTrue(db.archiveDao().allReferences().isEmpty())
+        assertTrue(db.archiveDao().allReceipts().isEmpty())
+        assertEquals(campaignHash(original), requireNotNull(db.archiveDao().backupMetadata(preview.fingerprint)).snapshotSha256)
+    }
+    @Test fun recoveryPreservesExistingBackupAndReceiptRowsWithoutDeletingThem() = runBlocking {
+        import(payload(listOf(reference("fictional-prior", "Fictional café 星図 🧭 history."))))
+        val second = import(payload(listOf(reference("fictional-later"))))
+        val backups = db.archiveDao().allBackups()
+        val receipts = db.archiveDao().allReceipts()
+        val sql = db.openHelper.writableDatabase
+        sql.execSQL("CREATE TRIGGER preserve_backup_evidence BEFORE DELETE ON campaign_import_backups BEGIN SELECT RAISE(ABORT, 'Recovery backups are immutable'); END")
+        sql.execSQL("CREATE TRIGGER preserve_receipt_evidence BEFORE DELETE ON campaign_import_receipts BEGIN SELECT RAISE(ABORT, 'Import receipts are immutable'); END")
+        val recovery = repo.archive.rollback(second.packageHash, true)
+        assertEquals(backups, db.archiveDao().allBackups())
+        assertEquals(receipts, db.archiveDao().allReceipts().filterNot { it.packageHash == recovery.packageHash })
+        assertEquals("fictional-prior", db.archiveDao().allReferences().single().externalId)
+        assertEquals("Fictional café 星図 🧭 history.", db.archiveDao().allReferences().single().body)
     }
     @Test fun recoveryRefusesToDiscardSubsequentCampaignEdits() = runBlocking {
         val receipt = import()
@@ -282,7 +385,7 @@ class CampaignArchiveTest {
     }
 
     @Test fun oversizedReferenceSourceAndRecoverySnapshotsUseBoundedBlobChunks() = runBlocking {
-        val large = reference("fictional-large", "a".repeat(1_200_000)).copy(propertiesJson = "{\"fictional\":\"" + "b".repeat(1_100_000) + "\"}")
+        val large = reference("fictional-large", "é".repeat(1_200_000)).copy(propertiesJson = "{\"fictional\":\"" + "b".repeat(1_100_000) + "\"}")
         val first = import(payload(records = listOf(large)))
         assertEquals(1, db.archiveDao().largeReferences().size)
         assertEquals(large.body, db.archiveDao().allReferences().single().body)
@@ -290,8 +393,10 @@ class CampaignArchiveTest {
         val second = import(payload(records = listOf(reference("fictional-second"))))
         val backup = requireNotNull(db.archiveDao().backup(second.packageHash))
         assertTrue(backup.snapshotJson.length > 4_000_000)
+        assertTrue(backup.snapshotJson.all { it.code < 128 })
         assertEquals(backup.snapshotSha256, campaignHash(backup.snapshotJson))
         repo.archive.rollback(second.packageHash, true)
+        assertEquals(large.body, db.archiveDao().allReferences().single().body)
         assertEquals(large.propertiesJson, db.archiveDao().allReferences().single().propertiesJson)
         assertTrue(repo.archive.verify(first.packageHash).valid)
     }
