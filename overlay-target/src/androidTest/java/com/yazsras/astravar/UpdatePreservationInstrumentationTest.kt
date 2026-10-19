@@ -114,7 +114,7 @@ class UpdatePreservationInstrumentationTest {
         tap("Find a prompt")
         val query = ui.bounds(By.clazz("android.widget.EditText").focused(true).pkg(product), "focused ChatGPT prompt search", timeoutMs = 10_000)
         assertNotNull(query)
-        ui.enterFocusedField("Resume", product, "ChatGPT prompt search")
+        ui.setFocusedField("Resume", product, "ChatGPT prompt search")
         device.pressBack()
         tap("Copy handoff prompt")
         find("Copied — paste in ChatGPT")
