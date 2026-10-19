@@ -156,8 +156,76 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
     internal suspend fun snapshot(includeBackups: Boolean = true) = CampaignArchiveState(
         dao.allReferences(), dao.allRelations(), dao.allReceipts(), if (includeBackups) dao.allBackups() else emptyList(), dao.allSources())
     private suspend fun campaignSnapshot() = CampaignBackup(db).snapshot(includeBackups = false)
+    /** Preview compares typed/reference rows; retained source payloads contribute only to its full state hash. */
+    private suspend fun previewConflictSnapshot(): LedgerExport = CampaignBackup(db).snapshot(includeArchive = false).copy(
+        archive = CampaignArchiveState(references = dao.allReferences(), relations = dao.allRelations(), receipts = dao.allReceipts()))
     private fun stateHash(value: LedgerExport) = campaignSerializedHash(LedgerExport.serializer(), value.copy(exportedAt = 0,
         archive = value.archive.copy(receipts = emptyList(), backups = emptyList())))
+    private fun recoverySnapshot(value: LedgerExport) = value.copy(exportedAt = 0,
+        archive = value.archive.copy(backups = emptyList()))
+    // A separate suspend frame releases the source archive before the next complete database read.
+    private suspend fun currentStateHash() = stateHash(campaignSnapshot())
+
+    /** Independently hash stored SQLite bytes without reconstructing another complete backup String. */
+    private suspend fun verifyStoredBackup(metadata: CampaignBackupMetadata) {
+        check(metadata.snapshotBytes in 1..CAMPAIGN_BACKUP_MAX_BYTES.toLong()) { "Recovery backup exceeds the safe recovery text limit." }
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        var offset = 1L
+        while (offset <= metadata.snapshotBytes) {
+            val count = minOf(128 * 1024L, metadata.snapshotBytes - offset + 1).toInt()
+            val bytes = requireNotNull(dao.backupChunk(metadata.packageHash, offset, count)) { "Recovery backup text is missing." }
+            check(bytes.size == count) { "Recovery backup was truncated during readback." }
+            digest.update(bytes)
+            offset += count
+        }
+        check(digest.digest().joinToString("") { "%02x".format(it) } == metadata.snapshotSha256) { "Recovery backup database readback failed." }
+    }
+
+    /** Keep the normal byte-exact path free of backup decoding, including earlier schema-four encodings. */
+    private suspend fun matchingCurrentSnapshot(metadata: CampaignBackupMetadata, expectedState: String): LedgerExport? {
+        check(metadata.sourceStateSha256 == expectedState) { "The recovery backup did not verify." }
+        val current = campaignSnapshot()
+        check(stateHash(current) == expectedState) { "Local data changed. Preview again before creating a recovery backup." }
+        val snapshot = recoverySnapshot(current)
+        if (metadata.snapshotSha256 != campaignBackupSerializedHash(snapshot) &&
+            metadata.snapshotSha256 != campaignSerializedHash(LedgerExport.serializer(), snapshot)) return null
+        verifyStoredBackup(metadata)
+        return current
+    }
+
+    private suspend fun verifyEarlierReceiptSnapshot(metadata: CampaignBackupMetadata) {
+        // A later import and rollback can add immutable receipts without changing campaign state.
+        // Decode only after the current snapshot's helper frame ends, then verify the entire prior state.
+        val prior = decodeVerifiedSnapshot(metadata)
+        val retainedReceipts = dao.allReceipts().toSet()
+        check(prior.archive.backups.isEmpty() && prior.archive.receipts.all { it in retainedReceipts }) {
+            "The recovery backup contains different recovery evidence."
+        }
+    }
+
+    private suspend fun verifiedCurrentSnapshot(metadata: CampaignBackupMetadata, expectedState: String): LedgerExport {
+        matchingCurrentSnapshot(metadata, expectedState)?.let { return it }
+        verifyEarlierReceiptSnapshot(metadata)
+        // The decoded backup frame also ends before this fresh current-state readback.
+        return campaignSnapshot().also {
+            check(stateHash(it) == expectedState) { "Local data changed. Preview again before creating a recovery backup." }
+        }
+    }
+
+    private suspend fun verifyExistingBackup(metadata: CampaignBackupMetadata, expectedState: String) {
+        verifiedCurrentSnapshot(metadata, expectedState)
+    }
+
+    private suspend fun prepareBackup(packageHash: String, expectedState: String): CampaignImportBackup {
+        val current = campaignSnapshot()
+        check(stateHash(current) == expectedState) { "Local data changed. Preview again before creating a recovery backup." }
+        // Backup bodies exclude other backup bodies to prevent exponential nesting.
+        val snapshot = recoverySnapshot(current)
+        val expectedHash = campaignBackupSerializedHash(snapshot)
+        val text = campaignBackupJson(snapshot)
+        check(campaignHash(text) == expectedHash) { "Recovery backup serialization did not verify." }
+        return CampaignImportBackup(packageHash, text, expectedHash, expectedState, System.currentTimeMillis())
+    }
     private fun referenceId(campaignId: String, externalId: String) = "$campaignId::$externalId"
     private fun rows(archive: CampaignArchivePayload, hash: String) = archive.records.map {
         CampaignReferenceRecord(referenceId(archive.campaignId, it.externalId), archive.campaignId, it.externalId, it.title,
@@ -186,62 +254,66 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
     }
 
     suspend fun preview(text: String): CampaignArchivePreview = db.withTransaction {
-        val current = campaignSnapshot()
+        // End the full source snapshot's frame before decoding another complete selected package.
+        // The surrounding transaction keeps this fingerprint and later conflict rows consistent.
+        val currentFingerprint = currentStateHash()
         try {
-            supportedCampaignBackup(text)
-            rejectDuplicateJsonMembers(text)
-            val envelope = campaignJson.decodeFromString<CampaignArchiveEnvelope>(text)
-            require(envelope.format == "astravar-campaign-archive" && envelope.schema == 1) { "Unsupported campaign archive format or schema." }
-            require(envelope.payloadSha256.matches(Regex("[0-9a-f]{64}")) && campaignHash(envelope.payload) == envelope.payloadSha256) { "Archive integrity check failed. Select the original complete file." }
-            rejectDuplicateJsonMembers(envelope.payload)
-            val incoming = campaignJson.decodeFromString<CampaignArchivePayload>(envelope.payload)
-            require(incoming.records.sumOf { it.relationIds.size.toLong() } <= CAMPAIGN_JSON_MAX_CONTAINER_VALUES) {
-                "Archive relationships exceed the supported campaign complexity limit. No records were imported."
-            }
-            val conflicts = validatePayload(incoming).toMutableList()
-            val incomingRows = rows(incoming, envelope.payloadSha256)
-            val known = (current.archive.references + incomingRows).map { it.id }.toSet()
-            val relations = edges(incoming, known)
-            val state = CampaignArchiveState(references = incomingRows, relations = relations)
-            conflicts += validateState(state, current.archive)
-            incoming.mapped?.let {
-                require(it.archive == CampaignArchiveState()) { "Mapped records cannot contain another campaign archive." }
-                conflicts += CampaignBackup(db).validate(it, current)
-                conflicts += validateMappedIdentities(it, current)
-            }
-            val warnings = incoming.issues + relations.filter { !it.resolved }.map { "Unresolved relationship: ${it.fromId} → ${it.toId}" } +
-                incoming.attachments.filter { it.base64 == null }.map { "Attachment retained as external reference: ${it.fileName} (${it.status})" }
-            val prior = dao.receipt(envelope.payloadSha256)
-            if (dao.receipt("rollback:${envelope.payloadSha256}") != null) conflicts += "This exact package was rolled back. Review a newly exported package before reimporting."
-            val summary = "${incoming.records.size} reference records, ${relations.size} relationships, ${incoming.attachments.size} attachments; " +
-                "${incoming.mapped?.items?.size ?: 0} mapped inventory items, ${incoming.mapped?.records?.characterProfiles?.size ?: 0} characters, " +
-                "${incoming.mapped?.records?.wallets?.size ?: 0} wallet snapshots. " +
-                if (prior != null) "Already imported; repeating this import adds nothing." else "Existing different records are preserved. History does not execute gameplay."
-            CampaignArchivePreview(conflicts.isEmpty(), summary, conflicts.distinct(), warnings.distinct(), envelope.payloadSha256,
-                stateHash(current), incoming, envelope.payload, campaignSerializedHash(CampaignArchivePayload.serializer(), incoming)).also { backupReview = if (it.valid) it.fingerprint to it.currentFingerprint else null }
+            previewValidated(text, currentFingerprint)
         } catch (e: Exception) {
-            CampaignArchivePreview(false, "Campaign archive could not be validated.", listOf(e.message ?: "Invalid archive."), emptyList(), "", stateHash(current))
+            CampaignArchivePreview(false, "Campaign archive could not be validated.", listOf(e.message ?: "Invalid archive."), emptyList(), "", currentFingerprint)
         }
+    }
+
+    private suspend fun previewValidated(text: String, currentFingerprint: String): CampaignArchivePreview {
+        supportedCampaignBackup(text)
+        rejectDuplicateJsonMembers(text)
+        val envelope = campaignJson.decodeFromString<CampaignArchiveEnvelope>(text)
+        require(envelope.format == "astravar-campaign-archive" && envelope.schema == 1) { "Unsupported campaign archive format or schema." }
+        require(envelope.payloadSha256.matches(Regex("[0-9a-f]{64}")) && campaignHash(envelope.payload) == envelope.payloadSha256) { "Archive integrity check failed. Select the original complete file." }
+        rejectDuplicateJsonMembers(envelope.payload)
+        val incoming = campaignJson.decodeFromString<CampaignArchivePayload>(envelope.payload)
+        require(incoming.records.sumOf { it.relationIds.size.toLong() } <= CAMPAIGN_JSON_MAX_CONTAINER_VALUES) {
+            "Archive relationships exceed the supported campaign complexity limit. No records were imported."
+        }
+        val conflicts = validatePayload(incoming).toMutableList()
+        val current = previewConflictSnapshot()
+        val incomingRows = rows(incoming, envelope.payloadSha256)
+        val known = (current.archive.references + incomingRows).map { it.id }.toSet()
+        val relations = edges(incoming, known)
+        val state = CampaignArchiveState(references = incomingRows, relations = relations)
+        conflicts += validateState(state, current.archive)
+        incoming.mapped?.let {
+            require(it.archive == CampaignArchiveState()) { "Mapped records cannot contain another campaign archive." }
+            conflicts += CampaignBackup(db).validate(it, current)
+            conflicts += validateMappedIdentities(it, current)
+        }
+        val warnings = incoming.issues + relations.filter { !it.resolved }.map { "Unresolved relationship: ${it.fromId} → ${it.toId}" } +
+            incoming.attachments.filter { it.base64 == null }.map { "Attachment retained as external reference: ${it.fileName} (${it.status})" }
+        val prior = dao.receipt(envelope.payloadSha256)
+        if (dao.receipt("rollback:${envelope.payloadSha256}") != null) conflicts += "This exact package was rolled back. Review a newly exported package before reimporting."
+        val summary = "${incoming.records.size} reference records, ${relations.size} relationships, ${incoming.attachments.size} attachments; " +
+            "${incoming.mapped?.items?.size ?: 0} mapped inventory items, ${incoming.mapped?.records?.characterProfiles?.size ?: 0} characters, " +
+            "${incoming.mapped?.records?.wallets?.size ?: 0} wallet snapshots. " +
+            if (prior != null) "Already imported; repeating this import adds nothing." else "Existing different records are preserved. History does not execute gameplay."
+        return CampaignArchivePreview(conflicts.isEmpty(), summary, conflicts.distinct(), warnings.distinct(), envelope.payloadSha256,
+            currentFingerprint, incoming, envelope.payload, campaignSerializedHash(CampaignArchivePayload.serializer(), incoming)).also { backupReview = if (it.valid) it.fingerprint to it.currentFingerprint else null }
     }
 
     /** Must happen after preview and before commit; verifies serialization and retains the exact recovery snapshot. */
     suspend fun exportPreImportBackup(packageHash: String): String = db.withTransaction {
         val review = requireNotNull(backupReview?.takeIf { it.first == packageHash }) { "Preview a valid package before saving its recovery backup." }
-        val current = campaignSnapshot()
-        check(stateHash(current) == review.second) { "Local data changed. Preview again before creating a recovery backup." }
-        dao.backup(packageHash)?.let { existing ->
-            require(existing.sourceStateSha256 == review.second && campaignHash(existing.snapshotJson) == existing.snapshotSha256) { "The saved recovery snapshot does not match this preview." }
-            return@withTransaction existing.snapshotJson
+        dao.backupMetadata(packageHash)?.let { existing ->
+            verifyExistingBackup(existing, review.second)
+            // The source snapshot's helper frame has ended before the saved text is allocated.
+            return@withTransaction readArchiveText(existing.snapshotBytes) { offset, size -> dao.backupChunk(packageHash, offset, size) }
         }
-        // Backup bodies exclude other backup bodies to prevent exponential nesting; those remain in the local recovery store.
-        val snapshot = current.copy(exportedAt = 0, archive = current.archive.copy(backups = emptyList()))
-        val text = campaignBackupJson(snapshot)
-        check(campaignJson.decodeFromString<LedgerExport>(text) == snapshot) { "Recovery backup serialization did not verify." }
-        val record = CampaignImportBackup(packageHash, text, campaignHash(text), review.second, System.currentTimeMillis())
+        val record = prepareBackup(packageHash, review.second)
         dao.insert(record)
-        val reread = requireNotNull(dao.backup(packageHash))
-        check(reread == record && campaignHash(reread.snapshotJson) == record.snapshotSha256) { "Recovery backup database readback failed." }
-        text
+        val metadata = requireNotNull(dao.backupMetadata(packageHash))
+        check(metadata.packageHash == record.packageHash && metadata.snapshotSha256 == record.snapshotSha256 &&
+            metadata.sourceStateSha256 == record.sourceStateSha256 && metadata.createdAt == record.createdAt) { "Recovery backup metadata readback failed." }
+        verifyStoredBackup(metadata)
+        record.snapshotJson
     }
 
     suspend fun commit(preview: CampaignArchivePreview, confirmed: Boolean): CampaignImportReceipt = db.withTransaction {
@@ -255,11 +327,8 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
         require(campaignHash(preview.payloadJson) == preview.fingerprint &&
             campaignSerializedHash(CampaignArchivePayload.serializer(), incoming) == preview.archiveFingerprint) { "Preview content changed. Select the package again." }
         require(validatePayload(incoming).isEmpty()) { "Archive validation failed." }
-        val current = campaignSnapshot()
-        check(stateHash(current) == preview.currentFingerprint) { "Local data changed after preview. Select the file again." }
-        val backup = requireNotNull(dao.backup(preview.fingerprint)) { "Save and verify a pre-import recovery backup first." }
-        check(backup.sourceStateSha256 == preview.currentFingerprint && campaignHash(backup.snapshotJson) == backup.snapshotSha256 &&
-            stateHash(campaignJson.decodeFromString<LedgerExport>(backup.snapshotJson)) == preview.currentFingerprint) { "The recovery backup did not verify." }
+        val backup = requireNotNull(dao.backupMetadata(preview.fingerprint)) { "Save and verify a pre-import recovery backup first." }
+        val current = verifiedCurrentSnapshot(backup, preview.currentFingerprint)
         val incomingRows = rows(incoming, preview.fingerprint)
         val edges = edges(incoming, (current.archive.references + incomingRows).map { it.id }.toSet())
         val state = CampaignArchiveState(references = incomingRows, relations = edges,
@@ -312,24 +381,33 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
         require(confirmed) { "Player confirmation is required before recovery." }
         dao.receipt("rollback:$packageHash")?.let { return@withTransaction it }
         val receipt = requireNotNull(dao.receipt(packageHash)) { "No import receipt exists." }
-        check(stateHash(campaignSnapshot()) == receipt.readbackSha256) { "Campaign data changed after import. Export both states and reconcile; automatic rollback would discard later work." }
-        val backup = requireNotNull(dao.backup(packageHash)) { "The pre-import backup is unavailable." }
-        check(campaignHash(backup.snapshotJson) == backup.snapshotSha256) { "Recovery backup integrity failed." }
-        val prior = campaignJson.decodeFromString<LedgerExport>(backup.snapshotJson)
-        check(stateHash(prior) == backup.sourceStateSha256) { "Recovery snapshot identity failed." }
-        val retainedBackups = dao.allBackups()
-        val retainedReceipts = dao.allReceipts()
+        check(currentStateHash() == receipt.readbackSha256) { "Campaign data changed after import. Export both states and reconcile; automatic rollback would discard later work." }
+        val backup = requireNotNull(dao.backupMetadata(packageHash)) { "The pre-import backup is unavailable." }
+        restoreVerifiedSnapshot(backup)
+        // The decoded prior snapshot's helper frame has ended before independent readback.
+        check(currentStateHash() == backup.sourceStateSha256) { "Recovery database readback differs from the verified pre-import snapshot." }
+        CampaignImportReceipt("rollback:$packageHash", receipt.campaignId, receipt.title, System.currentTimeMillis(),
+            receipt.recordCount, receipt.relationCount, "ROLLED_BACK", backup.sourceStateSha256,
+            "Recovered the verified pre-import campaign snapshot. Original import and recovery receipts are retained.").also { dao.insert(it) }
+    }
+
+    private suspend fun decodeVerifiedSnapshot(metadata: CampaignBackupMetadata): LedgerExport {
+        verifyStoredBackup(metadata)
+        val text = readArchiveText(metadata.snapshotBytes) { offset, size -> dao.backupChunk(metadata.packageHash, offset, size) }
+        check(campaignHash(text) == metadata.snapshotSha256) { "Recovery backup integrity failed." }
+        val prior = campaignDecodeBackup(text)
+        check(stateHash(prior) == metadata.sourceStateSha256) { "Recovery snapshot identity failed." }
+        return prior
+    }
+
+    private suspend fun restoreVerifiedSnapshot(metadata: CampaignBackupMetadata) {
+        // Decoding ends in its own frame so the serialized text is released before restoring rows.
+        val prior = decodeVerifiedSnapshot(metadata)
         val sql = db.openHelper.writableDatabase
         ROLLBACK_DELETE_TABLES.forEach { sql.execSQL("DELETE FROM $it") }
         val empty = LedgerExport(exportedAt = 0, items = emptyList(), events = emptyList())
         CampaignBackup(db).mergeRows(prior.copy(archive = prior.archive.copy(backups = emptyList(), receipts = emptyList())), empty)
-        // Recovery evidence remains immutable across rollback and is included in future normal backups.
-        retainedBackups.forEach { dao.insert(it) }
-        retainedReceipts.forEach { dao.insert(it) }
-        check(stateHash(campaignSnapshot()) == backup.sourceStateSha256) { "Recovery database readback differs from the verified pre-import snapshot." }
-        CampaignImportReceipt("rollback:$packageHash", receipt.campaignId, receipt.title, System.currentTimeMillis(),
-            receipt.recordCount, receipt.relationCount, "ROLLED_BACK", backup.sourceStateSha256,
-            "Recovered the verified pre-import campaign snapshot. Original import and recovery receipts are retained.").also { dao.insert(it) }
+        // Backup and receipt tables remain untouched, preserving immutable recovery evidence in place.
     }
 
     private suspend fun verifyRecords(archive: CampaignArchivePayload, hash: String): List<String> {
@@ -495,7 +573,7 @@ private val ROLLBACK_DELETE_TABLES = listOf(
     "character_abilities", "project_stages", "material_requirements", "connection_facts", "connection_milestones", "companion_resources",
     "item_details", "item_properties", "campaign_links", "campaign_audit", "command_receipts", "campaign_checkpoints", "ledger_events",
     "ledger_items", "character_profiles", "invention_projects", "connection_entities", "companion_states", "campaign_reference_relations",
-    "campaign_references", "campaign_archive_sources", "campaign_import_backups", "campaign_import_receipts"
+    "campaign_references", "campaign_archive_sources"
 )
 val CAMPAIGN_MIGRATION_3_4: Migration = object : Migration(3, 4) {
     override fun migrate(db: SupportSQLiteDatabase) { CAMPAIGN_ARCHIVE_SCHEMA.forEach(db::execSQL) }
