@@ -82,8 +82,7 @@ jobs:
       - name: Build only fresh native target and instrumentation with matching test signer
         timeout-minutes: 12
         run: |
-          chmod +x gradlew
-          ./gradlew --no-daemon --console=plain :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
+          bash ./gradlew --no-daemon --console=plain :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
           python3 scripts/native_recheck.py verify-targets --output validation/native-test-apks.json
       - name: Native upgrade, full archive recovery and mapped campaign interfaces
         timeout-minutes: 35
