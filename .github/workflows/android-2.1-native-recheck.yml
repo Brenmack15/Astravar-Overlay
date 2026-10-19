@@ -4,6 +4,8 @@ on:
     branches: ['feat/astravar-2.1-player-first']
     paths:
       - 'overlay-target/src/androidTest/**'
+      - 'app/src/test/java/com/yazsras/astravar/ui/RebuildVisualAcceptanceTest.kt'
+      - 'scripts/ci-player-first-emulator.sh'
       - '.github/workflows/android-2.1-native-recheck.yml'
       - 'scripts/native_recheck.py'
       - 'scripts/tests/test_native_recheck.py'
@@ -24,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 65
     env:
-      ASTRAVAR_VERSION_CODE: '30'
+      ASTRAVAR_VERSION_CODE: '31'
       ASTRAVAR_VERSION_NAME: '2.1.0'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -64,19 +66,19 @@ jobs:
           # the archive digest and original run/source are checked before use.
           curl --connect-timeout 15 --max-time 150 -fsSL \
             -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GH_TOKEN" -H 'X-GitHub-Api-Version: 2026-03-10' \
-            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/artifacts/12182178961 \
+            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/artifacts/12187774293 \
             -o "$RUNNER_TEMP/native-recheck-artifact.json"
           curl --connect-timeout 15 --max-time 150 -fsSL \
             -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GH_TOKEN" -H 'X-GitHub-Api-Version: 2026-03-10' \
-            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/artifacts/12182178961/zip \
+            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/artifacts/12187774293/zip \
             -o "$RUNNER_TEMP/native-recheck-product.zip"
           curl --connect-timeout 15 --max-time 150 -fsSL \
             -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GH_TOKEN" -H 'X-GitHub-Api-Version: 2026-03-10' \
-            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/runs/39241681704 \
+            https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/runs/39254633105 \
             -o "$RUNNER_TEMP/native-recheck-source-run.json"
           curl --connect-timeout 15 --max-time 150 -fsSL \
             -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GH_TOKEN" -H 'X-GitHub-Api-Version: 2026-03-10' \
-            'https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/runs/39241681704/jobs?filter=all&per_page=100' \
+            'https://api.github.com/repos/Brenmack15/Astravar-Overlay/actions/runs/39254633105/jobs?filter=all&per_page=100' \
             -o "$RUNNER_TEMP/native-recheck-source-jobs.json"
           python3 scripts/native_recheck.py prepare --archive "$RUNNER_TEMP/native-recheck-product.zip" --artifact-metadata "$RUNNER_TEMP/native-recheck-artifact.json" --source-run-metadata "$RUNNER_TEMP/native-recheck-source-run.json" --source-jobs-metadata "$RUNNER_TEMP/native-recheck-source-jobs.json"
       - name: Build only fresh native target and instrumentation with matching test signer
