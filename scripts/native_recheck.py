@@ -40,6 +40,7 @@ ALLOWED_FILES = {
     "scripts/tests/test_native_recheck.py",
     "docs/ASTRAVAR_2_1_NATIVE_RECHECK.md",
     "overlay-target/src/androidTest/java/com/yazsras/astravar/OverlayInstrumentationTest.kt",
+    "overlay-target/src/androidTest/java/com/yazsras/astravar/UpdatePreservationInstrumentationTest.kt",
 }
 
 
