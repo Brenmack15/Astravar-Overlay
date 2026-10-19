@@ -7,9 +7,9 @@
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/2.json": "50a395a8b87a7a119312af1b1edba8246f68aed77be8900baa29a5caff964361",
     "app/schemas/com.yazsras.astravar.data.SandboxSyncDb/1.json": "23de63787037f830e1295ba7cd7efbc7d62cf18e3ba836c4e511bec8fd6cef03",
     "app/src/main/AndroidManifest.xml": "2a3a68963357e470043a0da0269422b8c007013ce0569e0b5cb8a4214f9d3fc7",
-    "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": "73ec243b9c12bceac07c8fd560d6fc6a4fad3a2485d09424efb6c1dd47f3a9cb",
-    "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": "87f3d0615d6b46a59b8499d67e33d2c2d0d0863f2cfb44d1b5b6733e01832c79",
-    "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": "6f53990746acf85f474ea6c5fcdc4a9162cef331cd2c52e69e19fa501011dc54",
+    "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": "a107fad88803696b7d3a0a06591403f54e06cc62801659ac7cd133d6dafcf6d2",
+    "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": "083954872f38de5652f7b11a75a36b9fe75cc01f4452e1dceb218fbe813bc388",
+    "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": "7e5b92d763929c131ddef1f8ee5f08bad520233939f51234feace666b45c77c3",
     "app/src/main/java/com/yazsras/astravar/data/HistoryStorage.kt": "c7968f73293f5d8f46fa148be3fbbb74352565e914ef3b1762f88800104dbb62",
     "app/src/main/java/com/yazsras/astravar/data/SandboxSync.kt": "25f71e8aac585b24f83975796e9a4a7aa01b7c6a8c6f94607544bdf8775f5cf9",
     "app/src/main/java/com/yazsras/astravar/data/Store.kt": "17c00ac0996007b028b99af360205c59f0694b258e7184b267067ffa038ed3be",
@@ -82,7 +82,7 @@
     "rules/src/test/kotlin/com/yazsras/astravar/rules/WeaponWorkflowTest.kt": "36d788ce7e2e7174e8b391c3e330c6e81c23ff0656b9fd8896277571a55ac425",
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/3.json": "d030a6759b35784528732ff331ed20b27cb3c41561db0b7031d839b962f49901",
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/4.json": "076ebbba19127c09137b7095d84cc89bc9fb64c25ab74951677b9d2537cd3c5f",
-    "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": "559357699d2887a8e75ff2722ae09f5772e3df23259fb78460aed96837fab96a"
+    "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": "4d6923a856264dd07841e6c85560fd3ee39de08b077774a712caf3b78079360e"
   },
   "owner_signing_block_sha256": "9f749325c6e42970c42ff72ce35cdb31af58a7a30000a404223b4841e267a1f3",
   "authorized_branding_change": {
@@ -267,6 +267,28 @@
       "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": {
         "reviewed_sha256": "559357699d2887a8e75ff2722ae09f5772e3df23259fb78460aed96837fab96a",
         "reason": "Owner-authorized additive offline campaign import and verified recovery. Canonical Notion identity deduplication and bounded SQLite BLOB substring reads retain oversized source, backup and reference UTF-8 without CursorWindow row failures. Verification evidence recorded separately."
+      }
+    }
+  },
+  "authorized_campaign_archive_memory_changes": {
+    "baseline": "0416314bbc8c29fe464cb11e50b55d61c012609d",
+    "scope": "Streaming UTF-8 and exact-byte JSON hashing/backup serialization; archive typed readback without copying retained sources. No combat mechanics, historical Room schema or owner signing block changes.",
+    "files": {
+      "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": {
+        "previous_sha256": "73ec243b9c12bceac07c8fd560d6fc6a4fad3a2485d09424efb6c1dd47f3a9cb",
+        "sha256": "a107fad88803696b7d3a0a06591403f54e06cc62801659ac7cd133d6dafcf6d2"
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": {
+        "previous_sha256": "87f3d0615d6b46a59b8499d67e33d2c2d0d0863f2cfb44d1b5b6733e01832c79",
+        "sha256": "083954872f38de5652f7b11a75a36b9fe75cc01f4452e1dceb218fbe813bc388"
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": {
+        "previous_sha256": "6f53990746acf85f474ea6c5fcdc4a9162cef331cd2c52e69e19fa501011dc54",
+        "sha256": "7e5b92d763929c131ddef1f8ee5f08bad520233939f51234feace666b45c77c3"
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": {
+        "previous_sha256": "559357699d2887a8e75ff2722ae09f5772e3df23259fb78460aed96837fab96a",
+        "sha256": "4d6923a856264dd07841e6c85560fd3ee39de08b077774a712caf3b78079360e"
       }
     }
   }
