@@ -44,6 +44,50 @@ ALLOWED_FILES = {
 }
 
 
+# Preserve the historical code31 workflow/default pins. The new profile can
+# reuse only the independently inspected code32 build and this exact harness delta.
+VERSION_CODE = 31
+STRICT_CHANGED_FILES = False
+PROFILE_NAME = "code31"
+SOURCE_FAILURE_LIMITATION = "Original run stopped at the overlay fixture; importer acceptance requires this new native recheck."
+CODE32_PROFILE = {
+    "BASE_COMMIT": "80e5dd2dc6645338ece59a7bb2c11cba0a3f7c06",
+    "BASE_TREE": "f957c7ac94f68d611cec02eaa85a3d8ed6456661",
+    "RUN_ID": 39270984985,
+    "SOURCE_JOB_ID": 118122894843,
+    "ARTIFACT_ID": 12196741246,
+    "ARTIFACT_NAME": "Astravar-2.1-migration-native-source",
+    "ARTIFACT_SHA256": "6810561146a964a905b842c9cf64d5d2c85e8d20d47f7ee0559edae25a6d6132",
+    "ARTIFACT_BYTES": 44824691,
+    "CI_CERTIFICATE": "50ea42fd9bf86bc444039ea8ff35aeb6ed1e75e4410fd65658dbaa4d5624717f",
+    "APK_HASHES": {
+        "Astravar-2.1-CI-ONLY-code24.apk": "978182dbc1c3938b05aaa6247b88ae4b0a6947b0f64b7fecf62a479c2fcde75e",
+        "Astravar-2.1-CI-ONLY-code32.apk": "7afff785ed1b722f37426ea1d9b9a753493b7acb5844b1add6074b9d0a6be7d4",
+    },
+    "MAPPING_ARTIFACT_PATH": "app/build/outputs/mapping/release/mapping.txt",
+    "MAPPING_SHA256": "942fd19dd90b10e1cd79c42722af858fe50e4b908403c9662aa4414e961caa1b",
+    "ALLOWED_FILES": {
+        "overlay-target/src/androidTest/java/com/yazsras/astravar/CampaignImportInstrumentationTest.kt",
+        "scripts/native_recheck.py",
+        "scripts/tests/test_native_recheck.py",
+        ".github/workflows/android-2.1-native-recheck32.yml",
+        ".github/workflows/android-2.1.yml",
+        "docs/ASTRAVAR_2_1_NATIVE_RECHECK_CODE32.md",
+    },
+    "VERSION_CODE": 32,
+    "STRICT_CHANGED_FILES": True,
+    "PROFILE_NAME": "code32",
+    "SOURCE_FAILURE_LIMITATION": "Original run verified the full second backup but its offscreen status was not observed; all native and typed acceptance requires this new strict recheck.",
+}
+CODE31_PROFILE = {name: globals()[name] for name in CODE32_PROFILE}
+
+
+def configure_profile(name):
+    if name not in ("code31", "code32"):
+        raise ValueError("Only the pinned code31 or code32 profile is supported")
+    globals().update(CODE32_PROFILE if name == "code32" else CODE31_PROFILE)
+
+
 def run_git(repo, *args):
     return subprocess.check_output(["git", "-C", str(repo), *args], stderr=subprocess.STDOUT)
 
@@ -52,8 +96,10 @@ def allowed_path(path):
     return path in ALLOWED_FILES
 
 
-def source_guard(repo, base_commit=BASE_COMMIT, base_tree=BASE_TREE):
+def source_guard(repo, base_commit=None, base_tree=None):
     """Use final tree differences, including removals/modes; reject dirty source."""
+    base_commit = BASE_COMMIT if base_commit is None else base_commit
+    base_tree = BASE_TREE if base_tree is None else base_tree
     if run_git(repo, "rev-parse", f"{base_commit}^{{tree}}").decode().strip() != base_tree:
         raise ValueError("Baseline tree does not match the verified product source")
     run_git(repo, "merge-base", "--is-ancestor", base_commit, "HEAD")
@@ -64,7 +110,10 @@ def source_guard(repo, base_commit=BASE_COMMIT, base_tree=BASE_TREE):
     forbidden = [p for p in paths if not allowed_path(p)]
     if forbidden:
         raise ValueError("Product/source changes require full verification: " + ", ".join(forbidden))
+    if STRICT_CHANGED_FILES and set(paths) != ALLOWED_FILES:
+        raise ValueError("Native code32 recheck requires its exact reviewed harness changes; missing: " + ", ".join(sorted(ALLOWED_FILES - set(paths))))
     return {
+        "profile": PROFILE_NAME, "reused_product_version_code": VERSION_CODE,
         "test_source_commit": run_git(repo, "rev-parse", "HEAD").decode().strip(),
         "test_source_tree": run_git(repo, "rev-parse", "HEAD^{tree}").decode().strip(),
         "reused_product_source_commit": base_commit,
@@ -110,7 +159,7 @@ def verify_source_run(run, jobs):
     return {"source_run_id": RUN_ID, "source_job_id": SOURCE_JOB_ID,
             "source_run_conclusion": "failure", "product_build_step_conclusion": "success",
             "recorded_failed_step": SOURCE_NATIVE_STEP,
-            "limitation": "Original run stopped at the overlay fixture; importer acceptance requires this new native recheck."}
+            "limitation": SOURCE_FAILURE_LIMITATION}
 
 
 def verified_archive_payloads(archive):
@@ -165,7 +214,7 @@ def prepare(repo, archive, metadata_path, source_run_path, source_jobs_path, sdk
     # Write only known APKs, never extract arbitrary archive paths or old failures.
     output.mkdir(parents=True)
     from inspect_release_apk import inspect
-    for code in (24, 31):
+    for code in (24, VERSION_CODE):
         name = f"Astravar-2.1-CI-ONLY-code{code}.apk"
         apk = output / name
         apk.write_bytes(payloads[name])
@@ -216,6 +265,7 @@ def verify_targets(repo, sdk, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["guard", "prepare", "verify-targets", "snapshot-mapped", "verify-mapped"])
+    parser.add_argument("--profile", choices=["code31", "code32"], default="code31")
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--archive", type=Path)
     parser.add_argument("--artifact-metadata", type=Path)
@@ -229,6 +279,7 @@ def main():
     parser.add_argument("--rolled-back", action="store_true")
     parser.add_argument("--synthetic-demo", action="store_true")
     args = parser.parse_args()
+    configure_profile(args.profile)
     if args.command == "guard":
         result = source_guard(args.repo)
     elif args.command == "prepare":
