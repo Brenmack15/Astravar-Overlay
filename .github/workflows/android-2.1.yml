@@ -7,13 +7,13 @@ permissions:
   contents: read
 concurrency:
   # One full run per pushed development head; manual runs use the same queue.
-  group: "astravar-21-${{ github.ref_name }}${{ github.event_name == 'push' && github.event.head_commit.message == 'ci: run verified native code32 harness recheck' && '-native32-harness-only' || '' }}"
+  group: "astravar-21-${{ github.ref_name }}${{ github.event_name == 'push' && github.event.head_commit.message == 'ci: run verified native code32 harness recheck' && '-native32-harness-only' || github.event_name == 'push' && github.event.head_commit.message == 'ci: run verified native code33 harness recheck' && '-native33-harness-only' || '' }}"
   cancel-in-progress: true
 jobs:
   verify:
     # The strict immutable-product native workflow covers this exact test-only subject.
     if: >-
-      github.event_name != 'push' || github.event.head_commit.message != 'ci: run verified native code32 harness recheck'
+      github.event_name != 'push' || (github.event.head_commit.message != 'ci: run verified native code32 harness recheck' && github.event.head_commit.message != 'ci: run verified native code33 harness recheck')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
