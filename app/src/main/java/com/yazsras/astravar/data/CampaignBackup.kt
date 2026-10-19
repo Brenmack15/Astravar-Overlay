@@ -26,13 +26,15 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
     private fun hash(value: LedgerExport) = campaignSerializedHash(LedgerExport.serializer(), value)
 
     suspend fun preview(text: String): ImportPreview = db.withTransaction {
-        val current = snapshot()
         try {
             supportedCampaignBackup(text)
             val header = rejectDuplicateJsonMembers(text)
             require("format" in header && "schema" in header) { "Backup must declare its format and supported schema." }
             // Inspect the actual decoded header. A JSON tree would retain another full copy of source payloads.
-            val incoming = campaignJson.decodeFromString<LedgerExport>(text)
+            val incoming = campaignDecodeBackup(text)
+            // Decode before reading local source payloads so their copies are not retained while
+            // constructing a potentially large incoming string. Both reads remain in this transaction.
+            val current = snapshot()
             val conflicts = validate(incoming, current)
             ImportPreview(conflicts.isEmpty(), "${incoming.items.size} items, ${incoming.events.size} inventory events, " +
                 "${incoming.records.projects.size} inventions, ${incoming.records.entities.size} connections, " +
@@ -40,7 +42,7 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
                 "${incoming.records.wallets.size} wallets, ${incoming.records.checkpoints.size} checkpoints; existing different records will never be replaced.",
                 conflicts, hash(incoming), hash(current), incoming)
         } catch (e: Exception) {
-            ImportPreview(false, "Backup could not be validated.", listOf(e.message ?: "Unsupported backup."), "", hash(current))
+            ImportPreview(false, "Backup could not be validated.", listOf(e.message ?: "Unsupported backup."), "", hash(snapshot()))
         }
     }
 
