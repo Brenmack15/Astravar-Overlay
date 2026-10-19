@@ -59,7 +59,7 @@ class NativeRecheckTest(unittest.TestCase):
         self.assertEqual(result["test_source_commit"], self.git(repo, "rev-parse", "HEAD"))
         self.assertEqual(len(result["changed_paths"]), len(native.ALLOWED_FILES))
 
-    def test_only_exact_overlay_test_fixture_is_allowed(self):
+    def test_only_exact_reviewed_fixtures_and_runner_are_allowed(self):
         repo, base, tree = self.repository()
         fixture = "overlay-target/src/androidTest/java/com/yazsras/astravar/OverlayInstrumentationTest.kt"
         (repo / fixture).write_text("bounded font configuration observation\n")
@@ -82,7 +82,7 @@ class NativeRecheckTest(unittest.TestCase):
             "app/src/main/res/icon.xml",
             "app/build.gradle.kts",
             "rules/src/Rules.kt",
-            "scripts/ci-player-first-emulator.sh",
+            "scripts/ci-player-first-emulator-other.sh",
         ]
         for name in forbidden:
             with self.subTest(forbidden_path=name):
@@ -96,10 +96,10 @@ class NativeRecheckTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "full verification"):
                     native.source_guard(repo, base, tree)
 
-    def test_product_rules_resources_build_and_unchanged_runner_cannot_be_reused(self):
+    def test_product_rules_resources_build_and_unapproved_runner_cannot_be_reused(self):
         repo, base, tree = self.repository()
         for name in ["app/src/main/Product.kt", "rules/src/Rules.kt", "app/src/main/res/icon.xml",
-                     "app/build.gradle.kts", "scripts/ci-player-first-emulator.sh",
+                     "app/build.gradle.kts", "scripts/unapproved-native-runner.sh",
                      "overlay-target/src/main/Target.kt", "docs/unreviewed.md"]:
             with self.subTest(path=name):
                 self.git(repo, "reset", "--hard", base)
@@ -109,6 +109,29 @@ class NativeRecheckTest(unittest.TestCase):
                 self.commit(repo)
                 with self.assertRaisesRegex(ValueError, "full verification"):
                     native.source_guard(repo, base, tree)
+
+    def test_native_runner_preserves_gates_and_exposes_import_before_postupdate_overlay(self):
+        script = (MODULE.parent / "ci-player-first-emulator.sh").read_text()
+        calls = [
+            "run_class OverlayInstrumentationTest 3 validation/native-overlay.txt",
+            "run_class UpdateFixtureInstrumentationTest 1 validation/native-update-fixture.txt",
+            "run_class UpdatePreservationInstrumentationTest 1 validation/native-update-readback.txt",
+            "run_class CampaignImportInstrumentationTest#aDocumentPickerPreviewConfirmationAndLibrary 1 validation/native-campaign-import.txt",
+            "run_class CampaignImportInstrumentationTest#bGuardedRollbackRestoresVerifiedSnapshot 1 validation/native-campaign-rollback.txt",
+            "run_class OverlayInstrumentationTest#bNotificationStop 1 validation/native-updated-notification-stop.txt",
+            "run_class OverlayInstrumentationTest#cRollRestorationMainHistoryAndLivePermissionRecovery 1 validation/native-updated-overlay-recovery.txt",
+        ]
+        positions = []
+        for call in calls:
+            self.assertEqual(script.count(call), 1, call)
+            positions.append(script.index(call))
+        self.assertEqual(positions, sorted(positions))
+        self.assertGreater(script.index("scripts/history-preservation-fixture.py verify"), positions[-1])
+        self.assertIn('ASTRAVAR_NATIVE_CLASS_TIMEOUT=720 ' + calls[3], script)
+        self.assertIn('grep -q "^OK ($astravar_count test"', script)
+        self.assertEqual(len(native.ALLOWED_FILES), 7)
+        self.assertIn("scripts/ci-player-first-emulator.sh", native.ALLOWED_FILES)
+        self.assertIn("app/src/test/java/com/yazsras/astravar/ui/RebuildVisualAcceptanceTest.kt", native.ALLOWED_FILES)
 
     def test_product_deletion_and_mode_change_are_rejected(self):
         repo, base, tree = self.repository()
@@ -215,19 +238,20 @@ class NativeRecheckTest(unittest.TestCase):
     def archive(self, *, source=None, extra=None, tree=None):
         archive = self.root / "synthetic.zip"
         payloads = {name: ("fictional " + name).encode() for name in native.APK_HASHES}
+        payloads["mapping.txt"] = b"fictional R8 mapping"
         with zipfile.ZipFile(archive, "w") as z:
             z.writestr("validation/SOURCE_COMMIT.txt", source or native.BASE_COMMIT)
             z.writestr("validation/fresh-native-source-proof.json", json.dumps({
                 "sourceCommit": native.BASE_COMMIT, "sourceTree": tree or native.BASE_TREE,
                 "ownerSigningUsed": False, "realCampaignDataUsed": False}))
             for name, data in payloads.items():
-                z.writestr("validation/" + name, data)
+                z.writestr(native.MAPPING_ARTIFACT_PATH if name == "mapping.txt" else "validation/" + name, data)
             if extra:
                 z.writestr(*extra)
         return archive, payloads
 
     def verify_synthetic_archive(self, archive, payloads):
-        with patch.object(native, "ARTIFACT_BYTES", archive.stat().st_size), patch.object(native, "ARTIFACT_SHA256", hashlib.sha256(archive.read_bytes()).hexdigest()), patch.dict(native.APK_HASHES, {n: hashlib.sha256(p).hexdigest() for n, p in payloads.items()}, clear=True):
+        with patch.object(native, "ARTIFACT_BYTES", archive.stat().st_size), patch.object(native, "ARTIFACT_SHA256", hashlib.sha256(archive.read_bytes()).hexdigest()), patch.dict(native.APK_HASHES, {n: hashlib.sha256(p).hexdigest() for n, p in payloads.items() if n.endswith(".apk")}, clear=True), patch.object(native, "MAPPING_SHA256", hashlib.sha256(payloads["mapping.txt"]).hexdigest()):
             return native.verified_archive_payloads(archive)
 
     def test_zip_digest_payload_hash_and_source_are_independently_required(self):
@@ -239,6 +263,9 @@ class NativeRecheckTest(unittest.TestCase):
         name = next(iter(wrong))
         wrong[name] = b"different content"
         with self.assertRaisesRegex(ValueError, "APK checksum"):
+            self.verify_synthetic_archive(archive, wrong)
+        wrong = dict(payloads, **{"mapping.txt": b"different R8 mapping"})
+        with self.assertRaisesRegex(ValueError, "R8 mapping checksum"):
             self.verify_synthetic_archive(archive, wrong)
         archive, payloads = self.archive(source="wrong source")
         with self.assertRaisesRegex(ValueError, "SOURCE_COMMIT"):
@@ -272,14 +299,14 @@ class NativeRecheckTest(unittest.TestCase):
             with self.subTest(field=key), self.assertRaises(ValueError):
                 native.verify_product_inspection(info, 24)
 
-    def test_current_code30_and_exact_new_artifact_name_are_required(self):
-        info = {"package": "com.yazsras.astravar", "version_code": 30, "version_name": "2.1.0",
+    def test_current_code31_and_exact_new_artifact_name_are_required(self):
+        info = {"package": "com.yazsras.astravar", "version_code": 31, "version_name": "2.1.0",
                 "label": "Astravar", "certificate_sha256": native.CI_CERTIFICATE, "debuggable": False,
                 "owner_signature_verified": False, "launcher_artwork_bytes_verified": True,
-                "alignment_16kb_verified": True, "apk_sha256": native.APK_HASHES["Astravar-2.1-CI-ONLY-code30.apk"]}
-        native.verify_product_inspection(info, 30)
+                "alignment_16kb_verified": True, "apk_sha256": native.APK_HASHES["Astravar-2.1-CI-ONLY-code31.apk"]}
+        native.verify_product_inspection(info, 31)
         with self.assertRaises(ValueError):
-            native.verify_product_inspection(dict(info, version_code=26), 30)
+            native.verify_product_inspection(dict(info, version_code=30), 31)
         with self.assertRaises(ValueError):
             native.verify_artifact_metadata(dict(self.metadata(), name="Astravar-2.1-verification"))
 
