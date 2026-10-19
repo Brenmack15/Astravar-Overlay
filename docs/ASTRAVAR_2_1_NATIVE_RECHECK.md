@@ -1,64 +1,27 @@
 # Native harness recheck
 
-`Astravar 2.1 native harness recheck` is a separate GitHub Actions workflow for
-repairing native instrumentation after the complete verification run has already
-built an unchanged product. It does not replace the full Android workflow or
-publish a release.
+`Astravar 2.1 native harness recheck` reuses an immutable product build while adding native instrumentation coverage. It does not replace the full Android workflow, rebuild the owner APK, or publish a production release.
 
-The workflow reuses artifact **12150294180** from run **39163162978**, whose product
-source is **1417dd5e045151c8a16b349ccf2c058371c8be16**, tree
-**f6aea137f996a50082f2ca21045d5c69f2f317fc**. The compressed archive SHA256 is
-`106b675781ed445d412047302e352b9d104aacc1f33f0d4fbd73976fb63e2a79`.
-Its original full run passed Python, rules, Android unit tests, lint and optimized
-builds, but failed native instrumentation. No successful native result is implied.
+The immutable mode retains artifact `12150294180` from run `39163162978`, source `1417dd5e045151c8a16b349ccf2c058371c8be16`, tree `f6aea137f996a50082f2ca21045d5c69f2f317fc`. Its original ZIP SHA256 is `106b675781ed445d412047302e352b9d104aacc1f33f0d4fbd73976fb63e2a79`. The API identity, ZIP digest/size, temporary certificate and APK hashes stay pinned in `scripts/native_recheck.py`. Missing, expired, mismatched or incomplete artifacts fail closed. This historical artifact cannot certify the newer campaign importer.
 
-Before downloading an APK, the source guard requires a clean checkout descended
-from that exact commit. Only `overlay-target/src/androidTest/**`, this document,
-the new workflow, `scripts/native_recheck.py`, its exact Python test file and the
-single controlled fixture
-`overlay-target/src/main/java/com/yazsras/astravar/target/TargetActivity.kt` may
-differ. The activity belongs to the disposable second application used to test
-outside taps, keyboard focus and protected windows. Its SDK 36 IME-insets repair
-keeps the keyboard field visible; it does not change Astravar's product UI.
-No other target main source, manifest, resource or build file is permitted.
-Product code, resources, schemas, build configuration and the existing native
-runner are forbidden changes. Mixed edits still fail even when they include the
-approved fixture. A rejected guard requires a new full run and an independently
-reviewed immutable baseline, not a broader allowlist.
+The importer source is published commit `f8243bffda93aaf635875fbb09a1cbfdba72e88b`, tree `a73393ba71bbb21e94997927e1ea38b9f5502545`. Its app and rules source equals owner-signed product source `f0676e0ed41637799e495c9d4b9d4c5ab7d47239`. Run `39186845136` passed debug regressions but failed an existing release test's intermediate-state assertion; its artifact `12159336425` has no code26 APK or `SOURCE_COMMIT.txt`. It must not be reused as a complete product artifact.
 
-The helper verifies the artifact API identity/run/digest, complete downloaded ZIP
-checksum, original `SOURCE_COMMIT.txt`, individual APK checksums and actual APK
-metadata. The code24 and code25 product APKs must both be `com.yazsras.astravar`,
-version `2.1.0`, label `Astravar`, non-debuggable, with the same pinned temporary CI
-certificate. Artwork and 16 KiB alignment checks remain enabled.
+The separate source-native workflow builds fresh baseline code24 and current code26 CI APKs, then runs accelerated Android verification. It is explicitly a fresh source build, without immutable-artifact reuse. The ordinary full workflow still performs all regressions and lint; correcting a test's wait does not change product source or relax its assertions.
 
-Only the controlled second-app target and instrumentation are newly assembled;
-their actual packages and matching fresh test certificate are checked. Both real
-product APKs remain the exact pinned bytes from the original full build. The existing native
-runner then runs unchanged, including synthetic demo safeguards, strict overlay
-assertions, all-store preservation, historical raw hashes and independent UI
-readback. Evidence records `SOURCE_COMMIT.txt` for the reused product and
-`NATIVE_TEST_SOURCE_COMMIT.txt` for the new test source, with both trees in
-`native-recheck-source.json`. Old screenshots or failed test output are not copied
-into the new evidence directory.
+The source guard requires a clean committed descendant of the exact published baseline. Allowed differences are native tests and assets under `overlay-target/src/androidTest/**`, this document, the recheck workflow, `scripts/native_recheck.py`, `scripts/native-campaign-import-readback.py`, and their exact Python test files. The existing controlled second-app fixture `overlay-target/src/main/java/com/yazsras/astravar/target/TargetActivity.kt` also remains allowed. No other target main source, product source, resource, Room schema, build configuration or existing native runner may change. A failed guard requires a fresh full product verification rather than a broader exception.
 
-The `Astravar-2.1-native-recheck` artifact is test evidence. Its reused product APKs
-are **CI-only**, signed with
-`e54ceedb4515f44bba2f42a639ef7a18bca5d0578c3b37a9df1d49a7552cd5f0`.
-They are not owner-signed permanent releases. Do not install them over an
-owner-signed app or uninstall any existing installation to bypass a mismatch.
-No owner key or real campaign records are used. The source artifact expires on
-2026-11-01; a missing or expired artifact fails closed.
+The immutable helper checks the API run/source/ID/digest, complete ZIP, `SOURCE_COMMIT.txt`, individual APK hashes, actual package/version/certificate, artwork and 16 KiB alignment. Its historical code24/code25 pair uses a temporary CI certificate. Fresh source-native builds check code24/code26 instead. All CI APKs use `com.yazsras.astravar`, version `2.1.0`, and a matching temporary signer. They are **CI-only**. Never install them over an owner installation or bypass a certificate mismatch. Original owner signing material and real campaign records never enter CI.
 
-The development branch push trigger covers instrumentation and the four recheck
-support files; this fixture repair also changes those guarded support files. Its
-job runs only when the final publication commit has the exact subject
-`ci: run verified native harness recheck`; partial publication commits skip it.
-`workflow_dispatch` is retained for future authorized default-branch adoption;
-GitHub requires the workflow file on the default branch for manual dispatch.
-No default-branch change is authorized or needed for the branch push trigger.
-The workflow uses a separate concurrency group from complete verification.
+In immutable mode only fresh controlled target and instrumentation APKs are assembled. In fresh source-native mode the current product is also built. The campaign runner checks the additive schema 3 to 4 upgrade, original stores and historical hashes, overlay behavior, font scaling, and the fictional archive with 320 references, 2,225 relations and a roughly 21 MiB retained source. This exercises document selection, invalid integrity, interrupted preview, explicit consent, verified backup, import, independent readback, duplicate prevention and large-source recovery.
 
-Keep the ordinary full workflow enabled and report its result separately. Any
-subsequent product change requires complete verification and a fresh product
-build before release approval.
+After that archive is rolled back, a supplemental typed test selects `fictional-mapped-campaign.json` through DocumentsUI. It contains a fictional player and companion, one unknown-quantity item with acquisition history, placement/property, proposed invention, material requirement, contact, wallet and checkpoint. UI assertions read Armor, Party, Inventory, equipment, wallet, Inventions, Connections, checkpoints and Reference Library. They do not execute gameplay.
+
+Capture a complete baseline immediately before the typed test with `python3 scripts/native_recheck.py snapshot-mapped --database validation/campaign-rolled-back/astravar-campaign-ledger.db --output validation/campaign-mapped-before.json --synthetic-demo`.
+
+Verify freshly copied SQLite with `python3 scripts/native_recheck.py verify-mapped --database validation/campaign-mapped/astravar-campaign-ledger.db --manifest validation/campaign-mapped-before.json --fixture validation/native-mapped-fixture.json --output validation/native-mapped-readback.json --synthetic-demo`. Recovery uses corresponding recovered database/output paths plus `--rolled-back`.
+
+The host helper compares every supplied typed column, nullable value, identity, original body/hash and retained source. Excluding only incoming identities, it compares all remaining table counts and content hashes, including prior immutable archive receipts/backups. It detects missing history, unknown values becoming zero, and preexisting data changes. Recovery must restore the baseline and retain both application and rollback receipts.
+
+Evidence separates immutable product source from fresh native test source. Old failures/screenshots are not copied. Report full-run and recheck outcomes separately; this document does not assert that a pending test passed.
+
+The reviewed branch push job runs only for the exact final subject `ci: run verified native harness recheck`; intermediate publication commits skip it. Manual dispatch requires future authorized default-branch adoption, so no default-branch change is needed or performed. A separate concurrency group preserves the original full run. Later product changes require fresh full verification and an immutable product build.
