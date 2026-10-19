@@ -7,7 +7,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.security.MessageDigest
 import java.util.UUID
 
 /** Local player-entered records only. Nothing in this database is automatically uploaded. */
@@ -183,8 +182,7 @@ data class ImportPreview(
 )
 
 internal val campaignJson = Json { encodeDefaults = true; ignoreUnknownKeys = false }
-internal fun campaignHash(text: String): String = MessageDigest.getInstance("SHA-256")
-    .digest(text.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+internal fun campaignHash(text: String): String = campaignUtf8Hash(text)
 
 @Dao
 interface CampaignRecordsDao {
