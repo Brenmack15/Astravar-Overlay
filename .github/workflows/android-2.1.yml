@@ -16,10 +16,10 @@ jobs:
   verify:
     if: github.event_name != 'pull_request' || github.head_ref == 'feat/astravar-2.1-player-first'
     runs-on: ubuntu-latest
-    timeout-minutes: 80
+    timeout-minutes: 90
     env:
       ASTRAVAR_VERSION_NAME: '2.1.0'
-      ASTRAVAR_VERSION_CODE: '24'
+      ASTRAVAR_VERSION_CODE: '26'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -54,9 +54,9 @@ jobs:
           python3 scripts/verify_particle_resources.py
           python3 scripts/verify_upgrade_integrity.py
       - name: Rules, Android regressions, release lint and optimized APK
-        # The measured cold runner completed all tests/lint/build24, then reached
-        # the former 25-minute limit during the separate proof-build25 R8 pass.
-        # Preserve every check and give both optimized versions a bounded budget.
+        # Build the exact schema-3 source baseline and final schema-4 source with one
+        # disposable signer. This proves the real additive upgrade, not merely
+        # reinstalling the same source under a higher version code.
         timeout-minutes: 40
         run: |
           chmod +x gradlew
@@ -68,19 +68,25 @@ jobs:
           export ASTRAVAR_KEY_ALIAS=astravar-ci
           keytool -genkeypair -noprompt -keystore "$ASTRAVAR_KEYSTORE" -storetype PKCS12 -storepass "$ASTRAVAR_STORE_PASSWORD" -keypass "$ASTRAVAR_KEY_PASSWORD" -alias "$ASTRAVAR_KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 2 -dname 'CN=Astravar CI test only'
           trap 'rm -f "$ASTRAVAR_KEYSTORE"' EXIT
+          # The owner key never enters CI. Baseline source is the explicitly
+          # verified owner-approved commit; only fictional native fixtures run.
+          git fetch --no-tags --depth=1 origin b02222006e631e145194609e248cbb7adf5f21db
+          git worktree add --detach "$RUNNER_TEMP/astravar-schema3-baseline" b02222006e631e145194609e248cbb7adf5f21db
+          test "$(git -C "$RUNNER_TEMP/astravar-schema3-baseline" rev-parse HEAD)" = b02222006e631e145194609e248cbb7adf5f21db
+          (cd "$RUNNER_TEMP/astravar-schema3-baseline" && ASTRAVAR_VERSION_CODE=24 bash ./gradlew --no-daemon --console=plain :app:assembleRelease)
+          mkdir -p validation
+          cp "$RUNNER_TEMP/astravar-schema3-baseline/app/build/outputs/apk/release/app-release.apk" validation/Astravar-2.1-CI-ONLY-code24.apk
+          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-CI-ONLY-code24.apk --package com.yazsras.astravar --version-name 2.1.0 --version-code 24 --output validation/release-code24.json
           ./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest -PastravarScreenshots="$GITHUB_WORKSPACE/validation/screenshots"
           mkdir -p validation
-          cp app/build/outputs/apk/release/app-release.apk validation/Astravar-2.1-CI-ONLY-code24.apk
+          cp app/build/outputs/apk/release/app-release.apk validation/Astravar-2.1-CI-ONLY-code26.apk
           cp app/build/outputs/apk/debug/app-debug.apk validation/Astravar-2.1-QA-debug.apk
-          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-CI-ONLY-code24.apk --package com.yazsras.astravar --version-name 2.1.0 --version-code 24 --output validation/release-code24.json
-          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-QA-debug.apk --package com.yazsras.astravar.v2uidebug --version-name 2.1.0-ui-rebuild --version-code 24 --output validation/debug-code24.json
-          ASTRAVAR_VERSION_CODE=25 ./gradlew --no-daemon --console=plain :app:assembleRelease
-          cp app/build/outputs/apk/release/app-release.apk validation/Astravar-2.1-CI-ONLY-code25.apk
-          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-CI-ONLY-code25.apk --package com.yazsras.astravar --version-name 2.1.0 --version-code 25 --output validation/release-code25.json
+          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-CI-ONLY-code26.apk --package com.yazsras.astravar --version-name 2.1.0 --version-code 26 --output validation/release-code26.json
+          python3 scripts/inspect_release_apk.py validation/Astravar-2.1-QA-debug.apk --package com.yazsras.astravar.v2uidebug --version-name 2.1.0-ui-rebuild --version-code 26 --output validation/debug-code26.json
           python3 - <<'PY'
           import json
           a=json.load(open('validation/release-code24.json'))
-          b=json.load(open('validation/release-code25.json'))
+          b=json.load(open('validation/release-code26.json'))
           assert a['certificate_sha256']==b['certificate_sha256']
           assert b['version_code']>a['version_code']
           assert not a['owner_signature_verified'], 'CI must never use the owner key'
@@ -89,7 +95,7 @@ jobs:
           sha256sum validation/*.apk > validation/SHA256SUMS.txt
           printf '%s\n' 'CI TEST ONLY. The optimized APK uses a disposable signer, not the permanent owner signing identity. Do not install over an owner-signed app or uninstall an existing app to bypass signature checks. No production release is published.' >validation/CI-ONLY-NOT-A-PERMANENT-RELEASE.txt
       - name: Native overlay, font scaling and in-place update preservation
-        timeout-minutes: 25
+        timeout-minutes: 30
         run: bash scripts/ci-player-first-emulator.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
