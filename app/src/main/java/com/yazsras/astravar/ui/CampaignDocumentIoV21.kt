@@ -5,6 +5,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.CharBuffer
+import java.nio.charset.CharsetEncoder
 import java.nio.charset.CodingErrorAction
 import java.security.MessageDigest
 
@@ -53,15 +54,41 @@ internal object CampaignDocumentIoV21 {
         }
     }
 
-    private fun utf8(text: String, consume: (ByteArray, Int) -> Unit) {
-        val encoder = Charsets.UTF_8.newEncoder().onMalformedInput(CodingErrorAction.REPLACE)
-            .onUnmappableCharacter(CodingErrorAction.REPLACE)
-        val source = CharBuffer.wrap(text)
+    internal fun utf8(
+        text: String,
+        encoder: CharsetEncoder = Charsets.UTF_8.newEncoder().onMalformedInput(CodingErrorAction.REPLACE)
+            .onUnmappableCharacter(CodingErrorAction.REPLACE),
+        consume: (ByteArray, Int) -> Unit
+    ) {
+        // Android's ICU encoder copies the remaining input of a String-backed
+        // CharBuffer on each overflow. Keep its input array-backed and bounded,
+        // as well as its output, even when the document is many MiB long.
+        val source = CharBuffer.allocate(8192)
+        source.limit(0)
         val bytes = ByteBuffer.allocate(8192)
+        var offset = 0
+        do {
+            // Underflow can retain a high surrogate at the end of a window.
+            // Compact carries it into the next window before adding new text.
+            source.compact()
+            val count = minOf(source.remaining(), text.length - offset)
+            text.toCharArray(source.array(), source.position(), offset, offset + count)
+            source.position(source.position() + count)
+            offset += count
+            source.flip()
+            while (true) {
+                val result = encoder.encode(source, bytes, offset == text.length)
+                if (result.isError) result.throwException()
+                if (bytes.position() > 0) consume(bytes.array(), bytes.position())
+                bytes.clear()
+                if (result.isUnderflow) break
+            }
+        } while (offset < text.length)
         while (true) {
-            val result = encoder.encode(source, bytes, true)
+            val result = encoder.flush(bytes)
             if (result.isError) result.throwException()
-            consume(bytes.array(), bytes.position()); bytes.clear()
+            if (bytes.position() > 0) consume(bytes.array(), bytes.position())
+            bytes.clear()
             if (result.isUnderflow) break
         }
     }
