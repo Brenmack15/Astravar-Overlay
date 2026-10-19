@@ -4,7 +4,6 @@ import androidx.room.withTransaction
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 
 internal const val CAMPAIGN_BACKUP_MAX_CHARACTERS = 32_000_000
@@ -21,18 +20,18 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
     private val records = db.recordsDao()
     private val party = db.partyDao()
 
-    internal suspend fun snapshot() = LedgerExport(exportedAt = 0, items = items.allItems(), events = items.allEvents(),
-        records = CampaignRecordsRepository(db).snapshot(), archive = CampaignArchiveRepository(db).snapshot())
+    internal suspend fun snapshot(includeBackups: Boolean = true, includeArchive: Boolean = true) = LedgerExport(exportedAt = 0, items = items.allItems(), events = items.allEvents(),
+        records = CampaignRecordsRepository(db).snapshot(), archive = if (includeArchive) CampaignArchiveRepository(db).snapshot(includeBackups = includeBackups) else CampaignArchiveState())
 
-    private fun hash(value: LedgerExport) = campaignHash(campaignJson.encodeToString(value))
+    private fun hash(value: LedgerExport) = campaignSerializedHash(LedgerExport.serializer(), value)
 
     suspend fun preview(text: String): ImportPreview = db.withTransaction {
         val current = snapshot()
         try {
             supportedCampaignBackup(text)
-            val header = campaignJson.parseToJsonElement(text).jsonObject
-            require(header["format"]?.jsonPrimitive?.content == "astravar-campaign-items" &&
-                (header["schema"]?.jsonPrimitive?.intOrNull ?: -1) in 1..4) { "Backup must declare its format and supported schema." }
+            val header = rejectDuplicateJsonMembers(text)
+            require("format" in header && "schema" in header) { "Backup must declare its format and supported schema." }
+            // Inspect the actual decoded header. A JSON tree would retain another full copy of source payloads.
             val incoming = campaignJson.decodeFromString<LedgerExport>(text)
             val conflicts = validate(incoming, current)
             ImportPreview(conflicts.isEmpty(), "${incoming.items.size} items, ${incoming.events.size} inventory events, " +
