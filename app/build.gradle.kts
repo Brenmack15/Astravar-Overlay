@@ -87,6 +87,9 @@ dependencies {
     implementation(project(":rules"))
     implementation(platform("androidx.compose:compose-bom:2025.12.01"))
     implementation("androidx.activity:activity-compose:1.12.2")
+    // Play services basement transitively requests Fragment 1.1.0. Keep its runtime compatible
+    // with Activity Result APIs and this pinned Android/Activity toolchain.
+    implementation("androidx.fragment:fragment:1.8.9")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
