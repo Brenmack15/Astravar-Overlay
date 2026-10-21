@@ -1,0 +1,75 @@
+/** Private Sites transport enrollment. A verified owner explicitly encrypts the
+ * outer transport credential to this installation; device enrollment remains a
+ * separate, narrower server authorization. No plaintext credential file exists.
+ */
+const BOOTSTRAP_CAMPAIGN = 'synthetic-owner-acceptance';
+const BOOTSTRAP_ALGORITHM = 'RSA-OAEP-256+A256GCM';
+const bootstrapEncoder = new TextEncoder();
+function bootstrapJson(value, status = 200) {
+  return new Response(JSON.stringify(value), { status, headers: {
+    'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
+  } });
+}
+function bootstrapBase64(value) {
+  return btoa(String.fromCharCode(...new Uint8Array(value))).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+}
+function bootstrapBytes(value) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+$/.test(value) || value.length > 1200) throw new Error('INVALID_PUBLIC_KEY');
+  return Uint8Array.from(atob(value.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - value.length % 4) % 4)), value => value.charCodeAt(0));
+}
+export function bootstrapAad(value) {
+  return `ASTRAVAR_SERVICE_BOOTSTRAP_V1\n${value.origin}\n${value.campaignId}\n${value.nonce}\n${value.expiresAt}`;
+}
+export async function encryptBootstrapBundle(publicKeySpki, payload, now = Date.now()) {
+  if (!payload || payload.campaignId !== BOOTSTRAP_CAMPAIGN || !/^[A-Za-z0-9_-]{43}$/.test(payload.nonce) ||
+      typeof payload.serviceAccessBearer !== 'string' || payload.serviceAccessBearer.length < 32 || payload.serviceAccessBearer.length > 8192 ||
+      /[\r\n]/.test(payload.serviceAccessBearer)) throw new Error('INVALID_BOOTSTRAP');
+  const origin = new URL(payload.origin);
+  if (origin.protocol !== 'https:' || origin.origin !== payload.origin || origin.port || origin.username || origin.password) throw new Error('INVALID_ORIGIN');
+  const rsa = await crypto.subtle.importKey('spki', bootstrapBytes(publicKeySpki), { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt']);
+  if (rsa.algorithm.modulusLength < 2048 || rsa.algorithm.modulusLength > 4096) throw new Error('INVALID_PUBLIC_KEY');
+  const aes = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt']);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const header = { v: 1, algorithm: BOOTSTRAP_ALGORITHM, origin: payload.origin, campaignId: payload.campaignId,
+    nonce: payload.nonce, expiresAt: now + 10 * 60_000 };
+  const secret = bootstrapEncoder.encode(JSON.stringify({ ...header, serviceAccessBearer: payload.serviceAccessBearer }));
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: bootstrapEncoder.encode(bootstrapAad(header)), tagLength: 128 }, aes, secret);
+  secret.fill(0);
+  const raw = new Uint8Array(await crypto.subtle.exportKey('raw', aes));
+  const wrappedKey = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, rsa, raw);
+  raw.fill(0);
+  return { ...header, wrappedKey: bootstrapBase64(wrappedKey), iv: bootstrapBase64(iv), ciphertext: bootstrapBase64(ciphertext) };
+}
+const BOOTSTRAP_HTML = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Astravar private service authorization</title><style>body{background:#101622;color:#edf1f7;font:17px system-ui;max-width:34rem;margin:3rem auto;padding:1.3rem;line-height:1.5}h1{color:#d9b66d;font-size:1.6rem}button{min-height:52px;background:#d9b66d;color:#101622;font:inherit;border:0;border-radius:12px;padding:.8rem 1.2rem;width:100%}code{overflow-wrap:anywhere}p{margin:1.2rem 0}</style><h1>Authorize this Astravar installation</h1><p>Continue only if you opened this page from Astravar on your phone. The download is encrypted for that installation and expires in 10 minutes.</p><p>Request code: <code id="code">Invalid request</code></p><p>This grants access through the private service transport. Your device must still be paired separately before it can read or approve fictional character changes. It does not authorize live campaign uploads.</p><button id="download" disabled>Download encrypted authorization</button><p id="status" role="status"></p><script nonce="BOOTSTRAP_NONCE">
+const q=new URLSearchParams(location.hash.slice(1));const key=q.get('publicKeySpki'),nonce=q.get('nonce'),campaignId=q.get('campaignId');
+const button=document.getElementById('download'),status=document.getElementById('status');
+if(key&&/^[A-Za-z0-9_-]{43}$/.test(nonce||'')&&campaignId==='synthetic-owner-acceptance'){document.getElementById('code').textContent=nonce.slice(0,12);button.disabled=false}
+button.onclick=async()=>{button.disabled=true;status.textContent='Preparing encrypted authorization…';try{const r=await fetch('/owner/bootstrap/bundle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({origin:location.origin,campaignId,nonce,publicKeySpki:key})});if(!r.ok)throw Error();const bundle=await r.json();const blob=new Blob([JSON.stringify(bundle)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='Astravar-encrypted-authorization.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status.textContent='Return to Astravar, import the encrypted authorization, then pair this device.'}catch{status.textContent='Authorization is unavailable. Verify service provisioning and restart from Astravar.';button.disabled=false}};
+</script></html>`;
+export async function handleBootstrap(request, env) {
+  if (!env.OWNER_SITE_USER_ID || request.headers.get('oai-authenticated-user-id') !== env.OWNER_SITE_USER_ID) return bootstrapJson({ error: 'OWNER_AUTHENTICATION_REQUIRED' }, 401);
+  const url = new URL(request.url);
+  if (url.protocol !== 'https:' || url.port) return bootstrapJson({ error: 'HTTPS_REQUIRED' }, 400);
+  if (url.pathname === '/owner/bootstrap' && request.method === 'GET') {
+    const scriptNonce = bootstrapBase64(crypto.getRandomValues(new Uint8Array(24)));
+    return new Response(BOOTSTRAP_HTML.replace('BOOTSTRAP_NONCE', scriptNonce), { headers: {
+    'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${scriptNonce}'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+    } });
+  }
+  if (url.pathname !== '/owner/bootstrap/bundle' || request.method !== 'POST') return bootstrapJson({ error: 'NOT_FOUND' }, 404);
+  if (request.headers.get('origin') !== url.origin || request.headers.get('content-type')?.split(';')[0].trim() !== 'application/json') return bootstrapJson({ error: 'SAME_ORIGIN_JSON_REQUIRED' }, 403);
+  if (!env.SITES_SERVICE_ACCESS_BEARER) return bootstrapJson({ error: 'PRIVATE_TRANSPORT_NOT_PROVISIONED' }, 503);
+  let body;
+  try {
+    const reader = request.body?.getReader(); if (!reader) throw new Error();
+    const chunks = []; let length = 0;
+    for (;;) { const { value, done } = await reader.read(); if (done) break; length += value.length;
+      if (length > 4096) { await reader.cancel(); return bootstrapJson({ error: 'REQUEST_TOO_LARGE' }, 413); } chunks.push(value); }
+    const bytes = new Uint8Array(length); let at = 0; for (const chunk of chunks) { bytes.set(chunk, at); at += chunk.length; }
+    body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    if (!body || Array.isArray(body) || Object.keys(body).sort().join(',') !== 'campaignId,nonce,origin,publicKeySpki' || body.origin !== url.origin) throw new Error();
+    return bootstrapJson(await encryptBootstrapBundle(body.publicKeySpki, { ...body, serviceAccessBearer: env.SITES_SERVICE_ACCESS_BEARER }));
+  } catch { return bootstrapJson({ error: 'INVALID_BOOTSTRAP_REQUEST' }, 400); }
+}

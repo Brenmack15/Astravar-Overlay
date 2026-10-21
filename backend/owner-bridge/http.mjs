@@ -1,0 +1,64 @@
+import {BridgeError,MODE,CAMPAIGN} from './core.mjs';
+const MAX_BODY=65_536;
+function response(status,value) {
+ return Response.json(value,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}});
+}
+async function readBody(request) {
+ if(request.headers.get('content-type')?.split(';')[0].trim()!=='application/json') throw new BridgeError(415,'JSON_REQUIRED');
+ const length=request.headers.get('content-length');
+ if(length!==null&&(!/^\d+$/.test(length)||Number(length)>MAX_BODY)) throw new BridgeError(413,'BODY_TOO_LARGE');
+ // Stream bounds matter even when no Content-Length exists.
+ const reader=request.body?.getReader(); if(!reader) throw new BridgeError(400,'BODY_REQUIRED');
+ let size=0; const chunks=[];
+ while(true) { const {done,value}=await reader.read(); if(done) break; size+=value.length; if(size>MAX_BODY){await reader.cancel();throw new BridgeError(413,'BODY_TOO_LARGE');} chunks.push(value); }
+ const bytes=new Uint8Array(size); let offset=0; for(const c of chunks){bytes.set(c,offset);offset+=c.length;}
+ try{return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{throw new BridgeError(400,'INVALID_JSON');}
+}
+/** Outer host must separately enforce its authenticated Site/service gateway.
+ * ownerPrincipal must originate from verified host identity, never request JSON/header supplied by a device.
+ */
+export async function handleOwnerApi(request,bridge,{ownerPrincipal=null}={}) {
+ try {
+  const url=new URL(request.url),path=url.pathname,method=request.method;
+  // No browser-origin bypass: owner routes require a verified host principal and same-origin fetch.
+  const origin=request.headers.get('origin');
+  if(origin&&origin!==url.origin) throw new BridgeError(403,'CROSS_ORIGIN_DENIED');
+  if(method==='POST'&&path==='/v1/pairings') return response(200,{...await bridge.requestPairing(await readBody(request)),verificationUri:new URL('/owner',url).href});
+  if(method==='POST'&&path==='/v1/pairings/token') {
+   const result=await bridge.pollPairing(await readBody(request)); return response(result.status==='PENDING'?202:200,result);
+  }
+  if(method==='POST'&&path==='/v1/owner/pairings/approve') {
+   if(!ownerPrincipal) throw new BridgeError(401,'OWNER_AUTHENTICATION_REQUIRED');
+   return response(200,await bridge.approvePairing(ownerPrincipal,await readBody(request)));
+  }
+  if(method==='GET'&&path==='/v1/owner/devices') {
+   if(!ownerPrincipal) throw new BridgeError(401,'OWNER_AUTHENTICATION_REQUIRED');
+   return response(200,await bridge.listDevices(ownerPrincipal));
+  }
+  if(method==='POST'&&path==='/v1/owner/devices/revoke') {
+   if(!ownerPrincipal) throw new BridgeError(401,'OWNER_AUTHENTICATION_REQUIRED');
+   const b=await readBody(request);
+   if(!b||Object.keys(b).length!==1||typeof b.credentialId!=='string') throw new BridgeError(400,'INVALID_REQUEST');
+   return response(200,await bridge.revokeDevice(ownerPrincipal,CAMPAIGN,b.credentialId));
+  }
+  const match=path.match(/^\/v1\/campaigns\/([A-Za-z0-9._-]+)\/(.+)$/);
+  if(!match) throw new BridgeError(404,'NOT_FOUND');
+  const [,campaign,action]=match,authorization=request.headers.get('authorization')||'';
+  if(!authorization.startsWith('Bearer ')) throw new BridgeError(401,'AUTHENTICATION_REQUIRED');
+  const principal=await bridge.authenticate(request.headers.get('X-Astravar-Credential')||'',authorization.slice(7),{forSelfRevocation:method==='POST'&&action==='devices/revoke'});
+  let value;
+  if(method==='POST'&&action==='characters') value=await bridge.publishCharacter(principal,campaign,await readBody(request));
+  else if(method==='GET'&&/^characters\/[A-Za-z0-9._-]+$/.test(action)) value=await bridge.getCharacter(principal,campaign,action.split('/')[1]);
+  else if(method==='GET'&&action==='pending') value=await bridge.getPendingUpdates(principal,campaign);
+  else if(method==='POST'&&action==='decisions') value=await bridge.decide(principal,campaign,await readBody(request));
+  else if(method==='GET'&&/^receipts\/[0-9a-f-]+$/.test(action)) value=await bridge.getCommandReceipt(principal,campaign,action.split('/')[1]);
+  else if(method==='GET'&&action==='history') value=await bridge.history(principal,campaign,Number(url.searchParams.get('after')??0));
+  else if(method==='POST'&&action==='devices/revoke') { const b=await readBody(request); if(!b||Object.keys(b).length!==0) throw new BridgeError(400,'INVALID_REQUEST'); value=await bridge.revokeDevice(principal,campaign,principal.credentialId); }
+  else throw new BridgeError(404,'NOT_FOUND');
+  return response(200,value);
+ } catch(error) {
+  if(error instanceof BridgeError) return response(error.status,{mode:MODE,error:{code:error.code}});
+  // Never return SQL, credentials, source records or exception strings to callers.
+  return response(503,{mode:MODE,error:{code:'SERVICE_UNAVAILABLE'}});
+ }
+}
