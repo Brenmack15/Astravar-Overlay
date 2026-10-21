@@ -1,5 +1,9 @@
 package com.yazsras.astravar.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -10,10 +14,14 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.yazsras.astravar.data.CampaignConnectionClient
+import com.yazsras.astravar.data.CampaignConnectionSyncJob
+import com.yazsras.astravar.data.CampaignSyncNotifications
+import com.yazsras.astravar.data.CampaignSyncPreferences
 import com.yazsras.astravar.data.OwnerSyncFailure
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -22,11 +30,24 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 
 /** Player-facing manager. No UI state is accepted as evidence of a successful device commit. */
 @Composable fun CampaignConnectionPage() {
     val context = LocalContext.current.applicationContext
     val client = remember(context) { CampaignConnectionClient(context) }
+    val syncPreferences = remember(context) { CampaignSyncPreferences(context) }
+    var syncPaused by remember { mutableStateOf(syncPreferences.paused) }
+    var syncNotifications by remember { mutableStateOf(syncPreferences.notificationsEnabled) }
+    var notificationAvailable by remember { mutableStateOf(CampaignSyncNotifications.canShow(context)) }
+    DisposableEffect(syncPreferences) {
+        val observer = syncPreferences.observeControls {
+            syncPaused = syncPreferences.paused
+            syncNotifications = syncPreferences.notificationsEnabled
+            notificationAvailable = CampaignSyncNotifications.canShow(context)
+        }
+        onDispose { observer.close() }
+    }
     DisposableEffect(client) { onDispose { client.close() } }
     val coroutineScope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -70,7 +91,7 @@ import java.io.ByteArrayOutputStream
         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(verified.toString())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
     LaunchedEffect(client) {
-        try { snapshot = client.snapshot(); operate { client.foreground() } }
+        try { snapshot = client.snapshot(); if (!syncPreferences.paused) operate { client.foreground() } }
         catch (e: CancellationException) { throw e }
         catch (_: Exception) { error = true; message = "The saved campaign connection could not be read. Existing campaign records are preserved." }
     }
@@ -81,7 +102,10 @@ import java.io.ByteArrayOutputStream
             val connected = (latestSnapshot["connected"] as? JsonPrimitive)?.booleanOrNull == true
             val pairing = latestSnapshot["pairing"] as? JsonObject
             val hasCode = (pairing?.get("userCode") as? JsonPrimitive)?.contentOrNull?.isNotBlank() == true
-            if (connected) operate { client.foreground() }
+            notificationAvailable = CampaignSyncNotifications.canShow(context)
+            if (syncPreferences.paused) operate { client.snapshot() }
+            // MainActivity already owns the active-UI transport timer. This page only redraws its journal.
+            else if (connected) operate { client.snapshot() }
             else if (hasCode) operate { client.finishPairing() }
         }
     })
@@ -90,6 +114,11 @@ import java.io.ByteArrayOutputStream
             refresh()
             while (true) { delay(5_000); refresh() }
         }
+    }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        notificationAvailable = CampaignSyncNotifications.canShow(context)
+        CampaignSyncNotifications.refresh(context)
+        operate { client.snapshot() }
     }
     val importAuthorization = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) operate {
@@ -116,7 +145,9 @@ import java.io.ByteArrayOutputStream
         Text("Advanced · legacy HP and fictional test connections")
         Box(Modifier.weight(1f)) { LiveHpConnectionPage() }
     } else {
-        val view = campaignConnectionView(snapshot).copy(busy = busy, error = error, message = message)
+        val view = campaignConnectionView(snapshot).copy(busy = busy, error = error, message = message,
+            automaticSyncPaused = syncPaused, syncNotificationEnabled = syncNotifications,
+            syncNotificationAvailable = notificationAvailable)
         CampaignConnectionContent(view,
             onPair = { origin, profile, name, reads, writes -> operate {
                 val result = client.beginPairing(origin, profile, name, reads, writes)
@@ -134,7 +165,43 @@ import java.io.ByteArrayOutputStream
             onRenew = { origin, profile -> operate { val url = client.startServiceAuthorization(origin, profile); openOwner(url, origin); client.snapshot() } },
             onImportAuthorization = { importAuthorization.launch(arrayOf("application/json", "application/octet-stream")) },
             onDiagnostics = { diagnostics = true },
-            onRestrictPermissions = { readScopes, writeScopes -> operate { client.restrictPermissions(readScopes, writeScopes) } }
+            onRestrictPermissions = { readScopes, writeScopes -> operate { client.restrictPermissions(readScopes, writeScopes) } },
+            onPauseSync = { paused ->
+                try {
+                    syncPreferences.paused = paused
+                    syncPaused = paused
+                    if (!paused) { CampaignConnectionSyncJob.schedule(context); CampaignConnectionSyncJob.enqueue(context) }
+                    operate { client.snapshot() }
+                } catch (_: IOException) {
+                    syncPaused = syncPreferences.paused
+                    error = true
+                    message = "Android could not save this setting. The displayed pause state applies to this session; review it before restarting Astravar."
+                } finally {
+                    if (paused) CampaignConnectionSyncJob.cancel(context)
+                    CampaignSyncNotifications.refresh(context)
+                }
+            },
+            onSyncNotification = { enabled ->
+                try {
+                    syncPreferences.notificationsEnabled = enabled
+                    syncNotifications = enabled
+                    if (enabled && Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else if (enabled && !CampaignSyncNotifications.canShow(context)) {
+                        context.startActivity(Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                            .putExtra(Settings.EXTRA_CHANNEL_ID, CampaignSyncNotifications.CHANNEL).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                    operate { client.snapshot() }
+                } catch (_: IOException) {
+                    syncNotifications = syncPreferences.notificationsEnabled
+                    error = true
+                    message = "Android could not save the notification preference. Review it before restarting Astravar."
+                } finally {
+                    notificationAvailable = CampaignSyncNotifications.canShow(context)
+                    CampaignSyncNotifications.update(context, snapshot)
+                }
+            }
         )
     }
 }

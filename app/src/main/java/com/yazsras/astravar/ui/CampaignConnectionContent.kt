@@ -46,7 +46,9 @@ data class CampaignConnectionView(
     val writeScopes: Set<String> = emptySet(), val autoSyncScopes: Set<String> = emptySet(),
     val authorizationPending: Boolean = false,
     val pending: List<CampaignPendingView> = emptyList(), val receipts: List<CampaignReceiptView> = emptyList(),
-    val busy: Boolean = false, val message: String = "", val error: Boolean = false
+    val busy: Boolean = false, val message: String = "", val error: Boolean = false,
+    val automaticSyncPaused: Boolean = false, val syncNotificationEnabled: Boolean = false,
+    val syncNotificationAvailable: Boolean = false, val pushConfigured: Boolean = false, val pushRegistered: Boolean = false
 )
 
 @Composable fun CampaignConnectionContent(view: CampaignConnectionView,
@@ -55,7 +57,8 @@ data class CampaignConnectionView(
     onAutoSync: (Set<String>) -> Unit, onDecision: (String, Boolean) -> Unit,
     onRevoke: () -> Unit, onRenew: (String, String) -> Unit,
     onImportAuthorization: () -> Unit, onDiagnostics: () -> Unit,
-    onRestrictPermissions: (Set<String>, Set<String>) -> Unit = { _, _ -> }
+    onRestrictPermissions: (Set<String>, Set<String>) -> Unit = { _, _ -> },
+    onPauseSync: (Boolean) -> Unit = {}, onSyncNotification: (Boolean) -> Unit = {}
 ) {
     var origin by rememberSaveable(view.origin) { mutableStateOf(view.origin) }
     var deviceName by rememberSaveable(view.deviceName) { mutableStateOf(view.deviceName) }
@@ -82,16 +85,39 @@ data class CampaignConnectionView(
             Text("Every save retains its source, revision and receipt. Pending delivery stays pending until your device commits it.", style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Ice)
         }
         PlayerCard {
-            Text(if (view.busy) "Syncing" else view.status, style = MaterialTheme.typography.titleMedium,
+            Text(if (view.busy) "Syncing" else if (view.automaticSyncPaused) "Paused" else view.status, style = MaterialTheme.typography.titleMedium,
                 color = if (view.error) MaterialTheme.colorScheme.error else RebuildPalette.Ice,
                 modifier = Modifier.testTag("campaign-connection-status"))
             Text("Account: ${view.account.ifBlank { "Not authenticated" }}")
             Text("Device: ${view.deviceName}", color = RebuildPalette.Muted)
             Text("Campaign: ${view.campaignId.ifBlank { "Not selected" }}", color = RebuildPalette.Muted)
-            Text("Latest verified sync: ${view.lastSyncAt?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it)) } ?: "Not yet verified"}", color = RebuildPalette.Muted)
+            Text("Latest verified device sync: ${view.lastSyncAt?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM).format(Date(it)) } ?: "Not yet verified"}", color = RebuildPalette.Muted)
             if (view.revokePending) Text("Server revocation pending. Local access is disabled; retry to confirm server revocation.", color = RebuildPalette.GoldBright)
             if (view.connected || view.revokePending) PlayerButton(onClick = onSync, enabled = !view.busy,
                 modifier = Modifier.fillMaxWidth()) { Text("Sync now") }
+        }
+        PlayerCard {
+            Text("Background sync", style = MaterialTheme.typography.titleMedium)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Pause automatic sync", modifier = Modifier.weight(1f))
+                Switch(view.automaticSyncPaused, onPauseSync,
+                    modifier = Modifier.testTag("campaign-sync-pause").semantics { contentDescription = "Pause automatic campaign sync" })
+            }
+            if (view.automaticSyncPaused) Text("Automatic delivery is paused in the app, overlay and background. Queued transactions and saved permissions are retained. Sync now remains available.", color = RebuildPalette.GoldBright)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Show Background Sync notification", modifier = Modifier.weight(1f))
+                Switch(view.syncNotificationEnabled, onSyncNotification,
+                    modifier = Modifier.testTag("campaign-sync-notification").semantics { contentDescription = "Show background campaign sync notification" })
+            }
+            if (view.syncNotificationEnabled && !view.syncNotificationAvailable) {
+                Text("Android notification permission or this notification channel is off. Push remains normal priority; Android may defer background delivery.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                PlayerOutlinedButton(onClick = { onSyncNotification(true) }, modifier = Modifier.fillMaxWidth()) { Text("Enable notification permission") }
+            }
+            Text(when {
+                !view.pushConfigured -> "Push is not configured in this build. Sync on open and Android's scheduled recovery remain available."
+                !view.pushRegistered -> "Push registration is pending. Sync on open and scheduled recovery remain available."
+                else -> "Push wakes a short synchronization job. Delivery can be delayed by Android, connectivity or battery settings."
+            }, color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
         }
         if (!view.connected && !view.revokePending) PlayerCard {
             Text("Choose your campaign", style = MaterialTheme.typography.titleMedium)
@@ -301,6 +327,9 @@ internal fun campaignConnectionView(snapshot: JsonObject, now: Long = System.cur
         writeScopes = grant.connectionScopes("writeScopes").let { granted -> if (snapshot["localWriteScopes"] is JsonArray) granted.intersect(snapshot.connectionScopes("localWriteScopes")) else granted },
         autoSyncScopes = if (authorizationPending || revoking || grantExpired) emptySet() else grant.connectionScopes("autoSyncScopes").intersect(localAutoScopes).intersect(writableCampaignCategories),
         authorizationPending = authorizationPending,
+        automaticSyncPaused = (snapshot["automaticSyncPaused"] as? JsonPrimitive)?.booleanOrNull == true,
+        pushConfigured = (snapshot["pushConfigured"] as? JsonPrimitive)?.booleanOrNull == true,
+        pushRegistered = (snapshot["pushRegistered"] as? JsonPrimitive)?.booleanOrNull == true,
         pending = snapshot.connectionRows("pending").map { row -> CampaignPendingView(row.connectionText("commandId"), row.connectionText("state"), row.connectionText("source"), row.connectionText("message"),
             row.connectionRows("operations").map { op -> CampaignOperationView(op.connectionText("type"), op.connectionText("recordId"), op.connectionLong("expectedRevision"),
                 op.connectionLong("currentRevision"), displayFields(op["current"] ?: op["currentFields"]), displayFields(op["proposedFields"] ?: op["fields"]),
