@@ -161,7 +161,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                         "Remote Updates" -> if(BuildConfig.DEBUG) RemoteUpdatesPage(app.remoteStats, characterAbilities) {id->
                             tool=null;remoteReviewId=id
                         }
-                        "Owner connection" -> LiveHpConnectionPage()
+                        "Owner connection" -> CampaignConnectionPage()
                         "Campaign backup" -> CampaignBackupPageV2(app.campaignLedger)
                         "Campaign import" -> CampaignArchiveImportV21(app.campaignLedger)
                         "Weapon backup" -> Page {BackupPage(current,actions)}

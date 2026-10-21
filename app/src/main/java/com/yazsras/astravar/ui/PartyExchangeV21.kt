@@ -32,6 +32,8 @@ import java.util.UUID
     var copper by rememberSaveable { mutableStateOf("") }
     var silver by rememberSaveable { mutableStateOf("") }
     var gold by rememberSaveable { mutableStateOf("") }
+    var electrum by rememberSaveable { mutableStateOf("") }
+    var platinum by rememberSaveable { mutableStateOf("") }
     var source by rememberSaveable { mutableStateOf("") }
     var errorMessage by rememberSaveable { mutableStateOf("") }
     val reviewState = rememberUiDraftText()
@@ -60,8 +62,8 @@ import java.util.UUID
             require(source.isNotBlank()) { "Describe the confirmed exchange source." }
             require(!stale) { "The wallet or item changed. Close and reopen to review current records." }
             val coinChange = CurrencyCommand(selectedWallet.id, selectedWallet.revision,
-                coins(copper), coins(silver), coins(gold), source.trim())
-            val hasCoins = listOf(coinChange.copperDelta, coinChange.silverDelta, coinChange.goldDelta).any { it != 0L }
+                coins(copper), coins(silver), coins(gold), source.trim(), electrumDelta = coins(electrum), platinumDelta = coins(platinum))
+            val hasCoins = listOf(coinChange.copperDelta, coinChange.silverDelta, coinChange.goldDelta, coinChange.electrumDelta, coinChange.platinumDelta).any { it != 0L }
             var creation = emptyList<LedgerDraft>()
             var quantities = emptyList<QuantityCommand>()
             var moves = emptyList<ItemMoveCommand>()
@@ -94,7 +96,7 @@ import java.util.UUID
         } catch (e: Exception) { errorMessage = e.message ?: "Review the exchange fields." }
     }
     val dirty = receipt == null && (title.isNotBlank() || count.isNotBlank() || quantityDelta.isNotBlank() ||
-        copper.isNotBlank() || silver.isNotBlank() || gold.isNotBlank() || source.isNotBlank() || review != null)
+        copper.isNotBlank() || silver.isNotBlank() || gold.isNotBlank() || electrum.isNotBlank() || platinum.isNotBlank() || source.isNotBlank() || review != null)
     PlayerSheet("Confirmed item & currency exchange", onDismiss, dirty = dirty, showCancel = dirty, actions = {
         when {
             receipt != null -> PlayerButton(onClick = onDismiss) { Text("Done") }
@@ -117,9 +119,9 @@ import java.util.UUID
             Text("Review before committing", style = MaterialTheme.typography.titleLarge)
             Text("No records have changed yet. This saves every listed change together, or none.", color = RebuildPalette.Ice)
             RecordValue("Wallet", wallet?.name ?: "Unavailable")
-            RecordValue("Opening balances", "${wallet?.copper ?: "?"} cp · ${wallet?.silver ?: "?"} sp · ${wallet?.gold ?: "?"} gp")
+            RecordValue("Opening balances", "${wallet?.copper ?: "?"} cp · ${wallet?.silver ?: "?"} sp · ${wallet?.gold ?: "?"} gp · ${wallet?.electrum ?: "?"} ep · ${wallet?.platinum ?: "?"} pp")
             val change = review.currency.firstOrNull()
-            RecordValue("Exact coin changes", "${change?.copperDelta ?: 0} cp · ${change?.silverDelta ?: 0} sp · ${change?.goldDelta ?: 0} gp")
+            RecordValue("Exact coin changes", "${change?.copperDelta ?: 0} cp · ${change?.silverDelta ?: 0} sp · ${change?.goldDelta ?: 0} gp · ${change?.electrumDelta ?: 0} ep · ${change?.platinumDelta ?: 0} pp")
             review.creations.forEach { RecordValue("Acquired item", "${it.title} · quantity ${it.quantity ?: "unknown"} → ${partyMemberName(memberId)} · Carried") }
             review.quantities.forEach { RecordValue("Existing item quantity", "${item?.title ?: it.itemId} · ${item?.quantity ?: "unknown"} with change ${it.delta}") }
             review.moves.forEach { RecordValue("Existing item transfer", "${item?.title ?: it.itemId} → ${partyMemberName(it.holderProfileId)} · ${it.state}") }
@@ -133,7 +135,7 @@ import java.util.UUID
             PartySelection("Wallet", wallet?.name ?: "No wallet", memberWallets.map { it.id to it.name }) { id ->
                 walletJson = memberWallets.firstOrNull { it.id == id }?.let { json.encodeToString(it) }
             }
-            wallet?.let { Text("Opening: ${it.copper ?: "?"} cp · ${it.silver ?: "?"} sp · ${it.gold ?: "?"} gp", color = RebuildPalette.Gold) }
+            wallet?.let { Text("Opening: ${it.copper ?: "?"} cp · ${it.silver ?: "?"} sp · ${it.gold ?: "?"} gp · ${it.electrum ?: "?"} ep · ${it.platinum ?: "?"} pp", color = RebuildPalette.Gold) }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("New item", "Quantity", "Move item").forEach { label ->
                     PlayerFilterChip(operation == label, onClick = { operation = label }, label = { Text(label) })
@@ -163,6 +165,8 @@ import java.util.UUID
             Field("Exchange copper change", copper, { copper = it })
             Field("Exchange silver change", silver, { silver = it })
             Field("Exchange gold change", gold, { gold = it })
+            Field("Exchange electrum change", electrum, { electrum = it })
+            Field("Exchange platinum change", platinum, { platinum = it })
             Field("Exchange event source (required)", source, { source = it }, single = false)
             if (stale) Text("The selected wallet or item changed. Close and reopen before reviewing.", color = MaterialTheme.colorScheme.error)
         }

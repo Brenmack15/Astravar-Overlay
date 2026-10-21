@@ -122,7 +122,10 @@ import java.io.ByteArrayOutputStream
             val url = client.startServiceAuthorization(origin, campaign)
             openOwnerPage(url, origin)
             val code = URI(url).fragment?.split('&')?.firstOrNull { it.startsWith("nonce=") }?.substringAfter("nonce=")?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{43}")) }?.take(12)
-            JsonObject(client.snapshot() + ("message" to JsonPrimitive("Owner authorization page opened.${code?.let { " Compare request code $it on the owner page." } ?: ""} After approving, import the encrypted authorization file.")))
+            JsonObject(client.snapshot() + buildJsonObject {
+                put("message", "Owner authorization page opened.${code?.let { " Compare the displayed request code on the owner page." } ?: ""} After approving, import the encrypted authorization file.")
+                code?.let { put("authorizationCode", it) }
+            })
         } },
         onImportAuthorization = { importAuthorization.launch(arrayOf("application/json", "application/octet-stream")) },
         onPublishFixture = { revision -> operation { client.publishFictionalAbility(revision) } },
@@ -173,6 +176,7 @@ internal fun ownerConnectionView(snapshot: JsonObject): OwnerConnectionView {
         lastSuccessfulSync = snapshot.number("lastSyncAt")?.takeIf { it > 0 },
         scopes = (snapshot["scopes"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList(),
         pairingCode = pairing?.text("userCode")?.ifBlank { null }, pairingUrl = pairing?.text("verificationUri")?.ifBlank { null },
+        authorizationCode = snapshot.text("authorizationCode").takeIf { it.matches(Regex("[A-Za-z0-9_-]{12}")) },
         pending = pending, receipts = history,
         fictionalScore = fixture?.number("score")?.toInt(), fictionalRevision = fixture?.number("revision"),
         fictionalRemoteRevision = fixture?.number("remoteRevision")?.takeIf { it > 0 }

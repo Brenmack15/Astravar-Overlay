@@ -27,6 +27,7 @@ data class OwnerConnectionView(
     val scopes: List<String> = emptyList(),
     val pairingCode: String? = null,
     val pairingUrl: String? = null,
+    val authorizationCode: String? = null,
     val pending: List<OwnerChangeView> = emptyList(),
     val receipts: List<OwnerReceiptView> = emptyList(),
     val fictionalScore: Int? = null,
@@ -115,7 +116,7 @@ data class OwnerReceiptView(val commandId: String, val status: String, val revis
                 PlayerButton(enabled = !view.busy && origin.isNotBlank() && campaign == "synthetic-owner-acceptance" && deviceName.isNotBlank(),
                     onClick = { onPair(origin.trim(), campaign.trim(), deviceName.trim()) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Start secure pairing") }
             } else {
-                Text("Pairing code: ${view.pairingCode}", style = MaterialTheme.typography.titleLarge, color = RebuildPalette.GoldBright)
+                PairingCodeCopy(view.pairingCode)
                 Text("Authorize this exact device and fictional campaign in your owner connection page, then check pairing below.", color = RebuildPalette.Muted)
                 view.pairingUrl?.let { url ->
                     PlayerOutlinedButton(enabled = !view.busy, onClick = { onOpenPairing(url) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Open owner authorization") }
@@ -134,6 +135,7 @@ data class OwnerReceiptView(val commandId: String, val status: String, val revis
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Import encrypted authorization") }
             Text("Only an encrypted file created for this device is accepted. Do not paste credentials into Astravar or chat.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
         }
+        view.authorizationCode?.let { PairingCodeCopy(it, "Authorization request code") }
         if (view.message.isNotBlank()) Text(view.message,
             color = if (view.error) MaterialTheme.colorScheme.error else RebuildPalette.Ice,
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })

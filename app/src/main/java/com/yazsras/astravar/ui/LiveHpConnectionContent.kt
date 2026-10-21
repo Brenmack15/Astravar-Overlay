@@ -100,7 +100,7 @@ data class LiveHpConnectionView(val origin: String = "", val profiles: List<Live
                     onClick = { selected?.let { onPair(origin.trim(), it.id, deviceName.trim()) } },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Pair this character") }
             } else {
-                Text("Pairing code: ${view.pairingCode}", style = MaterialTheme.typography.titleLarge, color = RebuildPalette.GoldBright)
+                PairingCodeCopy(view.pairingCode)
                 Text("Approve this character and device on the owner page. Astravar checks the server for approval automatically.", color = RebuildPalette.Muted)
                 view.pairingUrl?.let { url -> PlayerButton(enabled = !view.busy, onClick = { onOpenOwner(url) },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Open owner approval") } }

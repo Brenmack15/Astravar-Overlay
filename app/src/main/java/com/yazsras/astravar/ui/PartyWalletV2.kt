@@ -31,7 +31,7 @@ import java.util.UUID
     if (held.isEmpty()) PlayerEmpty("No wallet recorded", "Opening Party never assumes a zero balance or imports currency from old conversations.")
     held.forEach { wallet -> PlayerCard {
         Text(wallet.name, style = MaterialTheme.typography.titleMedium)
-        Text("${wallet.copper ?: "?"} cp · ${wallet.silver ?: "?"} sp · ${wallet.gold ?: "?"} gp", color = RebuildPalette.Gold)
+        Text("${wallet.copper ?: "?"} cp · ${wallet.silver ?: "?"} sp · ${wallet.gold ?: "?"} gp · ${wallet.electrum ?: "?"} ep · ${wallet.platinum ?: "?"} pp", color = RebuildPalette.Gold)
         Text("Revision ${wallet.revision} · ${wallet.source}", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
         PlayerButton(onClick = { edit(wallet, "change") }) { Text("Record income / expense") }
         PlayerTextButton(onClick = { edit(wallet, "balance") }) { Text("Record sourced balance correction") }
@@ -49,6 +49,8 @@ import java.util.UUID
     var copper by rememberSaveable { mutableStateOf(if (mode == "balance") snapshot?.copper?.toString().orEmpty() else "") }
     var silver by rememberSaveable { mutableStateOf(if (mode == "balance") snapshot?.silver?.toString().orEmpty() else "") }
     var gold by rememberSaveable { mutableStateOf(if (mode == "balance") snapshot?.gold?.toString().orEmpty() else "") }
+    var electrum by rememberSaveable { mutableStateOf(if (mode == "balance") snapshot?.electrum?.toString().orEmpty() else "") }
+    var platinum by rememberSaveable { mutableStateOf(if (mode == "balance") snapshot?.platinum?.toString().orEmpty() else "") }
     var source by rememberSaveable { mutableStateOf("") }
     val commandId = rememberSaveable { UUID.randomUUID().toString() }
     val walletId = rememberSaveable { snapshot?.id ?: UUID.randomUUID().toString() }
@@ -57,19 +59,21 @@ import java.util.UUID
     fun amount(text: String): Long? = text.trim().takeIf(String::isNotEmpty)?.let {
         it.toLongOrNull() ?: error("Use whole coin counts, or leave blank.")
     }
-    val invalid = listOf(copper, silver, gold).any { it.isNotBlank() && it.toLongOrNull() == null }
+    val invalid = listOf(copper, silver, gold, electrum, platinum).any { it.isNotBlank() && it.toLongOrNull() == null }
     val dirty = name != snapshot?.name.orEmpty() || source.isNotEmpty() ||
         copper != (if (mode == "balance") snapshot?.copper?.toString().orEmpty() else "") ||
         silver != (if (mode == "balance") snapshot?.silver?.toString().orEmpty() else "") ||
-        gold != (if (mode == "balance") snapshot?.gold?.toString().orEmpty() else "")
+        gold != (if (mode == "balance") snapshot?.gold?.toString().orEmpty() else "") ||
+        electrum != (if (mode == "balance") snapshot?.electrum?.toString().orEmpty() else "") ||
+        platinum != (if (mode == "balance") snapshot?.platinum?.toString().orEmpty() else "")
     PlayerSheet(if (mode == "balance") "Record wallet balances" else "Record currency change", onDismiss, dirty = dirty, actions = {
         PlayerButton(onClick = { actions.run {
             val receipt = if (mode == "balance") repository.party.saveWallet(
                 (snapshot ?: PartyWallet(id = walletId, holderProfileId = memberId, name = name.trim())).copy(
-                    name = name.trim(), copper = amount(copper), silver = amount(silver), gold = amount(gold)),
+                    name = name.trim(), copper = amount(copper), silver = amount(silver), gold = amount(gold), electrum = amount(electrum), platinum = amount(platinum)),
                 snapshot?.revision, source.trim(), commandId)
             else repository.party.adjustCurrency(CurrencyCommand(walletId, snapshot?.revision ?: error("Wallet unavailable."),
-                amount(copper) ?: 0, amount(silver) ?: 0, amount(gold) ?: 0, source.trim(), commandId))
+                amount(copper) ?: 0, amount(silver) ?: 0, amount(gold) ?: 0, source.trim(), commandId, amount(electrum) ?: 0, amount(platinum) ?: 0))
             onDismiss(); "Currency saved; receipt ${receipt.commandId}."
         } }, enabled = !actions.busy && !stale && !invalid && source.isNotBlank() && (mode != "balance" || name.isNotBlank())) { Text("Save currency record") }
     }) {
@@ -78,13 +82,15 @@ import java.util.UUID
             Field("Wallet name", name, { name = it })
             Text("A sourced opening balance or correction can remain unknown. A normal gain or expense belongs in Record income / expense.", color = RebuildPalette.Muted)
         } else {
-            Text("${snapshot?.name.orEmpty()} · current ${snapshot?.copper ?: "?"} cp / ${snapshot?.silver ?: "?"} sp / ${snapshot?.gold ?: "?"} gp", color = RebuildPalette.Gold)
+            Text("${snapshot?.name.orEmpty()} · current ${snapshot?.copper ?: "?"} cp / ${snapshot?.silver ?: "?"} sp / ${snapshot?.gold ?: "?"} gp / ${snapshot?.electrum ?: "?"} ep / ${snapshot?.platinum ?: "?"} pp", color = RebuildPalette.Gold)
             Text("Positive = gained; negative = spent; blank = no change. An unknown denomination cannot be spent until its sourced opening balance is recorded.", color = RebuildPalette.Muted)
         }
         val hint = if (mode == "balance") "blank = unknown" else "+ gained / − spent"
         Field("Copper · $hint", copper, { copper = it })
         Field("Silver · $hint", silver, { silver = it })
         Field("Gold · $hint", gold, { gold = it })
+        Field("Electrum · $hint", electrum, { electrum = it })
+        Field("Platinum · $hint", platinum, { platinum = it })
         if (invalid) Text("Enter whole numbers only.", color = MaterialTheme.colorScheme.error)
         Field("Currency event source (required)", source, { source = it }, single = false, enabled = !actions.busy)
         LocalRecordStatus(actions.message, actions.busy)
