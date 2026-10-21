@@ -71,10 +71,10 @@ test('bootstrap owner identity and same-origin explicit browser submission are m
   assert.equal((await decrypt(pair, await response.json())).serviceAccessBearer, env.SITES_SERVICE_ACCESS_BEARER);
 });
 
-test('bootstrap rejects live campaigns, malformed keys, foreign origins, extra fields and oversized input', async () => {
+test('bootstrap rejects unsafe campaigns, malformed keys, foreign origins, extra fields and oversized input', async () => {
   const pair = await keys();
   const base = { origin, campaignId, nonce, publicKeySpki: pair.spki };
-  for (const body of [{ ...base, campaignId: 'live-zerg' }, { ...base, nonce: 'bad' }, { ...base, origin: 'https://foreign.example' },
+  for (const body of [{ ...base, campaignId: 'unsafe/campaign' }, { ...base, nonce: 'bad' }, { ...base, origin: 'https://foreign.example' },
     { ...base, publicKeySpki: 'invalid' }, { ...base, serviceAccessBearer: 'caller-provided' }]) {
     assert.equal((await handleBootstrap(request('/owner/bootstrap/bundle', 'POST', body), env)).status, 400);
   }
@@ -205,7 +205,7 @@ test('attachment form parser rejects duplicate, extra, missing, malformed and ov
     new URLSearchParams(missing).toString(),
     encoded.replace('nonce=' + nonce, 'nonce=%QQ'),
     new Uint8Array([0xc3, 0x28]),
-    ...[{ ...body, campaignId: 'live-zerg' }, { ...body, nonce: 'bad' },
+    ...[{ ...body, campaignId: 'unsafe/campaign' }, { ...body, nonce: 'bad' },
       { ...body, origin: 'https://foreign.example' }, { ...body, publicKeySpki: 'invalid' }]
       .map(value => new URLSearchParams(value).toString()),
   ];
@@ -261,3 +261,5 @@ test('bootstrap page submits a native same-origin form without Blob downloads or
     assert.equal(page.inputs.origin.value, '');
   }
 });
+
+ test('bootstrap permits explicit safe live campaign transport without granting record scope',async()=>{const pair=await keys();const liveCampaign='hp-transport-fixture';const response=await handleBootstrap(request('/owner/bootstrap/bundle','POST',{origin,campaignId:liveCampaign,nonce,publicKeySpki:pair.spki}),env);assert.equal(response.status,200);const bundle=await response.json();assert.equal(bundle.campaignId,liveCampaign);assert.equal((await decrypt(pair,bundle)).campaignId,liveCampaign);assert.equal(Object.hasOwn(bundle,'profileId'),false);});

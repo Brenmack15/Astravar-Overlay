@@ -1,6 +1,6 @@
 # Astravar Owner Connection deployment and phone acceptance
 
-This is **separate service source**, distinct from the existing private Test Merchant bridge and anonymous Cloudflare lab. The source package does not itself register or deploy a Site. A locally passing MCP request is not evidence that the ChatGPT app has connected to this service.
+This is **separate service source**, distinct from the existing private Test Merchant bridge and anonymous Cloudflare lab. The source package does not itself register or deploy a Site. A locally passing MCP request is not evidence that the ChatGPT app has connected to this service. The original five fictional tools are preserved; additional owner-approved HP tools are defined in [HP_MCP_TOOLS.md](HP_MCP_TOOLS.md). Deployment and acceptance status must come from the current release evidence.
 
 ## Security boundary
 
@@ -16,7 +16,7 @@ Runtime configuration is server-only:
 | `OWNER_SITE_USER_ID` | Exact verified owner identity for this new Site |
 | `SITES_SERVICE_ACCESS_BEARER` | Platform-provided private service access credential; never source, logs, chat, or a plaintext download |
 
-The service and published tool schemas accept only campaign `synthetic-owner-acceptance`, profile `owner-sync-fixture`, and Intelligence record `owner-sync-fixture-int`. Real campaign uploads, other record types, and combat-engine writes are disabled. Connector tools can propose changes; only an authenticated enrolled Android device can submit approval or rejection. Approval in ChatGPT never substitutes for the native player control.
+The original fictional service and its five tool schemas accept only campaign `synthetic-owner-acceptance`, profile `owner-sync-fixture`, and Intelligence record `owner-sync-fixture-int`. The separately authorized HP path requires an explicit campaign/profile binding and its own native device scopes; fictional credentials cannot access it. Other record types and combat-engine writes remain outside this connection. Connector tools can propose changes; only an authenticated enrolled Android device can submit approval or rejection. Approval in ChatGPT never substitutes for the native player control.
 
 ## Source and deployment preparation
 
@@ -40,8 +40,13 @@ The stateless JSON-RPC `POST /mcp` implements `server/discover`, `initialize`, `
 | `propose_record_update` | `campaignId`, canonical `commandId` UUID, `recordId`, `expectedRevision`, `fields:{score}`, `source` | Staged difference; the saved record stays unchanged |
 | `get_pending_updates` | `campaignId` | Pending current/proposed differences |
 | `get_command_receipt` | `campaignId`, `commandId` | Independent immutable result, or `RECEIPT_NOT_READY` |
+| `get_owner_connection` | None | Only approved live HP binding/publication metadata |
+| `get_character_hp` | `campaignId`, `profileId` | One approved profile's device-published HP record, revision and freshness |
+| `propose_hp_adjustment` | `campaignId`, `profileId`, `commandId`, `expectedRevision`, `expectedCurrentHp`, signed `adjustment`, `source` | Server-computed HP difference staged for native approval |
+| `get_hp_pending_updates` | `campaignId` | Pending HP-only differences within active approved campaign bindings |
+| `get_hp_command_receipt` | `campaignId`, `commandId` | Independent immutable HP outcome, or an unverified error |
 
-`mcp.mjs` is the exact schema source. Additional fields, real targets, noninteger scores, stale revisions, sources above 1,900 characters and caller-supplied authority are rejected. Sources are never truncated. There is no MCP approval, character publish, enrollment or credential tool. Nonsecret discovery and schema listing can run before owner configuration for platform provisioning; `tools/call` always requires the configured owner and verified identity.
+`mcp.mjs` is the exact schema source. Additional fields, invalid or unapproved targets, noninteger values, stale revisions, sources above 1,900 characters and caller-supplied authority are rejected. The original fictional tools cannot target live records. Sources are never truncated. There is no MCP approval, character publish, enrollment or credential tool. Nonsecret discovery and schema listing can run before owner configuration for platform provisioning; `tools/call` always requires the configured owner and verified identity. The HP tool guide defines its separate native consent, bounds and exact proposal fingerprint.
 
 When Sites reports the new plugin available, inspect the actual current tool registry and invoke a read operation. If the plugin is missing, use `plugin_management.suggest_plugins` with the exact returned plugin ID. If installation reports **Already installed** but tools remain absent, start a new ChatGPT conversation with the plugin connected. The phone path is Plugins → Personal → Created by you → Install or Connect. No developer computer, local MCP configuration, or API key is required for this Sites connector path.
 

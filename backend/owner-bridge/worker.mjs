@@ -1,6 +1,7 @@
 /** Sites-only entrypoint. Do not expose this handler behind an unauthenticated
  * proxy: Sites must verify/replace all oai-authenticated-* identity headers.
  */
+import { LiveHpBridge } from './live-hp.mjs';
 import { OwnerBridge, MODE } from './core.mjs';
 import { handleOwnerApi } from './http.mjs';
 import { handleMcp } from './mcp.mjs';
@@ -13,15 +14,18 @@ function ownerPage() {
   const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24))));
   return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Astravar Owner Connection</title>
 <style>body{color:#eee9df;background:#10151e;font:18px system-ui;max-width:32rem;margin:auto;padding:1.2rem}h1{color:#dbc081;font-size:1.7rem}label{display:block;margin:1rem 0 .35rem}input,button{box-sizing:border-box;min-height:52px;width:100%;font:inherit;border-radius:12px;padding:.7rem}input{color:inherit;background:#1e2734;border:1px solid #637085}button{background:#dbc081;border:0;color:#121820;margin:.7rem 0}a{color:#e6cb8e}pre{white-space:pre-wrap;overflow-wrap:anywhere}section{margin:1.5rem 0;padding:1rem;border:1px solid #4c5361;border-radius:16px}.muted{color:#bdc5cf}</style>
-<h1>Astravar Owner Connection</h1><p class="muted">Fictional acceptance records only. Real campaign data is disabled.</p>
+<h1>Astravar Owner Connection</h1><p class="muted">Fictional tests and separately approved character HP connections. Each device is bound to one campaign and character.</p>
 <section><h2>Pair this phone</h2><p>Start in Astravar → Config → Owner Connection. Open the encrypted bootstrap link on the same phone, then enter the pairing code shown in Astravar.</p>
-<form id="pair"><label for="code">Device pairing code</label><input id="code" name="userCode" autocomplete="off" spellcheck="false" maxlength="100" required><button>Approve this device</button></form><pre id="pair-result" role="status" aria-live="polite"></pre></section>
+<form id="pair"><label for="code">Device pairing code</label><input id="code" name="userCode" autocomplete="off" spellcheck="false" maxlength="100" required><button id="review-pair" type="button">Review requested access</button><button id="approve-pair" disabled>Approve this device</button></form><pre id="pair-result" role="status" aria-live="polite"></pre></section>
 <section><h2>Revoke a device</h2><p>Revocation stops future server access. A device may retain its existing local records.</p><button id="devices">Refresh enrolled devices</button><pre id="device-list" role="status"></pre>
 <form id="revoke"><label for="credential">Device credential ID</label><input id="credential" name="credentialId" autocomplete="off" spellcheck="false" maxlength="128" required><button>Revoke this device</button></form><pre id="revoke-result" role="status" aria-live="polite"></pre></section>
 <p>No character change is approved here. Changes require Astravar's native Approve control.</p>
 <script nonce="${nonce}">
 const submit=async(path,value,target)=>{const output=document.getElementById(target);output.textContent='Contacting server…';try{const response=await fetch(path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(value),redirect:'error'});const result=await response.json();output.textContent=response.ok?JSON.stringify(result,null,2):'Request failed: '+(result.error?.code||response.status);}catch{output.textContent='Unable to reach the authenticated server. Retry when online.';}};
-document.getElementById('pair').addEventListener('submit',event=>{event.preventDefault();submit('/v1/owner/pairings/approve',{userCode:document.getElementById('code').value.trim()},'pair-result');});
+let reviewedCode=null;
+document.getElementById('code').addEventListener('input',()=>{reviewedCode=null;document.getElementById('approve-pair').disabled=true;});
+document.getElementById('review-pair').addEventListener('click',async()=>{const code=document.getElementById('code').value.trim(),output=document.getElementById('pair-result');reviewedCode=null;document.getElementById('approve-pair').disabled=true;try{const r=await fetch('/v1/owner/pairings/summary',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({userCode:code}),redirect:'error'});const v=await r.json();output.textContent=r.ok?JSON.stringify(v,null,2):'Request failed: '+(v.error?.code||r.status);if(r.ok){reviewedCode=code;document.getElementById('approve-pair').disabled=false;}}catch{output.textContent='Unable to review device access. Retry when online.';}});
+document.getElementById('pair').addEventListener('submit',event=>{event.preventDefault();const code=document.getElementById('code').value.trim();if(code!==reviewedCode)return;document.getElementById('approve-pair').disabled=true;reviewedCode=null;submit('/v1/owner/pairings/approve',{userCode:code},'pair-result');});
 document.getElementById('revoke').addEventListener('submit',event=>{event.preventDefault();submit('/v1/owner/devices/revoke',{credentialId:document.getElementById('credential').value.trim()},'revoke-result');});
 document.getElementById('devices').addEventListener('click',async()=>{const output=document.getElementById('device-list');try{const response=await fetch('/v1/owner/devices',{credentials:'same-origin',redirect:'error'});const value=await response.json();output.textContent=response.ok?JSON.stringify(value,null,2):'Unable to list devices.';}catch{output.textContent='Unable to reach the server.';}});
 </script></html>`, { headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8',
@@ -41,15 +45,16 @@ export async function handleWorker(request, env) {
   const ownerId = env?.OWNER_SITE_USER_ID;
   const configured = Boolean(env?.DB && typeof ownerId === 'string' && ownerId.trim());
   const bridge = configured ? new OwnerBridge(env.DB, { ownerId }) : null;
+  const liveHp = configured ? new LiveHpBridge(env.DB,{ownerId}) : null;
   // Tool schemas contain no private data and are needed for plugin provisioning.
   // Actual tools/call still requires the configured owner and verified identity.
-  if (url.pathname === '/mcp') return handleMcp(request, bridge, { ownerId, allowPublicDiscovery: true });
+  if (url.pathname === '/mcp') return handleMcp(request, bridge, { ownerId, allowPublicDiscovery: true,liveHp });
   if (!configured) return json({ mode: MODE, error: { code: 'OWNER_CONNECTION_NOT_CONFIGURED' } }, 503);
   const isOwner = request.headers.get('oai-authenticated-user-id') === ownerId;
   const ownerPrincipal = isOwner ? { ownerId, role: 'owner', credentialId: 'sites-owner', scopes: [] } : null;
   if (url.pathname.startsWith('/owner/bootstrap')) return handleBootstrap(request, env);
   if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/owner')) return isOwner ? ownerPage() : json({ mode: MODE, error: { code: 'OWNER_AUTHENTICATION_REQUIRED' } }, 401);
-  if (url.pathname.startsWith('/v1/')) return handleOwnerApi(request, bridge, { ownerPrincipal });
+  if (url.pathname.startsWith('/v1/')) return handleOwnerApi(request, bridge, { ownerPrincipal,liveHp });
   return json({ mode: MODE, error: { code: 'NOT_FOUND' } }, 404);
 }
 

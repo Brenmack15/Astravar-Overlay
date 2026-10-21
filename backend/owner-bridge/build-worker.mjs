@@ -2,14 +2,14 @@
  * It intentionally rejects syntax outside that explicit subset. No runtime
  * credentials or campaign content are read by this build.
  */
-import { readFile, mkdir, writeFile, copyFile, cp } from 'node:fs/promises';
+import { readFile, mkdir, writeFile, copyFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const output = resolve(process.argv[2] || resolve(root, 'build'));
 const modules = [
-  ['core.mjs', 'CORE'], ['http.mjs', 'HTTP'], ['mcp.mjs', 'MCP'],
+  ['core.mjs', 'CORE'], ['live-hp.mjs', 'LIVE_HP'], ['http.mjs', 'HTTP'], ['mcp.mjs', 'MCP'],
   ['bootstrap.mjs', 'BOOTSTRAP'], ['worker.mjs', 'ENTRY'],
 ];
 const names = new Map(modules.map(([file, name]) => [`./${file}`, name]));
