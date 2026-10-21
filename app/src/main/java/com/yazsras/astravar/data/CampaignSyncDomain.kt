@@ -143,6 +143,16 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
                 val normalized=if(kind=="companion") "companion-state" else kind
                 return id!=null && (before.containsKey(key(normalized,id)) || key(normalized,id) in created)
             }
+            if (operation.type == "acquire_item" && operation.fields.containsKey("placement")) {
+                val destination = operation.fields.getValue("placement").jsonObject
+                destination.allowed("holderProfileId", "expectedHolderRevision", "state")
+                val holderId = destination.text("holderProfileId")
+                val holderRevision = destination.getValue("expectedHolderRevision").jsonPrimitive.long
+                require(holderRevision > 0 && known("character-profile", holderId)) { "Acquiring holder is outside selected campaign." }
+                check(before[key("character-profile", holderId)]?.revision == holderRevision &&
+                    db.recordsDao().characterProfile(holderId)?.revision == holderRevision) { "Acquiring holder changed." }
+                check(db.partyDao().placement(operation.recordId) == null) { "Acquisition placement already exists." }
+            }
             if(operation.type=="move_item") {
                 for((field,kind) in listOf("holderProfileId" to "character-profile","containerItemId" to "item","installedProjectId" to "project"))
                     operation.fields.optional(field)?.let {require(known(kind,it)) {"Destination is outside selected campaign."}}
@@ -200,9 +210,27 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         when (op.type) {
             "acquire_item" -> {
                 require(op.kind == "item" && current == null && op.expectedRevision == 0L)
-                val draft = campaignJson.decodeFromJsonElement<LedgerDraft>(f)
+                val destination = f["placement"]?.jsonObject
+                val draft = campaignJson.decodeFromJsonElement<LedgerDraft>(JsonObject(f - "placement"))
                 require(draft.evidenceStatus == "Confirmed" && draft.itemState !in setOf("Consumed", "Sold", "Lost", "Installed")) { "Only a resolved acquisition may establish an item." }
-                ledger.create(draft.copy(source = source),child,op.recordId)
+                if (destination == null) ledger.create(draft.copy(source = source),child,op.recordId)
+                else {
+                    val holderId = destination.text("holderProfileId")
+                    val holder = requireNotNull(db.recordsDao().characterProfile(holderId)) { "Save the acquiring character or companion profile first." }
+                    check(holder.revision == destination.getValue("expectedHolderRevision").jsonPrimitive.long) { "Acquiring holder changed." }
+                    val state = destination.optional("state") ?: "Carried"
+                    require(state in setOf("Carried", "Equipped")) { "Acquisition supports carried or equipped placement." }
+                    val owner = holder.name.ifBlank { holder.id }; val location = "Actor:$holderId"
+                    require(!draft.archived && draft.quantity != 0) { "An acquired item must be available." }
+                    require(draft.owner in setOf("Unknown", owner) && draft.location in setOf("Unknown", location) &&
+                        draft.itemState in setOf("Unknown", state)) { "Acquisition fields conflict with its placement." }
+                    val item = ledger.create(draft.copy(source = source, owner = owner, itemState = state, location = location),child,op.recordId)
+                    val placement = ItemPlacement(item.id, holderProfileId = holderId, state = state, source = source, updatedAt = item.updatedAt)
+                    validatePlacement(placement,db.partyDao().allPlacements(),db.ledgerDao().allItems(),db.recordsDao().allCharacterProfiles(),db.recordsDao().allProjects())
+                    db.partyDao().put(placement)
+                    db.recordsDao().insert(CampaignAudit("$child:placement", child, "item-placement", item.id, "ACQUISITION", source,
+                        0, placement.revision, placement.updatedAt, null, campaignJson.encodeToString(placement)))
+                }
             }
             "set_status" -> {
                 if (op.kind == "character-profile") {

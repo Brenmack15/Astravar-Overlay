@@ -68,16 +68,22 @@ abstract class OwnerConnectionDb : RoomDatabase() {
 
 fun interface OwnerConnectionTransport {
     suspend fun request(origin: String, path: String, credential: OwnerSyncCredential?, serviceAccess: String?, body: String?): OwnerSyncResponse
+    suspend fun delete(origin: String, path: String, credential: OwnerSyncCredential?, serviceAccess: String?): OwnerSyncResponse =
+        throw OwnerSyncFailure("DELETE_TRANSPORT_UNAVAILABLE")
 }
 /** Device credentials and optional Site credentials are sent only to the enrolled, HTTPS origin. */
 class OwnerConnectionHttpsTransport : OwnerConnectionTransport {
-    override suspend fun request(origin: String, path: String, credential: OwnerSyncCredential?, serviceAccess: String?, body: String?): OwnerSyncResponse = withContext(Dispatchers.IO) {
+    override suspend fun request(origin: String, path: String, credential: OwnerSyncCredential?, serviceAccess: String?, body: String?): OwnerSyncResponse =
+        execute(origin, path, credential, serviceAccess, body, if (body == null) "GET" else "POST")
+    override suspend fun delete(origin: String, path: String, credential: OwnerSyncCredential?, serviceAccess: String?): OwnerSyncResponse =
+        execute(origin, path, credential, serviceAccess, null, "DELETE")
+    private suspend fun execute(origin: String, path: String, credential: OwnerSyncCredential?, serviceAccess: String?, body: String?, method: String): OwnerSyncResponse = withContext(Dispatchers.IO) {
         val endpoint = OwnerSyncProtocol.origin(origin)
         require(path.matches(Regex("/v[12]/[A-Za-z0-9_./:%-]+")) && !path.contains(".."))
         credential?.let { require(it.origin == endpoint && it.expiresAt > System.currentTimeMillis()) }
         val connection = URL(endpoint + path).openConnection() as HttpURLConnection
         connection.instanceFollowRedirects = false; connection.connectTimeout = 8000; connection.readTimeout = 8000
-        connection.requestMethod = if (body == null) "GET" else "POST"
+        connection.requestMethod = method
         connection.setRequestProperty("Accept", "application/json"); connection.setRequestProperty("Cache-Control", "no-store")
         credential?.let { connection.setRequestProperty("Authorization", "Bearer ${it.bearer}"); connection.setRequestProperty("X-Astravar-Credential", it.credentialId) }
         serviceAccess?.let { require(it.none { c -> c == '\r' || c == '\n' }); connection.setRequestProperty("OAI-Sites-Authorization", "Bearer $it") }
@@ -107,6 +113,10 @@ class OwnerConnectionClient internal constructor(private val context: Context, p
     constructor(context: Context) : this(context.applicationContext, OwnerConnectionDb.open(context), CampaignLedgerDb.open(context),
         OwnerSyncCredentialVault(context), OwnerConnectionHttpsTransport(), System::currentTimeMillis, {})
     private val dao = db.connection(); private val records = CampaignRecordsRepository(campaignDb)
+    private var automaticOperation = false
+    private fun requireAutomaticAllowed() {
+        if (automaticOperation && CampaignSyncPreferences(context).paused) throw OwnerSyncFailure("AUTOMATIC_SYNC_PAUSED")
+    }
     companion object { private val lock = Mutex() }
     private suspend fun setting() = dao.settings() ?: OwnerConnectionSettings()
     private fun checked(value: OwnerConnectionSettings): OwnerConnectionSettings = value.also {
@@ -117,6 +127,7 @@ class OwnerConnectionClient internal constructor(private val context: Context, p
         (vault.credential(value.origin, value.campaignId) ?: throw OwnerSyncFailure("AUTHENTICATION_REQUIRED")).also {
             if (it.credentialId == "pairing-pending") throw OwnerSyncFailure("PAIRING_PENDING") }
     private suspend fun request(value: OwnerConnectionSettings, path: String, body: String? = null, authenticated: Boolean = true): JsonObject {
+        requireAutomaticAllowed()
         checked(value)
         val response = transport.request(value.origin, path, if (authenticated) credential(value) else null,
             vault.serviceAccess(value.origin, value.campaignId), body)
@@ -313,6 +324,11 @@ class OwnerConnectionClient internal constructor(private val context: Context, p
         put("profileId", value.profileId); put("key", value.key); put("score", value.score?.let(::JsonPrimitive) ?: JsonNull)
         put("magicModifier", value.magicModifier); put("notes", value.notes); put("source", value.source); put("updatedAt", value.updatedAt)
     }
+    suspend fun automaticSync(): JsonObject = lock.withLock {
+        if (CampaignSyncPreferences(context).paused) return@withLock snapshotUnlocked()
+        automaticOperation = true
+        try { syncUnlocked(); snapshotUnlocked() } finally { automaticOperation = false }
+    }
     suspend fun refresh(): JsonObject = sync()
     suspend fun sync(): JsonObject = lock.withLock {
         try { syncUnlocked(); snapshotUnlocked() }
@@ -448,12 +464,17 @@ class OwnerConnectionClient internal constructor(private val context: Context, p
         })
     }
     private suspend fun finishLocal(p: OwnerConnectionProposal) {
+        requireAutomaticAllowed()
         validateProposal(p)
         require(p.state == "APPROVING" && p.approvedAbilityJson != null)
         val frozen = campaignJson.decodeFromString<CharacterAbility>(p.approvedAbilityJson)
         require(frozen.profileId == OwnerConnectionProtocol.PROFILE && frozen.key == "INT" && frozen.score == p.proposedScore && frozen.revision == p.expectedRevision)
         val id = OwnerConnectionProtocol.localCommand(p.origin, p.campaignId, p.commandId)
-        try { records.saveAbility(frozen, p.expectedRevision, "Player-approved owner proposal ${p.commandId} · ${p.source}", id) }
+        try { campaignDb.withTransaction {
+            requireAutomaticAllowed()
+            records.saveAbility(frozen, p.expectedRevision, "Player-approved owner proposal ${p.commandId} · ${p.source}", id)
+            requireAutomaticAllowed()
+        } }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) {
             if (records.receipt(id) == null && ability()?.revision != p.expectedRevision) { dao.update(p.copy(state = "CONFLICT", message = "Local revision changed · nothing applied")); return }

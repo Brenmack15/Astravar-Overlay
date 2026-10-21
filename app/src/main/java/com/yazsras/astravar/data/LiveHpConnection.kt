@@ -84,6 +84,10 @@ class LiveHpConnectionClient internal constructor(private val context: Context, 
         OwnerSyncCredentialVault(context), OwnerConnectionHttpsTransport())
     private val dao = db.connection()
     private val records = CampaignRecordsRepository(campaignDb)
+    private var automaticOperation = false
+    private fun requireAutomaticAllowed() {
+        if (automaticOperation && CampaignSyncPreferences(context).paused) throw OwnerSyncFailure("AUTOMATIC_SYNC_PAUSED")
+    }
     companion object { private val lock = Mutex() }
     private suspend fun setting() = dao.settings() ?: LiveHpSettings()
     private suspend fun profile(id: String) = campaignDb.recordsDao().characterProfile(id)
@@ -101,6 +105,7 @@ class LiveHpConnectionClient internal constructor(private val context: Context, 
         ?: throw OwnerSyncFailure("AUTHENTICATION_REQUIRED")).also { if (it.credentialId == "pairing-pending") throw OwnerSyncFailure("PAIRING_PENDING") }
     private fun base(value: LiveHpSettings) = "/v1/hp/campaigns/${value.campaignId}"
     private suspend fun request(value: LiveHpSettings, path: String, body: String? = null, authenticated: Boolean = true): JsonObject {
+        requireAutomaticAllowed()
         scoped(value)
         val expectedMode = if (path.startsWith("/v1/hp/")) LiveHpConnectionProtocol.MODE else OwnerConnectionProtocol.MODE
         val response = transport.request(value.origin, path, if (authenticated) credential(value) else null,
@@ -216,10 +221,12 @@ class LiveHpConnectionClient internal constructor(private val context: Context, 
     }
     suspend fun foreground(): JsonObject = lock.withLock {
         val value = setting()
-        if (value.campaignId.isBlank() || value.deviceId.isBlank()) return@withLock snapshotUnlocked()
+        if (value.campaignId.isBlank() || value.deviceId.isBlank() || CampaignSyncPreferences(context).paused) return@withLock snapshotUnlocked()
+        automaticOperation = true
         try { syncUnlocked(); snapshotUnlocked() }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { recordFailure(e); throw e }
+        finally { automaticOperation = false }
     }
     suspend fun refresh() = sync()
     suspend fun sync(): JsonObject = lock.withLock {
@@ -396,6 +403,7 @@ class LiveHpConnectionClient internal constructor(private val context: Context, 
         put("localFields", if (approved) LiveHpConnectionProtocol.fields(verifiedLocalOutcome(p, requireNotNull(receipt))) else JsonNull)
     })
     private suspend fun finishLocal(p: LiveHpCommand) {
+        requireAutomaticAllowed()
         parsed(p); require(p.state == "APPROVING")
         val frozen = campaignJson.decodeFromString<CharacterProfile>(requireNotNull(p.baselineProfileJson)); require(frozen.id == p.profileId && frozen.revision == p.expectedRevision)
         val localId = LiveHpConnectionProtocol.localCommand(p.origin, p.campaignId, p.commandId)
@@ -405,7 +413,10 @@ class LiveHpConnectionClient internal constructor(private val context: Context, 
             else {
                 val current = profile(p.profileId)
                 if (current != frozen) return@withTransaction null
-                records.saveProfile(frozen.copy(currentHp = p.proposedHp), p.expectedRevision, LiveHpConnectionProtocol.source(p.commandId, p.source), localId)
+                requireAutomaticAllowed()
+                val committed = records.saveProfile(frozen.copy(currentHp = p.proposedHp), p.expectedRevision, LiveHpConnectionProtocol.source(p.commandId, p.source), localId)
+                requireAutomaticAllowed()
+                committed
             }
         }
         if (receipt == null) { dao.update(p.copy(state = "CONFLICT", message = "Local profile changed before commit · nothing applied")); return }

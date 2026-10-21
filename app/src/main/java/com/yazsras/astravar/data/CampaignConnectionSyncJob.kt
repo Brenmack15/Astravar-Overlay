@@ -1,43 +1,87 @@
 package com.yazsras.astravar.data
 
-import android.app.job.JobInfo
 import android.app.job.JobParameters
 import android.app.job.JobScheduler
 import android.app.job.JobService
-import android.content.ComponentName
 import android.content.Context
-import kotlinx.coroutines.*
+import androidx.work.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
+import java.util.concurrent.TimeUnit
 
-/** Persisted OS retries synchronize only the owner-enrolled campaign and granted record categories. */
-class CampaignConnectionSyncJob : JobService() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var running: Job? = null
-    override fun onStartJob(params: JobParameters): Boolean {
-        running = scope.launch {
-            var client: CampaignConnectionClient? = null
-            var retry = false
-            try { client = CampaignConnectionClient(applicationContext); client.foreground() }
-            catch (e: CancellationException) { throw e }
-            catch (e: OwnerSyncFailure) {
-                retry = e.code in setOf("REMOTE_UNAVAILABLE", "SERVICE_UNAVAILABLE", "OPERATION_FAILED", "QUOTA_REACHED")
-                if (e.code in setOf("CREDENTIAL_REVOKED_OR_EXPIRED", "AUTHENTICATION_REQUIRED", "CAMPAIGN_NOT_AUTHORIZED")) cancel(applicationContext)
-                // A visible conflict or a transient service failure does not erase the persisted periodic job.
+/** Short-lived constrained recovery. WorkManager persists boot recovery; no perpetual dataSync service. */
+class CampaignConnectionWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
+    override suspend fun doWork(): Result {
+        val manual = inputData.getBoolean("manual", false)
+        if (!manual && CampaignSyncPreferences(applicationContext).paused) return Result.success()
+        val store = CampaignPushStore(applicationContext)
+        val requestedAt = inputData.getLong("wakeAt", 0)
+        // APPEND_OR_REPLACE closes the wake-vs-worker-completion race. A burst queued while an
+        // earlier job is draining is coalesced here without skipping token/periodic/manual recovery.
+        if (!manual && requestedAt > 0 && requestedAt <= completedWakeAt(applicationContext)) return Result.success()
+        val drainingWakeAt = store.lastReceivedAt.coerceAtLeast(requestedAt)
+        store.lastWorkStartedAt = System.currentTimeMillis()
+        store.recordStage("worker_started", store.lastWorkStartedAt)
+        var client: CampaignConnectionClient? = null
+        return try {
+            client = CampaignConnectionClient(applicationContext)
+            withTimeout(45_000) { client.foreground(manual = manual) }
+            if (requestedAt > 0) applicationContext.getSharedPreferences("astravar-campaign-push", Context.MODE_PRIVATE)
+                .edit().putLong("completedWakeAt", drainingWakeAt).apply()
+            Result.success()
+        } catch (_: TimeoutCancellationException) { retryBounded() }
+        catch (error: CancellationException) { throw error }
+        catch (error: OwnerSyncFailure) {
+            when (error.code) {
+                "AUTOMATIC_SYNC_PAUSED" -> Result.success()
+                "CREDENTIAL_REVOKED_OR_EXPIRED", "AUTHENTICATION_REQUIRED", "CAMPAIGN_NOT_AUTHORIZED", "CAMPAIGN_GRANT_EXPIRED", "CREDENTIAL_SCOPE_OR_EXPIRY" -> {
+                    CampaignConnectionSyncJob.cancel(applicationContext); Result.failure()
+                }
+                "REMOTE_UNAVAILABLE", "SERVICE_UNAVAILABLE", "OPERATION_FAILED", "QUOTA_REACHED", "PRIVATE_GATEWAY_AUTH_REQUIRED" -> retryBounded()
+                else -> Result.failure()
             }
-            catch (_: java.io.IOException) { retry = true }
-            catch (_: Exception) { /* Preserve periodic recovery; foreground diagnostics retain the concrete issue. */ }
-            finally { client?.close(); jobFinished(params, retry) }
-        }
-        return true
+        } catch (_: java.io.IOException) { retryBounded() }
+        catch (_: Exception) { Result.failure() }
+        finally { client?.close() }
     }
-    override fun onStopJob(params: JobParameters): Boolean { running?.cancel(); return true }
-    override fun onDestroy() { scope.cancel(); super.onDestroy() }
+    private fun retryBounded() = if (runAttemptCount < 5) Result.retry() else Result.failure()
+    private fun completedWakeAt(context: Context) = context.getSharedPreferences("astravar-campaign-push", Context.MODE_PRIVATE).getLong("completedWakeAt", 0)
+}
+
+/** Legacy JobService remains declared so old OS job IDs can be retired safely on update. */
+class CampaignConnectionSyncJob : JobService() {
+    override fun onStartJob(params: JobParameters): Boolean { schedule(applicationContext); return false }
+    override fun onStopJob(params: JobParameters) = false
     companion object {
-        private const val ID = 0x415343
-        fun schedule(context: Context) {
-            context.getSystemService(JobScheduler::class.java).schedule(JobInfo.Builder(ID, ComponentName(context, CampaignConnectionSyncJob::class.java))
-                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setPeriodic(15 * 60 * 1000L)
-                .setBackoffCriteria(30_000, JobInfo.BACKOFF_POLICY_EXPONENTIAL).setPersisted(true).build())
+        const val WAKE = "astravar-campaign-wake-v1"
+        const val MANUAL = "astravar-campaign-manual-v1"
+        const val PERIODIC = "astravar-campaign-recovery-v1"
+        private const val LEGACY_ID = 0x415343
+        private val network = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
+        fun enqueue(context: Context, manual: Boolean = false, expedited: Boolean = false, wakeAt: Long = 0) {
+            if (!manual && CampaignSyncPreferences(context).paused) return
+            val request = OneTimeWorkRequestBuilder<CampaignConnectionWorker>().setConstraints(network)
+                .setInputData(workDataOf("manual" to manual, "wakeAt" to wakeAt))
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+                .addTag("astravar-campaign-sync")
+            if (expedited && android.os.Build.VERSION.SDK_INT >= 31 && CampaignSyncNotifications.canShow(context)) request.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            WorkManager.getInstance(context).enqueueUniqueWork(if (manual) MANUAL else WAKE,
+                ExistingWorkPolicy.APPEND_OR_REPLACE, request.build())
         }
-        fun cancel(context: Context) { context.getSystemService(JobScheduler::class.java).cancel(ID) }
+        fun schedule(context: Context) {
+            context.getSystemService(JobScheduler::class.java).cancel(LEGACY_ID)
+            if (CampaignSyncPreferences(context).paused) { cancel(context); return }
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(PERIODIC, ExistingPeriodicWorkPolicy.KEEP,
+                PeriodicWorkRequestBuilder<CampaignConnectionWorker>(15, TimeUnit.MINUTES)
+                    .setConstraints(network).setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+                    .addTag("astravar-campaign-sync").build())
+        }
+        /** Pause never deletes queued commands or credentials. Explicit manual work remains available. */
+        fun cancel(context: Context) {
+            context.getSystemService(JobScheduler::class.java).cancel(LEGACY_ID)
+            WorkManager.getInstance(context).cancelUniqueWork(WAKE)
+            WorkManager.getInstance(context).cancelUniqueWork(PERIODIC)
+        }
     }
 }

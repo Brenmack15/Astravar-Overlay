@@ -13,6 +13,7 @@ class LiveHpConnectionSyncJob : JobService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var running: Job? = null
     override fun onStartJob(params: JobParameters): Boolean {
+        if (CampaignSyncPreferences(applicationContext).paused) return false
         running = scope.launch {
             var client: LiveHpConnectionClient? = null
             var retry = false
@@ -25,11 +26,12 @@ class LiveHpConnectionSyncJob : JobService() {
         }
         return true
     }
-    override fun onStopJob(params: JobParameters): Boolean { running?.cancel(); return true }
+    override fun onStopJob(params: JobParameters): Boolean { running?.cancel(); return !CampaignSyncPreferences(applicationContext).paused }
     override fun onDestroy() { scope.cancel(); super.onDestroy() }
     companion object {
         private const val ID = 0x415348
         fun schedule(context: Context) {
+            if (CampaignSyncPreferences(context).paused) return
             context.getSystemService(JobScheduler::class.java).schedule(JobInfo.Builder(ID, ComponentName(context, LiveHpConnectionSyncJob::class.java))
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setPeriodic(15 * 60 * 1000L)
                 .setBackoffCriteria(30_000, JobInfo.BACKOFF_POLICY_EXPONENTIAL).setPersisted(true).build())
