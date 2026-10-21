@@ -36,9 +36,9 @@ class CampaignArchiveMigrationTest {
         old.execSQL("INSERT INTO party_wallets VALUES(?,?,?,?,?,?,?,?,?,?)", arrayOf<Any?>("fictional-existing-wallet", "fictional-existing", "Fictional purse", null, 2, 3, 7, "Fictional old source", 1, "fictional-campaign"))
         old.version = 3; old.close()
         val migrated = Room.databaseBuilder(context, CampaignLedgerDb::class.java, name)
-            .addMigrations(CAMPAIGN_MIGRATION_3_4).allowMainThreadQueries().build()
+            .addMigrations(CAMPAIGN_MIGRATION_3_4, CAMPAIGN_MIGRATION_4_5).allowMainThreadQueries().build()
         try {
-            assertEquals(4, migrated.openHelper.writableDatabase.version)
+            assertEquals(5, migrated.openHelper.writableDatabase.version)
             assertNull(migrated.recordsDao().allCharacterProfiles().single().currentHp)
             assertEquals(9L, migrated.recordsDao().allCharacterProfiles().single().revision)
             assertNull(migrated.partyDao().allWallets().single().copper)

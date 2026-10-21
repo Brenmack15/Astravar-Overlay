@@ -265,7 +265,7 @@ class CampaignArchiveTest {
     @Test fun backupRequiresExplicitFormatAndSchemaDespiteSerializableDefaults() = runBlocking {
         val value = LedgerExport(exportedAt = 0, items = emptyList(), events = emptyList())
         val valid = campaignJson.encodeToString(value)
-        listOf(valid.replace("\"format\":\"astravar-campaign-items\",", ""), valid.replace("\"schema\":4,", "")).forEach {
+        listOf(valid.replace("\"format\":\"astravar-campaign-items\",", ""), valid.replace("\"schema\":5,", "")).forEach {
             val preview = repo.previewImport(it)
             assertFalse(preview.valid)
             assertTrue(preview.conflicts.any { error -> error.contains("declare its format and supported schema") })
@@ -299,7 +299,7 @@ class CampaignArchiveTest {
         val receipt = import(payload(listOf(reference("a", relations = listOf("b")), reference("b")), mapped()))
         val exported = repo.export()
         val snapshot = campaignJson.decodeFromString<LedgerExport>(exported)
-        assertEquals(4, snapshot.schema); assertEquals(2, snapshot.archive.references.size)
+        assertEquals(5, snapshot.schema); assertEquals(2, snapshot.archive.references.size)
         assertEquals(1, snapshot.archive.backups.size); assertEquals(1, snapshot.archive.sources.size)
         val other = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext<Context>(), CampaignLedgerDb::class.java).allowMainThreadQueries().build()
         try {

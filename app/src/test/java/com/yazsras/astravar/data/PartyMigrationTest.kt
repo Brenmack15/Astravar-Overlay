@@ -53,9 +53,9 @@ class PartyMigrationTest {
         old.version = 2
         old.close()
         val migrated = Room.databaseBuilder(context, CampaignLedgerDb::class.java, name)
-            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4).allowMainThreadQueries().build()
+            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4, CAMPAIGN_MIGRATION_4_5).allowMainThreadQueries().build()
         try {
-            assertEquals(4, migrated.openHelper.writableDatabase.version)
+            assertEquals(5, migrated.openHelper.writableDatabase.version)
             val profile = requireNotNull(migrated.recordsDao().characterProfile("synthetic-preserved-actor"))
             assertEquals(3, profile.currentHp)
             assertNull(profile.temporaryHp)
@@ -77,7 +77,7 @@ class PartyMigrationTest {
         } finally { migrated.close() }
         // Reopen the named fixture; no production application data is used.
         val sameName = Room.databaseBuilder(context, CampaignLedgerDb::class.java, name)
-            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4).allowMainThreadQueries().build()
+            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4, CAMPAIGN_MIGRATION_4_5).allowMainThreadQueries().build()
         try {
             assertEquals("Synthetic migrated role", sameName.partyDao().sheets().first().single().sheet.role)
             assertEquals(3, sameName.recordsDao().characterProfile("synthetic-preserved-actor")?.currentHp)
