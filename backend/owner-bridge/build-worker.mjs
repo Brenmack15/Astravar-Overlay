@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const root = dirname(fileURLToPath(import.meta.url));
 const output = resolve(process.argv[2] || resolve(root, 'build'));
 const modules = [
-  ['core.mjs', 'CORE'], ['campaign.mjs', 'CAMPAIGN_SYNC'], ['campaign-tools.mjs','CAMPAIGN_TOOLS_MODULE'], ['live-hp.mjs', 'LIVE_HP'], ['http.mjs', 'HTTP'], ['mcp.mjs', 'MCP'],
+  ['core.mjs', 'CORE'], ['campaign.mjs', 'CAMPAIGN_SYNC'], ['campaign-push.mjs', 'CAMPAIGN_PUSH'], ['campaign-tools.mjs','CAMPAIGN_TOOLS_MODULE'], ['live-hp.mjs', 'LIVE_HP'], ['http.mjs', 'HTTP'], ['mcp.mjs', 'MCP'],
   ['bootstrap.mjs', 'BOOTSTRAP'], ['worker.mjs', 'ENTRY'],
 ];
 const names = new Map(modules.map(([file, name]) => [`./${file}`, name]));

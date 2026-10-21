@@ -41,7 +41,7 @@ test('actual isolated HTTPS gateway restarts with persistent HP/receipt and reje
  const restored=new SqliteAdapter(path),restoredBridge=new OwnerBridge(restored,{ownerId}),restoredHp=new LiveHpBridge(restored,{ownerId}),device=await restoredBridge.authenticate(token.credentialId,secret);
  assert.equal((await restoredHp.getCharacterHp(device,campaign,profileId)).fields.currentHp,17);
  assert.deepEqual((await restoredHp.getCommandReceipt(device,campaign,publication.commandId,profileId)).receipt,saved.receipt);
- assert.equal((await restored.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name LIKE 'bridge_%'").bind().first()).count,18);
+ assert.equal((await restored.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name LIKE 'bridge_%'").bind().first()).count,19);
  // A real schema guard must reject a partially altered fixture, not merely skip
  // master initialization when any one old table happens to exist.
  restored.db.exec('DROP INDEX bridge_campaign_records_grant');restored.close();
