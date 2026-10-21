@@ -38,6 +38,12 @@ Native bootstrap diagnostics retain only binding/window booleans and numeric
 age/expiry differences, never challenge values, keys or credentials. Production
 expiry, origin, campaign, nonce and replay guards are unchanged.
 
+The native UI driver scrolls each decision into view and waits for its real
+clickable, enabled semantics before dispatch. Cached proposal text alone is not
+evidence that an asynchronous refresh has finished. Failed native phases retain
+the fictional UI semantics and filtered HP/revision/pending-state diagnostics;
+all saved revision, receipt and independent readback assertions remain required.
+
 Native test phases exercise:
 
 1. Real emulator AndroidKeyStore encryption/decryption, tamper rejection and
