@@ -13,8 +13,24 @@ android {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(36)
-        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("2.2.0")
+        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(37)
+        // Public Firebase client identifiers, supplied by the owner-approved project at build time.
+        // No service-account key or signing material belongs in Android resources or source control.
+        fun firebaseConfig(name: String) = providers.gradleProperty(name).orElse(providers.environmentVariable(name)).getOrElse("")
+        listOf("ASTRAVAR_FIREBASE_APP_ID", "ASTRAVAR_FIREBASE_PROJECT_ID", "ASTRAVAR_FIREBASE_SENDER_ID", "ASTRAVAR_FIREBASE_API_KEY").forEach { name ->
+            val value = firebaseConfig(name)
+            require(value.none { it == '\n' || it == '\r' || it == '\"' || it == '\\' }) { "Invalid Firebase client configuration." }
+            buildConfigField("String", name, "\"$value\"")
+        }
+        if (listOf("ASTRAVAR_FIREBASE_APP_ID", "ASTRAVAR_FIREBASE_PROJECT_ID", "ASTRAVAR_FIREBASE_SENDER_ID", "ASTRAVAR_FIREBASE_API_KEY").all { firebaseConfig(it).isNotBlank() }) {
+            // FirebaseInitProvider reconstructs the same default app after process death. Messaging
+            // auto-init stays disabled in the manifest until authenticated campaign enrollment.
+            resValue("string", "google_app_id", firebaseConfig("ASTRAVAR_FIREBASE_APP_ID"))
+            resValue("string", "project_id", firebaseConfig("ASTRAVAR_FIREBASE_PROJECT_ID"))
+            resValue("string", "gcm_defaultSenderId", firebaseConfig("ASTRAVAR_FIREBASE_SENDER_ID"))
+            resValue("string", "google_api_key", firebaseConfig("ASTRAVAR_FIREBASE_API_KEY"))
+        }
+        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("2.3.0")
     }
     signingConfigs {
         create("owner") {
@@ -75,6 +91,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.core:core-ktx:1.17.0")
+    implementation("androidx.work:work-runtime-ktx:2.11.0")
+    implementation("com.google.firebase:firebase-messaging:24.1.2")
     implementation("androidx.room:room-runtime:2.8.4")
     implementation("androidx.room:room-ktx:2.8.4")
     ksp("androidx.room:room-compiler:2.8.4")
