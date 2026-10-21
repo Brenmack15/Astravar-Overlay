@@ -161,10 +161,16 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
         archive = CampaignArchiveState(references = dao.allReferences(), relations = dao.allRelations(), receipts = dao.allReceipts()))
     private fun stateHash(value: LedgerExport) = campaignSerializedHash(LedgerExport.serializer(), value.copy(exportedAt = 0,
         archive = value.archive.copy(receipts = emptyList(), backups = emptyList())))
+    /** Schema 5 adds nullable denominations. Only an exactly representable old state can match its old receipt.
+     * Never erase known zero/nonzero coins or rewrite an original hash, source payload or backup body. */
+    private fun stateHashMatches(value: LedgerExport, expected: String): Boolean = stateHash(value) == expected ||
+        (value.schema == 5 && value.records.wallets.all { it.electrum == null && it.platinum == null } &&
+            stateHash(value.copy(schema = 4)) == expected)
     private fun recoverySnapshot(value: LedgerExport) = value.copy(exportedAt = 0,
         archive = value.archive.copy(backups = emptyList()))
     // A separate suspend frame releases the source archive before the next complete database read.
     private suspend fun currentStateHash() = stateHash(campaignSnapshot())
+    private suspend fun currentStateMatches(expected: String) = stateHashMatches(campaignSnapshot(), expected)
 
     /** Independently hash stored SQLite bytes without reconstructing another complete backup String. */
     private suspend fun verifyStoredBackup(metadata: CampaignBackupMetadata) {
@@ -183,9 +189,11 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
 
     /** Keep the normal byte-exact path free of backup decoding, including earlier schema-four encodings. */
     private suspend fun matchingCurrentSnapshot(metadata: CampaignBackupMetadata, expectedState: String): LedgerExport? {
-        check(metadata.sourceStateSha256 == expectedState) { "The recovery backup did not verify." }
         val current = campaignSnapshot()
+        // A fresh schema-5 review and a stored schema-4 backup may hash the same unchanged records differently.
+        // Independently verify both identities against this same committed snapshot.
         check(stateHash(current) == expectedState) { "Local data changed. Preview again before creating a recovery backup." }
+        check(stateHashMatches(current, metadata.sourceStateSha256)) { "The recovery backup did not verify." }
         val snapshot = recoverySnapshot(current)
         if (metadata.snapshotSha256 != campaignBackupSerializedHash(snapshot) &&
             metadata.snapshotSha256 != campaignSerializedHash(LedgerExport.serializer(), snapshot)) return null
@@ -208,7 +216,9 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
         verifyEarlierReceiptSnapshot(metadata)
         // The decoded backup frame also ends before this fresh current-state readback.
         return campaignSnapshot().also {
-            check(stateHash(it) == expectedState) { "Local data changed. Preview again before creating a recovery backup." }
+            check(stateHash(it) == expectedState && stateHashMatches(it, metadata.sourceStateSha256)) {
+                "Local data changed. Preview again before creating a recovery backup."
+            }
         }
     }
 
@@ -334,7 +344,7 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
         val state = CampaignArchiveState(references = incomingRows, relations = edges,
             sources = listOf(CampaignArchiveSource(preview.fingerprint, preview.payloadJson)))
         val mapped = incoming.mapped ?: LedgerExport(exportedAt = 0, items = emptyList(), events = emptyList())
-        val merge = mapped.copy(archive = state, schema = 4)
+        val merge = mapped.copy(archive = state, schema = maxOf(4, mapped.schema))
         val errors = CampaignBackup(db).validate(merge, current) + validateMappedIdentities(mapped, current)
         require(errors.isEmpty()) { errors.joinToString("\n") }
         CampaignBackup(db).mergeRows(merge, current)
@@ -359,7 +369,7 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
         // The source decoder's coroutine frame ends before state readback starts, releasing its attachment strings.
         val errors = verifySavedSource(packageHash).toMutableList()
         // Changes made after import are permitted; report those explicitly instead of falsely verifying an unchanged snapshot.
-        if (stateHash(campaignSnapshot()) != receipt.readbackSha256) errors += "Campaign records changed after this import; the original receipt remains preserved."
+        if (!currentStateMatches(receipt.readbackSha256)) errors += "Campaign records changed after this import; the original receipt remains preserved."
         CampaignArchiveVerification(errors.isEmpty(), if (errors.isEmpty()) "Database readback matches every imported identity, relationship and content hash." else "Review the database readback differences.", errors.distinct())
     }
 
@@ -381,11 +391,11 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
         require(confirmed) { "Player confirmation is required before recovery." }
         dao.receipt("rollback:$packageHash")?.let { return@withTransaction it }
         val receipt = requireNotNull(dao.receipt(packageHash)) { "No import receipt exists." }
-        check(currentStateHash() == receipt.readbackSha256) { "Campaign data changed after import. Export both states and reconcile; automatic rollback would discard later work." }
+        check(currentStateMatches(receipt.readbackSha256)) { "Campaign data changed after import. Export both states and reconcile; automatic rollback would discard later work." }
         val backup = requireNotNull(dao.backupMetadata(packageHash)) { "The pre-import backup is unavailable." }
         restoreVerifiedSnapshot(backup)
         // The decoded prior snapshot's helper frame has ended before independent readback.
-        check(currentStateHash() == backup.sourceStateSha256) { "Recovery database readback differs from the verified pre-import snapshot." }
+        check(currentStateMatches(backup.sourceStateSha256)) { "Recovery database readback differs from the verified pre-import snapshot." }
         CampaignImportReceipt("rollback:$packageHash", receipt.campaignId, receipt.title, System.currentTimeMillis(),
             receipt.recordCount, receipt.relationCount, "ROLLED_BACK", backup.sourceStateSha256,
             "Recovered the verified pre-import campaign snapshot. Original import and recovery receipts are retained.").also { dao.insert(it) }
