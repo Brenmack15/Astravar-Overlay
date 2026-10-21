@@ -2,7 +2,7 @@ name: Astravar HP native HTTPS acceptance
 on:
   push:
     branches: ['feat/astravar-2.1-player-first']
-    paths: ['app/**', 'backend/owner-bridge/**', 'scripts/ci-owner-hp-native.sh', 'scripts/ci-owner-native-server.mjs', '.github/workflows/owner-hp-native.yml']
+    paths: ['app/**', 'backend/owner-bridge/**', 'scripts/ci-owner-hp-native.sh', 'scripts/ci-owner-native-server.mjs', 'scripts/ui_foundation_sha256.json', 'scripts/verify_ui_foundation.py', '.github/workflows/owner-hp-native.yml']
   workflow_dispatch:
 permissions:
   contents: read
