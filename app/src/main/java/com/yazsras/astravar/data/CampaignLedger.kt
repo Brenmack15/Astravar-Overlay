@@ -135,7 +135,8 @@ abstract class CampaignLedgerDb : RoomDatabase() {
     companion object {
         fun open(context: Context): CampaignLedgerDb = Room.databaseBuilder(
             context.applicationContext, CampaignLedgerDb::class.java, "astravar-campaign-ledger.db"
-        ).addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4).build() // NEVER fallbackToDestructiveMigration()
+        ).enableMultiInstanceInvalidation()
+            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4).build() // NEVER fallbackToDestructiveMigration()
     }
 }
 

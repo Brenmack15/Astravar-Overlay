@@ -26,6 +26,8 @@ class OwnerServiceEnrollment(val origin: String, val campaignId: String, interna
  * transport access to this installation. SAF sees ciphertext only. The local
  * one-use challenge and non-exportable RSA key bind the imported file to this
  * phone, service and campaign. Neither key nor credentials enter app backups.
+ * This grants private transport access only: a separately owner-approved,
+ * campaign/profile-scoped device enrollment controls record permissions.
  */
 class OwnerConnectionBootstrap internal constructor(context: Context, private val now: () -> Long,
     private val keyProvider: () -> KeyPair) {
@@ -56,7 +58,7 @@ class OwnerConnectionBootstrap internal constructor(context: Context, private va
     }
     @Synchronized fun begin(origin: String, campaign: String): String {
         val endpoint = OwnerSyncProtocol.origin(origin)
-        require(campaign == OwnerConnectionProtocol.CAMPAIGN) { "Live campaign acceptance has not been authorized." }
+        OwnerSyncProtocol.id(campaign)
         val nonce = encode(ByteArray(32).also { SecureRandom().nextBytes(it) })
         val publicKey = encode(keyProvider().public.encoded)
         check(preferences.edit().putString("origin", endpoint).putString("campaign", campaign).putString("nonce", nonce)
@@ -75,7 +77,7 @@ class OwnerConnectionBootstrap internal constructor(context: Context, private va
         val nonce = bundle.getValue("nonce").jsonPrimitive.content
         val expiry = bundle.getValue("expiresAt").jsonPrimitive.long
         val created = preferences.getLong("createdAt", 0)
-        require(OwnerSyncProtocol.origin(origin) == origin && campaign == OwnerConnectionProtocol.CAMPAIGN &&
+        require(OwnerSyncProtocol.origin(origin) == origin && OwnerSyncProtocol.id(campaign) == campaign &&
             preferences.getString("origin", null) == origin && preferences.getString("campaign", null) == campaign &&
             nonce.matches(Regex("[A-Za-z0-9_-]{43}")) && preferences.getString("nonce", null) == nonce &&
             created > 0 && now() >= created && now() - created <= MAX_AGE && expiry > now() && expiry <= now() + MAX_AGE) {
