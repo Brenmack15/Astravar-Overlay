@@ -4,6 +4,7 @@ set -euo pipefail
 : "${ANDROID_HOME:?Android SDK required}"
 : "${RUNNER_TEMP:?Isolated CI runner required}"
 : "${ASTRAVAR_BASELINE_DEBUG_APK:?Previous published debug APK required}"
+: "${ASTRAVAR_VERSION_CODE:?Exact candidate version code required}"
 test -c /dev/kvm
 sudo chmod 666 /dev/kvm
 astravar_private=$(mktemp -d "$RUNNER_TEMP/astravar-hp-native.XXXXXX")
@@ -143,8 +144,9 @@ done
 timeout 45s adb -s "$astravar_serial" install "$ASTRAVAR_BASELINE_DEBUG_APK"
 timeout 45s adb -s "$astravar_serial" install app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 run_test() {
-  local astravar_test=$1 astravar_log=$2
-  timeout -k 5s 240s adb -s "$astravar_serial" shell am instrument -w -r -e class "$astravar_test" \
+  local astravar_test=$1 astravar_log=$2 astravar_timeout=${3:-240}
+  [[ "$astravar_timeout" =~ ^[1-9][0-9]*$ ]]
+  timeout -k 5s "${astravar_timeout}s" adb -s "$astravar_serial" shell am instrument -w -r -e class "$astravar_test" \
     "$astravar_product.test/androidx.test.runner.AndroidJUnitRunner" | tee "$astravar_output/$astravar_log"
   grep -q '^OK (1 test' "$astravar_output/$astravar_log"
   ! grep -q 'FAILURES\|INSTRUMENTATION_FAILED\|Process crashed' "$astravar_output/$astravar_log"
@@ -162,7 +164,7 @@ grep -q Success "$astravar_output/update-install.txt"
 snapshot "$astravar_output/update-after.sha256"
 diff -u "$astravar_output/update-before.sha256" "$astravar_output/update-after.sha256" >"$astravar_output/update-store-diff.txt"
 adb -s "$astravar_serial" shell dumpsys package "$astravar_product" >"$astravar_output/updated-package.txt"
-grep -q 'versionCode=35' "$astravar_output/updated-package.txt"
+grep -q "versionCode=${ASTRAVAR_VERSION_CODE} " "$astravar_output/updated-package.txt"
 # The isolated .example DNS cannot provide Android network time. After proving
 # fresh AVD ownership again, align only this guest clock before any credentials.
 # A two-second lead covers second-resolution setting/ADB latency without changing
@@ -208,12 +210,33 @@ start_server
 run_test 'com.yazsras.astravar.data.LiveHpNativeHttpsTest#bRestartRetryAndValidatedBackupRestore' native-hp-restart-restore.txt
 timeout 10s adb -s "$astravar_serial" shell am force-stop "$astravar_product"
 run_test 'com.yazsras.astravar.data.LiveHpNativeHttpsTest#cSimultaneousLocalEditAndAuthorizationRevocation' native-hp-negative.txt
+# Production campaign HTTPS transport, explicit grant, Auto-Sync and immutable readback.
+run_test 'com.yazsras.astravar.data.CampaignNativeHttpsTest#authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts' native-campaign-https.txt 360
+# Real native Room/domain transactions in a separately named synthetic database.
+run_test 'com.yazsras.astravar.data.CampaignSyncNativeTest#nativeCommittedHpSlotAndCheckpointSurviveDatabaseReopen' native-campaign-hp-slot-checkpoint.txt
+run_test 'com.yazsras.astravar.data.CampaignSyncNativeTest#nativeAtomicPurchaseRollbackAndRetryPreserveSinglePhysicalIdentity' native-campaign-purchase-move.txt
+run_test 'com.yazsras.astravar.data.CampaignSyncNativeTest#nativeCompanionAndStageChangesKeepIndependentResourcesAndLaterWork' native-campaign-companion-stage.txt
+# Production Compose component, native clipboard, keyboard and font-scale checks.
+run_test 'com.yazsras.astravar.ui.PairingCodeClipboardTest#tap_copies_exact_displayed_code_and_announces_feedback' native-pairing-code-copy.txt
+run_test 'com.yazsras.astravar.ui.PairingCodeClipboardTest#keyboard_activation_and_large_text_preserve_the_exact_code' native-pairing-code-keyboard.txt
 git rev-parse HEAD >"$astravar_output/SOURCE_COMMIT.txt"
 python3 - "$astravar_output" <<'PY'
-import json,pathlib,sys
+import json,math,os,pathlib,statistics,sys
 p=pathlib.Path(sys.argv[1]); (p/'SCOPE.json').write_text(json.dumps({'fictionalOnly':True,'emulatorApi':36,
  'nativeHttps':True,'nativeAndroidKeyStore':True,'productionComposeApprovalAndRejection':True,
- 'forceStopRestart':True,'separateDatabaseValidatedBackupRestore':True,'sameDebugKeyUpdate':'published34 to candidate35',
- 'actualOwnerSigningIdentityTestedInCi':False,'realChatGptHostInvocation':False,'physicalGalaxy':False,
+ 'forceStopRestart':True,'separateDatabaseValidatedBackupRestore':True,'sameDebugKeyUpdate':'published35 to candidate'+os.environ['ASTRAVAR_VERSION_CODE'],
+ 'actualOwnerSigningIdentityTestedInCi':False,'realChatGptHostInvocation':False,'physicalGalaxy':False,'nativeClipboardExactCopy':True,'nativeKeyboardActivation':True,'nativeLargeFontScale':2,'nativeCampaignRoomDomainTransactions':True,'campaignRoomPersistenceAfterCloseReopen':True,'campaignHttps':True,'campaignHostedMcpAcceptance':False,
  'isolatedGatewaySimulatesSitesIdentity':True,'noProductionTlsChanges':True,'temporaryEmulatorHosts':True},indent=2)+'\n')
+rows=[]
+for line in (p/'gateway.log').read_text().splitlines():
+    try:
+        row=json.loads(line)
+        if isinstance(row,dict) and row.get('syntheticOnly') and 'elapsedMs' in row: rows.append(row)
+    except (ValueError,TypeError): pass
+latency=sorted(row['elapsedMs'] for row in rows)
+assert latency, 'Actual synthetic HTTPS protocol timing evidence required'
+(p/'PROTOCOL-METRICS.json').write_text(json.dumps({'syntheticOnly':True,'requestCount':len(rows),
+ 'medianMs':statistics.median(latency),'p95Ms':latency[math.ceil(len(latency)*0.95)-1],'maximumMs':max(latency),
+ 'expectedNegativeTestResponses':sum(row['status']>=400 for row in rows),
+ 'scope':'Local native TLS fixture includes intentional offline/security failures; not production reliability or ChatGPT latency.'},indent=2)+'\n')
 PY

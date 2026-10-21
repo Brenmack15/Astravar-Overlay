@@ -68,12 +68,18 @@ async function dispatch(req, bytes) {
   return response;
 }
 const server = https.createServer({ key: readFileSync(resolve(directory, 'server.key')), cert: readFileSync(resolve(directory, 'server.crt')) }, async (req, res) => {
+  const started = performance.now();
   try {
     const response = await dispatch(req, await body(req));
     if (!response) return;
     res.writeHead(response.status, Object.fromEntries(response.headers));
     res.end(Buffer.from(await response.arrayBuffer()));
-  } catch { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end('{"error":"CI_GATEWAY_FAILURE"}'); }
+    console.log(JSON.stringify({syntheticOnly:true,method:req.method,path:new URL(req.url,origin).pathname,status:response.status,elapsedMs:Number((performance.now()-started).toFixed(2))}));
+  } catch (error) {
+    // File/line frames are actionable; never log request headers, bodies or tokens.
+    console.error(JSON.stringify({syntheticOnly:true,failure:'CI_GATEWAY_FAILURE',type:error?.name,frames:String(error?.stack??'').split('\n').slice(1,5)}));
+    res.writeHead(500, { 'Content-Type': 'application/json' }); res.end('{"error":"CI_GATEWAY_FAILURE"}');
+  }
 });
 let tlsReady = false;
 let dnsReady = false;

@@ -6,7 +6,7 @@
     "app/src/main/java/com/yazsras/astravar/data/HistoryStorage.kt": "c7968f73293f5d8f46fa148be3fbbb74352565e914ef3b1762f88800104dbb62",
     "app/src/main/java/com/yazsras/astravar/data/Store.kt": "17c00ac0996007b028b99af360205c59f0694b258e7184b267067ffa038ed3be",
     "app/src/main/java/com/yazsras/astravar/overlay/ArcaneSurface.kt": "e73af0007da85e7807f1e8d3245347eb6256d507c17b67bbb4dd456285669cbb",
-    "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": "355b4b5bf6e8fa934eba59c453ddb83d0d11ca1001d34bbf72fa38f032141153",
+    "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": "60c2f1874d21a60f4bc6dd8490a6a295cbe75786601d438283fc9e53df79ef3e",
     "app/src/main/res/drawable-nodpi/astravar_cutout.webp": "580c7e31c3cab1ebfef5b5b449b660c45d3b055ff88c876f8f12876115cce7c4",
     "app/src/main/res/drawable-nodpi/astravar_reference.jpg": "c60543080b52334ec9e8637f6509c1a146e7f284d39d15a2d9c696a48e6df3dd",
     "app/src/main/res/font/cinzel.ttf": "7edcff5bbab3644c973b7df42f57368fa5e71ebf49ce5ea24f74f80bcd679cbb",
@@ -137,6 +137,20 @@
         "reviewed_sha256": "ff179553fdd944ffa020211589a47cdf13d387ed5a2217b67131e7c66f1d97e9",
         "reason": "Clarify that the unchanged twenty-entry limit applies to the working/undo projection, not destruction of immutable history or complete backups.",
         "source_commit": "ddf1a50"
+      }
+    }
+  },
+  "authorized_campaign_sync_source_changes": {
+    "authorization": "Owner ASTRAVAR2.2 complete campaign integration directive,21October2026",
+    "verified_source_baseline": "abae4f49beec75d14a364be91f7d0fb4303524ad",
+    "scope": "Reviewed additive campaign synchronization and wallet/backup evolution. Historical source provenance, original assets, protected combat engine, immutable historical schemas and owner signing configuration are retained. Test evidence is recorded separately.",
+    "files": {
+      "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": {
+        "previous_pinned_sha256": "355b4b5bf6e8fa934eba59c453ddb83d0d11ca1001d34bbf72fa38f032141153",
+        "reviewed_sha256": "60c2f1874d21a60f4bc6dd8490a6a295cbe75786601d438283fc9e53df79ef3e",
+        "reason": "Insert only the foreground campaign delivery loop into the existing session. Combat, dice, weapon formulas, controls, artwork, accounting and all other overlay source remain byte-identical after removing that exact insertion.",
+        "exact_authorized_insertion": "        // The existing visible foreground session keeps delivery active while the player uses ChatGPT.\n        // A successful network poll alone never becomes a claimed committed gameplay save.\n        scope.launch(Dispatchers.IO) {\n            val campaign = CampaignConnectionClient(applicationContext)\n            try {\n                while (isActive) {\n                    try { campaign.foreground() }\n                    catch (e: CancellationException) { throw e }\n                    catch (_: Exception) { /* Durable inbox/outbox and verified status survive network interruption. */ }\n                    delay(5_000)\n                }\n            } finally { campaign.close() }\n        }\n",
+        "after_removing_exact_insertion_sha256": "355b4b5bf6e8fa934eba59c453ddb83d0d11ca1001d34bbf72fa38f032141153"
       }
     }
   }

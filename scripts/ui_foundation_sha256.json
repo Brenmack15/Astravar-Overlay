@@ -6,15 +6,15 @@
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/1.json": "8f92801eb01d6ed7d6ff4c5508e9fc4131146fbbcf9a9f8aad92e2596536ec30",
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/2.json": "50a395a8b87a7a119312af1b1edba8246f68aed77be8900baa29a5caff964361",
     "app/schemas/com.yazsras.astravar.data.SandboxSyncDb/1.json": "23de63787037f830e1295ba7cd7efbc7d62cf18e3ba836c4e511bec8fd6cef03",
-    "app/src/main/AndroidManifest.xml": "9e25b9ee647fe23770a5414a37d8c6f7a70c58f2686233d9f443155819a783cb",
-    "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": "4bc371c0ada32d604e07dad8f4705a9e20f7c623860c6e7be9346d923bb84ca6",
-    "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": "eb0a3fffa6d2209ca8c20ab35bc7b018573eb0eb35d503ab18a32cde32b09943",
+    "app/src/main/AndroidManifest.xml": "b66418063c763cc2f4c0775987af3af650a5b56dec51c3a65acdae4832feab67",
+    "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": "f7eefb74ebec642b318ab67053605ec5ede36dd02b38a2ae0c85819178821251",
+    "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": "18e19a4abe551da58a02314124ef229420e8abe49f4ff5371552fae1fe800f6f",
     "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": "7e5b92d763929c131ddef1f8ee5f08bad520233939f51234feace666b45c77c3",
     "app/src/main/java/com/yazsras/astravar/data/HistoryStorage.kt": "c7968f73293f5d8f46fa148be3fbbb74352565e914ef3b1762f88800104dbb62",
     "app/src/main/java/com/yazsras/astravar/data/SandboxSync.kt": "25f71e8aac585b24f83975796e9a4a7aa01b7c6a8c6f94607544bdf8775f5cf9",
     "app/src/main/java/com/yazsras/astravar/data/Store.kt": "17c00ac0996007b028b99af360205c59f0694b258e7184b267067ffa038ed3be",
     "app/src/main/java/com/yazsras/astravar/overlay/ArcaneSurface.kt": "e73af0007da85e7807f1e8d3245347eb6256d507c17b67bbb4dd456285669cbb",
-    "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": "355b4b5bf6e8fa934eba59c453ddb83d0d11ca1001d34bbf72fa38f032141153",
+    "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": "60c2f1874d21a60f4bc6dd8490a6a295cbe75786601d438283fc9e53df79ef3e",
     "app/src/main/res/drawable-nodpi/astravar_armor_front.png": "25d225393ba934260690d184a5993805add290bdfdb76e05bcb7ff8486b355b3",
     "app/src/main/res/drawable-nodpi/astravar_cutout.webp": "580c7e31c3cab1ebfef5b5b449b660c45d3b055ff88c876f8f12876115cce7c4",
     "app/src/main/res/drawable-nodpi/astravar_reference.jpg": "c60543080b52334ec9e8637f6509c1a146e7f284d39d15a2d9c696a48e6df3dd",
@@ -350,6 +350,35 @@
         "previous_sha256": "083954872f38de5652f7b11a75a36b9fe75cc01f4452e1dceb218fbe813bc388",
         "sha256": "eb0a3fffa6d2209ca8c20ab35bc7b018573eb0eb35d503ab18a32cde32b09943",
         "reason": "Enable Room multi-instance invalidation so existing Armor/Party collectors observe authenticated HP writes from separate client/job database instances; schemas and the exact migration chain remain unchanged."
+      }
+    }
+  },
+  "authorized_campaign_sync_source_changes": {
+    "authorization": "Owner ASTRAVAR2.2 complete campaign integration directive,21October2026",
+    "verified_source_baseline": "abae4f49beec75d14a364be91f7d0fb4303524ad",
+    "scope": "Reviewed additive campaign synchronization and wallet/backup evolution. Historical source provenance, original assets, protected combat engine, immutable historical schemas and owner signing configuration are retained. Test evidence is recorded separately.",
+    "files": {
+      "app/src/main/AndroidManifest.xml": {
+        "previous_pinned_sha256": "9e25b9ee647fe23770a5414a37d8c6f7a70c58f2686233d9f443155819a783cb",
+        "reviewed_sha256": "b66418063c763cc2f4c0775987af3af650a5b56dec51c3a65acdae4832feab67",
+        "reason": "Add only the non-exported, BIND_JOB_SERVICE-protected campaign sync job. Preserve package, HTTPS-only transport, backup exclusion, existing services and original artwork."
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": {
+        "previous_pinned_sha256": "4bc371c0ada32d604e07dad8f4705a9e20f7c623860c6e7be9346d923bb84ca6",
+        "reviewed_sha256": "f7eefb74ebec642b318ab67053605ec5ede36dd02b38a2ae0c85819178821251",
+        "reason": "Accept schema5 while retaining schemas1\u20134; validate nullable electrum/platinum and aggregate Trusted DM receipts against the original committed child audits. Preserve merge-only recovery and reject forged aggregates."
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": {
+        "previous_pinned_sha256": "eb0a3fffa6d2209ca8c20ab35bc7b018573eb0eb35d503ab18a32cde32b09943",
+        "reviewed_sha256": "18e19a4abe551da58a02314124ef229420e8abe49f4ff5371552fae1fe800f6f",
+        "reason": "Add Room4-to5 nullable wallet migration and schema5 export; optional explicitly supplied item identity uses a distinct idempotency fingerprint, preserving legacy create fingerprints and physical item identity."
+      },
+      "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": {
+        "previous_pinned_sha256": "355b4b5bf6e8fa934eba59c453ddb83d0d11ca1001d34bbf72fa38f032141153",
+        "reviewed_sha256": "60c2f1874d21a60f4bc6dd8490a6a295cbe75786601d438283fc9e53df79ef3e",
+        "reason": "Insert only the foreground campaign delivery loop into the existing session. Combat, dice, weapon formulas, controls, artwork, accounting and all other overlay source remain byte-identical after removing that exact insertion.",
+        "exact_authorized_insertion": "        // The existing visible foreground session keeps delivery active while the player uses ChatGPT.\n        // A successful network poll alone never becomes a claimed committed gameplay save.\n        scope.launch(Dispatchers.IO) {\n            val campaign = CampaignConnectionClient(applicationContext)\n            try {\n                while (isActive) {\n                    try { campaign.foreground() }\n                    catch (e: CancellationException) { throw e }\n                    catch (_: Exception) { /* Durable inbox/outbox and verified status survive network interruption. */ }\n                    delay(5_000)\n                }\n            } finally { campaign.close() }\n        }\n",
+        "after_removing_exact_insertion_sha256": "355b4b5bf6e8fa934eba59c453ddb83d0d11ca1001d34bbf72fa38f032141153"
       }
     }
   }
