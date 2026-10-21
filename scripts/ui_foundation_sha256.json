@@ -6,7 +6,7 @@
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/1.json": "8f92801eb01d6ed7d6ff4c5508e9fc4131146fbbcf9a9f8aad92e2596536ec30",
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/2.json": "50a395a8b87a7a119312af1b1edba8246f68aed77be8900baa29a5caff964361",
     "app/schemas/com.yazsras.astravar.data.SandboxSyncDb/1.json": "23de63787037f830e1295ba7cd7efbc7d62cf18e3ba836c4e511bec8fd6cef03",
-    "app/src/main/AndroidManifest.xml": "2a3a68963357e470043a0da0269422b8c007013ce0569e0b5cb8a4214f9d3fc7",
+    "app/src/main/AndroidManifest.xml": "5327740cec5694eb7d35741d29f2c75fde0dadfad5d9614bbf36cf359fa479df",
     "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": "4bc371c0ada32d604e07dad8f4705a9e20f7c623860c6e7be9346d923bb84ca6",
     "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": "083954872f38de5652f7b11a75a36b9fe75cc01f4452e1dceb218fbe813bc388",
     "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": "7e5b92d763929c131ddef1f8ee5f08bad520233939f51234feace666b45c77c3",
@@ -311,6 +311,28 @@
     },
     "new_files": {
       "app/src/main/java/com/yazsras/astravar/data/CampaignBackupDecoder.kt": "ac54ca342f5b7fe4a07fd31db533e24be8fbf53fd492e4460513851a3b0c74ea"
+    }
+  },
+  "authorized_owner_connection_changes": {
+    "baseline": "833bc580fce83a503d09f2e85a711c950dc2d897",
+    "scope": "Owner-authorized authenticated fictional character approval/retry connection. Original package, owner signing block, campaign/weapon stores, artwork and prior schema digests remain protected.",
+    "files": {
+      "app/src/main/AndroidManifest.xml": {
+        "previous_sha256": "2a3a68963357e470043a0da0269422b8c007013ce0569e0b5cb8a4214f9d3fc7",
+        "sha256": "6bc26431b58171dcc6a7e5a50da639f6a7ac688e4963c304cc5c537c8cd9a036",
+        "reason": "Add the nonexported BIND_JOB_SERVICE-protected owner retry service and boot permission for OS-persisted network jobs. Existing permissions/components and cleartext/backup policy unchanged."
+      }
+    }
+  },
+  "authorized_owner_network_permission_correction": {
+    "baseline": "c3c27f63b110fa153d52d28eb78f9fffe5112b1b",
+    "files": {
+      "app/src/main/AndroidManifest.xml": {
+        "previous_sha256": "6bc26431b58171dcc6a7e5a50da639f6a7ac688e4963c304cc5c537c8cd9a036",
+        "sha256": "5327740cec5694eb7d35741d29f2c75fde0dadfad5d9614bbf36cf359fa479df",
+        "reason": "Android14+ requires normal ACCESS_NETWORK_STATE permission when scheduling jobs with a network constraint. No data access scope, signing configuration, domain schema or mechanics change.",
+        "official_reference": "https://developer.android.com/about/versions/14/behavior-changes-14#jobscheduler-reinforces-callback-and-network-behavior"
+      }
     }
   }
 }
