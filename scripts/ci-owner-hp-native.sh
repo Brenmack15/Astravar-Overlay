@@ -98,13 +98,27 @@ timeout 15s adb -s "$astravar_serial" wait-for-device
 # credentials exist yet, no CA is installed system-wide, and TLS hostname
 # verification still receives the original hp-bridge.example URL.
 # Official support: developer.android.com/studio/run/emulator-commandline
-# adb remount -R performs the reboot only if required by this debug image.
-timeout -k 5s 60s adb -s "$astravar_serial" remount -R >"$astravar_output/hosts-remount.txt" 2>&1
+# Do not use remount -R: intentional adbd disconnect during its automatic reboot
+# can return 255 before the caller can wait. A plain successful remount reports
+# whether a reboot is required, matching AOSP's explicit remount test lifecycle.
+astravar_previous_boot=$(timeout 5s adb -s "$astravar_serial" shell cat /proc/sys/kernel/random/boot_id | tr -d '\r')
+test -n "$astravar_previous_boot"
+timeout -k 5s 60s adb -s "$astravar_serial" remount >"$astravar_output/hosts-remount.txt" 2>&1
+astravar_requires_reboot=0
+if grep -Fq 'Now reboot your device for settings to take effect' "$astravar_output/hosts-remount.txt"; then
+  astravar_requires_reboot=1
+  timeout 15s adb -s "$astravar_serial" reboot
+fi
 timeout -k 5s 120s adb -s "$astravar_serial" wait-for-device
 astravar_remounted_booted=0
 for astravar_attempt in $(seq 1 90); do
   kill -0 "$astravar_emulator_pid"
-  if [[ "$(timeout 3s adb -s "$astravar_serial" shell getprop sys.boot_completed | tr -d '\r')" == 1 ]]; then astravar_remounted_booted=1; break; fi
+  astravar_current_boot=$(timeout 3s adb -s "$astravar_serial" shell cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r' || true)
+  astravar_boot_complete=$(timeout 3s adb -s "$astravar_serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)
+  if [[ "$astravar_boot_complete" == 1 && -n "$astravar_current_boot" ]] &&
+    [[ "$astravar_requires_reboot" == 0 || "$astravar_current_boot" != "$astravar_previous_boot" ]]; then
+    astravar_remounted_booted=1; break
+  fi
   sleep 2
 done
 test "$astravar_remounted_booted" = 1
