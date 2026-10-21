@@ -163,6 +163,39 @@ snapshot "$astravar_output/update-after.sha256"
 diff -u "$astravar_output/update-before.sha256" "$astravar_output/update-after.sha256" >"$astravar_output/update-store-diff.txt"
 adb -s "$astravar_serial" shell dumpsys package "$astravar_product" >"$astravar_output/updated-package.txt"
 grep -q 'versionCode=35' "$astravar_output/updated-package.txt"
+# The isolated .example DNS cannot provide Android network time. After proving
+# fresh AVD ownership again, align only this guest clock before any credentials.
+# A two-second lead covers second-resolution setting/ADB latency without changing
+# the production ten-minute challenge, expiry or nonce checks.
+kill -0 "$astravar_emulator_pid"
+test "$(adb -s "$astravar_serial" shell getprop ro.kernel.qemu | tr -d '\r')" = 1
+test "$(timeout 10s adb -s "$astravar_serial" emu avd name | tr -d '\r' | awk 'NR == 1 { print }')" = AstravarHpCI
+sample_clock() {
+  local astravar_phase=$1 astravar_host_before astravar_guest_epoch astravar_host_after
+  astravar_host_before=$(date +%s%N)
+  astravar_guest_epoch=$(timeout 10s adb -s "$astravar_serial" shell toybox date +%s.%N | tr -d '\r')
+  astravar_host_after=$(date +%s%N)
+  python3 - "$astravar_output/clock-$astravar_phase.json" "$astravar_host_before" "$astravar_guest_epoch" "$astravar_host_after" <<'PY'
+import decimal,json,pathlib,re,sys
+p,before,guest,after=sys.argv[1:]
+assert re.fullmatch(r'[0-9]+\.[0-9]{9}',guest), 'Native epoch sample required'
+host_ms=(int(before)+int(after))//2//1_000_000
+guest_ms=int(decimal.Decimal(guest)*1000)
+value={'fictionalOnly':True,'hostEpochMs':host_ms,'guestEpochMs':guest_ms,
+       'guestMinusHostMs':guest_ms-host_ms,'sampleRoundTripMs':(int(after)-int(before))//1_000_000}
+pathlib.Path(p).write_text(json.dumps(value,indent=2)+'\n')
+PY
+}
+sample_clock before
+timeout 10s adb -s "$astravar_serial" shell settings put global auto_time 0
+astravar_clock_target=$(( $(date +%s) + 2 ))
+timeout 10s adb -s "$astravar_serial" shell toybox date -u -s "@$astravar_clock_target" >"$astravar_output/clock-set.txt"
+sample_clock after
+python3 - "$astravar_output/clock-after.json" <<'PY'
+import json,sys
+value=json.load(open(sys.argv[1]))
+assert 0 <= value['guestMinusHostMs'] <= 5000, 'Owned guest clock synchronization not verified'
+PY
 # No credentials appear in command arguments/logs or retained artifacts.
 adb -s "$astravar_serial" shell "run-as $astravar_product sh -c 'mkdir -p files; cat >files/ci-https-config.json'" <"$astravar_private/client-config.json"
 run_test 'com.yazsras.astravar.data.LiveHpNativeHttpsTest#aNativeKeystorePublicationApprovalRejectionAndOfflineIntent' native-hp-first.txt
