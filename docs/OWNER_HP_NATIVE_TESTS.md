@@ -25,6 +25,12 @@ be rejected. No system-wide CA or production TLS override is installed. The temp
 gateway strips caller identity headers and accepts its privileged controller
 only with an ephemeral secret held outside retained evidence.
 
+If a successful plain remount requests a reboot, the harness explicitly reboots
+and requires a changed kernel boot ID and completed boot before rechecking AVD
+ownership. This avoids treating the intentional `adbd` disconnect from
+`remount -R` as a completed remount. Any remount, ownership, hosts write or
+resolution failure still aborts before app credentials are installed.
+
 Native test phases exercise:
 
 1. Real emulator AndroidKeyStore encryption/decryption, tamper rejection and
