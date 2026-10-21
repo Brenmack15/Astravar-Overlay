@@ -1,5 +1,9 @@
 # Working on Astravar Overlay
 
+## Astravar 2.3 authorization (21 October 2026)
+
+The owner supplied CODEX_WORK_DIRECTIVE.md authorizes an isolated2.3 branch from code36, compact indexed player-known reads, optional authenticated Firebase wakeups, network-constrained WorkManager recovery, global automatic Pause and quiet opt-in notification controls, plus atomic acquire-and-assign to verified same-campaign profiles. Preserve the permanent package, original owner signing key, all stores/accepted mechanics, existing Site/plugin identity and standing grants. No billing activation, main merge, force-push, destructive migration, public signing material or invented phone acceptance. Account/provider consent and actual owner installation remain owner actions. Push is best-effort; immutable Android receipts and independent readback remain authority. Keep production push disabled until private Firebase configuration and native controls are ready. Read docs/ULTRA_FAST_SYNC_V23.md for implementation and acceptance boundaries.
+
 Read docs/ASTRAVAR_RULES.md and docs/DECISIONS.md before changing mechanics. Keep the shared pure Kotlin engine authoritative for both native surfaces. Run `./gradlew :rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug` for changes affecting accounting or UI. Use the controlled `overlay-target` app for overlay interaction tests.
 
 Never claim physical Samsung/D&D Beyond coverage from an emulator test. Do not include campaign PDFs, personal exports, secrets, keystores, or signing recovery files in source control. Do not force push, merge main, publish a release, or rotate the release key without the owner's approval. Use feature branches. Unresolved campaign mechanics must stay visibly configurable.

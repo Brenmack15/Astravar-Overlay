@@ -1,4 +1,8 @@
-# Astravar 2.2
+# Astravar 2.3 development candidate
+
+The isolated `feat/astravar-2.3-ultra-fast-sync` branch continues code36 without merging or changing PR#5. It adds compact indexed session reads, atomic acquire-and-assign, authenticated optional FCM wakeups, constrained WorkManager recovery and quiet opt-in pause/sync controls. The default Android target is2.3.0/code37 with the existing permanent package and owner signing identity. See [2.3 implementation and acceptance boundaries](docs/ULTRA_FAST_SYNC_V23.md). Production Firebase configuration, an owner-installed configured update and actual phone wake/commit/receipt/readback must be verified before calling fast live sync complete.
+
+The sections below retain the inherited2.2 feature and recovery documentation.
 
 Native Android tabletop companion by Yazsras Studios, continuing the verified
 Astravar 2.0 source. Development branch: `feat/astravar-2.1-player-first`.
