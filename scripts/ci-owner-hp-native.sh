@@ -75,7 +75,7 @@ mkdir -p "$ANDROID_AVD_HOME" "$ANDROID_USER_HOME"
 printf 'no\n' | timeout -k 5s 40s avdmanager create avd --force -n AstravarHpCI -p "$ANDROID_AVD_HOME/AstravarHpCI.avd" \
   -k 'system-images;android-36;google_apis;x86_64' --device pixel_6
 "$ANDROID_HOME/emulator/emulator" -avd AstravarHpCI -port 5584 -accel on -dns-server 127.0.0.1 \
-  -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect >"$astravar_output/emulator.log" 2>&1 &
+  -no-window -no-audio -no-snapshot -no-boot-anim -writable-system -gpu swiftshader_indirect >"$astravar_output/emulator.log" 2>&1 &
 astravar_emulator_pid=$!
 kill -0 "$astravar_emulator_pid"
 timeout -k 5s 120s adb -s "$astravar_serial" wait-for-device
@@ -93,6 +93,33 @@ kill -0 "$astravar_emulator_pid"
 astravar_verified_emulator=1
 timeout 15s adb -s "$astravar_serial" root
 timeout 15s adb -s "$astravar_serial" wait-for-device
+# Resolve only the two reserved fixture names through the owned emulator OS.
+# The session-only writable image is destroyed with this fresh AVD. No device
+# credentials exist yet, no CA is installed system-wide, and TLS hostname
+# verification still receives the original hp-bridge.example URL.
+# Official support: developer.android.com/studio/run/emulator-commandline
+# adb remount -R performs the reboot only if required by this debug image.
+timeout -k 5s 60s adb -s "$astravar_serial" remount -R >"$astravar_output/hosts-remount.txt" 2>&1
+timeout -k 5s 120s adb -s "$astravar_serial" wait-for-device
+astravar_remounted_booted=0
+for astravar_attempt in $(seq 1 90); do
+  kill -0 "$astravar_emulator_pid"
+  if [[ "$(timeout 3s adb -s "$astravar_serial" shell getprop sys.boot_completed | tr -d '\r')" == 1 ]]; then astravar_remounted_booted=1; break; fi
+  sleep 2
+done
+test "$astravar_remounted_booted" = 1
+kill -0 "$astravar_emulator_pid"
+test "$(adb -s "$astravar_serial" shell getprop ro.kernel.qemu | tr -d '\r')" = 1
+test "$(timeout 10s adb -s "$astravar_serial" emu avd name | tr -d '\r' | awk 'NR == 1 { print }')" = AstravarHpCI
+timeout 15s adb -s "$astravar_serial" root
+timeout 15s adb -s "$astravar_serial" wait-for-device
+timeout -k 5s 30s adb -s "$astravar_serial" remount >>"$astravar_output/hosts-remount.txt" 2>&1
+timeout 10s adb -s "$astravar_serial" shell "printf '\n127.0.0.1 hp-bridge.example wrong-hp-bridge.example\n' >> /system/etc/hosts"
+timeout 10s adb -s "$astravar_serial" shell "grep -F '127.0.0.1 hp-bridge.example wrong-hp-bridge.example' /system/etc/hosts" >"$astravar_output/hosts-mapping.txt"
+for astravar_fixture_host in hp-bridge.example wrong-hp-bridge.example; do
+  timeout 10s adb -s "$astravar_serial" shell ping -c 1 -W 2 "$astravar_fixture_host" >"$astravar_output/resolve-$astravar_fixture_host.txt"
+  grep -Fq '(127.0.0.1)' "$astravar_output/resolve-$astravar_fixture_host.txt"
+done
 timeout 10s adb -s "$astravar_serial" reverse tcp:443 tcp:18443
 timeout 10s adb -s "$astravar_serial" shell settings put global private_dns_mode off
 timeout 10s adb -s "$astravar_serial" shell input keyevent 82
@@ -141,5 +168,5 @@ p=pathlib.Path(sys.argv[1]); (p/'SCOPE.json').write_text(json.dumps({'fictionalO
  'nativeHttps':True,'nativeAndroidKeyStore':True,'productionComposeApprovalAndRejection':True,
  'forceStopRestart':True,'separateDatabaseValidatedBackupRestore':True,'sameDebugKeyUpdate':'published34 to candidate35',
  'actualOwnerSigningIdentityTestedInCi':False,'realChatGptHostInvocation':False,'physicalGalaxy':False,
- 'isolatedGatewaySimulatesSitesIdentity':True,'noProductionTlsChanges':True},indent=2)+'\n')
+ 'isolatedGatewaySimulatesSitesIdentity':True,'noProductionTlsChanges':True,'temporaryEmulatorHosts':True},indent=2)+'\n')
 PY
