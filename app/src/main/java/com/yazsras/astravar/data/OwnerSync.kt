@@ -153,6 +153,32 @@ class OwnerSyncCredentialVault(context: Context, private val now: () -> Long = S
     @Synchronized fun forget(origin: String, campaignId: String) {
         check(preferences.edit().remove(entry(OwnerSyncProtocol.origin(origin), OwnerSyncProtocol.id(campaignId))).commit())
     }
+    /** Optional outer private-Site access stays separately encrypted and never enters a backup. */
+    @Synchronized fun storeServiceAccess(origin: String, campaignId: String, bearer: String) {
+        val endpoint = OwnerSyncProtocol.origin(origin); OwnerSyncProtocol.id(campaignId)
+        require(bearer.length in 32..8192 && bearer.none { it == '\r' || it == '\n' })
+        val name = entry(endpoint, campaignId) + "-service"
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, keyProvider()); updateAAD(name.toByteArray(Charsets.UTF_8)) }
+        val bytes = bearer.toByteArray(Charsets.UTF_8)
+        val encrypted = cipher.doFinal(bytes); bytes.fill(0)
+        check(preferences.edit().putString(name, Base64.encodeToString(cipher.iv + encrypted, Base64.NO_WRAP)).commit())
+    }
+    @Synchronized fun serviceAccess(origin: String, campaignId: String): String? {
+        val name = entry(OwnerSyncProtocol.origin(origin), OwnerSyncProtocol.id(campaignId)) + "-service"
+        val blob = preferences.getString(name, null) ?: return null
+        return try {
+            val bytes = Base64.decode(blob, Base64.NO_WRAP); require(bytes.size >= 29)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+                init(Cipher.DECRYPT_MODE, keyProvider(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
+                updateAAD(name.toByteArray(Charsets.UTF_8))
+            }
+            val plain = cipher.doFinal(bytes.copyOfRange(12, bytes.size))
+            val result = plain.toString(Charsets.UTF_8); plain.fill(0); result
+        } catch (_: Exception) { preferences.edit().remove(name).commit(); null }
+    }
+    @Synchronized fun forgetServiceAccess(origin: String, campaignId: String) {
+        check(preferences.edit().remove(entry(OwnerSyncProtocol.origin(origin), OwnerSyncProtocol.id(campaignId)) + "-service").commit())
+    }
     /** Local disconnect is not proof of server revocation. The service must revoke the credential too. */
     @Synchronized fun forgetAll() { check(preferences.edit().clear().commit()) }
 }
