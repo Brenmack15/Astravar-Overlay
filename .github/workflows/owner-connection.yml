@@ -7,6 +7,9 @@ on:
       - 'app/**'
       - 'rules/**'
       - '.github/workflows/owner-connection.yml'
+      - '.github/workflows/owner-hp-native.yml'
+      - 'scripts/ui_foundation_sha256.json'
+      - 'scripts/verify_ui_foundation.py'
   workflow_dispatch:
 permissions:
   contents: read
