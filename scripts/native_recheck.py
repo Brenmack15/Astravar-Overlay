@@ -310,6 +310,7 @@ def main():
     parser.add_argument("--fixture", type=Path)
     parser.add_argument("--rolled-back", action="store_true")
     parser.add_argument("--synthetic-demo", action="store_true")
+    parser.add_argument("--expected-room-schema", type=int, choices=(4, 5), default=4)
     args = parser.parse_args()
     configure_profile(args.profile)
     if args.command == "guard":
@@ -328,13 +329,15 @@ def main():
             parser.error("snapshot-mapped requires --database and a JSON --output path")
         helper = runpy.run_path(str(Path(__file__).with_name("native-campaign-import-readback.py")))
         result = helper["run"](argparse.Namespace(action="snapshot", database=args.database,
-                                                  manifest=args.output, synthetic_demo=args.synthetic_demo))
+                                                  manifest=args.output, synthetic_demo=args.synthetic_demo,
+                                                  expected_room_schema=args.expected_room_schema))
     else:
         if not args.database or not args.manifest or not args.fixture or args.output == Path("validation"):
             parser.error("verify-mapped requires --database, --manifest, --fixture and a JSON --output path")
         helper = runpy.run_path(str(Path(__file__).with_name("native-campaign-import-readback.py")))
         result = helper["verify_mapped"](args.database, args.manifest, args.fixture,
-                                         rolled_back=args.rolled_back, synthetic_demo=args.synthetic_demo)
+                                         rolled_back=args.rolled_back, synthetic_demo=args.synthetic_demo,
+                                         expected_room_schema=args.expected_room_schema)
         args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2))
 

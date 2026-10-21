@@ -9,6 +9,7 @@ import sqlite3
 ARCHIVE_TABLES = {"campaign_references", "campaign_reference_relations", "campaign_import_receipts",
                   "campaign_import_backups", "campaign_archive_sources"}
 MARKER = "ASTRAVAR_FICTIONAL_NATIVE_IMPORT_V1"
+SUPPORTED_ROOM_SCHEMAS = (4, 5)
 
 
 def sha(value):
@@ -39,15 +40,18 @@ def run(args):
         raise ValueError("Use a regular copied fictional campaign ledger database")
     with sqlite3.connect(path) as db:
         db.row_factory = sqlite3.Row
-        if db.execute("PRAGMA user_version").fetchone()[0] != 4:
-            raise ValueError("Expected additive campaign Room schema 4")
+        room_schema = db.execute("PRAGMA user_version").fetchone()[0]
+        expected_schema = getattr(args, "expected_room_schema", 4)
+        if expected_schema not in SUPPORTED_ROOM_SCHEMAS or room_schema != expected_schema:
+            raise ValueError(f"Expected additive campaign Room schema {expected_schema}; found {room_schema}")
         if args.action == "snapshot":
             result = {"marker": MARKER, "synthetic_only": True, "tables": normalized(db),
-                      "allTables": normalized(db, include_archive=True)}
+                      "allTables": normalized(db, include_archive=True), "roomSchema": room_schema}
             args.manifest.write_text(json.dumps(result, indent=2) + "\n")
-            return {"marker": MARKER, "status": "baseline-captured", "tables": len(result["tables"])}
+            return {"marker": MARKER, "status": "baseline-captured", "room_schema": room_schema, "tables": len(result["tables"])}
         expected = json.loads(args.manifest.read_text())
         assert expected["marker"] == MARKER and expected["synthetic_only"] is True
+        assert expected.get("roomSchema", 4) == room_schema, "Campaign Room schema changed since the captured baseline"
         assert normalized(db) == expected["tables"], "A preexisting campaign row changed during import/recovery"
         envelope = json.loads(args.fixture.read_text())
         assert envelope["format"] == "astravar-campaign-archive" and envelope["schema"] == 1
@@ -101,6 +105,7 @@ def run(args):
             assert receipts["rollback:" + package_hash]["state"] == "ROLLED_BACK"
             assert receipts["rollback:" + package_hash]["readbackSha256"] == backup["sourceStateSha256"]
         return {"marker": MARKER, "status": args.action + "-verified", "source_records": len(source["records"]),
+                "room_schema": room_schema,
                 "source_relationships": len(expected_edges), "active_imported_records": len(references),
                 "preexisting_table_count": len(expected["tables"]), "preexisting_rows_unchanged": True,
                 "original_content_and_source_hashes_verified": True, "backup_integrity_verified": True, "large_source_and_backup_rows_verified": oversized,
@@ -119,7 +124,7 @@ MAPPED_TABLES = {
 }
 
 
-def verify_mapped(database, manifest, fixture, *, rolled_back=False, synthetic_demo=False):
+def verify_mapped(database, manifest, fixture, *, rolled_back=False, synthetic_demo=False, expected_room_schema=None):
     """Compare complete fictional typed snapshots and all untouched rows from fresh SQLite queries."""
     if not synthetic_demo:
         raise ValueError("Explicit --synthetic-demo acknowledgement is required")
@@ -137,7 +142,7 @@ def verify_mapped(database, manifest, fixture, *, rolled_back=False, synthetic_d
     assert source["sourceRootUrl"].startswith("https://example.invalid/")
     assert all(row["sourceUrl"].startswith("https://example.invalid/") and row["visibility"] == "player" for row in source["records"])
     mapped = source["mapped"]
-    assert mapped["format"] == "astravar-campaign-items" and mapped["schema"] == 4
+    assert mapped["format"] == "astravar-campaign-items" and mapped["schema"] in SUPPORTED_ROOM_SCHEMAS
     assert set(mapped["records"]) == set(MAPPED_TABLES)
     groups = {"ledger_items": mapped["items"], "ledger_events": mapped["events"]}
     groups.update({table: mapped["records"][label] for label, table in MAPPED_TABLES.items()})
@@ -145,7 +150,12 @@ def verify_mapped(database, manifest, fixture, *, rolled_back=False, synthetic_d
     assert all(row.get("source", "").startswith("FICTIONAL ") for rows in groups.values() for row in rows), "Only marked fictional rows are accepted"
     with sqlite3.connect(database) as db:
         db.row_factory = sqlite3.Row
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+        room_schema = db.execute("PRAGMA user_version").fetchone()[0]
+        assert room_schema in SUPPORTED_ROOM_SCHEMAS, "Unsupported campaign Room schema"
+        if expected_room_schema is not None:
+            assert room_schema == expected_room_schema, "Mapped readback Room schema differs from the explicit expected version"
+        assert baseline.get("roomSchema", 4) == room_schema, "Campaign Room schema changed since the captured baseline"
+        assert mapped["schema"] <= room_schema, "Mapped fixture requires a newer campaign Room schema"
         omitted = {}
         for table, rows in groups.items():
             columns = list(db.execute(f'PRAGMA table_info("{table}")'))
@@ -161,10 +171,17 @@ def verify_mapped(database, manifest, fixture, *, rolled_back=False, synthetic_d
                 if rolled_back:
                     assert key not in actual, "Typed row survived rollback: " + table
                     continue
-                assert set(row) == expected_columns, "Fixture must supply complete typed values: " + table
+                expected_row = dict(row)
+                if table == "party_wallets" and room_schema == 5 and mapped["schema"] == 4:
+                    # Schema4 has no EP/PP values. Its additive schema5 migration
+                    # must preserve both as unknown SQL NULL, never inferred zero.
+                    assert row.get("electrum") is None and row.get("platinum") is None, "Legacy schema4 wallet cannot establish electrum or platinum, including zero"
+                    expected_row.setdefault("electrum", None)
+                    expected_row.setdefault("platinum", None)
+                assert set(expected_row) == expected_columns, "Fixture must supply complete typed values: " + table
                 assert key in actual, "Imported typed row missing: " + table
                 saved = actual[key]
-                for field, expected in row.items():
+                for field, expected in expected_row.items():
                     found = saved[field]
                     if field in ("recordReferences", "unknowns"):
                         found = json.loads(found)
@@ -199,6 +216,7 @@ def verify_mapped(database, manifest, fixture, *, rolled_back=False, synthetic_d
             retained = db.execute("SELECT payloadJson FROM campaign_archive_sources WHERE packageHash=?", (package,)).fetchone()
             assert retained and retained[0] == envelope["payload"] and sha(retained[0]) == package
         return {"marker": MARKER, "status": "mapped-rollback-verified" if rolled_back else "mapped-applied-verified",
+                "room_schema": room_schema, "mapped_fixture_schema": mapped["schema"],
                 "synthetic_only": True, "mapped_counts": {table: len(rows) for table, rows in groups.items()},
                 "mapped_complete_values_verified": not rolled_back, "null_values_preserved": not rolled_back,
                 "preexisting_all_table_count": len(baseline["allTables"]), "preexisting_rows_and_archive_evidence_unchanged": True,
@@ -214,5 +232,6 @@ if __name__ == "__main__":
     parser.add_argument("--fixture", type=Path)
     parser.add_argument("--backup-document", type=Path)
     parser.add_argument("--synthetic-demo", action="store_true")
+    parser.add_argument("--expected-room-schema", type=int, choices=SUPPORTED_ROOM_SCHEMAS, default=4)
     args = parser.parse_args()
     print(json.dumps(run(args), indent=2))

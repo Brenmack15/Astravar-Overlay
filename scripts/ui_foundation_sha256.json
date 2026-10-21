@@ -82,7 +82,7 @@
     "rules/src/test/kotlin/com/yazsras/astravar/rules/WeaponWorkflowTest.kt": "36d788ce7e2e7174e8b391c3e330c6e81c23ff0656b9fd8896277571a55ac425",
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/3.json": "d030a6759b35784528732ff331ed20b27cb3c41561db0b7031d839b962f49901",
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/4.json": "076ebbba19127c09137b7095d84cc89bc9fb64c25ab74951677b9d2537cd3c5f",
-    "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": "d72df52c79cee5a25b8aa147ae8f2ea643b4ae13844cb7f35448eb00156d7cc0"
+    "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": "aa977e9b193e4985cf842ca75160ec7004529d9bc293258be87e02337a8dc0df"
   },
   "owner_signing_block_sha256": "9f749325c6e42970c42ff72ce35cdb31af58a7a30000a404223b4841e267a1f3",
   "authorized_branding_change": {
@@ -379,6 +379,12 @@
         "reason": "Insert only the foreground campaign delivery loop into the existing session. Combat, dice, weapon formulas, controls, artwork, accounting and all other overlay source remain byte-identical after removing that exact insertion.",
         "exact_authorized_insertion": "        // The existing visible foreground session keeps delivery active while the player uses ChatGPT.\n        // A successful network poll alone never becomes a claimed committed gameplay save.\n        scope.launch(Dispatchers.IO) {\n            val campaign = CampaignConnectionClient(applicationContext)\n            try {\n                while (isActive) {\n                    try { campaign.foreground() }\n                    catch (e: CancellationException) { throw e }\n                    catch (_: Exception) { /* Durable inbox/outbox and verified status survive network interruption. */ }\n                    delay(5_000)\n                }\n            } finally { campaign.close() }\n        }\n",
         "after_removing_exact_insertion_sha256": "355b4b5bf6e8fa934eba59c453ddb83d0d11ca1001d34bbf72fa38f032141153"
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": {
+        "previous_pinned_sha256": "d72df52c79cee5a25b8aa147ae8f2ea643b4ae13844cb7f35448eb00156d7cc0",
+        "reviewed_sha256": "aa977e9b193e4985cf842ca75160ec7004529d9bc293258be87e02337a8dc0df",
+        "compatibility_review_baseline": "cf99a9f3e62f8e15a32a94fcf97cec9ae23fca9f",
+        "reason": "Preserve original schema4 import receipts and byte-exact recovery snapshots across additive Room5 migration by recognizing the legacy state hash only when every new EP/PP value is unknown. Independently bind stored backup and fresh review to the same current records; known zero/nonzero denominations and later state changes continue to block rollback. Retain a schema5 mapped import as schema5 so verified EP/PP are not downgraded. Original source payloads, hashes, receipts, backup bodies, immutable schemas and owner signing configuration are unchanged."
       }
     }
   }

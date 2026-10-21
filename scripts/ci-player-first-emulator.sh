@@ -181,18 +181,20 @@ copy_campaign_database() {
   done
   test -s "$astravar_directory/astravar-campaign-ledger.db"
 }
+astravar_campaign_schema=${ASTRAVAR_EXPECTED_CAMPAIGN_SCHEMA:-4}
+[[ "$astravar_campaign_schema" == 4 || "$astravar_campaign_schema" == 5 ]]
 copy_campaign_database validation/campaign-before
-python3 scripts/native-campaign-import-readback.py snapshot --database validation/campaign-before/astravar-campaign-ledger.db --manifest validation/campaign-before.json --synthetic-demo >validation/campaign-baseline-result.json
+python3 scripts/native-campaign-import-readback.py snapshot --database validation/campaign-before/astravar-campaign-ledger.db --manifest validation/campaign-before.json --expected-room-schema "$astravar_campaign_schema" --synthetic-demo >validation/campaign-baseline-result.json
 ASTRAVAR_NATIVE_CLASS_TIMEOUT=720 run_class CampaignImportInstrumentationTest#aDocumentPickerPreviewConfirmationAndLibrary 1 validation/native-campaign-import.txt
 timeout 15s adb shell am force-stop com.yazsras.astravar
 copy_campaign_database validation/campaign-applied
 timeout 30s adb pull /sdcard/Android/data/com.yazsras.astravar.target/files/native-campaign-fixture.json validation/native-campaign-fixture.json >/dev/null
 timeout 30s adb pull /sdcard/Download/astravar-native-preimport-backup.json validation/native-campaign-preimport-backup.json >/dev/null
-python3 scripts/native-campaign-import-readback.py applied --database validation/campaign-applied/astravar-campaign-ledger.db --manifest validation/campaign-before.json --fixture validation/native-campaign-fixture.json --backup-document validation/native-campaign-preimport-backup.json --synthetic-demo | tee validation/campaign-applied-result.json
+python3 scripts/native-campaign-import-readback.py applied --database validation/campaign-applied/astravar-campaign-ledger.db --manifest validation/campaign-before.json --fixture validation/native-campaign-fixture.json --backup-document validation/native-campaign-preimport-backup.json --expected-room-schema "$astravar_campaign_schema" --synthetic-demo | tee validation/campaign-applied-result.json
 run_class CampaignImportInstrumentationTest#bGuardedRollbackRestoresVerifiedSnapshot 1 validation/native-campaign-rollback.txt
 timeout 15s adb shell am force-stop com.yazsras.astravar
 copy_campaign_database validation/campaign-rolled-back
-python3 scripts/native-campaign-import-readback.py rolled-back --database validation/campaign-rolled-back/astravar-campaign-ledger.db --manifest validation/campaign-before.json --fixture validation/native-campaign-fixture.json --synthetic-demo | tee validation/campaign-rollback-result.json
+python3 scripts/native-campaign-import-readback.py rolled-back --database validation/campaign-rolled-back/astravar-campaign-ledger.db --manifest validation/campaign-before.json --fixture validation/native-campaign-fixture.json --expected-room-schema "$astravar_campaign_schema" --synthetic-demo | tee validation/campaign-rollback-result.json
 # Run the legacy post-update overlay checks after importer recovery so a
 # fixture failure cannot hide the primary backup/import/rollback acceptance.
 # Exercise the updated source without reseeding demo data or executing another
@@ -202,4 +204,4 @@ run_class OverlayInstrumentationTest#cRollRestorationMainHistoryAndLivePermissio
 timeout 15s adb shell am force-stop com.yazsras.astravar
 copy_combat_database validation/history-after
 python3 scripts/history-preservation-fixture.py verify --database validation/history-after/astravar.db --manifest validation/history-fixture.json --synthetic-demo | tee validation/history-verification-result.json
-printf '%s\n' "PASS: matching certificate verified separately (${ASTRAVAR_TEST_SIGNER_LABEL:-CI-only}), version24→33, campaign schema3→4, all persisted store bytes retained before startup; independent native UI readback verified fictional inventory and recent rolls; copied-database readback verified every seeded raw historical hash, including old Shatter and malformed records." >validation/update-preservation-result.txt
+printf '%s\n' "PASS: matching certificate verified separately (${ASTRAVAR_TEST_SIGNER_LABEL:-CI-only}), version24→33, campaign schema3→${astravar_campaign_schema}, all persisted store bytes retained before startup; independent native UI readback verified fictional inventory and recent rolls; copied-database readback verified every seeded raw historical hash, including old Shatter and malformed records." >validation/update-preservation-result.txt
