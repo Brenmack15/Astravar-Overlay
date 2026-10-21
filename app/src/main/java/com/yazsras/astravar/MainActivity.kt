@@ -15,6 +15,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import com.yazsras.astravar.data.LiveHpConnectionClient
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import com.yazsras.astravar.overlay.OverlayService
 import com.yazsras.astravar.ui.AstravarScreen
 
@@ -30,6 +35,17 @@ class MainActivity: ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
         )
         setContent { AstravarScreen(application as AstravarApp,::startOverlay,::grantOverlay,::stopOverlay) }
+    }
+    override fun onStart() {
+        super.onStart()
+        // Pairing authorizes only the selected existing profile's HP. No unpaired record is uploaded.
+        lifecycleScope.launch(Dispatchers.IO) {
+            var hp: LiveHpConnectionClient? = null
+            try { val opened = LiveHpConnectionClient(applicationContext); hp = opened; opened.foreground() }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* Durable status/outbox is shown in Owner connection; foreground startup stays usable. */ }
+            finally { hp?.close() }
+        }
     }
     private fun grantOverlay() {
         stopOverlay()
