@@ -87,6 +87,19 @@ class OverlayService: Service() {
         ContextCompat.registerReceiver(this,lockReceiver,IntentFilter(Intent.ACTION_SCREEN_OFF),ContextCompat.RECEIVER_NOT_EXPORTED); registered=true
         scope.launch { app.preferences.flow.collect { prefs=it;if(!editingTarget) {distance=it.distance;targetPoint=it.targetPoint;directImpact=it.directImpact;immediateId=it.immediateId;manualSlot=it.manualSlot};elements=it.elements;selected=it.selectedPayloads.filter {id->state?.installed?.payloads?.any {p->p.id==id}==true}.toSet();if(!preferencesLoaded) {params=null;preferencesLoaded=true};if(!hidden) render() } }
         scope.launch { app.repository.state.filterNotNull().collect { state=it; selected=prefs.selectedPayloads.filter { id -> it.installed?.payloads?.any { p->p.id==id }==true }.toSet(); if(!hidden) render() } }
+        // The existing visible foreground session keeps delivery active while the player uses ChatGPT.
+        // A successful network poll alone never becomes a claimed committed gameplay save.
+        scope.launch(Dispatchers.IO) {
+            val campaign = CampaignConnectionClient(applicationContext)
+            try {
+                while (isActive) {
+                    try { campaign.foreground() }
+                    catch (e: CancellationException) { throw e }
+                    catch (_: Exception) { /* Durable inbox/outbox and verified status survive network interruption. */ }
+                    delay(5_000)
+                }
+            } finally { campaign.close() }
+        }
         watcher.post(permissionCheck)
     }
     override fun onStartCommand(intent: Intent?,flags: Int,startId: Int): Int {
