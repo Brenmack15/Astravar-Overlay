@@ -34,7 +34,10 @@ await writeFile(resolve(output, 'server/index.js'), bundle);
 const migrationPath = resolve(root, 'drizzle/0000_owner_bridge.sql');
 const normalizeSql = value => value.replace(/^--> statement-breakpoint\s*$/gm, '').replace(/\s+/g, ' ').trim();
 if (normalizeSql(await readFile(migrationPath, 'utf8')) !== normalizeSql(await readFile(resolve(root, 'schema.sql'), 'utf8'))) throw Error('Reviewed migration does not match the initial schema. Append a new migration after deployment; never rewrite applied SQL.');
-await cp(resolve(root, 'drizzle'), resolve(output, 'drizzle'), { recursive: true });
+// Sites discovers hosted migrations beneath the artifact's .openai directory.
+// A sibling output/drizzle directory is not consumed by the deployment migrator.
+await mkdir(resolve(output, '.openai'), { recursive: true });
+await cp(resolve(root, 'drizzle'), resolve(output, '.openai', 'drizzle'), { recursive: true });
 let hostingConfigured = false;
 try {
   const hosting = JSON.parse(await readFile(resolve(root, '.openai/hosting.json'), 'utf8'));
@@ -43,4 +46,4 @@ try {
   await copyFile(resolve(root, '.openai/hosting.json'), resolve(output, '.openai/hosting.json'));
   hostingConfigured = true;
 } catch (error) { if (error.code !== 'ENOENT') throw error; }
-console.log(JSON.stringify({ worker: resolve(output, 'server/index.js'), migration: resolve(output, 'drizzle/0000_owner_bridge.sql'), hostingConfigured, deployed: false }));
+console.log(JSON.stringify({ worker: resolve(output, 'server/index.js'), migration: resolve(output, '.openai/drizzle/0000_owner_bridge.sql'), hostingConfigured, deployed: false }));

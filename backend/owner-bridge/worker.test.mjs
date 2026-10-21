@@ -84,6 +84,38 @@ test('deterministic bundled Worker imports and serves the same authenticated MCP
     const bundled = await import(pathToFileURL(join(directory, 'server/index.js')));
     const response = await bundled.default.fetch(ownerRequest('/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) }), { DB: {}, OWNER_SITE_USER_ID: ownerId });
     assert.equal((await response.json()).result.tools.length, 5);
-    assert.equal((await readFile(join(directory, 'drizzle/0000_owner_bridge.sql'), 'utf8')).includes('CREATE TABLE'), true);
+    assert.equal((await readFile(join(directory, '.openai/drizzle/0000_owner_bridge.sql'), 'utf8')).includes('CREATE TABLE'), true);
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('Sites artifact migration layout initializes the hosted-style database before an authenticated pending read', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'astravar-migration-layout-'));
+  const db = new SqliteAdapter();
+  try {
+    const { stdout } = await execute(process.execPath, [fileURLToPath(new URL('./build-worker.mjs', import.meta.url)), directory]);
+    assert.equal(JSON.parse(stdout).migration, join(directory, '.openai/drizzle/0000_owner_bridge.sql'));
+    const migrationRoot = join(directory, '.openai/drizzle');
+    for (const file of ['0000_owner_bridge.sql', 'meta/_journal.json', 'meta/0000_snapshot.json']) {
+      assert.equal(await readFile(join(migrationRoot, file), 'utf8'), await readFile(new URL('./drizzle/' + file, import.meta.url), 'utf8'));
+    }
+    await assert.rejects(readFile(join(directory, 'drizzle/0000_owner_bridge.sql')), { code: 'ENOENT' });
+    const journal = JSON.parse(await readFile(join(migrationRoot, 'meta/_journal.json'), 'utf8'));
+    for (const entry of journal.entries) {
+      const sql = await readFile(join(migrationRoot, entry.tag + '.sql'), 'utf8');
+      for (const statement of sql.split(/^--> statement-breakpoint\s*$/m).map(value => value.trim()).filter(Boolean)) {
+        await db.prepare(statement).bind().run();
+      }
+    }
+    assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name LIKE 'bridge_%'").bind().first()).count, 6);
+    const bundled = await import(pathToFileURL(join(directory, 'server/index.js')));
+    const response = await bundled.default.fetch(ownerRequest('/mcp', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: {
+        name: 'get_pending_updates', arguments: { campaignId: 'synthetic-owner-acceptance' },
+      } }),
+    }), { DB: db, OWNER_SITE_USER_ID: ownerId });
+    const result = (await response.json()).result;
+    assert.equal(result.isError, false);
+    assert.deepEqual(result.structuredContent.proposals, []);
+  } finally { db.close(); await rm(directory, { recursive: true, force: true }); }
 });
