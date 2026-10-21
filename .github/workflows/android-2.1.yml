@@ -19,6 +19,7 @@ jobs:
     env:
       ASTRAVAR_VERSION_NAME: '2.1.0'
       ASTRAVAR_VERSION_CODE: '33'
+      ASTRAVAR_EXPECTED_CAMPAIGN_SCHEMA: '5'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -74,7 +75,7 @@ jobs:
           python3 scripts/verify_particle_resources.py
           python3 scripts/verify_upgrade_integrity.py
       - name: Rules, Android regressions, release lint and optimized APK
-        # Build the exact schema-3 source baseline and final schema-4 source with one
+        # Build the exact schema3 source baseline and final schema5 source with one
         # disposable signer. This proves the real additive upgrade, not merely
         # reinstalling the same source under a higher version code.
         timeout-minutes: 40
