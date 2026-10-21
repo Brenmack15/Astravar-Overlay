@@ -290,7 +290,7 @@ class LiveHpNativeHttpsTest {
  */
 @RunWith(AndroidJUnit4::class)
 class LiveHpBaselineSeedTest {
-    @Test fun existingFictionalProfilesBeforeUpdate() = runBlocking {
+    @Test fun existingFictionalProfilesBeforeUpdate(): Unit = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         assertEquals("com.yazsras.astravar.v2uidebug", context.packageName)
         assertEquals("1", UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).executeShellCommand("getprop ro.kernel.qemu").trim())
