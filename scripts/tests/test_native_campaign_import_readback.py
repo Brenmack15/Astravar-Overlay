@@ -14,6 +14,8 @@ spec.loader.exec_module(readback)
 
 
 class IndependentNativeCampaignReadbackTest(unittest.TestCase):
+    room_schema = 4
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -22,7 +24,7 @@ class IndependentNativeCampaignReadbackTest(unittest.TestCase):
         self.manifest = self.root / "baseline.json"
         self.fixture = self.root / "fixture.json"
         db = sqlite3.connect(self.path)
-        db.executescript('''PRAGMA user_version=4;
+        db.executescript(f'''PRAGMA user_version={self.room_schema};
         CREATE TABLE fictional_existing(id TEXT PRIMARY KEY,quantity INTEGER);
         INSERT INTO fictional_existing VALUES('fictional-current-item',NULL);
         CREATE TABLE campaign_references(id TEXT PRIMARY KEY,campaignId TEXT,externalId TEXT,title TEXT,category TEXT,body TEXT,propertiesJson TEXT,sourceUrl TEXT,sourceRevision TEXT,contentSha256 TEXT,packageHash TEXT);
@@ -51,7 +53,7 @@ class IndependentNativeCampaignReadbackTest(unittest.TestCase):
         db.commit();db.close()
 
     def args(self,action):
-        return argparse.Namespace(action=action,database=self.path,manifest=self.manifest,fixture=self.fixture,backup_document=None,synthetic_demo=True)
+        return argparse.Namespace(action=action,database=self.path,manifest=self.manifest,fixture=self.fixture,backup_document=None,synthetic_demo=True,expected_room_schema=self.room_schema)
 
     def mutate(self,sql):
         with sqlite3.connect(self.path) as db:db.execute(sql)
@@ -81,8 +83,29 @@ class IndependentNativeCampaignReadbackTest(unittest.TestCase):
         self.mutate("DELETE FROM campaign_import_receipts WHERE state='APPLIED'")
         with self.assertRaises(KeyError):readback.run(self.args("rolled-back"))
 
+    def test_wrong_or_unsupported_room_version_is_rejected(self):
+        for version in (3, 6, 5 if self.room_schema == 4 else 4):
+            with self.subTest(version=version):
+                self.mutate(f"PRAGMA user_version={version}")
+                with self.assertRaisesRegex(ValueError, "Expected additive campaign Room schema"):
+                    readback.run(self.args("applied"))
+        self.mutate(f"PRAGMA user_version={self.room_schema}")
+
+    def test_baseline_schema_drift_is_rejected(self):
+        baseline = json.loads(self.manifest.read_text())
+        baseline["roomSchema"] = 5 if self.room_schema == 4 else 4
+        self.manifest.write_text(json.dumps(baseline))
+        with self.assertRaisesRegex(AssertionError, "schema changed since the captured baseline"):
+            readback.run(self.args("applied"))
+
+
+class IndependentSchema5NativeCampaignReadbackTest(IndependentNativeCampaignReadbackTest):
+    room_schema = 5
+
 
 class IndependentMappedNativeReadbackTest(unittest.TestCase):
+    room_schema = 4
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -94,9 +117,9 @@ class IndependentMappedNativeReadbackTest(unittest.TestCase):
         self.envelope = json.loads(self.fixture.read_text())
         self.source = json.loads(self.envelope["payload"])
         self.package = self.envelope["payloadSha256"]
-        schema = json.loads((repo / "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/4.json").read_text())
+        schema = json.loads((repo / f"app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/{self.room_schema}.json").read_text())
         with sqlite3.connect(self.database) as db:
-            db.execute("PRAGMA user_version=4")
+            db.execute(f"PRAGMA user_version={self.room_schema}")
             for entity in schema["database"]["entities"]:
                 db.execute(entity["createSql"].replace("${TABLE_NAME}", entity["tableName"]))
             original = dict(self.source["mapped"]["items"][0], id="fictional-before-item", title="Fictional existing unknown item",
@@ -104,7 +127,7 @@ class IndependentMappedNativeReadbackTest(unittest.TestCase):
             self.insert(db, "ledger_items", original)
             self.insert(db, "campaign_import_backups", dict(packageHash="b" * 64, snapshotJson="{}", snapshotSha256=readback.sha("{}"),
                         sourceStateSha256="fictional-earlier-state", createdAt=1))
-        args = argparse.Namespace(action="snapshot", database=self.database, manifest=self.manifest, synthetic_demo=True)
+        args = argparse.Namespace(action="snapshot", database=self.database, manifest=self.manifest, synthetic_demo=True, expected_room_schema=self.room_schema)
         readback.run(args)
         self.groups = {"ledger_items": self.source["mapped"]["items"], "ledger_events": self.source["mapped"]["events"]}
         self.groups.update({table: self.source["mapped"]["records"][label] for label, table in readback.MAPPED_TABLES.items()})
@@ -141,11 +164,11 @@ class IndependentMappedNativeReadbackTest(unittest.TestCase):
         output = self.root / "readback.json"
         subprocess.check_call([sys.executable, str(command), "verify-mapped", "--database", str(self.database),
                                "--manifest", str(self.manifest), "--fixture", str(self.fixture),
-                               "--output", str(output), "--synthetic-demo"], stdout=subprocess.DEVNULL)
+                               "--output", str(output), "--expected-room-schema", str(self.room_schema), "--synthetic-demo"], stdout=subprocess.DEVNULL)
         self.assertTrue(json.loads(output.read_text())["mapped_complete_values_verified"])
         captured = self.root / "captured.json"
         subprocess.check_call([sys.executable, str(command), "snapshot-mapped", "--database", str(self.database),
-                               "--output", str(captured), "--synthetic-demo"], stdout=subprocess.DEVNULL)
+                               "--output", str(captured), "--expected-room-schema", str(self.room_schema), "--synthetic-demo"], stdout=subprocess.DEVNULL)
         self.assertIn("campaign_import_backups", json.loads(captured.read_text())["allTables"])
 
     def test_unknown_hp_quantity_or_wallet_cannot_become_zero(self):
@@ -193,3 +216,48 @@ class IndependentMappedNativeReadbackTest(unittest.TestCase):
             db.execute("DELETE FROM campaign_import_receipts WHERE packageHash=?", (self.package,))
         with self.assertRaises(AssertionError):
             self.verify(rolled_back=True)
+
+
+class IndependentMappedSchema5NativeReadbackTest(IndependentMappedNativeReadbackTest):
+    room_schema = 5
+
+    def test_legacy_absent_electrum_and_platinum_are_verified_as_null(self):
+        for field in ("electrum", "platinum"):
+            with self.subTest(field=field):
+                with sqlite3.connect(self.database) as db:
+                    db.execute(f'UPDATE party_wallets SET "{field}"=0 WHERE id=?', ("fictional-mapped-wallet",))
+                with self.assertRaisesRegex(AssertionError, "Mapped readback differs"):
+                    self.verify()
+                with sqlite3.connect(self.database) as db:
+                    db.execute(f'UPDATE party_wallets SET "{field}"=NULL WHERE id=?', ("fictional-mapped-wallet",))
+
+    def test_schema4_fixture_cannot_establish_electrum_or_platinum_even_zero(self):
+        for field in ("electrum", "platinum"):
+            for value in (0, 3):
+                with self.subTest(field=field, value=value):
+                    envelope = json.loads(self.fixture.read_text())
+                    source = json.loads(envelope["payload"])
+                    source["mapped"]["records"]["wallets"][0][field] = value
+                    envelope["payload"] = json.dumps(source, ensure_ascii=False)
+                    envelope["payloadSha256"] = readback.sha(envelope["payload"])
+                    invalid = self.root / "invalid-schema4-coin.json"; invalid.write_text(json.dumps(envelope))
+                    with self.assertRaisesRegex(AssertionError, "Legacy schema4 wallet cannot establish"):
+                        readback.verify_mapped(self.database, self.manifest, invalid, synthetic_demo=True)
+
+    def test_unexpected_columns_cannot_be_ignored(self):
+        with sqlite3.connect(self.database) as db:
+            db.execute("ALTER TABLE party_wallets ADD COLUMN unreviewed_coin INTEGER")
+        with self.assertRaisesRegex(AssertionError, "Fixture must supply complete typed values"):
+            self.verify()
+
+    def test_mapped_baseline_schema_drift_is_rejected(self):
+        baseline = json.loads(self.manifest.read_text()); baseline["roomSchema"] = 4
+        self.manifest.write_text(json.dumps(baseline))
+        with self.assertRaisesRegex(AssertionError, "schema changed since the captured baseline"):
+            self.verify()
+
+    def test_unsupported_mapped_room_schema_is_rejected(self):
+        with sqlite3.connect(self.database) as db:
+            db.execute("PRAGMA user_version=6")
+        with self.assertRaisesRegex(AssertionError, "Unsupported campaign Room schema"):
+            self.verify()
