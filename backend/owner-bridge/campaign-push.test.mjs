@@ -141,3 +141,26 @@ test('generic FCM failure preserves rotated registration and durable server queu
  await assert.rejects(f.push.notify({campaignId:campaign,credentialId:f.token.credentialId}),/PUSH_SEND_FAILED/);
  assert.equal((await f.db.prepare('SELECT count(*) AS count FROM bridge_campaign_push_tokens').bind().first()).count,1);
 });
+
+
+for(const {stage,table,target} of [
+ {stage:'encrypt',table:'bridge_credentials',target:'credential'},
+ {stage:'hash',table:'bridge_campaign_grants',target:'grant'}
+])test(`push registration cannot recreate a token after ${target} revocation during delayed ${stage}`,async t=>{
+ const f=await fixture(t);
+ // Rotation starts from an existing registration, which revoke must remove permanently.
+ await f.push.register(f.sync,f.principal,campaign,{token:fcmToken,notificationsEnabled:false});
+ let entered,release;
+ const suspended=new Promise(resolve=>{entered=resolve;}),resume=new Promise(resolve=>{release=resolve;});
+ const original=f.push[stage].bind(f.push);
+ f.push[stage]=async(...args)=>{const value=await original(...args);entered();await resume;return value;};
+ const pending=f.push.register(f.sync,f.principal,campaign,{token:fcmToken+'-rotated',notificationsEnabled:true});
+ const denied=assert.rejects(pending,e=>e.status===403&&e.code==='CAMPAIGN_NOT_AUTHORIZED');
+ await suspended;
+ await f.db.prepare(`UPDATE ${table} SET revoked=1 WHERE id=?`).bind(target==='credential'?f.token.credentialId:f.token.campaignAccess.grantId).run();
+ assert.equal((await f.db.prepare('SELECT count(*) AS count FROM bridge_campaign_push_tokens').bind().first()).count,0,'revocation first removes the old encrypted registration');
+ release();await denied;
+ assert.equal((await f.db.prepare('SELECT count(*) AS count FROM bridge_campaign_push_tokens').bind().first()).count,0,'the suspended upsert must not recreate a revoked registration');
+ assert.equal(await f.push.notify({campaignId:campaign,credentialId:f.token.credentialId}),false);
+ assert.equal(f.requests.length,0);
+});

@@ -50,10 +50,18 @@ export class CampaignPushTransport {
   if(!body||Object.keys(body).some(k=>!['token','notificationsEnabled'].includes(k))||typeof body.token!=='string'||!tokenPattern.test(body.token)||typeof body.notificationsEnabled!=='boolean')fail(400,'INVALID_PUSH_REGISTRATION');
   const grant=await bridge.authorize(principal,campaign,['device']);
   const encrypted=await this.encrypt(body.token,this.context(campaign,principal.credentialId)),digest=await this.hash(body.token);
-  await this.db.prepare(`INSERT INTO bridge_campaign_push_tokens(owner_id,campaign_id,grant_id,credential_id,token_hash,token_iv,token_ciphertext,notifications_enabled,updated_at,last_push_at)
-   VALUES(?,?,?,?,?,?,?,?,?,0) ON CONFLICT(owner_id,campaign_id,credential_id) DO UPDATE SET
+  // Recheck authorization in the same SQL statement that persists the token:
+  // revocation may have completed while encryption/hash work was suspended.
+  const at=this.now();
+  const result=await this.db.prepare(`INSERT INTO bridge_campaign_push_tokens(owner_id,campaign_id,grant_id,credential_id,token_hash,token_iv,token_ciphertext,notifications_enabled,updated_at,last_push_at)
+   SELECT ?,?,?,?,?,?,?,?,?,0 FROM bridge_campaign_grants g JOIN bridge_credentials c ON c.id=g.credential_id
+   WHERE g.id=? AND g.owner_id=? AND g.campaign_id=? AND g.credential_id=? AND g.revision=?
+   AND g.revoked=0 AND g.expires_at>? AND c.owner_id=? AND c.campaign_id=? AND c.role='device' AND c.revoked=0 AND c.expires_at>?
+   ON CONFLICT(owner_id,campaign_id,credential_id) DO UPDATE SET
    grant_id=excluded.grant_id,token_hash=excluded.token_hash,token_iv=excluded.token_iv,token_ciphertext=excluded.token_ciphertext,notifications_enabled=excluded.notifications_enabled,updated_at=excluded.updated_at`)
-   .bind(this.ownerId,campaign,grant.id,principal.credentialId,digest,encrypted.iv,encrypted.ciphertext,body.notificationsEnabled?1:0,this.now()).run();
+   .bind(this.ownerId,campaign,grant.id,principal.credentialId,digest,encrypted.iv,encrypted.ciphertext,body.notificationsEnabled?1:0,at,
+    grant.id,this.ownerId,campaign,principal.credentialId,grant.revision,at,this.ownerId,campaign,at).run();
+  if(!result?.meta?.changes)fail(403,'CAMPAIGN_NOT_AUTHORIZED');
   return{mode:'ASTRAVAR_CAMPAIGN_V2',campaignId:campaign,pushRegistered:true,notificationVisible:body.notificationsEnabled};
  }
  async unregister(bridge,principal,campaign){
