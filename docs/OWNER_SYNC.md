@@ -1,4 +1,20 @@
-# Owner-authenticated synchronization readiness
+# Legacy owner sync queue and synthetic harness
+
+This document records the earlier `OwnerSyncProtocol` queue/reference-service
+implementation and its historical evidence. The current Config interface uses
+the separate typed `OwnerConnectionProtocol`, `OwnerConnectionClient`, and
+`backend/owner-bridge` service. See [Owner connection acceptance](OWNER_CONNECTION_ACCEPTANCE.md)
+and the backend README for the current pairing, proposal, device approval,
+receipt, local publication, and revocation workflow. The protocols are distinct;
+the generic queue harness is not the deployed character service.
+
+The code34 connection candidate adds an encrypted, device-bound owner-browser
+authorization handoff before native device pairing. It remains fictional-only.
+Deployment, actual ChatGPT discovery/invocation, and physical Galaxy acceptance
+are separate gates and must not be inferred from local unit/contract tests.
+
+The remaining sections describe the earlier queue-only candidate as it stood
+before the direct-connection implementation, rather than the current Config UI.
 
 This candidate implements an Android protocol, encrypted device-credential vault,
 durable offline command queue and verified remote receipt/history handling. Real
