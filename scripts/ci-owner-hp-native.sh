@@ -221,17 +221,20 @@ run_test 'com.yazsras.astravar.data.CampaignSyncNativeTest#nativeCompanionAndSta
 # not simulate FCM transport delivery or establish Galaxy/Doze latency.
 run_test 'com.yazsras.astravar.data.CampaignWakeNativeTest#nativeWakeAuthenticationAndReplayRemainStrictWithScreenOff' native-campaign-wake-auth-screen-off.txt
 run_test 'com.yazsras.astravar.data.CampaignWakeNativeTest#nativePauseBlocksAutomaticWorkAndRetainsManualChoice' native-campaign-pause-manual.txt
+run_test 'com.yazsras.astravar.data.CampaignWakeNativeTest#nativeInjectedWakeSchedulingRespectsBatterySaverDozeAndPause' native-campaign-power-state-scheduling.txt
 run_test 'com.yazsras.astravar.data.CampaignWakeNativeTest#nativeQuietNotificationHasImmutableActionsAndPausedScreenshot' native-campaign-notification.txt
 # Production Compose component, native clipboard, keyboard and font-scale checks.
 run_test 'com.yazsras.astravar.ui.PairingCodeClipboardTest#tap_copies_exact_displayed_code_and_announces_feedback' native-pairing-code-copy.txt
 run_test 'com.yazsras.astravar.ui.PairingCodeClipboardTest#keyboard_activation_and_large_text_preserve_the_exact_code' native-pairing-code-keyboard.txt
+timeout 10s adb -s "$astravar_serial" pull "/sdcard/Android/data/$astravar_product/files/campaign-power-state-scheduling.json" "$astravar_output/campaign-power-state-scheduling.json" >/dev/null
 git rev-parse HEAD >"$astravar_output/SOURCE_COMMIT.txt"
 python3 - "$astravar_output" <<'PY'
 import json,math,os,pathlib,statistics,sys
-p=pathlib.Path(sys.argv[1]); (p/'SCOPE.json').write_text(json.dumps({'fictionalOnly':True,'emulatorApi':36,
+p=pathlib.Path(sys.argv[1]); power=json.loads((p/'campaign-power-state-scheduling.json').read_text())
+(p/'SCOPE.json').write_text(json.dumps({'fictionalOnly':True,'emulatorApi':36,
  'nativeHttps':True,'nativeAndroidKeyStore':True,'productionComposeApprovalAndRejection':True,
  'forceStopRestart':True,'separateDatabaseValidatedBackupRestore':True,'sameDebugKeyUpdate':'published35 to candidate'+os.environ['ASTRAVAR_VERSION_CODE'],
- 'actualOwnerSigningIdentityTestedInCi':False,'realChatGptHostInvocation':False,'physicalGalaxy':False,'nativeClipboardExactCopy':True,'nativeKeyboardActivation':True,'nativeLargeFontScale':2,'nativeCampaignRoomDomainTransactions':True,'campaignRoomPersistenceAfterCloseReopen':True,'campaignHttps':True,'campaignHostedMcpAcceptance':False,'nativeWakeAuthentication':True,'nativeEncryptedPushToken':True,'nativeDuplicateWakeDurability':True,'nativeWorkManagerPause':True,'nativeQuietNotification':True,'actualFcmDelivery':False,'actualDozeWakeLatency':False,
+ 'actualOwnerSigningIdentityTestedInCi':False,'realChatGptHostInvocation':False,'physicalGalaxy':False,'nativeClipboardExactCopy':True,'nativeKeyboardActivation':True,'nativeLargeFontScale':2,'nativeCampaignRoomDomainTransactions':True,'campaignRoomPersistenceAfterCloseReopen':True,'campaignHttps':True,'campaignHostedMcpAcceptance':False,'nativeWakeAuthentication':True,'nativeEncryptedPushToken':True,'nativeDuplicateWakeDurability':True,'nativeWorkManagerPause':True,'nativeQuietNotification':True,'actualFcmDelivery':False,'actualDozeWakeLatency':False,'nativePowerStateScheduling':power,
  'isolatedGatewaySimulatesSitesIdentity':True,'noProductionTlsChanges':True,'temporaryEmulatorHosts':True},indent=2)+'\n')
 rows=[]
 for line in (p/'gateway.log').read_text().splitlines():
