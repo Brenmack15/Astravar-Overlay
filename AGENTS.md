@@ -43,3 +43,21 @@ The 2.1 owner directive also authorizes HTTPS Internet access in the permanent
 application for the authenticated connection architecture. Cleartext remains
 disabled. This does not authorize any real campaign path to the anonymous lab;
 the synthetic protocol and private bridge remain distinct.
+
+## Owner HP connection authorization (20 October 2026)
+
+The owner's subsequent live-connection directive authorizes narrowly scoped,
+authenticated access to an existing selected character's HP through the existing
+owner-private Sites service. Pairing must bind the exact existing campaign/profile
+identity and HP permission scopes. A connector may read and propose; only explicit
+native player approval may change current HP. Preserve unknown HP and all maximum
+HP, temporary HP, unrelated profile fields, campaign records and combat mechanics.
+Record the approved acceptance adjustment as a connection test, not an invented
+encounter, damage roll or campaign event. All destructive/adversarial/failure tests
+must use isolated fictional fixtures and automated cloud/emulator verification;
+never deliberately fail or corrupt the owner's real phone records. The earlier
+fictional-only boundaries still apply to the disposable sandbox and original
+fictional protocol, not this separately scoped authenticated HP extension.
+Preserve the existing private Site audience, package and owner signing certificate.
+Do not request routine manual testing; the only indispensable owner actions are
+account/device consent, one verified APK installation and the real HP approval.

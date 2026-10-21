@@ -2,7 +2,7 @@
 
 Native Android tabletop companion by Yazsras Studios, continuing the verified
 Astravar 2.0 source. Development branch: `feat/astravar-2.1-player-first`.
-PR #4 remains draft and unmerged. This branch is a development candidate, not
+PR #5 remains draft and unmerged. This branch is a development candidate, not
 an approved public production release.
 
 ## During play
@@ -44,23 +44,33 @@ Advanced elements retain accepted upgrade gates.
 No real character values, level-ups, speculative upgrades or private review
 sheets are seeded. Original approved artwork and launcher portrait are preserved.
 
-Campaign Room migrates additively 1→2→3. Existing weapon Room migrations and
+Campaign Room migrates additively 1→2→3→4. Existing weapon Room migrations and
 historical backup compatibility remain intact. The same inventory database
 owns items, placements, crafting, audits and receipts. Real Notion records are
 not automatically imported or declared canonical.
 
 ## Connection boundary
 
-The owner-sync foundation has a scoped wire protocol, AndroidKeystore credential
-vault, staging queue, verified receipts and an authenticated synthetic reference
-service. Remaining engineering includes typed party/item/currency server commands,
-atomic domain/outbox writes and application adapters, owner OAuth/device enrollment,
-credential renewal and server revocation, production native connection UX and an
-authenticated MCP/tool adapter. The current Config page is a fictional acceptance
-harness; its generic replacement command does not synchronize real campaign
-transactions. Later gates include authorized hosting, actual native Astravar HTTPS
-and native ChatGPT Android access, and a shared-record round trip. Real import and
-authority cutover require separate approval after acceptance.
+Config's Owner connection provides a separate HP protocol for an existing selected
+profile. New account/device consent binds the exact profile and campaign scope.
+Only name, current/maximum/temporary HP, source, update time and the existing profile
+revision are mirrored. ChatGPT may read and propose a signed current-HP adjustment;
+only explicit native approval commits it through the campaign repository. Durable
+intent, local and server receipts, revision checks and independent readback protect
+retries and restarts. Unknown or stale HP cannot be used to create a proposal.
+Maximum HP, temporary HP, combat mechanics and unrelated records are preserved.
+Original fictional tools and credentials remain separate and cannot authorize HP
+access. Wider party/item/currency operations and real campaign migration are outside
+this narrowly scoped connection extension.
+
+The native HTTPS workflow runs isolated fictional records in an accelerated
+emulator, including in-place update, approval, rejection, interruption, restart,
+backup restoration, authorization and revocation checks. Emulator evidence is not
+physical-device or ordinary-ChatGPT acceptance. Deployment, installed connector
+discovery and the owner-approved real HP readback must each have independent
+evidence before being reported successful. See the [HP contract](docs/OWNER_HP_CONNECTION_CONTRACT.md),
+[MCP definitions](backend/owner-bridge/HP_MCP_TOOLS.md) and
+[automated native checks](docs/OWNER_HP_NATIVE_TESTS.md).
 The existing private DM Bridge is preserved. The anonymous Worker remains a
 separate fictional experiment and must never receive real campaign data.
 HTTPS networking is enabled; cleartext is disabled. No paid service is activated.
@@ -83,7 +93,7 @@ variants, optimized packaging, native overlay/accessibility and a same-key
 synthetic update. Its public APKs are explicitly **CI ONLY** and use a temporary
 signer. Never confuse them with the owner-signed candidate.
 
-Permanent release target: `com.yazsras.astravar`, version2.1.0/code24, existing
+Permanent release target: `com.yazsras.astravar`, version2.1.1/code35, existing
 owner signing identity. The original private identity was recovered and its
 certificate matches available historical owner APKs. Signing material is never
 stored here or sent to CI. A production release requires final owner approval.
