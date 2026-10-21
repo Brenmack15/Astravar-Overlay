@@ -1,4 +1,6 @@
 name: Astravar owner connection verification
+# Pair this full regression with owner-hp-native.yml after archive/recovery changes.
+# Both verify the exact pushed source; the original owner-signed APK is checked separately.
 on:
   push:
     branches: ['feat/astravar-2.1-player-first']
