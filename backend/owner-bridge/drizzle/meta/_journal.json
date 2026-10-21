@@ -15,6 +15,13 @@
       "when": 1792549600000,
       "tag": "0001_bootstrap_downloads",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792627200000,
+      "tag": "0002_live_hp",
+      "breakpoints": true
     }
   ]
 }
