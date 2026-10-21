@@ -1,0 +1,64 @@
+# Astravar campaign synchronization V2
+
+The original fictional and HP V1 contracts remain available and isolated. V2 requires an explicit new campaign enrollment; an HP token never implicitly authorizes campaign publication. All requests use existing authenticated HTTPS service transport plus `Authorization: Bearer <device proof>` and `X-Astravar-Credential` for device routes. Owner enrollment uses Sites-verified account identity, never a caller-selected owner. MCP cannot pair, approve, grant or revoke.
+
+## Enrollment and standing authorization
+
+`POST /v1/pairings` retains campaignId, profileId, deviceName, deviceSecretHash and adds optional `campaignAccess:{readScopes:[...],writeScopes:[...]}`. Categories: hp, resources, inventory, currency, character, companions, engineering, continuity, combat. Writes must be a subset of requested reads. Existing owner summary and approval show the explicit categories. Expanded enrollment issues only `campaign:sync` transport authority; it does not issue legacy HP scopes. Token response adds `campaignAccess:{grantId,revision,readScopes,writeScopes,autoSyncScopes,expiresAt}`. Initial autoSyncScopes is empty.
+
+All V2 paths start `/v2/campaigns/{campaignId}` and return mode `ASTRAVAR_CAMPAIGN_V2` and campaignId. `GET /grant` returns `{grant:{...}}`. `POST /grant` accepts `{commandId,expectedRevision,autoSyncScopes}` and optional readScopes/writeScopes. Those optional permissions may only narrow current owner-approved scopes; re-enabling revoked categories requires fresh owner enrollment. Empty read/write sets revoke those categories while retaining grant inspection and self-revocation. Prior immutable receipts are projected through the current read scopes, so old saved receipts cannot leak revoked fields. The authenticated native device may enable only write scopes separately approved by the owner enrollment. The server increments grant revision with CAS, preserves immutable grant events, and enforces it during submission and receipt. Native local scope authorization must independently match before commit. Revocation and expiry are checked server-side for every operation.
+
+## Records and efficient reads
+
+Wire record: `{recordId,kind,revision,fields}`. `fields` is the existing serialized typed Android record, retaining stable identity, source, timestamps and revision. Kinds: character-profile, character-ability, party-sheet, companion-state, companion-resource, item, item-placement, item-details, item-property, wallet, project, stage, requirement, connection, fact, milestone, link, checkpoint, reference, configuration, roll-history, audit.
+
+`POST /records` accepts `{commandId,records:[...]}`; max 100 envelopes and bounded HTTPS body. Incremental batches are atomic. No monotonic revision rollback or same-revision content change is accepted. Optional removed entries `{kind,recordId,expectedRevision}` perform atomic CAS removal from the server mirror only, preserving the immutable publication log and all local records. An empty records batch with no removals must carry snapshotFingerprint, SHA256 of canonical sorted `{kind,recordId,revision,fingerprint:SHA256(canonical(fields))}` summaries for the CURRENT projected Android snapshot. The server compares its own current summaries and serializes against mirror_generation before updating freshness. A mismatch leaves the mirror stale. A unique matching empty batch is an authenticated freshness heartbeat; retrying an old command never refreshes freshness. Device journal records the publication and independently reads its actual current mirrored rows with GET /publications/{commandId}; this returns exact four-field records for the publication IDs, not cached original payloads. Singular independent GET /records/{kind}/{recordId} remains available. Removed rows are independently checked absent.
+
+`GET /records?kind=...&recordId=...&after=...&limit=...` returns filtered `records`, pagination cursor, source revision/freshness and verification time. `GET /records/{kind}/{recordId}` returns exact four-field `record` plus metadata; IDs may contain a colon for composite ability IDs. Unknown/null values remain unknown. Five-minute freshness is explicit, not a promise of Android instant background execution.
+
+Profile wire projection always retains identity/revision/source/update metadata. Character category adds name/armorClass/level; hp category adds current/max/temp HP. Party-sheet contentJson retains descriptive fields only for character, resources only for resources, conditions only for hp; portrait bitmap is never published. Companion resources require the companions category; player spell/class counters use resources. Audits require every category because historical before/after payloads cross category boundaries. Item and connection thumbnails are omitted. Native publication and backend read/receipt validation both enforce projection. No raw campaign DB, signing material or DM-only adventure archive is exposed.
+
+## Typed transaction and receipts
+
+MCP `submit_campaign_transaction` accepts `{campaignId,commandId,expectedGrantRevision,operations,source}`. Every operation is `{type,recordId,kind,expectedRevision,fields}`. Type payloads are strictly validated. Expected revision zero creates a typed new record; existing updates require its actual revision. Supported operations:
+
+- adjust_hp: character-profile, `{delta}`; unknown HP fails closed.
+- set_status: character-profile `{currentHp?,maximumHp?,temporaryHp?}` or party-sheet `{conditions}` for an explicit confirmed correction.
+- adjust_resource: party-sheet `{resourceName,delta}` or companion-resource `{delta}`; unknown remaining/capacity fails closed.
+- adjust_currency: wallet, optional copperDelta/silverDelta/electrumDelta/goldDelta/platinumDelta; no negative or invented unknown balance.
+- move_item: item, `{expectedPlacementRevision,holderProfileId?,containerItemId?,installedProjectId?,state?}`; item and original placement identity commit together. Omitted holder/container/installation/state fields preserve the existing placement; omitted holder also preserves the existing item owner label even when no structured placement exists. Explicit null clears only the supplied identity. State, if supplied, must be a supported string. The server rejects invalid mixed container/installation destinations, containment cycles and implicit child ownership changes.
+- consume_item: item `{quantity}`; zero inventory marks consumed and updates the existing placement atomically.
+- acquire_item: item expectedRevision zero, fields typed LedgerDraft with confirmed evidence and caller-supplied stable record ID.
+- set_ability: existing character-ability `{score}`; preserves magical modifiers and notes.
+- save_checkpoint: checkpoint typed fields.
+- set_record: whitelisted descriptive typed records only; cannot bypass HP/resources/conditions operations or replace combat/audit/history storage.
+
+Backend expands operations with scope, currentFields, proposedFields and sideEffects including their own frozen currentFields for independently validated expected results. Fingerprint is SHA256 of canonical sorted-key JSON `{campaignId,commandId,grantRevision,operations,source}` including expanded operations. Canonical numbers are safe integers; arrays retain order. Pending command status is PENDING_DELIVERY only when all operation categories have standing Auto-Sync, otherwise PENDING_APPROVAL. Both are uncommitted.
+
+Device `GET /pending` returns `{grant,commands}`. Native code verifies the full fingerprint, frozen grant revision and local independent category scopes; applies all original typed operations in one domain transaction and preserves an immutable local receipt. Device `POST /decisions` accepts `{commandId,fingerprint,status,localReceiptId,records}`. APPLIED requires an actual local receipt and complete projected records including item-placement side effects. REJECTED/CONFLICT require no records/no local receipt. Backend compares expected resulting fields/revisions, performs atomic mirror CAS and appends an immutable independent receipt. Duplicate request retries retain the original immutable result; changed payload with same command ID fails.
+
+`GET /receipts/{commandId}` and MCP `get_campaign_command_receipt` return `{receipt:{commandId,status,localReceiptId,fingerprint,records:[full envelopes],recordedAt,eventId,deviceCredentialId}}`. ChatGPT must independently retrieve this receipt and current saved record revision before saying a save completed. A queue HTTP success is not a device commit.
+
+`POST /devices/revoke {}` is idempotent for the same expired/revoked self credential and returns actual server revocation; a local-only disconnect is never represented as server revocation.
+
+## Read tools
+
+get_owner_connection (legacy connection plus campaignSync grants), get_campaign_state, get_character, get_character_abilities, get_character_resources, get_party, get_companion, get_inventory, get_item, get_equipment, get_currency, get_inventions, get_research, get_connections, get_campaign_checkpoint, get_campaign_history, get_astravar_configuration, get_roll_history, get_campaign_record, get_campaign_reference, get_campaign_command_receipt. Reads are bounded and filtered; no arbitrary SQL or unrestricted database replacement is available.
+
+## Evidence boundary
+
+Node fixtures test actual SQLite/D1-equivalent atomicity and host routing; native HTTPS emulator testing exercises the real production Worker against isolated fictional records. Neither establishes a physical Galaxy commit or normal hosted ChatGPT invocation. Hosted MCP discovery, authenticated tool invocation, and physical-device acceptance must be recorded separately after actual observation.
+
+## Chunked archive references
+
+Large read-only source references are transported as reference metadata plus bounded UTF-8 text parts. IDs begin archive: plus a hash of the original local source identity and meta/body:index/properties:index suffixes. Metadata retains original referenceId, Notion externalId, sourceURL/revision, body/property byte counts, part counts and SHA256 values. Each part retains original referenceId, part/index/total, text and contentHash. Full archive parts require all read categories because source prose may span HP, inventory, wealth and other categories. Native chunks fit the bounded publication body; the server independently enforces archive scope. get_campaign_reference reads one metadata/body/properties part by original referenceId, optional part and index. No truncation is represented as a complete document.
+
+Oversized immutable audits use metadata at the original audit record ID with chunked:true, originalRecordId, originalKind, contentSha256, contentBytes, parts, encoding and partIdPrefix. Ordered audit-kind text chunks use partIdPrefix + index, retain originalRecordId/contentSha256 and per-part hashes, and require all read categories. get_campaign_history/get_research list metadata instead of flooding the first page with text parts. Use get_campaign_record with the provided prefix and zero-based index to retrieve each narrow part and reconstruct/verify the original canonical JSON.
+
+## Wire bounds and deterministic typed defaults
+
+Archive metadata and parts retain the native sourceVersion field. New typed commands resolve omitted primary IDs from the command's stable recordId and omitted campaign IDs from its selected campaign context; explicitly wrong identities remain rejected. Deterministic Kotlin DTO defaults are normalized before producing expected saved fields, while partial updates merge existing fields first. Partial party-sheet content merges existing nested content and normalizes deterministic nested defaults; new nested attacks/capabilities need stable IDs. Unsafe incomplete new sheets are rejected before queuing, and nonlocal new sheets/characters require local identity enrollment. Unknown resource defaults stay null.
+
+Every expanded command is projected through the CURRENT read grant before its fingerprint or response is generated. Revoking HP access therefore also removes HP from newly generated rename-command baselines and proposed fields, even before the phone republishes a narrower mirror.
+
+Pending delivery returns an ordered prefix whose full serialized UTF-8 envelope is at most48KiB, with hasMore indicating retained work. Remaining commands stay durable for later reads after receipts. Individually undeliverable expanded commands are rejected before insertion. The backend also checks a projected result/side-effect acknowledgement estimate with bounded provenance overhead against60KiB. The native app independently verifies its actual decision payload fits65536bytes inside the same Room transaction and rolls back oversized results before any local commit. A bounded protocol response never means omitted work was completed.

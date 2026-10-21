@@ -2,10 +2,7 @@ package com.yazsras.astravar.data
 
 import androidx.room.withTransaction
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.*
 
 internal const val CAMPAIGN_BACKUP_MAX_CHARACTERS = 32_000_000
 internal fun supportedCampaignBackup(text: String): String {
@@ -19,26 +16,31 @@ internal fun supportedCampaignBackup(text: String): String {
 internal class CampaignBackup(private val db: CampaignLedgerDb) {
     private val items = db.ledgerDao()
     private val records = db.recordsDao()
+    private val party = db.partyDao()
 
-    private suspend fun snapshot() = LedgerExport(exportedAt = 0, items = items.allItems(), events = items.allEvents(),
-        records = CampaignRecordsRepository(db).snapshot())
+    internal suspend fun snapshot(includeBackups: Boolean = true, includeArchive: Boolean = true) = LedgerExport(exportedAt = 0, items = items.allItems(), events = items.allEvents(),
+        records = CampaignRecordsRepository(db).snapshot(), archive = if (includeArchive) CampaignArchiveRepository(db).snapshot(includeBackups = includeBackups) else CampaignArchiveState())
 
-    private fun hash(value: LedgerExport) = campaignHash(campaignJson.encodeToString(value))
+    private fun hash(value: LedgerExport) = campaignSerializedHash(LedgerExport.serializer(), value)
 
     suspend fun preview(text: String): ImportPreview = db.withTransaction {
-        val current = snapshot()
         try {
             supportedCampaignBackup(text)
-            val header = campaignJson.parseToJsonElement(text).jsonObject
-            require(header["format"]?.jsonPrimitive?.content == "astravar-campaign-items" &&
-                (header["schema"]?.jsonPrimitive?.intOrNull ?: -1) in 1..2) { "Backup must declare its format and supported schema." }
-            val incoming = campaignJson.decodeFromString<LedgerExport>(text)
+            val header = rejectDuplicateJsonMembers(text)
+            require("format" in header && "schema" in header) { "Backup must declare its format and supported schema." }
+            // Inspect the actual decoded header. A JSON tree would retain another full copy of source payloads.
+            val incoming = campaignDecodeBackup(text)
+            // Decode before reading local source payloads so their copies are not retained while
+            // constructing a potentially large incoming string. Both reads remain in this transaction.
+            val current = snapshot()
             val conflicts = validate(incoming, current)
             ImportPreview(conflicts.isEmpty(), "${incoming.items.size} items, ${incoming.events.size} inventory events, " +
-                "${incoming.records.projects.size} inventions, ${incoming.records.entities.size} connections; existing different records will never be replaced.",
+                "${incoming.records.projects.size} inventions, ${incoming.records.entities.size} connections, " +
+                "${incoming.records.partySheets.size} party sheets, ${incoming.records.placements.size} equipment placements, " +
+                "${incoming.records.wallets.size} wallets, ${incoming.records.checkpoints.size} checkpoints; existing different records will never be replaced.",
                 conflicts, hash(incoming), hash(current), incoming)
         } catch (e: Exception) {
-            ImportPreview(false, "Backup could not be validated.", listOf(e.message ?: "Unsupported backup."), "", hash(current))
+            ImportPreview(false, "Backup could not be validated.", listOf(e.message ?: "Unsupported backup."), "", hash(snapshot()))
         }
     }
 
@@ -57,6 +59,14 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         val conflicts = validate(incoming, current)
         require(conflicts.isEmpty()) { conflicts.joinToString("\n") }
 
+        mergeRows(incoming, current)
+        val now = System.currentTimeMillis()
+        records.insert(CampaignAudit(commandId, commandId, "backup", preview.fingerprint, "RESTORE", "User-confirmed local file restore",
+            0, 1, now, afterJson = preview.summary))
+        CommandReceipt(commandId, fp, "RESTORE", preview.fingerprint, 1, now, outcomeJson = preview.summary).also { records.insert(it) }
+    }
+
+    internal suspend fun mergeRows(incoming: LedgerExport, current: LedgerExport) {
         val currentItems = current.items.associateBy { it.id }
         incoming.items.filter { it.id !in currentItems }.forEach { items.insertItem(it) }
         val currentEvents = current.events.associateBy { it.commandId }
@@ -68,6 +78,11 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         merge(r.companionStates, c.companionStates, { it.companionId }) { records.put(it) }
         merge(r.characterProfiles, c.characterProfiles, { it.id }) { records.put(it) }
         merge(r.characterAbilities, c.characterAbilities, { it.id }) { records.put(it) }
+        merge(r.partySheets, c.partySheets, { it.profileId }) { party.put(it) }
+        merge(r.placements, c.placements, { it.itemId }) { party.put(it) }
+        merge(r.wallets, c.wallets, { it.id }) { party.put(it) }
+        merge(r.checkpoints, c.checkpoints, { it.id }) { party.put(it) }
+        merge(r.externalReferences, c.externalReferences, { it.id }) { party.put(it) }
         merge(r.stages, c.stages, { it.id }) { records.put(it) }
         merge(r.requirements, c.requirements, { it.id }) { records.put(it) }
         merge(r.facts, c.facts, { it.id }) { records.put(it) }
@@ -80,10 +95,7 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         merge(r.consumptions, c.consumptions, { it.id }) { records.insert(it) }
         merge(r.audit, c.audit, { it.id }) { records.insert(it) }
         merge(r.receipts, c.receipts, { it.commandId }) { records.insert(it) }
-        val now = System.currentTimeMillis()
-        records.insert(CampaignAudit(commandId, commandId, "backup", preview.fingerprint, "RESTORE", "User-confirmed local file restore",
-            0, 1, now, afterJson = preview.summary))
-        CommandReceipt(commandId, fp, "RESTORE", preview.fingerprint, 1, now, outcomeJson = preview.summary).also { records.insert(it) }
+        CampaignArchiveRepository(db).mergeState(incoming.archive, current.archive)
     }
 
     private suspend fun <T> merge(incoming: List<T>, current: List<T>, id: (T) -> String, insert: suspend (T) -> Unit) {
@@ -91,9 +103,9 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         incoming.filter { id(it) !in present }.forEach { insert(it) }
     }
 
-    private fun validate(incoming: LedgerExport, current: LedgerExport): List<String> {
+    internal fun validate(incoming: LedgerExport, current: LedgerExport): List<String> {
         val errors = mutableListOf<String>()
-        if (incoming.format != "astravar-campaign-items" || incoming.schema !in 1..2) {
+        if (incoming.format != "astravar-campaign-items" || incoming.schema !in 1..5) {
             return listOf("Unsupported backup format or schema. No data will be imported.")
         }
         if (incoming.schema == 1 && incoming.records != CampaignRecordsExport()) errors += "Schema 1 cannot contain v2 records."
@@ -109,8 +121,29 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         }
         checkRows("Item", incoming.items, current.items) { it.id }
         checkRows("Inventory event", incoming.events, current.events) { it.commandId }
+        errors += CampaignArchiveRepository.validateState(incoming.archive, current.archive)
+        if (incoming.schema < 5 && incoming.records.wallets.any { it.electrum != null || it.platinum != null }) errors += "Electrum and platinum balances require backup schema 5."
+        if (incoming.schema < 4 && incoming.archive != CampaignArchiveState()) errors += "Archive reference records require backup schema 4."
         val r = incoming.records
         val c = current.records
+        val notionIdentities = buildList {
+            (incoming.items + current.items).forEach { item ->
+                item.notionPageId?.takeIf(String::isNotBlank)?.let { add(normalizedNotionIdentity(it) to item.id) }
+            }
+            (r.externalReferences + c.externalReferences).filter { it.namespace.equals("notion", ignoreCase = true) && it.recordType == "item" }
+                .forEach { add(normalizedNotionIdentity(it.externalId) to it.recordId) }
+        }
+        if (notionIdentities.groupBy { it.first }.any { (_, rows) -> rows.map { it.second }.distinct().size > 1 }) errors += "One Notion item identity maps to multiple physical equipment records."
+        val walletIdentities = (r.wallets + c.wallets).distinctBy { it.id }.groupBy { Triple(it.campaignId, it.holderProfileId, it.name) }
+        if (walletIdentities.any { (_, rows) -> rows.size > 1 }) errors += "Wallet identities conflict; balances will not be combined."
+        if (incoming.schema < 3 && (r.partySheets.isNotEmpty() || r.placements.isNotEmpty() || r.wallets.isNotEmpty() || r.checkpoints.isNotEmpty() || r.externalReferences.isNotEmpty() || r.receipts.any { it.kind == "transaction" })) {
+            errors += "Legacy backup schemas cannot contain v3 party records."
+        }
+        checkRows("Party sheet", r.partySheets, c.partySheets) { it.profileId }
+        checkRows("Placement", r.placements, c.placements) { it.itemId }
+        checkRows("Wallet", r.wallets, c.wallets) { it.id }
+        checkRows("Checkpoint", r.checkpoints, c.checkpoints) { it.id }
+        checkRows("External reference", r.externalReferences, c.externalReferences) { it.id }
         checkRows("Invention", r.projects, c.projects) { it.id }
         checkRows("Stage", r.stages, c.stages) { it.id }
         checkRows("Requirement", r.requirements, c.requirements) { it.id }
@@ -178,6 +211,56 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         if (r.characterAbilities.any { it.profileId !in characterProfileIds || it.key !in setOf("STR", "DEX", "CON", "INT", "WIS", "CHA") ||
             (it.score != null && it.score !in 0..1000) || it.magicModifier !in -1000..1000 || !short(it.notes, 3000) ||
             !provenance(it.source) || it.revision < 1 }) errors += "Invalid manual ability score or character reference."
+        val partyRepository = PartyRecordsRepository(db)
+        r.partySheets.forEach { row ->
+            try {
+                require(row.profileId in characterProfileIds && row.revision >= 1 && provenance(row.source) && short(row.campaignId, 120, true))
+                partyRepository.validateSheet(row.sheet)
+            } catch (_: Exception) { errors += "Invalid party sheet ${row.profileId}; source, identity or typed values need review." }
+        }
+        val allItems = (current.items + incoming.items).distinctBy { it.id }
+        val allPlacements = (c.placements + r.placements).distinctBy { it.itemId }
+        val allProfiles = (c.characterProfiles + r.characterProfiles).distinctBy { it.id }
+        val allProjects = (c.projects + r.projects).distinctBy { it.id }
+        r.placements.forEach { row ->
+            try {
+                require(row.revision >= 1 && provenance(row.source))
+                validatePlacement(row, allPlacements, allItems, allProfiles, allProjects)
+                val item = allItems.first { it.id == row.itemId }
+                val expectedLocation = when {
+                    row.containerItemId != null -> "Item:${row.containerItemId}"
+                    row.installedProjectId != null -> "Project:${row.installedProjectId}"
+                    row.holderProfileId != null -> "Actor:${row.holderProfileId}"
+                    else -> "Unknown"
+                }
+                require(item.itemState == row.state && item.location == expectedLocation) { "Ownership mirror disagrees with the placement." }
+            } catch (_: Exception) { errors += "Invalid equipment placement ${row.itemId}; ownership, availability or containment conflicts." }
+        }
+        r.wallets.forEach { row ->
+            try { partyRepository.validateWallet(row); require(row.revision >= 1 && provenance(row.source) && (row.holderProfileId == null || row.holderProfileId in characterProfileIds)) }
+            catch (_: Exception) { errors += "Invalid wallet ${row.id}; unknown and negative balances must not be conflated." }
+        }
+        r.checkpoints.forEach { row ->
+            try { partyRepository.validateCheckpoint(row); require(row.revision >= 1 && provenance(row.source)) }
+            catch (_: Exception) { errors += "Invalid checkpoint ${row.id}." }
+        }
+        val externalKeys = (r.externalReferences + c.externalReferences).distinctBy { it.id }.map { it.namespace to it.externalId }
+        if (externalKeys.distinct().size != externalKeys.size) errors += "External source identity maps to multiple records."
+        r.externalReferences.forEach { row ->
+            try {
+                partyRepository.validateReference(row); require(row.revision >= 1 && provenance(row.source))
+                val exists = when (row.recordType) {
+                    "item" -> row.recordId in itemIds
+                    "character-profile" -> row.recordId in characterProfileIds
+                    "companion" -> row.recordId in companionIds
+                    "project" -> row.recordId in projectIds
+                    "connection" -> row.recordId in entityIds
+                    "checkpoint" -> (r.checkpoints + c.checkpoints).any { it.id == row.recordId }
+                    else -> false
+                }
+                require(exists)
+            } catch (_: Exception) { errors += "Invalid external reference ${row.id}." }
+        }
         if (r.itemDetails.any { it.itemId !in itemIds || it.revision < 1 || (it.weightGrams != null && it.weightGrams !in 0..1_000_000_000L) }) errors += "Invalid item details or reference."
         if (r.itemProperties.any { it.itemId !in itemIds || it.label.isBlank() || it.value.isBlank() || it.revision < 1 }) errors += "Invalid item property or reference."
         if (r.itemProperties.any { !short(it.label, 120, true) || !short(it.value, 6000, true) || !provenance(it.source) || it.evidenceStatus !in evidenceValues }) errors += "Invalid item property fields."
@@ -186,6 +269,7 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
             "project" -> id in projectIds
             "connection" -> id in entityIds
             "companion" -> id in companionIds
+            "character-profile" -> id in characterProfileIds
             else -> false
         }
         if (r.links.any { !endpoint(it.fromType, it.fromId) || !endpoint(it.toType, it.toId) || it.revision < 1 }) errors += "Links contain unresolved targets."
@@ -214,17 +298,56 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
             "character-ability" to (r.characterAbilities + c.characterAbilities).map { it.id }.toSet(),
             "item-details" to (r.itemDetails + c.itemDetails).map { it.itemId }.toSet(),
             "item-property" to (r.itemProperties + c.itemProperties).map { it.id }.toSet(),
-            "link" to (r.links + c.links).map { it.id }.toSet()
+            "link" to (r.links + c.links).map { it.id }.toSet(),
+            "party-sheet" to (r.partySheets + c.partySheets).map { it.profileId }.toSet(),
+            "item-placement" to (r.placements + c.placements).map { it.itemId }.toSet(),
+            "wallet" to (r.wallets + c.wallets).map { it.id }.toSet(),
+            "checkpoint" to (r.checkpoints + c.checkpoints).map { it.id }.toSet(),
+            "external-reference" to (r.externalReferences + c.externalReferences).map { it.id }.toSet(),
+            "transaction" to (r.receipts + c.receipts).filter { it.kind == "transaction" }.map { it.recordId }.toSet()
         )
         fun auditSnapshotMatches(event: CampaignAudit, value: String?, revision: Long): Boolean = try {
             if (value == null) false else {
                 val obj = campaignJson.parseToJsonElement(value).jsonObject
-                val key = when (event.recordType) { "companion" -> "companionId"; "item-details" -> "itemId"; else -> "id" }
+                val key = when (event.recordType) { "companion" -> "companionId"; "item-details", "item-placement" -> "itemId"; "party-sheet" -> "profileId"; else -> "id" }
                 val identity = if (event.recordType == "character-ability")
                     "${obj["profileId"]?.jsonPrimitive?.content}:${obj["key"]?.jsonPrimitive?.content}"
                 else obj[key]?.jsonPrimitive?.content
                 identity == event.recordId && obj["revision"]?.jsonPrimitive?.longOrNull == revision
             }
+        } catch (_: Exception) { false }
+        fun syncAuditMatches(record: CampaignSyncRecord, snapshot: String?): Boolean = try {
+            val original = requireNotNull(snapshot).let { campaignJson.parseToJsonElement(it).jsonObject }
+            val normalized = when (record.kind) {
+                "item", "connection" -> JsonObject(original + ("imageBase64" to JsonNull))
+                "party-sheet" -> {
+                    val content = campaignJson.parseToJsonElement(original.getValue("contentJson").jsonPrimitive.content).jsonObject
+                    JsonObject(original + ("contentJson" to JsonPrimitive(campaignJson.encodeToString(
+                        campaignJson.decodeFromJsonElement<PartySheetData>(content).copy(portraitBase64 = null)))))
+                }
+                "wallet" -> JsonObject(original + mapOf("electrum" to (original["electrum"] ?: JsonNull), "platinum" to (original["platinum"] ?: JsonNull)))
+                else -> original
+            }
+            normalized == record.fields
+        } catch (_: Exception) { false }
+        fun validateSyncAudit(event: CampaignAudit): Boolean = try {
+            require(incoming.schema >= 5 && event.kind == "TRUSTED_DM_TRANSACTION" && event.id == event.commandId &&
+                event.commandId.matches(Regex("campaign-sync-[0-9a-f]{48}")) && event.priorRevision == 0L && event.resultingRevision == 1L)
+            val receipt = requireNotNull(allReceipts[event.commandId])
+            require(receipt.kind == "CAMPAIGN_SYNC_V2" && receipt.recordId == event.recordId && receipt.outcomeJson == event.afterJson)
+            val after = campaignJson.decodeFromString<List<CampaignSyncRecord>>(requireNotNull(event.afterJson))
+            val before = campaignJson.decodeFromString<List<CampaignSyncRecord>>(requireNotNull(event.beforeJson))
+            require(after.size in 1..100 && after.map { it.kind to it.recordId }.distinct().size == after.size)
+            val prefix = event.commandId.take("campaign-sync-".length + 40) + "-"
+            val children = allReceipts.keys.filter { it.startsWith(prefix) }.toSet()
+            require(children.size in 1..100)
+            val childrenAudit = audit.values.filter { it.commandId in children && it.source == event.source }
+            fun localKind(kind: String) = when (kind) { "companion-state" -> "companion"; "companion-resource" -> "resource"; "reference" -> "external-reference"; else -> kind }
+            require(after.all { record -> childrenAudit.any { child -> child.recordType == localKind(record.kind) &&
+                child.recordId == record.recordId && child.resultingRevision == record.revision && syncAuditMatches(record,child.afterJson) } })
+            require(before.all { record -> childrenAudit.any { child -> child.recordType == localKind(record.kind) &&
+                child.recordId == record.recordId && child.priorRevision == record.revision && syncAuditMatches(record,child.beforeJson) } })
+            true
         } catch (_: Exception) { false }
         r.audit.forEach { event ->
             if (event.commandId !in allReceipts || event.priorRevision < 0 || event.resultingRevision != event.priorRevision + 1) {
@@ -232,6 +355,8 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
             }
             if (event.recordType == "backup") {
                 if (event.kind != "RESTORE" || event.afterJson.isNullOrBlank()) errors += "Invalid restore audit ${event.id}."
+            } else if (event.recordType == "campaign-transaction") {
+                if (!validateSyncAudit(event)) errors += "Campaign transaction ${event.id} has invalid or missing committed child outcomes."
             } else if (event.recordId !in recordIds[event.recordType].orEmpty() ||
                 !auditSnapshotMatches(event, event.afterJson, event.resultingRevision) ||
                 (event.priorRevision == 0L && event.beforeJson != null) ||
@@ -247,6 +372,20 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
                 original.afterJson != receipt.outcomeJson || (receipt.outputId != null && receipt.outputId !in itemIds)) {
                 errors += "Receipt ${receipt.commandId} is not linked to its original audited outcome."
             }
+        }
+
+        r.receipts.filter { it.kind == "transaction" }.forEach { receipt ->
+            try {
+                val outcome = campaignJson.decodeFromString<PartyExchangeOutcome>(receipt.outcomeJson)
+                require(outcome.id == receipt.commandId && receipt.recordId == receipt.commandId && outcome.revision == 1L &&
+                    outcome.childReceipts.size in 1..100 && outcome.childReceipts.map { it.commandId }.distinct().size == outcome.childReceipts.size)
+                require(outcome.source.isNotBlank() && outcome.source.length <= 2000)
+                require(outcome.childReceipts.all { child ->
+                    child.commandId.startsWith("exchange-${campaignHash(receipt.commandId).take(40)}-") &&
+                        child.kind in setOf("CREATE", "TRANSFER", "QUANTITY", "wallet") && allReceipts[child.commandId] == child
+                })
+                require(audit[receipt.commandId]?.kind == "ATOMIC_EXCHANGE")
+            } catch (_: Exception) { errors += "Transaction ${receipt.commandId} has invalid or missing original child receipts." }
         }
 
         // A merge may add genuinely missing historical rows, but cannot create a competing
@@ -267,6 +406,12 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         (r.itemDetails + c.itemDetails).forEach { finalRow("item-details", it.itemId, it.revision, campaignJson.encodeToString(it)) }
         (r.itemProperties + c.itemProperties).forEach { finalRow("item-property", it.id, it.revision, campaignJson.encodeToString(it)) }
         (r.links + c.links).forEach { finalRow("link", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.partySheets + c.partySheets).forEach { finalRow("party-sheet", it.profileId, it.revision, campaignJson.encodeToString(it)) }
+        (r.placements + c.placements).forEach { finalRow("item-placement", it.itemId, it.revision, campaignJson.encodeToString(it)) }
+        (r.wallets + c.wallets).forEach { finalRow("wallet", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.checkpoints + c.checkpoints).forEach { finalRow("checkpoint", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.externalReferences + c.externalReferences).forEach { finalRow("external-reference", it.id, it.revision, campaignJson.encodeToString(it)) }
+        (r.receipts + c.receipts).filter { it.kind == "transaction" }.forEach { finalRow("transaction", it.recordId, it.resultingRevision, it.outcomeJson) }
         fun sameJson(a: String?, b: String?): Boolean = try {
             a != null && b != null && campaignJson.parseToJsonElement(a) == campaignJson.parseToJsonElement(b)
         } catch (_: Exception) { false }
@@ -291,7 +436,7 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
             checkHistory("item", id, rows.map { event -> CampaignAudit(event.commandId, event.commandId, "item", id,
                 event.kind, event.source, event.priorRevision, event.resultingRevision, event.createdAt, event.beforeJson, event.afterJson) })
         }
-        (r.audit + c.audit).distinctBy { it.id }.filter { it.recordType != "backup" }
+        (r.audit + c.audit).distinctBy { it.id }.filter { it.recordType !in setOf("backup", "campaign-transaction") }
             .groupBy { it.recordType to it.recordId }.forEach { (key, rows) -> checkHistory(key.first, key.second, rows) }
         return errors.distinct()
     }

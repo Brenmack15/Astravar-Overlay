@@ -2,7 +2,8 @@ package com.yazsras.astravar.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
@@ -36,5 +37,9 @@ import com.yazsras.astravar.rules.DamageType
     val bitmap = remember(asset, resources) {
         BitmapFactory.decodeResource(resources, asset, BitmapFactory.Options().apply { inSampleSize = 4 }).asImageBitmap()
     }
-    Image(bitmap, contentDescription = null, contentScale = ContentScale.Fit, modifier = modifier.clip(CircleShape).border(.8.dp, Brass.copy(alpha=.55f), CircleShape).padding(2.dp))
+    Box(modifier = modifier.clip(CircleShape).border(.8.dp, Brass.copy(alpha=.55f), CircleShape)) {
+        // Original image is unchanged. Crop/zoom inside the same medallion bounds.
+        Image(bitmap, contentDescription = null, contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = 1.42f, scaleY = 1.42f))
+    }
 }

@@ -22,6 +22,16 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.flowOf
 
+@Suppress("DEPRECATION")
+private fun installedCertificateFingerprints(context: android.content.Context): String = runCatching {
+    val signatures = if (Build.VERSION.SDK_INT >= 28) {
+        context.packageManager.getPackageInfo(context.packageName, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+            .signingInfo?.apkContentsSigners.orEmpty()
+    } else context.packageManager.getPackageInfo(context.packageName, android.content.pm.PackageManager.GET_SIGNATURES).signatures.orEmpty()
+    signatures.map { signature -> java.security.MessageDigest.getInstance("SHA-256").digest(signature.toByteArray())
+        .joinToString("") { "%02x".format(it.toInt() and 255) } }.sorted().joinToString("\n").ifBlank { "Unavailable" }
+}.getOrDefault("Unavailable")
+
 @Composable fun AstravarScreen(app: AstravarApp,startOverlay: ()->Unit,grantOverlay: ()->Unit,stopOverlay: ()->Unit) {
     val s by app.repository.state.collectAsState()
     val error by app.repository.error.collectAsState()
@@ -30,6 +40,7 @@ import kotlinx.coroutines.flow.flowOf
     val scope=rememberCoroutineScope()
     val actions=remember { Actions(app.repository,scope) }
     var tab by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf("Armor")}
+    var configSection by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("Settings") }
     var campaignPage by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
     var tool by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
     var elementPicker by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf(false)}
@@ -104,14 +115,18 @@ import kotlinx.coroutines.flow.flowOf
                 screenStates.SaveableStateProvider(tab) {
                     when(tab) {
                         "Armor" -> ArmorOverviewV2(current,app.campaignLedger,
-                            combat={tab="Combat"},systems={tool="Core management"},
+                            combat={tab="Combat"},systems={tool="Spell reservoir"},
                             eek={tab="Campaign";campaignPage="Eek"},inventory={tab="Campaign";campaignPage="Inventory"},
                             elements=if(prefs.mode==Ability.ARCANE || prefs.mode==Ability.SPELL) emptyList() else prefs.elements,
                             selectElement={elementPicker=true},
                             characterProfileId=if(remoteTestEnabled) RemoteStatProtocol.PROFILE_ID else "local-player",
-                            onOverlayVisibilityChanged={armorModalOpen=it})
+                            onOverlayVisibilityChanged={armorModalOpen=it},
+                            openReferences={tab="Campaign";campaignPage="Reference Library"})
                         "Combat" -> if(current.onboarded) Dashboard(current,actions,startOverlay,grantOverlay,stopOverlay,app.preferences,prefs)
                             else WeaponSetupV2(current,actions,{tool="Rules & profile"},{tool="Weapon backup"})
+                        "Party" -> if (remoteTestEnabled) Page { Text("Party records are isolated from the disposable Remote Stat Test. Disable Remote Updates to edit party records.") }
+                            else PartyPageV2(app.campaignLedger, current,
+                                openReferences={tab="Campaign";campaignPage="Reference Library"}) {tab="Campaign";campaignPage="Inventory"}
                         "Campaign" -> {
                             val page=campaignPage
                             if(page==null) RebuildCampaignHub {campaignPage=it}
@@ -122,15 +137,22 @@ import kotlinx.coroutines.flow.flowOf
                                 }
                                 Box(Modifier.weight(1f)) {screenStates.SaveableStateProvider("campaign-$page") {
                                     when(page) {
-                                        "Inventory" -> CampaignLedgerPage(app.campaignLedger)
+                                        "Inventory" -> CampaignLedgerPage(app.campaignLedger) {campaignPage="Reference Library"}
                                         "Inventions" -> InventionsPageV2(app.campaignLedger)
+                                        "Checkpoints" -> CampaignCheckpointPanel(app.campaignLedger)
                                         "Eek" -> EekPageV2(app.campaignLedger)
+                                        "Reference Library" -> CampaignReferenceLibraryV21(app.campaignLedger)
+                                        "Campaign import" -> CampaignArchiveImportV21(app.campaignLedger)
                                         else -> ConnectionsPageV2(app.campaignLedger)
                                     }
                                 }}
                             }
                         }
-                        else -> RebuildConfigHub {tool=it}
+                        else -> Column(Modifier.fillMaxSize()) {
+                            V2SectionTabs(listOf("Settings", "ChatGPT"), configSection) { configSection = it }
+                            if (configSection == "ChatGPT") ChatGptPromptsPage()
+                            else RebuildConfigHub {tool=it}
+                        }
                     }
                 }
                 tool?.let {name->RebuildToolSheet(name,{tool=null}) {
@@ -139,11 +161,14 @@ import kotlinx.coroutines.flow.flowOf
                         "Remote Updates" -> if(BuildConfig.DEBUG) RemoteUpdatesPage(app.remoteStats, characterAbilities) {id->
                             tool=null;remoteReviewId=id
                         }
+                        "Owner connection" -> CampaignConnectionPage()
                         "Campaign backup" -> CampaignBackupPageV2(app.campaignLedger)
+                        "Campaign import" -> CampaignArchiveImportV21(app.campaignLedger)
                         "Weapon backup" -> Page {BackupPage(current,actions)}
                         "Rules & profile" -> RulesPage(current,actions,if(prefs.mode in listOf(Ability.ARCANE,Ability.SPELL)) emptyList() else prefs.elements)
                         "Resources & recovery" -> ResourcesPage(current,history,actions)
-                        "Core management" -> CoresPage(current,actions)
+                        "Spell reservoir" -> CoresPage(current,actions)
+                        "ChatGPT toolkit" -> ChatGptPromptsPage()
                         "Spell library" -> PayloadsPage(current,actions,app.preferences,prefs.selectedPayloads)
                         "Roll history" -> CombatHistoryPage(current)
                         "Overlay & appearance" -> SettingsPage(app,current,actions,startOverlay,grantOverlay,stopOverlay)
@@ -157,7 +182,7 @@ import kotlinx.coroutines.flow.flowOf
                 val blast=prefs.mode in listOf(Ability.DISCHARGE,Ability.SHATTER)
                 if(type==DamageType.FORCE) {app.preferences.elements(emptyList());if(!blast) app.preferences.mode(Ability.ARCANE)}
                 else {
-                    app.preferences.elements(if(s!!.profile.elementCapacity==1) listOf(type) else if(type in prefs.elements) prefs.elements-type else (prefs.elements+type).takeLast(s!!.profile.elementCapacity))
+                    app.preferences.elements(elementSelectionAfterChoice(s!!.profile,prefs.elements,type))
                     if(!blast) app.preferences.mode(Ability.ELEMENTAL)
                 }
             };elementPicker=false
@@ -206,9 +231,15 @@ import kotlinx.coroutines.flow.flowOf
 
 @Composable fun HelpPage() {
     val c=LocalContext.current
+    val certificates = remember(c) { installedCertificateFingerprints(c) }
     Page {
         Section("App version") {
             Text("Astravar ${BuildConfig.VERSION_NAME} · Build ${BuildConfig.VERSION_CODE}")
+            Text("Developer · Yazsras Studios")
+            Text("Installed package · ${c.packageName}")
+            Text("Installed signing certificate SHA-256")
+            androidx.compose.foundation.text.selection.SelectionContainer { Text(certificates, style=MaterialTheme.typography.bodySmall) }
+            Text("Future updates require this package identity, a compatible signing certificate and an increased build number. Export backups before installing an update.", style=MaterialTheme.typography.bodySmall)
         }
         Section("Device diagnostics") {
             Text("${Build.MANUFACTURER} ${Build.MODEL}\nAndroid ${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}\nBuild ${Build.DISPLAY}\nPackage ${c.packageName}\nDisplay-over-apps permission: ${Settings.canDrawOverlays(c)}")

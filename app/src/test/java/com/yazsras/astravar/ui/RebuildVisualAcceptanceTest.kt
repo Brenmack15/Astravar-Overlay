@@ -310,7 +310,11 @@ class RebuildVisualAcceptanceTest {
             assertEquals(listOf(DamageType.FIRE), runBlocking { fixture.preferences.flow.first().elements })
             compose.onNodeWithText("Active element").performClick()
             compose.onNodeWithContentDescription("Neutral Force").performClick()
-            settleUntil { runBlocking { fixture.preferences.flow.first().elements.isEmpty() } }
+            settleUntil {
+                runBlocking {
+                    fixture.preferences.flow.first().let { it.elements.isEmpty() && it.mode == Ability.ARCANE }
+                }
+            }
             assertEquals(Ability.ARCANE, runBlocking { fixture.preferences.flow.first().mode })
             assertEquals(seed.profile, fixture.repository.state.value!!.profile)
         }
@@ -326,10 +330,10 @@ class RebuildVisualAcceptanceTest {
             compose.onAllNodesWithText("Change").onFirst().performClick()
             compose.onNodeWithText("Choose attack").assertIsDisplayed()
             listOf("Elemental shot", "Gauntlet strike", "Charged gauntlet", "Spell-imbued shot", "Spell-imbued strike", "Discharge")
-                .forEach { compose.onAllNodesWithText(it).onLast().assertIsDisplayed() }
+                .forEach { compose.onAllNodesWithText(it).onLast().performScrollTo().assertIsDisplayed() }
             listOf("Gauntlet strike", "Charged gauntlet", "Spell-imbued strike").forEach { name ->
                 compose.onNode(isNotEnabled() and hasAnyDescendant(hasText(name)))
-                    .assertIsDisplayed().assertIsNotEnabled().assertHasNoClickAction()
+                    .performScrollTo().assertIsDisplayed().assertIsNotEnabled().assertHasNoClickAction()
             }
             capture("rebuild-attack-selection", fixture.activity.get(), modal = true)
             compose.onNodeWithText("Spell-imbued shot").performClick()
@@ -338,7 +342,7 @@ class RebuildVisualAcceptanceTest {
             compose.onNodeWithText(Ability.SPELL.title).assertIsDisplayed()
             compose.onAllNodesWithText("Change").onFirst().performClick()
             compose.onNodeWithText("Existing weapon modes").performScrollTo().performClick()
-            compose.onNodeWithText(Ability.SHATTER.title).performScrollTo().assertIsDisplayed().assertHasClickAction()
+            compose.onNodeWithText(Ability.SHATTER.title).assertDoesNotExist()
             compose.onNodeWithText(Ability.ARCANE.title).performScrollTo().assertIsDisplayed().assertHasClickAction()
             compose.onNodeWithText(Ability.ARCANE.title).performClick()
             settleUntil { runBlocking { fixture.preferences.flow.first().mode == Ability.ARCANE } }

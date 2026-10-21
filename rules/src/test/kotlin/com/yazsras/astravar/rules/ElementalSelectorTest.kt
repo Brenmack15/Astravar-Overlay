@@ -5,7 +5,7 @@ import org.junit.Test
 
 class ElementalSelectorTest {
     private fun seed(p: Profile=Profile())=Campaign(onboarded=true,attuned=true,profile=p,installedId="core",cores=listOf(Core("core","Test core")),slots=mapOf(2 to 2))
-    private fun elemental(p: Profile)=Engine.plan(seed(p),"elemental",Ability.ELEMENTAL,elements=listOf(DamageType.LIGHTNING))
+    private fun elemental(p: Profile)=historicalPlan(seed(p),"elemental",Ability.ELEMENTAL,elements=listOf(DamageType.LIGHTNING))
 
     @Test fun everyIndependentForceAndSelectorCountUsesGenericDiceAndAverages() {
         assertEquals(2,Profile().elementalSelectorDiceCount)
@@ -48,7 +48,7 @@ class ElementalSelectorTest {
 
     @Test fun neutralHasNoSelectorEvenAtTenAndNaturalOneAppliesNoDamage() {
         val s=seed(Profile(baseDamageDiceCount=3,elementalSelectorDiceCount=10))
-        val p=Engine.plan(s,"neutral",Ability.ARCANE,elements=listOf(DamageType.LIGHTNING))
+        val p=historicalPlan(s,"neutral",Ability.ARCANE,elements=listOf(DamageType.LIGHTNING))
         assertTrue(p.elements.isEmpty());assertEquals(listOf(Dice(3,12,5)),Engine.components(p).map {it.damage.dice})
         val requested=mutableListOf<Int>()
         val roll=DiceRoller.roll(p,die={requested+=it;1})
@@ -59,7 +59,7 @@ class ElementalSelectorTest {
 
     @Test fun dualResonanceGivesEachBasicElementTheFullConfiguredCountAndCritical() {
         val profile=Profile(level=10,elementalSelectorDiceCount=3,confirmed=setOf(Upgrade.DUAL_RESONANCE))
-        val p=Engine.plan(seed(profile),"dual",Ability.ELEMENTAL,elements=listOf(DamageType.FIRE,DamageType.LIGHTNING))
+        val p=historicalPlan(seed(profile),"dual",Ability.ELEMENTAL,elements=listOf(DamageType.FIRE,DamageType.LIGHTNING))
         for(crit in listOf(false,true)) {
             val roll=DiceRoller.roll(p,die={if(it==20) {if(crit) 20 else 14} else 2})
             val count=if(crit) 6 else 3
@@ -87,9 +87,9 @@ class ElementalSelectorTest {
             val profiles=listOf(1,10).map {Profile(level=10,elementalSelectorDiceCount=it,confirmed=setOf(Upgrade.DUAL_RESONANCE))}
             val shots=profiles.map {profile ->
                 val charged=Engine.charge(seed(profile),"core",spell,"payload",SourceKind.SLOT,true)
-                val p=Engine.plan(charged,"shot",ability,listOf("payload"),elements=if(ability==Ability.SPELL) listOf(DamageType.FIRE,DamageType.LIGHTNING) else emptyList(),direct=ability!=Ability.SPELL,point="Gate")
+                val p=historicalPlan(charged,"shot",ability,listOf("payload"),elements=if(ability==Ability.SPELL) listOf(DamageType.FIRE,DamageType.LIGHTNING) else emptyList(),direct=ability!=Ability.SPELL,point="Gate")
                 assertTrue(p.elements.isEmpty());assertFalse(Engine.components(p,critical).any {it.label=="Selector"})
-                val after=DiceRoller.fire(charged,p,die={if(it==20) {if(critical) 20 else 14} else 2})
+                val after=historicalFire(charged,p,die={if(it==20) {if(critical) 20 else 14} else 2})
                 assertEquals(1,after.slots[2]);assertTrue(after.core("core").payloads.isEmpty())
                 if(ability==Ability.DISCHARGE) assertEquals(600L,after.core("core").exhaustedUntil)
                 if(ability==Ability.SHATTER) {assertTrue(after.core("core").destroyed);assertTrue(after.postShatter)}
@@ -102,7 +102,7 @@ class ElementalSelectorTest {
 
     @Test fun selectorNeverAffectsForceImpactOrEmergencyProgressionAtAnyTier() {
         for(level in 5..20) for(n in 1..10) for(ability in listOf(Ability.DISCHARGE,Ability.SHATTER)) {
-            val plans=listOf(1,10).map {m -> Engine.plan(seed(Profile(level=level,baseDamageDiceCount=n,elementalSelectorDiceCount=m)),"impact",ability,direct=true,point="Gate")}
+            val plans=listOf(1,10).map {m -> historicalPlan(seed(Profile(level=level,baseDamageDiceCount=n,elementalSelectorDiceCount=m)),"impact",ability,direct=true,point="Gate")}
             for(crit in listOf(false,true)) assertEquals(Engine.components(plans[0],crit),Engine.components(plans[1],crit))
             assertEquals(Dice(n*2,12,5),Engine.components(plans[1],true).first().damage.dice)
             assertEquals(plans[1].blastDiceCount,Engine.components(plans[1],true).last().damage.dice.count)

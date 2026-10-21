@@ -6,30 +6,30 @@
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/1.json": "8f92801eb01d6ed7d6ff4c5508e9fc4131146fbbcf9a9f8aad92e2596536ec30",
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/2.json": "50a395a8b87a7a119312af1b1edba8246f68aed77be8900baa29a5caff964361",
     "app/schemas/com.yazsras.astravar.data.SandboxSyncDb/1.json": "23de63787037f830e1295ba7cd7efbc7d62cf18e3ba836c4e511bec8fd6cef03",
-    "app/src/main/AndroidManifest.xml": "8af945d068b6404169dc126415408805be91f2f97b52319fe314ff7bb375d12f",
-    "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": "feeb234e91cacd9c81d01bef14bb506d3195f3af377ed1c14e1ad27529800160",
-    "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": "68aa9fa9b027df3abca4ca07eca032c04f5a5b1cd3948d4b2c5a758a867e2ac1",
-    "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": "90dbcfe730c9bea800101449551cad81942a979b168566d792fc3ee8978e5871",
-    "app/src/main/java/com/yazsras/astravar/data/HistoryStorage.kt": "62c5c6412de5e5fd6ff12c1083c1fe3c793e5d3d4cfe56ce080c704eb2371c54",
+    "app/src/main/AndroidManifest.xml": "b66418063c763cc2f4c0775987af3af650a5b56dec51c3a65acdae4832feab67",
+    "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": "f7eefb74ebec642b318ab67053605ec5ede36dd02b38a2ae0c85819178821251",
+    "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": "18e19a4abe551da58a02314124ef229420e8abe49f4ff5371552fae1fe800f6f",
+    "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": "7e5b92d763929c131ddef1f8ee5f08bad520233939f51234feace666b45c77c3",
+    "app/src/main/java/com/yazsras/astravar/data/HistoryStorage.kt": "c7968f73293f5d8f46fa148be3fbbb74352565e914ef3b1762f88800104dbb62",
     "app/src/main/java/com/yazsras/astravar/data/SandboxSync.kt": "25f71e8aac585b24f83975796e9a4a7aa01b7c6a8c6f94607544bdf8775f5cf9",
-    "app/src/main/java/com/yazsras/astravar/data/Store.kt": "c6602445a62cc9b23df11bb663f54cb8b5d06011db05dcb82ada704d647cf03d",
+    "app/src/main/java/com/yazsras/astravar/data/Store.kt": "17c00ac0996007b028b99af360205c59f0694b258e7184b267067ffa038ed3be",
     "app/src/main/java/com/yazsras/astravar/overlay/ArcaneSurface.kt": "e73af0007da85e7807f1e8d3245347eb6256d507c17b67bbb4dd456285669cbb",
-    "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": "90851da55e3bb18274946a37e1bac8aa43f1f329f7aad4b47f93767cf16b8bb3",
+    "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": "60c2f1874d21a60f4bc6dd8490a6a295cbe75786601d438283fc9e53df79ef3e",
     "app/src/main/res/drawable-nodpi/astravar_armor_front.png": "25d225393ba934260690d184a5993805add290bdfdb76e05bcb7ff8486b355b3",
     "app/src/main/res/drawable-nodpi/astravar_cutout.webp": "580c7e31c3cab1ebfef5b5b449b660c45d3b055ff88c876f8f12876115cce7c4",
     "app/src/main/res/drawable-nodpi/astravar_reference.jpg": "c60543080b52334ec9e8637f6509c1a146e7f284d39d15a2d9c696a48e6df3dd",
     "app/src/main/res/drawable-nodpi/graphite_texture.png": "6c2af92f3e33160776ed3bfe17b8a2431225e6119eebfa4a3df933ea52ee7ef1",
     "app/src/main/res/drawable-nodpi/metal_texture.png": "11142aad77bb53c32d788081fd555ea761921a3ec64956ba64f3625e020c62f9",
-    "app/src/main/res/drawable-nodpi/particle_acid.png": "a31bdc674fc52626d5167d2674abaa944534be7eeedd46f7a1b63b92a8151363",
-    "app/src/main/res/drawable-nodpi/particle_cold.png": "e5d6a8fbc2ea576f40e6c8e6b88d6b3d429c17b90c2b18581be4bee6f4dceceb",
-    "app/src/main/res/drawable-nodpi/particle_fire.png": "c4444ef869009767e1b38d6913c0be0309c31367c98865ec6256793cfe502cd2",
-    "app/src/main/res/drawable-nodpi/particle_force.png": "4e77e9843004519ae07e925ca57ec5d31dc90c3061cf620e0db4d9c8999b6a41",
-    "app/src/main/res/drawable-nodpi/particle_lightning.png": "45bc6141226624a29b2d9096f54909e03bcbaa05262e944c8d47fc64651cd80e",
-    "app/src/main/res/drawable-nodpi/particle_necrotic.png": "39e6d047f51ee95d41e6b11c0b00ab28c2447f1dc58e2df3cdc08fc19ec28384",
-    "app/src/main/res/drawable-nodpi/particle_poison.png": "81941c3dd25b5b6835db7f486cd70c09f0010cf43e3978004c2df33387bbe873",
-    "app/src/main/res/drawable-nodpi/particle_psychic.png": "78932b5e61c913fb5e1a68c98b7a5f27cdbba708d36c095a3f807d839ae9f9b1",
-    "app/src/main/res/drawable-nodpi/particle_radiant.png": "471c55a567a9f6f5357aa5bc5199aa8b2e9c06efbcde84d181f093a33fe387e0",
-    "app/src/main/res/drawable-nodpi/particle_thunder.png": "a92f130a454c0b6669a0aab07cf2a3adc6a91cbf4a2acd8af95cedd9f5ef3159",
+    "app/src/main/res/drawable-nodpi/particle_acid.jpg": "a31bdc674fc52626d5167d2674abaa944534be7eeedd46f7a1b63b92a8151363",
+    "app/src/main/res/drawable-nodpi/particle_cold.jpg": "e5d6a8fbc2ea576f40e6c8e6b88d6b3d429c17b90c2b18581be4bee6f4dceceb",
+    "app/src/main/res/drawable-nodpi/particle_fire.jpg": "c4444ef869009767e1b38d6913c0be0309c31367c98865ec6256793cfe502cd2",
+    "app/src/main/res/drawable-nodpi/particle_force.jpg": "4e77e9843004519ae07e925ca57ec5d31dc90c3061cf620e0db4d9c8999b6a41",
+    "app/src/main/res/drawable-nodpi/particle_lightning.jpg": "45bc6141226624a29b2d9096f54909e03bcbaa05262e944c8d47fc64651cd80e",
+    "app/src/main/res/drawable-nodpi/particle_necrotic.jpg": "39e6d047f51ee95d41e6b11c0b00ab28c2447f1dc58e2df3cdc08fc19ec28384",
+    "app/src/main/res/drawable-nodpi/particle_poison.jpg": "81941c3dd25b5b6835db7f486cd70c09f0010cf43e3978004c2df33387bbe873",
+    "app/src/main/res/drawable-nodpi/particle_psychic.jpg": "78932b5e61c913fb5e1a68c98b7a5f27cdbba708d36c095a3f807d839ae9f9b1",
+    "app/src/main/res/drawable-nodpi/particle_radiant.jpg": "471c55a567a9f6f5357aa5bc5199aa8b2e9c06efbcde84d181f093a33fe387e0",
+    "app/src/main/res/drawable-nodpi/particle_thunder.jpg": "a92f130a454c0b6669a0aab07cf2a3adc6a91cbf4a2acd8af95cedd9f5ef3159",
     "app/src/main/res/drawable/arcane_geometry.xml": "00a7a646d94d077129add30ed96c0e8916370daaf97fc63527a60e2b7f3ba7e3",
     "app/src/main/res/drawable/ic_acid.xml": "70e5821e122349677594d6f794aecef933e5dd01d975850941ef7ba209af279a",
     "app/src/main/res/drawable/ic_cold.xml": "5eeddebfdc07a9a1aebff71a5acf3867739193d87705a41a3854dfb40d3b8549",
@@ -64,22 +64,25 @@
     "app/src/main/res/values/styles.xml": "1325c6db46c862140d9d93f9087fb933451d94190efb8c9d7d0e94289bdccd45",
     "app/src/main/res/xml/data_extraction_rules.xml": "9b63470201d0d30ddd34354d78b9e6b5745f77e19f223762f80f79babf32c969",
     "rules/build.gradle.kts": "25d6eac2ed7ca251ffc432e18d6e8f44a94211a54e2768623c7f102cc875fa7b",
-    "rules/src/main/kotlin/com/yazsras/astravar/rules/BackupCodec.kt": "c0dee331adc50ac4a042379203d4b0e4b459e81046bf873bdcdd7b099feb0fbc",
-    "rules/src/main/kotlin/com/yazsras/astravar/rules/DiceRoller.kt": "24f613cf445f16e1c6dbe6cfa67576cb4e3f3b52a04c1528d10e52c670d3b257",
-    "rules/src/main/kotlin/com/yazsras/astravar/rules/Engine.kt": "16261ebf284139f3d2a937bf394b09cbf0671b6e3fc5be83da9f7fd61bff4971",
+    "rules/src/main/kotlin/com/yazsras/astravar/rules/BackupCodec.kt": "0549c5fdf4766ad88a81e3d58f5ac8d16dbb6e781859c18e72097c042412a4e1",
+    "rules/src/main/kotlin/com/yazsras/astravar/rules/DiceRoller.kt": "c3ab14fe38139e85630e7ccbf2f7c07bc983254ca3da2dfb52bb3957be283899",
+    "rules/src/main/kotlin/com/yazsras/astravar/rules/Engine.kt": "7228b65f1b492266a1a0fd97f8e0534a89cce87f2ace3f1a1c3bb690ad30d7df",
     "rules/src/main/kotlin/com/yazsras/astravar/rules/HistoryJson.kt": "82a94a6275e539237357c53677488a263f3d006ffe2ad6fd4a49eeb8f08b4a1f",
-    "rules/src/main/kotlin/com/yazsras/astravar/rules/HistoryRetention.kt": "af2bcb67a804f92b07cfb593f595c465bae131d4c6014cd55f471c800555399d",
-    "rules/src/main/kotlin/com/yazsras/astravar/rules/Model.kt": "13108810a2e713f8463e8edbd4f46ec8f05a9729df9d185dd2242e2765499d86",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/BackupCodecTest.kt": "1d6515853bb4dc20c8d87ce4d0b9f0903e5f9dcb9b8a8177b4a4556eb1cac640",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/DiceRollerTest.kt": "53d9b9937630e0770b6cd1b5b3a2a0596f091be6fcd5d2730925a9f7d036cd77",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/ElementalSelectorTest.kt": "f7a842f9be15c5f71d1e2ed4f7042f621017684af6075850c488ed16b16a2fdd",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/EmergencyScalingTest.kt": "126b13b9288211dfd3fee6430b705273ff128feb3a3821e215a4e417aea5d939",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/EngineTest.kt": "ede950caa725db7f226d0f4ff98ffb119df36471e4e023268641e687ddb28470",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/ForceMigrationTest.kt": "3fd1f2f5b4f39dd938170443a71ef94ef15a36b604c55f48b824a0052735933a",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/HistoryRetentionTest.kt": "4a83a858d72c1c9098d1b48901162b220503d5c221d40d41409700e9f0097a45",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/PrimaryForceTest.kt": "d50c4329e34a2e31922d9d37db3867d63c732e362b3ce579c72dc1c615967662",
+    "rules/src/main/kotlin/com/yazsras/astravar/rules/HistoryRetention.kt": "ff179553fdd944ffa020211589a47cdf13d387ed5a2217b67131e7c66f1d97e9",
+    "rules/src/main/kotlin/com/yazsras/astravar/rules/Model.kt": "0c17dde66699844d0a87c32506e9a61eb48f1f4de98b10e3f3355e06c990618d",
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/BackupCodecTest.kt": "76ad5eea212aff956648d1e636817a56dc816387c074b085490e2ef74971a8d6",
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/DiceRollerTest.kt": "d815341ebed13c7eff66afc13dca59164996fd0c715687b57715f5f91edd8f44",
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/ElementalSelectorTest.kt": "ea8a48788c545b06c98e7bb72cca460f7f086990c69eb4632cf1373097459599",
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/EmergencyScalingTest.kt": "e147ca1fd0da0dbd98b0efec29aa136722bffd0a8d28af9003b3dc8f769b8490",
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/EngineTest.kt": "d10f11611b43050964eafa3c834535d0348b5ddcac0537bffb92a30a93888cf5",
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/ForceMigrationTest.kt": "e25301c9403ae2b79c65a5d2ddf3e7b91d46460bc34de0451d40f985a9b58e63",
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/HistoryRetentionTest.kt": "42162dbe3ae23bae6333b71b3abe6c36313f5aca68ea2c770f77b392b9885aff",
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/PrimaryForceTest.kt": "f7f8c9339d4250c53b194aa9aaf570d302b2146ecc8b47e0498a3fd58b7e5d21",
     "rules/src/test/kotlin/com/yazsras/astravar/rules/SelectorMigrationTest.kt": "c7a1b535fdb76b48f0bc3b4df865b957411942b443e4ae155ca03d71210d491d",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/WeaponWorkflowTest.kt": "36d788ce7e2e7174e8b391c3e330c6e81c23ff0656b9fd8896277571a55ac425"
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/WeaponWorkflowTest.kt": "36d788ce7e2e7174e8b391c3e330c6e81c23ff0656b9fd8896277571a55ac425",
+    "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/3.json": "d030a6759b35784528732ff331ed20b27cb3c41561db0b7031d839b962f49901",
+    "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/4.json": "076ebbba19127c09137b7095d84cc89bc9fb64c25ab74951677b9d2537cd3c5f",
+    "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": "aa977e9b193e4985cf842ca75160ec7004529d9bc293258be87e02337a8dc0df"
   },
   "owner_signing_block_sha256": "9f749325c6e42970c42ff72ce35cdb31af58a7a30000a404223b4841e267a1f3",
   "authorized_branding_change": {
@@ -87,5 +90,302 @@
     "file": "app/src/main/AndroidManifest.xml",
     "previous_sha256": "d88d22d7f808b617a5c6fbe0a581789a5ecf79a54116c69732bbf951e12d82dd",
     "scope": "Application label and launcher icon/roundIcon only; owner approved identity handoff. All other foundation hashes and owner signing hash unchanged."
+  },
+  "authorized_particle_extension_fix": {
+    "source_head": "28c890a9af83a5e83f33d639f0fed2734af35a0f",
+    "reason": "Original particle resource files contain JPEG data; Android release packaging requires matching extensions.",
+    "original_file_count": 10,
+    "binary_content_changed": false,
+    "original_baseline": "7c1e42c0f2b3ea639aa675b9109f8d2ddbcee528"
+  },
+  "authorized_player_first_source_changes": {
+    "authorization": "Owner Astravar2.1 master development directive,18October2026",
+    "verified_pr4_base": "28c890a9af83a5e83f33d639f0fed2734af35a0f",
+    "scope": "Reviewed source evolution; original artwork, historical schema JSON and owner signing block remain immutable. Test results are recorded separately.",
+    "files": {
+      "app/src/main/AndroidManifest.xml": {
+        "previous_pinned_sha256": "8af945d068b6404169dc126415408805be91f2f97b52319fe314ff7bb375d12f",
+        "reviewed_sha256": "2a3a68963357e470043a0da0269422b8c007013ce0569e0b5cb8a4214f9d3fc7",
+        "reason": "Owner-authorized HTTPS connection architecture; cleartext disabled; branding and package preserved."
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": {
+        "previous_pinned_sha256": "feeb234e91cacd9c81d01bef14bb506d3195f3af377ed1c14e1ad27529800160",
+        "reviewed_sha256": "73ec243b9c12bceac07c8fd560d6fc6a4fad3a2485d09424efb6c1dd47f3a9cb",
+        "reason": "Strict additive schema3 backup preview/restore including party, placement and transaction receipts.",
+        "additional_reviews": [
+          {
+            "previous_reviewed_sha256": "334842742182ceaf538616509d8ee6028f810b40ba3e78a7eee0f679d8bfb013",
+            "reviewed_sha256": "73ec243b9c12bceac07c8fd560d6fc6a4fad3a2485d09424efb6c1dd47f3a9cb",
+            "reason": "Extend merge-only backup validation and restore to schema4 references, source archives, import receipts and verified recovery snapshots; retain all typed records, provenance and previous schemas.",
+            "source_baseline": "b02222006e631e145194609e248cbb7adf5f21db",
+            "authorization": "Owner ASTRAVAR2.1 Complete Notion Campaign Migration directive,18October2026"
+          }
+        ]
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": {
+        "previous_pinned_sha256": "68aa9fa9b027df3abca4ca07eca032c04f5a5b1cd3948d4b2c5a758a867e2ac1",
+        "reviewed_sha256": "87f3d0615d6b46a59b8499d67e33d2c2d0d0863f2cfb44d1b5b6733e01832c79",
+        "reason": "Additive campaign Room2-to-3 migration and guards for structured inventory ownership.",
+        "additional_reviews": [
+          {
+            "previous_reviewed_sha256": "ba147dddd03c46773384c4323d47854c5ef4edcb5d97fc658cc0cb05f8feabe5",
+            "reviewed_sha256": "87f3d0615d6b46a59b8499d67e33d2c2d0d0863f2cfb44d1b5b6733e01832c79",
+            "reason": "Additive CampaignLedgerDb3-to-4 tables and ordinary schema4 exports for complete offline campaign archives; existing campaign and weapon records remain intact.",
+            "source_baseline": "b02222006e631e145194609e248cbb7adf5f21db",
+            "authorization": "Owner ASTRAVAR2.1 Complete Notion Campaign Migration directive,18October2026"
+          }
+        ]
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": {
+        "previous_pinned_sha256": "90dbcfe730c9bea800101449551cad81942a979b168566d792fc3ee8978e5871",
+        "reviewed_sha256": "6f53990746acf85f474ea6c5fcdc4a9162cef331cd2c52e69e19fa501011dc54",
+        "reason": "Reuse existing records/audit store for transactional placement and crafting integrity."
+      },
+      "app/src/main/java/com/yazsras/astravar/data/Store.kt": {
+        "previous_pinned_sha256": "c6602445a62cc9b23df11bb663f54cb8b5d06011db05dcb82ada704d647cf03d",
+        "reviewed_sha256": "17c00ac0996007b028b99af360205c59f0694b258e7184b267067ffa038ed3be",
+        "reason": "Selectively retire stale Shatter preference; preserve other preferences and immutable history. Preserve original history before mutations/imports, retain omitted shots without duplicate dice graphs, and deduplicate old command IDs beyond the recent window; expose complete streaming backup hooks.",
+        "additional_reviews": [
+          {
+            "previous_reviewed_sha256": "61dc33220fec3d279b93047bc14e53d4101c62431fc2087c95c41a6501e02fc6",
+            "reviewed_sha256": "17c00ac0996007b028b99af360205c59f0694b258e7184b267067ffa038ed3be",
+            "reason": "Preserve original history before mutations/imports, retain omitted shots without duplicate dice graphs, and deduplicate old command IDs beyond the recent window; expose complete streaming backup hooks.",
+            "source_commit": "ddf1a50"
+          }
+        ]
+      },
+      "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": {
+        "previous_pinned_sha256": "30f890627065eee06373db12499118b2107176cedd1abe9d92fa02c7b8d09576",
+        "reviewed_sha256": "355b4b5bf6e8fa934eba59c453ddb83d0d11ca1001d34bbf72fa38f032141153",
+        "reason": "Native permanent-nexus controls and accepted sourced melee; shared engine remains authoritative. Shared selector keeps unlocked advanced elements usable individually alongside accepted basic-only Dual Resonance. Payload selection preserves already chosen Discharge or Spell-Imbued Gauntlet instead of changing attack type. Explicit result-dial and mode-callback statements resolve lint indentation diagnostics without behavior changes."
+      },
+      "rules/src/main/kotlin/com/yazsras/astravar/rules/BackupCodec.kt": {
+        "previous_pinned_sha256": "c0dee331adc50ac4a042379203d4b0e4b459e81046bf873bdcdd7b099feb0fbc",
+        "reviewed_sha256": "0549c5fdf4766ad88a81e3d58f5ac8d16dbb6e781859c18e72097c042412a4e1",
+        "reason": "Validate added sourced profiles/adoption while preserving historical Shatter decoding. Document the unchanged bounded codec as a working-view compatibility API; complete Android history backup uses the separately tested streaming archive transport.",
+        "additional_reviews": [
+          {
+            "previous_reviewed_sha256": "1090f801d99c3acde1af9437fe470d60bb10812384f8726e43ec408048282b1c",
+            "reviewed_sha256": "0549c5fdf4766ad88a81e3d58f5ac8d16dbb6e781859c18e72097c042412a4e1",
+            "reason": "Document the unchanged bounded codec as a working-view compatibility API; complete Android history backup uses the separately tested streaming archive transport.",
+            "source_commit": "ddf1a50"
+          }
+        ]
+      },
+      "rules/src/main/kotlin/com/yazsras/astravar/rules/DiceRoller.kt": {
+        "previous_pinned_sha256": "24f613cf445f16e1c6dbe6cfa67576cb4e3f3b52a04c1528d10e52c670d3b257",
+        "reviewed_sha256": "c3ab14fe38139e85630e7ccbf2f7c07bc983254ca3da2dfb52bb3957be283899",
+        "reason": "Accepted melee critical/flat semantics and shared persistent accounting."
+      },
+      "rules/src/main/kotlin/com/yazsras/astravar/rules/Engine.kt": {
+        "previous_pinned_sha256": "16261ebf284139f3d2a937bf394b09cbf0671b6e3fc5be83da9f7fd61bff4971",
+        "reviewed_sha256": "7228b65f1b492266a1a0fd97f8e0534a89cce87f2ace3f1a1c3bb690ad30d7df",
+        "reason": "New-play Shatter/spare-core denial, sourced melee, versioned formulas, one-time sourced legacy adoption."
+      },
+      "rules/src/main/kotlin/com/yazsras/astravar/rules/Model.kt": {
+        "previous_pinned_sha256": "13108810a2e713f8463e8edbd4f46ec8f05a9729df9d185dd2242e2765499d86",
+        "reviewed_sha256": "0c17dde66699844d0a87c32506e9a61eb48f1f4de98b10e3f3355e06c990618d",
+        "reason": "Additive serialized profiles, charge/adoption state; retain legacy names and snapshot defaults."
+      },
+      "rules/src/test/kotlin/com/yazsras/astravar/rules/BackupCodecTest.kt": {
+        "previous_pinned_sha256": "1d6515853bb4dc20c8d87ce4d0b9f0903e5f9dcb9b8a8177b4a4556eb1cac640",
+        "reviewed_sha256": "76ad5eea212aff956648d1e636817a56dc816387c074b085490e2ef74971a8d6",
+        "reason": "Keep historical combat fixtures explicit after retiring their execution for new play; assertions retain old results."
+      },
+      "rules/src/test/kotlin/com/yazsras/astravar/rules/DiceRollerTest.kt": {
+        "previous_pinned_sha256": "53d9b9937630e0770b6cd1b5b3a2a0596f091be6fcd5d2730925a9f7d036cd77",
+        "reviewed_sha256": "d815341ebed13c7eff66afc13dca59164996fd0c715687b57715f5f91edd8f44",
+        "reason": "Keep historical combat fixtures explicit after retiring their execution for new play; assertions retain old results."
+      },
+      "rules/src/test/kotlin/com/yazsras/astravar/rules/ElementalSelectorTest.kt": {
+        "previous_pinned_sha256": "f7a842f9be15c5f71d1e2ed4f7042f621017684af6075850c488ed16b16a2fdd",
+        "reviewed_sha256": "ea8a48788c545b06c98e7bb72cca460f7f086990c69eb4632cf1373097459599",
+        "reason": "Keep historical combat fixtures explicit after retiring their execution for new play; assertions retain old results."
+      },
+      "rules/src/test/kotlin/com/yazsras/astravar/rules/EmergencyScalingTest.kt": {
+        "previous_pinned_sha256": "126b13b9288211dfd3fee6430b705273ff128feb3a3821e215a4e417aea5d939",
+        "reviewed_sha256": "e147ca1fd0da0dbd98b0efec29aa136722bffd0a8d28af9003b3dc8f769b8490",
+        "reason": "Keep historical combat fixtures explicit after retiring their execution for new play; assertions retain old results."
+      },
+      "rules/src/test/kotlin/com/yazsras/astravar/rules/EngineTest.kt": {
+        "previous_pinned_sha256": "ede950caa725db7f226d0f4ff98ffb119df36471e4e023268641e687ddb28470",
+        "reviewed_sha256": "d10f11611b43050964eafa3c834535d0348b5ddcac0537bffb92a30a93888cf5",
+        "reason": "Keep historical combat fixtures explicit after retiring their execution for new play; assertions retain old results."
+      },
+      "rules/src/test/kotlin/com/yazsras/astravar/rules/ForceMigrationTest.kt": {
+        "previous_pinned_sha256": "3fd1f2f5b4f39dd938170443a71ef94ef15a36b604c55f48b824a0052735933a",
+        "reviewed_sha256": "e25301c9403ae2b79c65a5d2ddf3e7b91d46460bc34de0451d40f985a9b58e63",
+        "reason": "Keep historical combat fixtures explicit after retiring their execution for new play; assertions retain old results."
+      },
+      "rules/src/test/kotlin/com/yazsras/astravar/rules/HistoryRetentionTest.kt": {
+        "previous_pinned_sha256": "4a83a858d72c1c9098d1b48901162b220503d5c221d40d41409700e9f0097a45",
+        "reviewed_sha256": "42162dbe3ae23bae6333b71b3abe6c36313f5aca68ea2c770f77b392b9885aff",
+        "reason": "Keep historical combat fixtures explicit after retiring their execution for new play; assertions retain old results."
+      },
+      "rules/src/test/kotlin/com/yazsras/astravar/rules/PrimaryForceTest.kt": {
+        "previous_pinned_sha256": "d50c4329e34a2e31922d9d37db3867d63c732e362b3ce579c72dc1c615967662",
+        "reviewed_sha256": "f7f8c9339d4250c53b194aa9aaf570d302b2146ecc8b47e0498a3fd58b7e5d21",
+        "reason": "Keep historical combat fixtures explicit after retiring their execution for new play; assertions retain old results."
+      },
+      "app/src/main/java/com/yazsras/astravar/data/HistoryStorage.kt": {
+        "previous_pinned_sha256": "62c5c6412de5e5fd6ff12c1083c1fe3c793e5d3d4cfe56ce080c704eb2371c54",
+        "reviewed_sha256": "c7968f73293f5d8f46fa148be3fbbb74352565e914ef3b1762f88800104dbb62",
+        "reason": "Supersede destructive retention with transactional raw preservation before recent-view normalization; retain legacy archives and separate malformed decoding from SQLite failures.",
+        "source_commit": "ddf1a50"
+      },
+      "rules/src/main/kotlin/com/yazsras/astravar/rules/HistoryRetention.kt": {
+        "previous_pinned_sha256": "af2bcb67a804f92b07cfb593f595c465bae131d4c6014cd55f471c800555399d",
+        "reviewed_sha256": "ff179553fdd944ffa020211589a47cdf13d387ed5a2217b67131e7c66f1d97e9",
+        "reason": "Clarify that the unchanged twenty-entry limit applies to the working/undo projection, not destruction of immutable history or complete backups.",
+        "source_commit": "ddf1a50"
+      }
+    }
+  },
+  "authorized_notion_campaign_migration": {
+    "authorization": "Owner ASTRAVAR2.1 Complete Notion Campaign Migration directive,18October2026",
+    "source_baseline": "b02222006e631e145194609e248cbb7adf5f21db",
+    "scope": "Explicitly reviewed schema4 campaign import, complete local reference preservation and recovery; original schemas, weapon engine, artwork and owner signing configuration remain pinned. No real source exports are included.",
+    "files": {
+      "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": {
+        "source_baseline_sha256": "334842742182ceaf538616509d8ee6028f810b40ba3e78a7eee0f679d8bfb013",
+        "reviewed_sha256": "73ec243b9c12bceac07c8fd560d6fc6a4fad3a2485d09424efb6c1dd47f3a9cb",
+        "reason": "Extend merge-only backup validation and restore to schema4 references, source archives, import receipts and verified recovery snapshots; retain all typed records, provenance and previous schemas."
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": {
+        "source_baseline_sha256": "ba147dddd03c46773384c4323d47854c5ef4edcb5d97fc658cc0cb05f8feabe5",
+        "reviewed_sha256": "87f3d0615d6b46a59b8499d67e33d2c2d0d0863f2cfb44d1b5b6733e01832c79",
+        "reason": "Additive CampaignLedgerDb3-to-4 tables and ordinary schema4 exports for complete offline campaign archives; existing campaign and weapon records remain intact."
+      },
+      "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/3.json": {
+        "reviewed_sha256": "d030a6759b35784528732ff331ed20b27cb3c41561db0b7031d839b962f49901",
+        "reason": "Frozen schema3 retained unchanged from verified source baseline."
+      },
+      "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/4.json": {
+        "reviewed_sha256": "076ebbba19127c09137b7095d84cc89bc9fb64c25ab74951677b9d2537cd3c5f",
+        "reason": "Owner-authorized additive offline campaign archive import and recovery implementation; verification evidence recorded separately."
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": {
+        "reviewed_sha256": "559357699d2887a8e75ff2722ae09f5772e3df23259fb78460aed96837fab96a",
+        "reason": "Owner-authorized additive offline campaign import and verified recovery. Canonical Notion identity deduplication and bounded SQLite BLOB substring reads retain oversized source, backup and reference UTF-8 without CursorWindow row failures. Verification evidence recorded separately."
+      }
+    }
+  },
+  "authorized_campaign_archive_memory_changes": {
+    "baseline": "0416314bbc8c29fe464cb11e50b55d61c012609d",
+    "scope": "Streaming UTF-8 and exact-byte JSON hashing/backup serialization; predecode JSON complexity limits and normalized Notion item aliases; typed readback without copying retained sources. No combat mechanics, historical Room schema or owner signing block changes.",
+    "files": {
+      "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": {
+        "previous_sha256": "73ec243b9c12bceac07c8fd560d6fc6a4fad3a2485d09424efb6c1dd47f3a9cb",
+        "sha256": "ba7f2d60c8683dc028ed3f03d10a3c1ab3287265d2533dce2db82e54f363f807"
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": {
+        "previous_sha256": "87f3d0615d6b46a59b8499d67e33d2c2d0d0863f2cfb44d1b5b6733e01832c79",
+        "sha256": "083954872f38de5652f7b11a75a36b9fe75cc01f4452e1dceb218fbe813bc388"
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": {
+        "previous_sha256": "6f53990746acf85f474ea6c5fcdc4a9162cef331cd2c52e69e19fa501011dc54",
+        "sha256": "7e5b92d763929c131ddef1f8ee5f08bad520233939f51234feace666b45c77c3"
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": {
+        "previous_sha256": "559357699d2887a8e75ff2722ae09f5772e3df23259fb78460aed96837fab96a",
+        "sha256": "0b26e5c7c15176ae3da9ef8a0dc01bccb2031ceb14a11f3f82f500e246c13c06"
+      }
+    }
+  },
+  "authorized_campaign_recovery_memory_changes": {
+    "baseline": "64776691556c847d6165dce3591ff0dda27542d1",
+    "scope": "Bounded SQLite byte-hash verification, generated-serializer backup decoding with bounded leaf chunks and balanced concatenation, and separated snapshot lifetimes; lossless ASCII-escaped backup JSON with legacy Unicode and receipt-only drift compatibility; recovery receipts and snapshots retained in place. Canonical source/state hashes, combat mechanics, Room schemas and owner signing remain unchanged.",
+    "files": {
+      "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": {
+        "previous_sha256": "0b26e5c7c15176ae3da9ef8a0dc01bccb2031ceb14a11f3f82f500e246c13c06",
+        "sha256": "d72df52c79cee5a25b8aa147ae8f2ea643b4ae13844cb7f35448eb00156d7cc0"
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": {
+        "previous_sha256": "ba7f2d60c8683dc028ed3f03d10a3c1ab3287265d2533dce2db82e54f363f807",
+        "sha256": "4bc371c0ada32d604e07dad8f4705a9e20f7c623860c6e7be9346d923bb84ca6"
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignStreamCodec.kt": {
+        "previous_sha256": "5fb6fbeebddf169c94cb2857f61d6158e154a5c57fb170fafc72ad881d8016c2",
+        "sha256": "f69b723b1cc65940f43ba3cf4af561691775a54494bdaab643bc78ec59d0d886"
+      }
+    },
+    "new_files": {
+      "app/src/main/java/com/yazsras/astravar/data/CampaignBackupDecoder.kt": "ac54ca342f5b7fe4a07fd31db533e24be8fbf53fd492e4460513851a3b0c74ea"
+    }
+  },
+  "authorized_owner_connection_changes": {
+    "baseline": "833bc580fce83a503d09f2e85a711c950dc2d897",
+    "scope": "Owner-authorized authenticated fictional character approval/retry connection. Original package, owner signing block, campaign/weapon stores, artwork and prior schema digests remain protected.",
+    "files": {
+      "app/src/main/AndroidManifest.xml": {
+        "previous_sha256": "2a3a68963357e470043a0da0269422b8c007013ce0569e0b5cb8a4214f9d3fc7",
+        "sha256": "6bc26431b58171dcc6a7e5a50da639f6a7ac688e4963c304cc5c537c8cd9a036",
+        "reason": "Add the nonexported BIND_JOB_SERVICE-protected owner retry service and boot permission for OS-persisted network jobs. Existing permissions/components and cleartext/backup policy unchanged."
+      }
+    }
+  },
+  "authorized_owner_network_permission_correction": {
+    "baseline": "c3c27f63b110fa153d52d28eb78f9fffe5112b1b",
+    "files": {
+      "app/src/main/AndroidManifest.xml": {
+        "previous_sha256": "6bc26431b58171dcc6a7e5a50da639f6a7ac688e4963c304cc5c537c8cd9a036",
+        "sha256": "5327740cec5694eb7d35741d29f2c75fde0dadfad5d9614bbf36cf359fa479df",
+        "reason": "Android14+ requires normal ACCESS_NETWORK_STATE permission when scheduling jobs with a network constraint. No data access scope, signing configuration, domain schema or mechanics change.",
+        "official_reference": "https://developer.android.com/about/versions/14/behavior-changes-14#jobscheduler-reinforces-callback-and-network-behavior"
+      }
+    }
+  },
+  "authorized_owner_hp_connection_changes": {
+    "baseline": "e24d2d2c64fb187a68a2fdbb474fe122cbd6e3f5",
+    "reviewed_source_head": "657e67939789429e65d2eea6b70839449f0ee332",
+    "authorization": "Owner narrowly scoped HP connection directive,20October2026",
+    "scope": "Exactly the HP JobService registration and cross-instance Room observer refresh. Historical schema JSON, weapon mechanics, artwork, owner signing configuration, and all other foundation hashes remain pinned. Test results are recorded separately.",
+    "files": {
+      "app/src/main/AndroidManifest.xml": {
+        "previous_sha256": "5327740cec5694eb7d35741d29f2c75fde0dadfad5d9614bbf36cf359fa479df",
+        "sha256": "9e25b9ee647fe23770a5414a37d8c6f7a70c58f2686233d9f443155819a783cb",
+        "reason": "Register only the nonexported BIND_JOB_SERVICE-protected HP retry service; existing permissions, components, TLS and backup policy remain unchanged."
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": {
+        "previous_sha256": "083954872f38de5652f7b11a75a36b9fe75cc01f4452e1dceb218fbe813bc388",
+        "sha256": "eb0a3fffa6d2209ca8c20ab35bc7b018573eb0eb35d503ab18a32cde32b09943",
+        "reason": "Enable Room multi-instance invalidation so existing Armor/Party collectors observe authenticated HP writes from separate client/job database instances; schemas and the exact migration chain remain unchanged."
+      }
+    }
+  },
+  "authorized_campaign_sync_source_changes": {
+    "authorization": "Owner ASTRAVAR2.2 complete campaign integration directive,21October2026",
+    "verified_source_baseline": "abae4f49beec75d14a364be91f7d0fb4303524ad",
+    "scope": "Reviewed additive campaign synchronization and wallet/backup evolution. Historical source provenance, original assets, protected combat engine, immutable historical schemas and owner signing configuration are retained. Test evidence is recorded separately.",
+    "files": {
+      "app/src/main/AndroidManifest.xml": {
+        "previous_pinned_sha256": "9e25b9ee647fe23770a5414a37d8c6f7a70c58f2686233d9f443155819a783cb",
+        "reviewed_sha256": "b66418063c763cc2f4c0775987af3af650a5b56dec51c3a65acdae4832feab67",
+        "reason": "Add only the non-exported, BIND_JOB_SERVICE-protected campaign sync job. Preserve package, HTTPS-only transport, backup exclusion, existing services and original artwork."
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": {
+        "previous_pinned_sha256": "4bc371c0ada32d604e07dad8f4705a9e20f7c623860c6e7be9346d923bb84ca6",
+        "reviewed_sha256": "f7eefb74ebec642b318ab67053605ec5ede36dd02b38a2ae0c85819178821251",
+        "reason": "Accept schema5 while retaining schemas1\u20134; validate nullable electrum/platinum and aggregate Trusted DM receipts against the original committed child audits. Preserve merge-only recovery and reject forged aggregates."
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": {
+        "previous_pinned_sha256": "eb0a3fffa6d2209ca8c20ab35bc7b018573eb0eb35d503ab18a32cde32b09943",
+        "reviewed_sha256": "18e19a4abe551da58a02314124ef229420e8abe49f4ff5371552fae1fe800f6f",
+        "reason": "Add Room4-to5 nullable wallet migration and schema5 export; optional explicitly supplied item identity uses a distinct idempotency fingerprint, preserving legacy create fingerprints and physical item identity."
+      },
+      "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": {
+        "previous_pinned_sha256": "355b4b5bf6e8fa934eba59c453ddb83d0d11ca1001d34bbf72fa38f032141153",
+        "reviewed_sha256": "60c2f1874d21a60f4bc6dd8490a6a295cbe75786601d438283fc9e53df79ef3e",
+        "reason": "Insert only the foreground campaign delivery loop into the existing session. Combat, dice, weapon formulas, controls, artwork, accounting and all other overlay source remain byte-identical after removing that exact insertion.",
+        "exact_authorized_insertion": "        // The existing visible foreground session keeps delivery active while the player uses ChatGPT.\n        // A successful network poll alone never becomes a claimed committed gameplay save.\n        scope.launch(Dispatchers.IO) {\n            val campaign = CampaignConnectionClient(applicationContext)\n            try {\n                while (isActive) {\n                    try { campaign.foreground() }\n                    catch (e: CancellationException) { throw e }\n                    catch (_: Exception) { /* Durable inbox/outbox and verified status survive network interruption. */ }\n                    delay(5_000)\n                }\n            } finally { campaign.close() }\n        }\n",
+        "after_removing_exact_insertion_sha256": "355b4b5bf6e8fa934eba59c453ddb83d0d11ca1001d34bbf72fa38f032141153"
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": {
+        "previous_pinned_sha256": "d72df52c79cee5a25b8aa147ae8f2ea643b4ae13844cb7f35448eb00156d7cc0",
+        "reviewed_sha256": "aa977e9b193e4985cf842ca75160ec7004529d9bc293258be87e02337a8dc0df",
+        "compatibility_review_baseline": "cf99a9f3e62f8e15a32a94fcf97cec9ae23fca9f",
+        "reason": "Preserve original schema4 import receipts and byte-exact recovery snapshots across additive Room5 migration by recognizing the legacy state hash only when every new EP/PP value is unknown. Independently bind stored backup and fresh review to the same current records; known zero/nonzero denominations and later state changes continue to block rollback. Retain a schema5 mapped import as schema5 so verified EP/PP are not downgraded. Original source payloads, hashes, receipts, backup bodies, immutable schemas and owner signing configuration are unchanged."
+      }
+    }
   }
 }

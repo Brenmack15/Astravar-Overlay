@@ -15,6 +15,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.AstravarApp
+import com.yazsras.astravar.data.HistoryBackup
+import com.yazsras.astravar.data.HistoryBackupSummary
+import com.yazsras.astravar.data.PendingHistoryRestore
 import com.yazsras.astravar.rules.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -25,6 +28,7 @@ import java.util.UUID
 @Composable fun RulesPage(s: Campaign, a: Actions, elements: List<DamageType> = emptyList()) {
     val p = s.profile
     var mode by rememberSaveable { mutableStateOf<String?>(null) }
+    var detailsDirty by remember { mutableStateOf(false) }
     var baselineJson by rememberSaveable { mutableStateOf<String?>(null) }
     val baseline = remember(baselineJson) { baselineJson?.let { BackupCodec.json.decodeFromString<Profile>(it) } }
     var level by rememberSaveable { mutableStateOf("") }
@@ -55,7 +59,7 @@ import java.util.UUID
         syntheticDays = p.syntheticDays?.toString().orEmpty(); a.message = ""; mode = "edit"
     }
     val stale = baseline != null && p != baseline
-    val dirty = mode == "edit" && baseline?.let { b ->
+    val dirty = detailsDirty || (mode == "edit" && baseline?.let { b ->
         level != b.level.toString() || intelligence != b.intelligence.toString() || proficiency != b.proficiency.toString() ||
             dc != b.saveDc.toString() || calibration != b.calibration.toString() || calibrationEnabled != b.calibrationEnabled ||
             progression != b.proposedCalibrationProgression || confirmed != b.confirmed ||
@@ -63,7 +67,7 @@ import java.util.UUID
             release != b.releaseOverride?.toString().orEmpty() || limit != b.spellShotsPerTurn.toString() ||
             replacement != b.fastReplacementLevel.toString() || syntheticGp != b.syntheticGp?.toString().orEmpty() ||
             syntheticDays != b.syntheticDays?.toString().orEmpty()
-    } == true
+    } == true)
     Page {
         PlayerHeading("Rules & profile")
         PlayerCard {
@@ -72,13 +76,15 @@ import java.util.UUID
             Text("${if (p.attack >= 0) "+" else ""}${p.attack} attack · DC ${p.saveDc}", color = RebuildPalette.Ice, style = MaterialTheme.typography.titleMedium)
             Text("${p.base} Force · ${p.selector} per selected element", style = MaterialTheme.typography.bodyMedium)
         }
-        PlayerEntry("Damage upgrades", "Primary Force and elemental selector dice", "Weapon", { a.message = ""; mode = "upgrades" })
+        PlayerEntry("Shared damage defaults", "Inherited Primary Force and selector dice", "Weapon", { a.message = ""; detailsDirty = false; mode = "upgrades" })
+        PlayerEntry("Individual damage types", "Ten independent sourced formulas and unlock explanations", "Weapon", { a.message = ""; detailsDirty = false; mode = "elements" })
+        PlayerEntry("Gauntlet configuration", Engine.meleeLockReason(p) ?: "Accepted melee profile v${p.melee?.version}", "Weapon", { a.message = ""; detailsDirty = false; mode = "melee" })
         PlayerEntry("Edit weapon profile", "Level, modifiers and confirmed engineering upgrades", "Settings", ::edit)
         PlayerEntry("Mechanics reference", "Actions, blast rules, payloads and provisional settings", "Core", { mode = "reference" })
         if (a.message.isNotBlank()) Text(a.message, color = RebuildPalette.Ice)
     }
     mode?.let { currentMode ->
-        PlayerSheet(when (currentMode) { "upgrades" -> "Damage upgrades"; "edit" -> "Weapon profile"; else -> "Mechanics reference" },
+        PlayerSheet(when (currentMode) { "upgrades" -> "Shared damage defaults"; "elements" -> "Individual damage types"; "melee" -> "Gauntlet configuration"; "edit" -> "Weapon profile"; else -> "Mechanics reference" },
             onDismiss = { if (!a.busy) mode = null }, dirty = dirty, showCancel = false, actions = {
                 if (currentMode == "edit") {
                     val close = LocalPlayerDismiss.current
@@ -107,6 +113,8 @@ import java.util.UUID
                 }
             }) {
             when (currentMode) {
+                "elements" -> ElementDamageProfilesEditor(s, a) { detailsDirty = it }
+                "melee" -> MeleeProfileEditor(s, a) { detailsDirty = it }
                 "upgrades" -> WeaponDamageUpgrades(p, enabled = !a.busy, elements = elements,
                     onBaseCountSelected = { count ->
                         if (count != p.baseDamageDiceCount) a.change("Primary Force damage set to ${count}d${p.primaryForceDieSides}") {
@@ -132,7 +140,7 @@ import java.util.UUID
                     }
                     PlayerDisclosure("Confirmed upgrades") {
                         Text("Confirm installed upgrades independently. Level gates still apply.", color = RebuildPalette.Muted)
-                        Upgrade.entries.forEach { upgrade ->
+                        Upgrade.entries.filter { it in setOf(Upgrade.ADVANCED_ELEMENTS, Upgrade.DUAL_RESONANCE, Upgrade.DUAL_STORAGE) }.forEach { upgrade ->
                             Toggle("${upgrade.name.replace('_', ' ')} · ${if (p.has(upgrade)) "active" else "not active"}", upgrade in confirmed, !a.busy) { checked ->
                                 val next = if (checked) confirmed + upgrade else confirmed - upgrade
                                 confirmedNames = Upgrade.entries.filter { it in next }.joinToString(",") { it.name }
@@ -145,22 +153,19 @@ import java.util.UUID
                         Field("Proposed selector capacity override (blank = accepted 1/2)", elementCapacity, { elementCapacity = it }, enabled = !a.busy)
                         Field("Explicit release limit override (blank = milestone rules)", release, { release = it }, enabled = !a.busy)
                     }
-                    PlayerDisclosure("Replacement & synthetic cores") {
-                        Field("Fast replacement threshold · approximately level 15", replacement, { replacement = it }, enabled = !a.busy)
-                        Field("Synthetic core gp (blank = unresolved)", syntheticGp, { syntheticGp = it }, enabled = !a.busy)
-                        Field("Synthetic core days (blank = unresolved)", syntheticDays, { syntheticDays = it }, enabled = !a.busy)
-                    }
+
                 }
                 "reference" -> {
                     PlayerDisclosure("Accepted attacks", initiallyOpen = true) {
                         Text("Attunement and a usable core are required. ${p.base} Force; 60/180 ft. Extra Attack gives two ordinary attacks within one Attack action. Selector changes are free. Explosions always take one Action.")
                     }
-                    PlayerDisclosure("Discharge & Shatter") {
-                        Text("Discharge: ${p.discharge} Force (3× Primary dice), 60 ft range / 15 ft radius. Shatter: ${p.shatter} Force (7× Discharge dice), 120 ft range / 60 ft RADIUS. Each active element adds ${p.selector} once.")
+                    PlayerDisclosure("Discharge & permanent nexus") {
+                        Text("Discharge: ${p.discharge} Force (inherited 3× Primary dice), 60 ft range / 15 ft radius. Each active selected element uses its configured formula once. Recovery is recorded in game time; no real-world countdown is used.")
+                        Text("The permanent internal nexus cannot be swapped or replaced. Shatter is retired for new play; previous history remains readable.")
                         Text("A successful save halves each rolled Force/selector component, rounded down; spell payload/overcharge deals zero on success. No flat weapon bonus on explosions.")
                     }
                     PlayerDisclosure("Payloads · provisional") {
-                        Text("One spell-powered firing per turn; spell shots replace all free selector dice; one stored payload until confirmed dual storage at level 12, then two. Loaded magic persists through rests and swaps.")
+                        Text("One spell-powered firing per turn; spell shots replace all free selector dice; one stored payload until confirmed dual storage at level 12, then two. Loaded magic persists through rests.")
                     }
                     PlayerDisclosure("Assumptions & proposals") {
                         Text("Assumption: starter +1 calibration. Proposed, disabled by default: +2 at 10 / +3 at 15. Four/five payloads at level 20 are not finalized.")
@@ -206,6 +211,7 @@ import java.util.UUID
     fun close() { if (!a.busy) mode = if (mode == "event" || mode == "correction") "history" else null }
     Page {
         PlayerHeading("Resources & recovery")
+        PermanentNexusAdoption(s, a)
         PlayerCard {
             Text(if (s.encounter) "Weapon actions tracked" else "Weapon action limits off", style = MaterialTheme.typography.titleLarge)
             if (s.encounter) Text("${s.turn.attacks}/2 attacks used · ${if (s.turn.fullAction) "Action spent" else "Action available"}", color = RebuildPalette.Muted)
@@ -214,7 +220,7 @@ import java.util.UUID
             }
         }
         PlayerEntry("Weapon action limits", if (s.encounter) "Enforced on your turn" else "Optional manual enforcement", "Settings", { open("actions") })
-        PlayerEntry("Core recovery & installation", "${s.cores.count { it.usable(s.gameSeconds) }}/${s.cores.size} cores ready", "Core", { open("time") })
+        PlayerEntry("Internal nexus recovery", s.installed?.readiness(s.gameSeconds) ?: "Not configured", "Core", { open("time") })
         PlayerEntry("Spell slots", if (s.slots.isEmpty()) "Not reconciled" else s.slots.toSortedMap().entries.joinToString(" · ") { "L${it.key}: ${it.value}" }, "Payload", { open("slots") })
         PlayerEntry("Weapon notes", s.notes.ifBlank { "No notes" }, "More", { open("notes") })
         PlayerEntry("Accounting history", "${history.size} retained operations", "History", { open("history") })
@@ -262,7 +268,7 @@ import java.util.UUID
             when (currentMode) {
                 "actions" -> {
                     Toggle("Enforce Astravar actions on my turn", s.encounter, !a.busy) { enabled ->
-                        a.change("Weapon action limits set to $enabled; action budget reset") { it.copy(encounter = enabled, turn = Turn()) }
+                        a.change("Weapon action limits set to $enabled; next weapon turn confirmed") { Engine.resetWeaponActions(it).copy(encounter = enabled) }
                     }
                     Text("Tracks two ordinary attacks or one full Action, one Bonus Action, and the configured spell-firing limit. No initiative, enemy or round tracking.", color = RebuildPalette.Muted)
                 }
@@ -314,7 +320,7 @@ import java.util.UUID
                 } ?: Text("This event is no longer in retained history.")
                 "correction" -> {
                     Text(correction?.label ?: "No retained operation to undo.", style = MaterialTheme.typography.titleMedium)
-                    Text("Reverses the latest retained operation, including its resources and pending results. A correction event is kept. Rolls removed by the retention limit cannot be recovered.", color = RebuildPalette.Muted)
+                    Text("Reverses the latest retained operation, including its resources and pending results. A correction event is kept. Undo covers the recent accounting window; complete historical archives remain preserved and are not automatically reapplied as current resources.", color = RebuildPalette.Muted)
                 }
             }
             if (a.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -322,33 +328,129 @@ import java.util.UUID
         }
     }
 }
-@Composable fun BackupPage(s: Campaign,a: Actions) {
-    val c=LocalContext.current
-    var incoming by remember { mutableStateOf<Backup?>(null) }
-    var backupSaved by remember { mutableStateOf(false) }
-    val export=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) {uri -> if(uri!=null) a.run("Versioned backup saved") {
-        val text=a.repo.export(); withContext(Dispatchers.IO) { c.contentResolver.openOutputStream(uri,"wt")!!.use { it.write(text.toByteArray()) } }; backupSaved=true
-    } }
-    val session=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/markdown")) {uri -> if(uri!=null) a.run("Session export saved") { withContext(Dispatchers.IO) {c.contentResolver.openOutputStream(uri,"wt")!!.use {it.write(BackupCodec.session(s).toByteArray())}} } }
-    val import=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri -> if(uri!=null) a.run("Backup validated; review before replacing") {
-        incoming=withContext(Dispatchers.IO) {c.contentResolver.openInputStream(uri)!!.bufferedReader(Charsets.UTF_8).use {BackupCodec.decode(it)}}
-        backupSaved=false
-    } }
-    Section("Portable backups") {
-        Text("Versioned JSON contains campaign state and up to ${HistoryRetention.MAX_HISTORY_ENTRIES} recent rolls with bounded accounting history. Files stay where you choose. Import validates size, IDs, dice, levels, clocks, and references before an atomic replacement. Nothing is merged implicitly.")
-        Action("Export complete JSON backup",!a.busy) {export.launch("astravar-backup.json")}
-        Action("Export player-safe session Markdown",!a.busy) {session.launch("astravar-session.md")}
-        Action("Choose JSON backup to preview",!a.busy) {import.launch(arrayOf("application/json","text/plain","application/octet-stream"))}
-        incoming?.let { b ->
-            Text("IMPORT PREVIEW\n${b.campaign.profile.character} · ${if(b.campaign.demo) "DEMO" else "campaign"}\n${b.campaign.cores.size} cores · ${b.campaign.templates.size} templates · ${b.campaign.pending.count {it.result==null}} unresolved operations · ${b.campaign.pending.size} recent rolls\nThis replaces current campaign state. Only the newest ${HistoryRetention.MAX_HISTORY_ENTRIES} imported rolls are retained. Older rolls and duplicate legacy archives are discarded; campaign resources and settings are preserved.")
-            if(!backupSaved) Text("Save your current backup before replacing. This preserves a separate copy before replacement.")
-            Action("Back up current state first",!a.busy) {export.launch("astravar-before-import.json")}
-            val id=remember(b) {UUID.randomUUID().toString()}
-            Action("Replace campaign with validated import",!a.busy && backupSaved,danger=true) {a.run("Campaign imported once") {a.repo.import(b,id)};incoming=null}
-            PlayerTextButton(onClick={incoming=null}) {Text("Cancel import")}
+private class WeaponBackupPageLifetime { var active = true }
+
+@Composable fun BackupPage(s: Campaign, a: Actions) {
+    val context = LocalContext.current
+    val historyBackup = remember(context.applicationContext, a.repo) { HistoryBackup(context.applicationContext, a.repo) }
+    val lifetime = remember { WeaponBackupPageLifetime() }
+    DisposableEffect(Unit) { onDispose { lifetime.active = false } }
+    var incoming by remember { mutableStateOf<PendingHistoryRestore?>(null) }
+    var lastBackup by remember { mutableStateOf<HistoryBackupSummary?>(null) }
+    var previewWasOpen by rememberSaveable { mutableStateOf(false) }
+    var confirmRestore by remember { mutableStateOf(false) }
+    var receipt by rememberSaveable { mutableStateOf("") }
+    // Preview files are disposable cache, never campaign writes. Screen recreation
+    // deliberately requires selecting the source again instead of trusting a stale handle.
+    DisposableEffect(incoming) {
+        val prepared = incoming
+        onDispose { prepared?.close() }
+    }
+    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null) a.run("Complete weapon history backup saved") {
+            val summary = withContext(Dispatchers.IO) {
+                val stream = context.contentResolver.openOutputStream(uri, "wt") ?: error("The selected backup location cannot be opened.")
+                stream.use { historyBackup.export(it) }
+            }
+            lastBackup = summary
         }
     }
+    val session = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/markdown")) { uri ->
+        if (uri != null) a.run("Recent player-safe session summary saved") {
+            withContext(Dispatchers.IO) {
+                val stream = context.contentResolver.openOutputStream(uri, "wt") ?: error("The selected summary location cannot be opened.")
+                stream.use { it.write(BackupCodec.session(s).toByteArray(Charsets.UTF_8)) }
+            }
+        }
+    }
+    val chooseBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) a.run("Weapon backup validated; review before restoring") {
+            var prepared: PendingHistoryRestore? = null
+            var published = false
+            try {
+                withContext(Dispatchers.IO) {
+                    val stream = context.contentResolver.openInputStream(uri) ?: error("The selected backup cannot be read.")
+                    // Retain the handle before crossing the cancellable dispatcher
+                    // boundary so a cancelled return cannot strand private cache.
+                    prepared = stream.use { historyBackup.prepare(it) }
+                }
+                if (lifetime.active) {
+                    incoming = prepared ?: error("The validated preview is unavailable. Select the backup again.")
+                    previewWasOpen = true
+                    confirmRestore = false
+                    published = true
+                }
+            } finally {
+                if (!published) prepared?.close()
+            }
+        }
+    }
+    Section("Complete weapon backups") {
+        Text("The complete ZIP contains current weapon state, recent rolls and preserved historical archives, including original legacy backup files. The recent-roll view shows up to ${HistoryRetention.MAX_HISTORY_ENTRIES} entries at once; older history remains preserved.")
+        Text("Campaign inventory, party and relationship records use their separate Campaign backup. The session Markdown is a recent player-safe summary, not a complete backup.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+        Action("Export complete weapon history ZIP", !a.busy) { export.launch("astravar-weapon-history.zip") }
+        Action("Export recent session Markdown", !a.busy) { session.launch("astravar-session.md") }
+        Action("Choose weapon backup to preview", !a.busy) {
+            incoming = null
+            previewWasOpen = false
+            confirmRestore = false
+            chooseBackup.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/json", "text/plain", "application/octet-stream"))
+        }
+        lastBackup?.let { saved ->
+            Text("Saved complete backup · revision ${saved.revision} · ${saved.archiveCount} history archive entries · ${saved.originalFileCount} original files", color = RebuildPalette.Ice, style = MaterialTheme.typography.bodySmall)
+        }
+        if (incoming == null && previewWasOpen) Text("This restore preview was not retained. Select the backup again before another restore. If a confirmed restore was in progress, check the saved weapon state and History before retrying.", color = RebuildPalette.Ice)
+        incoming?.let { pending ->
+            val preview = pending.preview
+            val baselineChanged = s.revision != pending.baselineRevision
+            val backupMatches = lastBackup?.let { it.revision == pending.baselineRevision && it.fingerprint == pending.baselineFingerprint } == true
+            val operationId = remember(pending) { UUID.randomUUID().toString() }
+            WeaponHistoryRestoreReview(preview.campaign, preview.archiveCount, preview.archiveBytes,
+                preview.originalFileCount, preview.originalBytes, preview.legacyJson, backupMatches,
+                baselineChanged, a.busy,
+                backUp = { export.launch("astravar-before-restore.zip") },
+                restore = { confirmRestore = true },
+                cancel = { incoming = null; previewWasOpen = false; confirmRestore = false })
+            if (confirmRestore) ArcaneDialog(onDismissRequest = { if (!a.busy) confirmRestore = false },
+                title = { Text("Restore reviewed weapon state?") },
+                text = { Text("This replaces the working weapon state and recent-roll view. Existing immutable history and an exact pre-restore copy remain preserved. It does not change Campaign inventory or declare a real-campaign migration.") },
+                confirmButton = { PlayerTextButton(onClick = {
+                    confirmRestore = false
+                    a.run("Weapon state restored; complete history preserved") {
+                        val result = historyBackup.apply(pending, operationId)
+                        receipt = "Restore receipt ${result.operationId} · revision ${result.resultingRevision}"
+                        incoming = null
+                        previewWasOpen = false
+                        lastBackup = null
+                    }
+                }, enabled = !a.busy && backupMatches && !baselineChanged) { Text("Restore weapon state") } },
+                dismissButton = { PlayerTextButton(onClick = { confirmRestore = false }, enabled = !a.busy) { Text("Keep current state") } })
+        }
+        if (receipt.isNotBlank()) Text(receipt, color = RebuildPalette.Ice, style = MaterialTheme.typography.bodySmall)
+        if (a.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (a.message.isNotBlank()) Text(a.message, color = RebuildPalette.Ice)
+    }
 }
+
+/** Read-only review. Confirmation is delegated to the transactionally guarded archive importer. */
+@Composable internal fun WeaponHistoryRestoreReview(campaign: Campaign, archiveCount: Int, archiveBytes: Long,
+    originalFileCount: Int, originalBytes: Long, legacyJson: Boolean, backedUp: Boolean, stale: Boolean,
+    busy: Boolean, backUp: () -> Unit, restore: () -> Unit, cancel: () -> Unit) {
+    PlayerCard {
+        Text("Weapon restore preview", style = MaterialTheme.typography.titleLarge, color = RebuildPalette.Gold)
+        Text("${campaign.profile.character} · ${if (campaign.demo) "DEMO" else "weapon campaign"}")
+        Text("${campaign.templates.size} spell templates · ${campaign.pending.count { it.result == null }} unresolved operations · ${campaign.pending.size} recent rolls")
+        Text("Full history: $archiveCount archive entries ($archiveBytes bytes) · $originalFileCount original files ($originalBytes bytes)")
+        if (legacyJson) Text("Legacy JSON: exact original bytes are preserved on confirmed restore before its bounded working-state decode is applied.", color = RebuildPalette.Ice)
+        Text("Only the recent-roll view is limited to ${HistoryRetention.MAX_HISTORY_ENTRIES}. Restoring preserves full original history, keeps the pre-restore state and replaces the working state without replaying old actions or spending resources again.", color = RebuildPalette.Muted)
+        if (!backedUp) Text("Save a complete backup of the current state before confirming restore.", color = RebuildPalette.Ice)
+        if (stale) Text("Weapon records changed after this preview. Select the backup again before restoring.", color = MaterialTheme.colorScheme.error)
+        PlayerOutlinedButton(onClick = backUp, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Back up current complete history") }
+        PlayerButton(onClick = restore, enabled = !busy && backedUp && !stale, modifier = Modifier.fillMaxWidth()) { Text("Review restore confirmation") }
+        PlayerTextButton(onClick = cancel, enabled = !busy) { Text("Cancel weapon restore") }
+    }
+}
+
 @Composable fun SettingsPage(app: AstravarApp, s: Campaign, a: Actions, start: () -> Unit, grant: () -> Unit, stop: () -> Unit) {
     val prefs by app.preferences.flow.collectAsState(initial = com.yazsras.astravar.data.OverlayPrefs())
     val context = LocalContext.current

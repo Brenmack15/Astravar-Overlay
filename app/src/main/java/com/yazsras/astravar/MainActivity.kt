@@ -3,16 +3,28 @@ package com.yazsras.astravar
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import com.yazsras.astravar.data.CampaignConnectionClient
+import com.yazsras.astravar.data.LiveHpConnectionClient
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import com.yazsras.astravar.overlay.OverlayService
 import com.yazsras.astravar.ui.AstravarScreen
 
@@ -21,8 +33,38 @@ class MainActivity: ComponentActivity() {
         Toast.makeText(this,if(granted) "Notifications enabled. Tap Start overlay." else "Notifications remain off. Enable them when you want a visible session notification.",Toast.LENGTH_LONG).show()
     }
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState); enableEdgeToEdge()
+        super.onCreate(savedInstanceState)
+        // Astravar stays dark even when Android uses its light system theme.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
+        )
         setContent { AstravarScreen(application as AstravarApp,::startOverlay,::grantOverlay,::stopOverlay) }
+        // Deliver delegated updates throughout active app use, not only in Config.
+        lifecycleScope.launch(Dispatchers.IO) {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                val campaign = CampaignConnectionClient(applicationContext)
+                try {
+                    while (isActive) {
+                        try { campaign.foreground() }
+                        catch (e: CancellationException) { throw e }
+                        catch (_: Exception) { /* Persistent journal/status remains available for review. */ }
+                        delay(5_000)
+                    }
+                } finally { campaign.close() }
+            }
+        }
+    }
+    override fun onStart() {
+        super.onStart()
+        // Pairing authorizes only the selected existing profile's HP. No unpaired record is uploaded.
+        lifecycleScope.launch(Dispatchers.IO) {
+            var hp: LiveHpConnectionClient? = null
+            try { val opened = LiveHpConnectionClient(applicationContext); hp = opened; opened.foreground() }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* Durable status/outbox is shown in Owner connection; foreground startup stays usable. */ }
+            finally { hp?.close() }
+        }
     }
     private fun grantOverlay() {
         stopOverlay()

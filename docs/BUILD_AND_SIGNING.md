@@ -1,5 +1,14 @@
 # Builds and signing
 
+For the current isolated **2.1** branch, use
+[2.1 release and update gates](ASTRAVAR_21_RELEASE_READINESS.md) and
+[the development checkpoint](ASTRAVAR_2_1_CHECKPOINT.md). Its permanent owner
+candidate targets `com.yazsras.astravar`, `2.1.0`, code 24, signed privately with
+the recovered original owner identity. The older 2.0/debug instructions below
+remain historical references. Neither debug nor CI-only APKs establish an owner
+update channel. Exact artifact identity, source and test results must be checked
+before delivery; the current phone has not been inspected here.
+
 The release package ID remains `com.yazsras.astravar`. This UI reconstruction branch (`feat/astravar-2.0-ui-rebuild`) uses launcher name **Astravar**, version `2.0.1-ui-rebuild`, code `21`, debug package **`com.yazsras.astravar.v2uidebug`**. Original Preview is `com.yazsras.astravar.v2debug`; Inventory Beta is `com.yazsras.astravar.debug`. All have separate Android data sandboxes. Keep the installed working applications.
 
 The prior installed Preview's debug signing key is unavailable here, so this branch uses a separate debug package instead of requiring an uncertain update or uninstall. Validated, user-selected exports are the explicit transfer path. Campaign merge-only restore and weapon replacement restore are different flows; neither contains the fictional sync outbox. Keep the old Preview to preserve its local pending commands and receipts. See [phone installation](ASTRAVAR_2_PHONE_INSTALL.md).

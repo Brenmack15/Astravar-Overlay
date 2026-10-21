@@ -1,9 +1,12 @@
 package com.yazsras.astravar.ui
 
 import android.graphics.Bitmap
+import android.content.ComponentName
+import android.content.Intent
 import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.room.MultiInstanceInvalidationService
 import androidx.compose.runtime.*
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -43,8 +46,16 @@ class NavigationV2Test {
         }
     }
 
+    @OptIn(androidx.room.ExperimentalRoomApi::class)
     @Test(timeout = 90_000) fun campaignPagesAndBackupsRemainAccessibleBeforeWeaponOnboardingWithoutChangingWeaponState() {
         val app = ApplicationProvider.getApplicationContext<AstravarApp>()
+        // Android supplies a non-null ComponentName and the Room service binder when binding.
+        // Robolectric's default unconfigured bind instead invokes the callback with nulls.
+        // Use the actual service so production cross-instance invalidation stays enabled.
+        val invalidationIntent = Intent(app, MultiInstanceInvalidationService::class.java)
+        val invalidationService = Robolectric.buildService(MultiInstanceInvalidationService::class.java).create()
+        shadowOf(app).setComponentNameAndServiceForBindServiceForIntent(invalidationIntent,
+            ComponentName(app, MultiInstanceInvalidationService::class.java), invalidationService.get().onBind(invalidationIntent))
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         var overlayStarts = 0
         var permissionRequests = 0
@@ -79,9 +90,15 @@ class NavigationV2Test {
             compose.onNodeWithText("Inventions").performClick()
             compose.onNodeWithText("Add Invention").assertExists()
             compose.onNodeWithText("‹ Campaign").performClick()
+            compose.onNodeWithText("Party").performClick()
+            listOf("Zerg Hasma", "Eek", "Korr", "Veyrath").forEach { compose.onNodeWithText(it).assertExists() }
+            capture("v2-party", activity.get())
             compose.onNodeWithText("Eek").performClick()
+            capture("v2-eek-sheet", activity.get())
+            compose.onNodeWithText("Eek's specialized companion tools").performScrollTo().performClick()
             compose.onNodeWithText("Condition unknown").assertExists()
-            capture("v2-eek", activity.get())
+            compose.runOnIdle { captureNativeTestWindows("v2-eek", activity.get(), modal = true) }
+            compose.onNodeWithText("Close").performClick()
             compose.onNodeWithText("Config").performClick()
             compose.onNodeWithText("Campaign backup").performScrollTo().performClick()
             compose.onNodeWithText("Export campaign backup").assertExists()
@@ -89,7 +106,10 @@ class NavigationV2Test {
             compose.onNodeWithText("Combat").performClick()
             compose.onNodeWithText("CONFIRM YOUR WEAPON PROFILE").assertExists()
             compose.onNodeWithText("Campaign").performClick()
-            compose.onNodeWithText("Condition unknown").assertExists()
+            compose.onNodeWithText("Inventory").assertExists()
+            compose.onNodeWithText("Checkpoints").assertExists()
+            compose.onNodeWithText("Party").performClick()
+            compose.onNodeWithText("Eek's specialized companion tools").performScrollTo().assertExists()
             compose.runOnIdle { assertEquals(before, app.repository.state.value) }
             assertEquals(0, overlayStarts)
             assertEquals(0, permissionRequests)
@@ -100,7 +120,9 @@ class NavigationV2Test {
             assertTrue(records.getValue("companionStates").jsonArray.isEmpty())
             assertTrue(records.getValue("projects").jsonArray.isEmpty())
             assertTrue(records.getValue("entities").jsonArray.isEmpty())
-        } finally { activity.pause().stop().destroy() }
+            assertTrue(records.getValue("characterProfiles").jsonArray.isEmpty())
+            assertTrue(records.getValue("partySheets").jsonArray.isEmpty())
+        } finally { activity.pause().stop().destroy(); invalidationService.destroy() }
     }
 
     @Test fun primaryNavigationExposesSelectedDestinationAndReportsEachUserSelection() {
@@ -112,11 +134,11 @@ class NavigationV2Test {
                 AstravarTheme { RebuildPrimaryNavigation(selected) { selected = it; visited += it } }
             }
             compose.onNodeWithText("Armor").assertIsSelected()
-            listOf("Combat", "Campaign", "Config", "Armor").forEach { destination ->
+            listOf("Combat", "Party", "Campaign", "Config", "Armor").forEach { destination ->
                 compose.onNodeWithText(destination).performClick()
                 compose.onNodeWithText(destination).assertIsSelected()
             }
-            assertEquals(listOf("Combat", "Campaign", "Config", "Armor"), visited)
+            assertEquals(listOf("Combat", "Party", "Campaign", "Config", "Armor"), visited)
         } finally { activity.pause().stop().destroy() }
     }
 }

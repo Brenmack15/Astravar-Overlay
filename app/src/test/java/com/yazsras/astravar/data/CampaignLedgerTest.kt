@@ -93,7 +93,7 @@ class CampaignLedgerTest {
         assertTrue(data.contains("astravar-campaign-items"))
         assertTrue(data.contains(photo))
         assertTrue(data.contains("Found runes"))
-        assertTrue(data.contains("\"schema\":2"))
+        assertTrue(data.contains("\"schema\":5"))
         assertTrue(repo.exportLegacy().contains("\"schema\":1"))
     }
 

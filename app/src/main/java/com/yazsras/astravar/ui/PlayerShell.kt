@@ -12,12 +12,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
-val rebuildDestinations = listOf("Armor", "Combat", "Campaign", "Config")
+val rebuildDestinations = listOf("Armor", "Combat", "Party", "Campaign", "Config")
 
 @Composable fun RebuildAppHeader(demo: Boolean) {
     Row(Modifier.fillMaxWidth().background(RebuildPalette.Void).statusBarsPadding()
@@ -31,19 +34,44 @@ val rebuildDestinations = listOf("Armor", "Combat", "Campaign", "Config")
 }
 
 @Composable fun RebuildPrimaryNavigation(selected: String, change: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth().background(RebuildPalette.Void).navigationBarsPadding().padding(horizontal = 8.dp)) {
-        rebuildDestinations.forEach { name ->
-            val active = name == selected
-            Column(Modifier.weight(1f).heightIn(min = 68.dp).semantics { this.selected = active }
-                .clickable(role = Role.Tab) { change(name) }.padding(vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Box(Modifier.width(56.dp).height(28.dp).background(if (active) RebuildPalette.Active else Color.Transparent,
-                    RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
-                    if (name == "Combat") ApprovedAttackMedallion(ApprovedAttackArt.ELEMENTAL, Modifier.size(24.dp))
-                    else ArcaneIcon(when (name) { "Armor" -> "Emblem"; "Campaign" -> "History"; else -> "Settings" },
-                        Modifier.size(24.dp), if (active) RebuildPalette.Cyan else Muted)
+    val labelStyle = MaterialTheme.typography.labelLarge
+    val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val labelWidths = rebuildDestinations.associateWith { name ->
+        textMeasurer.measure(name, style = labelStyle, softWrap = false, maxLines = 1).size.width
+    }
+    BoxWithConstraints(Modifier.fillMaxWidth().background(RebuildPalette.Void)
+        .navigationBarsPadding().padding(horizontal = 8.dp)) {
+        val iconWidth = with(density) { 56.dp.toPx() }
+        val labelPadding = with(density) { 4.dp.toPx() }
+        fun fits(rows: List<List<String>>) = rows.all { row ->
+            row.all { name -> maxOf(iconWidth, labelWidths.getValue(name).toFloat()) + labelPadding <= constraints.maxWidth.toFloat() / row.size }
+        }
+        // Preserve the compact row when the actual scaled text fits. Otherwise
+        // keep all five labels readable, normally in balanced rows of three/two.
+        val rows = listOf(rebuildDestinations).takeIf(::fits)
+            ?: (3 downTo 1).map { rebuildDestinations.chunked(it) }.firstOrNull(::fits)
+            ?: rebuildDestinations.map { listOf(it) }
+        Column {
+            rows.forEach { row ->
+                Row(Modifier.fillMaxWidth()) {
+                    row.forEach { name ->
+                        val active = name == selected
+                        Column(Modifier.weight(1f).heightIn(min = 68.dp).semantics { this.selected = active }
+                            .clickable(role = Role.Tab) { change(name) }.padding(horizontal = 2.dp, vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Box(Modifier.width(56.dp).height(28.dp).background(if (active) RebuildPalette.Active else Color.Transparent,
+                                RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+                                if (name == "Combat") ApprovedAttackMedallion(ApprovedAttackArt.ELEMENTAL, Modifier.size(24.dp))
+                                else ArcaneIcon(when (name) { "Armor" -> "Emblem"; "Party" -> "Emblem"; "Campaign" -> "History"; else -> "Settings" },
+                                    Modifier.size(24.dp), if (active) RebuildPalette.Cyan else Muted)
+                            }
+                            Text(name, Modifier.fillMaxWidth(), style = labelStyle,
+                                color = if (active) Frost else Muted, textAlign = TextAlign.Center,
+                                maxLines = 1, softWrap = false)
+                        }
+                    }
                 }
-                Text(name, style = MaterialTheme.typography.labelLarge, color = if (active) Frost else Muted)
             }
         }
     }
@@ -55,7 +83,9 @@ val rebuildDestinations = listOf("Armor", "Combat", "Campaign", "Config")
         listOf(Triple("Inventory", "Items & equipment", "Core"),
             Triple("Inventions", "Blueprints & construction", "Settings"),
             Triple("Connections", "People, groups & milestones", "Emblem"),
-            Triple("Eek", "Companion & equipment", "Emblem")).forEach { (name, detail, icon) ->
+            Triple("Checkpoints", "Sourced session records & unresolved decisions", "History"),
+            Triple("Reference Library", "Imported campaign sources, history & relationships", "History"),
+            Triple("Campaign import", "Review a private archive, backup & import locally", "Settings")).forEach { (name, detail, icon) ->
             PlayerCard(onClick = { open(name) }) {
                 PlayerEntry(name, detail, icon, { open(name) })
             }
@@ -67,14 +97,17 @@ val rebuildDestinations = listOf("Armor", "Combat", "Campaign", "Config")
     Page {
         PlayerHeading("Config")
         SectionCaption("Systems")
-        PlayerEntry("Core management", "Install, charge & recover", "Core", { open("Core management") })
+        PlayerEntry("Spell reservoir", "Permanent internal core · manage spell loads", "Core", { open("Spell reservoir") })
         PlayerEntry("Spell library", "Configured templates & payloads", "Payload", { open("Spell library") })
         PlayerEntry("Rules & profile", "Accepted configuration & upgrades", "Weapon", { open("Rules & profile") })
         PlayerEntry("Resources & recovery", "Confirmed game time & resources", "Core", { open("Resources & recovery") })
         PlayerEntry("Roll history", "Saved rolls & exact dice", "History", { open("Roll history") })
+        PlayerEntry("ChatGPT toolkit", "Reusable handoffs, recovery and sync instructions", "More", { open("ChatGPT toolkit") })
         SectionCaption("App & data")
         PlayerEntry("Overlay & appearance", "Floating controls & app preferences", "Settings", { open("Overlay & appearance") })
         PlayerEntry("Campaign backup", "Items, projects, connections & companion", "History", { open("Campaign backup") })
+        PlayerEntry("Campaign import", "Private source archive · preview, backup & receipts", "History", { open("Campaign import") })
+        PlayerEntry("Owner connection", "Character HP · owner pairing & approvals", "Settings", { open("Owner connection") })
         PlayerEntry("Weapon backup", "Separate combat save", "History", { open("Weapon backup") })
         PlayerEntry("Fictional sync", "Public disposable test records", "More", { open("Fictional sync") })
         if (com.yazsras.astravar.BuildConfig.DEBUG) {

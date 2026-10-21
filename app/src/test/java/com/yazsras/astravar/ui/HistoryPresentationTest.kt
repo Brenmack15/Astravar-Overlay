@@ -25,7 +25,7 @@ class HistoryPresentationTest {
     @Test(timeout=60000) fun twentyLargeRollsOpenNewestFirstAndFullDetailsRequireAnOverlay() {
         val seed=Campaign(onboarded=true,attuned=true,installedId="core",profile=Profile(baseDamageDiceCount=10),cores=listOf(Core("core","Core")))
         val shots=(1..100).map {i->
-            val p=Engine.plan(seed,"roll-$i",Ability.SHATTER,elements=listOf(DamageType.LIGHTNING),point="Gate $i")
+            val p=ShotPlan("roll-$i",seed.revision,Ability.SHATTER,"core",seed.profile,emptyList(),elements=listOf(DamageType.LIGHTNING),targetPoint="Gate $i")
             val r=DiceRoller.roll(p,die={it},atMillis=i.toLong()).copy(coreName="Crystal $i")
             PendingShot(p,DiceRoller.resolution(p,r,targets=listOf(TargetSave("Target",false))),r)
         }

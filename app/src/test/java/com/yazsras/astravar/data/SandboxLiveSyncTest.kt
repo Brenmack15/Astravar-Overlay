@@ -3,6 +3,7 @@ package com.yazsras.astravar.data
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.yazsras.astravar.BuildConfig
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
@@ -18,6 +19,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class SandboxLiveSyncTest {
     @Test fun actualKotlinHttpsClientPersistsCommandAndVerifiesLiveReceiptAndReadback() = runBlocking {
+        assumeTrue("Live public sandbox acceptance is debug-only", BuildConfig.DEBUG)
         assumeTrue("Live public sandbox tests require ASTRAVAR_LIVE_SANDBOX=true",
             System.getenv("ASTRAVAR_LIVE_SANDBOX") == "true")
         val context = ApplicationProvider.getApplicationContext<Context>()

@@ -1,5 +1,22 @@
 # Astravar identity and permanent updates
 
+## Current 2.1 candidate
+
+The master upgrade continues on `feat/astravar-2.1-player-first`; the sections
+below retain the earlier branding delivery history. Permanent release target is
+`com.yazsras.astravar`, version `2.1.0`, code 24. Existing debug suffixes remain
+separate and do not provide a cross-package update path.
+
+The original owner signing identity has been recovered privately and its public
+certificate matches all nine inspected historical permanent-package APKs:
+`4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847`.
+No identity was rotated. The signing block remains unchanged; keys and recovery
+credentials remain outside Git and CI. Verify the assembled candidate and
+current installation independently before describing a handset update.
+The running app now displays its package, version/build and current signing
+certificate in Config → Help & diagnostics. See
+[current source and acceptance status](ASTRAVAR_2_1_CHECKPOINT.md).
+
 ## Approved branding
 
 The owner-supplied `Astravar_App_Identity_Icon_Handoff.zip` targets draft PR #4,
@@ -111,3 +128,21 @@ Live Cloudflare writes are opt-in and are not needed for branding verification.
 The work neither installs an APK on the owner's devices nor establishes physical
 Samsung coverage or permanent in-place update compatibility. PR #4 stays draft
 and unmerged. Current run links and exact results are recorded in its description.
+
+## Permanent release resource repair — isolated implementation candidate
+
+The ten original `particle_*.png` resource files contain JPEG-encoded bytes.
+For the reviewed release fix, rename them to matching `particle_*.jpg` filenames
+while retaining the **identical original Git blob bytes** and their SHA-256
+hashes. Android's generated `R.drawable.particle_*` identifiers remain the same.
+`scripts/ui_foundation_sha256.json` moves exactly those ten keyed paths without
+changing their expected image digests; it retains source baseline provenance.
+`verify_particle_resources.py` checks that the JPEG bytes remain untouched and
+correctly named. The owner signing block, launcher resources, gameplay code,
+databases and Android package ID do not change.
+
+This preparation is NOT evidence of a release APK, signing compatibility, or
+live campaign sync. CI's test-only signing key is not a production key. An
+owner-signed permanent candidate must be built with the previously established
+private keystore in an authorized secure environment and checked against the
+expected owner certificate. See `docs/ASTRAVAR_PERMANENT_RELEASE_PLAN.md`.

@@ -1,0 +1,191 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "d880e1443bafb62fc5c6af09bc8d865a",
+    "entities": [
+      {
+        "tableName": "owner_sync_outbox",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`commandId` TEXT NOT NULL, `origin` TEXT NOT NULL, `campaignId` TEXT NOT NULL, `recordId` TEXT NOT NULL, `expectedRevision` INTEGER NOT NULL, `body` TEXT NOT NULL, `fingerprint` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `state` TEXT NOT NULL, `receiptJson` TEXT, `issueCode` TEXT NOT NULL, PRIMARY KEY(`commandId`))",
+        "fields": [
+          {
+            "fieldPath": "commandId",
+            "columnName": "commandId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "origin",
+            "columnName": "origin",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "campaignId",
+            "columnName": "campaignId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordId",
+            "columnName": "recordId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expectedRevision",
+            "columnName": "expectedRevision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "body",
+            "columnName": "body",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fingerprint",
+            "columnName": "fingerprint",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "receiptJson",
+            "columnName": "receiptJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "issueCode",
+            "columnName": "issueCode",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "commandId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_owner_sync_outbox_origin_campaignId_state",
+            "unique": false,
+            "columnNames": [
+              "origin",
+              "campaignId",
+              "state"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_owner_sync_outbox_origin_campaignId_state` ON `${TABLE_NAME}` (`origin`, `campaignId`, `state`)"
+          }
+        ]
+      },
+      {
+        "tableName": "owner_sync_cursors",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`origin` TEXT NOT NULL, `campaignId` TEXT NOT NULL, `cursor` INTEGER NOT NULL, PRIMARY KEY(`origin`, `campaignId`))",
+        "fields": [
+          {
+            "fieldPath": "origin",
+            "columnName": "origin",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "campaignId",
+            "columnName": "campaignId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cursor",
+            "columnName": "cursor",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "origin",
+            "campaignId"
+          ]
+        }
+      },
+      {
+        "tableName": "owner_sync_received",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`origin` TEXT NOT NULL, `campaignId` TEXT NOT NULL, `cursor` INTEGER NOT NULL, `commandId` TEXT NOT NULL, `eventJson` TEXT NOT NULL, PRIMARY KEY(`origin`, `campaignId`, `cursor`))",
+        "fields": [
+          {
+            "fieldPath": "origin",
+            "columnName": "origin",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "campaignId",
+            "columnName": "campaignId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cursor",
+            "columnName": "cursor",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "commandId",
+            "columnName": "commandId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventJson",
+            "columnName": "eventJson",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "origin",
+            "campaignId",
+            "cursor"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_owner_sync_received_origin_campaignId_commandId",
+            "unique": true,
+            "columnNames": [
+              "origin",
+              "campaignId",
+              "commandId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_owner_sync_received_origin_campaignId_commandId` ON `${TABLE_NAME}` (`origin`, `campaignId`, `commandId`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'd880e1443bafb62fc5c6af09bc8d865a')"
+    ]
+  }
+}

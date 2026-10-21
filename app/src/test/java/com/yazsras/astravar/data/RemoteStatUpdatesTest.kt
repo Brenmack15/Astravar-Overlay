@@ -1,6 +1,7 @@
 package com.yazsras.astravar.data
 
 import android.content.Context
+import com.yazsras.astravar.BuildConfig
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.flow.first
@@ -9,6 +10,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -50,6 +52,31 @@ class RemoteStatUpdatesTest {
         try { block(); fail("Must reject without changing player data") } catch (_: IllegalArgumentException) {} catch (_: IllegalStateException) {}
     }
 
+    @Test fun actualVariantGateCannotBeBypassedOrWriteAnyRecord() = runBlocking {
+        val disabled = RemoteStatRepository(remoteDb, records, sandbox, api, debugEnabled = false)
+        val unknownCommand = UUID.randomUUID().toString()
+        fails { disabled.setEnabled(true) }
+        fails { disabled.refresh() }
+        fails { disabled.apply(unknownCommand) }
+        fails { disabled.reject(unknownCommand) }
+        if (!BuildConfig.DEBUG) {
+            // Passing true must never bypass the compiled production gate.
+            val forced = RemoteStatRepository(remoteDb, records, sandbox, api, debugEnabled = true)
+            for (repository in listOf(remote, forced)) {
+                fails { repository.setEnabled(true) }; fails { repository.setEnabled(false) }
+                fails { repository.refresh() }; fails { repository.apply(unknownCommand) }
+                fails { repository.reject(unknownCommand) }
+            }
+        }
+        assertEquals(0, api.requests)
+        assertEquals(0, api.posts)
+        assertNull(remote.settings.first())
+        assertTrue(remote.commands.first().isEmpty())
+        assertTrue(records.characterProfiles.first().isEmpty())
+        assertTrue(records.characterAbilities.first().isEmpty())
+        assertTrue(records.audit.first().isEmpty())
+    }
+
     @Test fun strictCanonicalVersionedProtocolRejectsTypeCoercionDuplicateKeysAndOtherProfiles() {
         val value = RemoteAbilityPayload(UUID.randomUUID().toString(), UUID.randomUUID().toString(), "INT", 0, 16)
         val wire = RemoteStatProtocol.encode(value)
@@ -66,6 +93,18 @@ class RemoteStatUpdatesTest {
     }
 
     @Test fun disabledAndReleaseGatePerformNoNetworkAndOptInSeedsNoScores() = runBlocking {
+        if (!BuildConfig.DEBUG) {
+            fails { remote.setEnabled(true) }
+            fails { remote.refresh() }
+            fails { remote.apply(UUID.randomUUID().toString()) }
+            assertEquals(0, api.requests); assertEquals(0, api.posts)
+            assertTrue(records.characterProfiles.first().isEmpty())
+            assertTrue(records.characterAbilities.first().isEmpty())
+            assertTrue(records.audit.first().isEmpty())
+            assertTrue(remote.commands.first().isEmpty())
+            assertNull(remote.settings.first())
+            return@runBlocking
+        }
         remote.refresh()
         assertEquals(0, api.requests)
         assertTrue(records.characterProfiles.first().isEmpty())
@@ -81,6 +120,7 @@ class RemoteStatUpdatesTest {
     }
 
     @Test fun arrivalWaitsForConfirmationAndNeverTouchesRealCharacter() = runBlocking {
+        assumeTrue("This fictional remote-stat scenario is a debug-only feature", BuildConfig.DEBUG)
         records.saveProfile(CharacterProfile(name = "Private test sentinel"), source = "Local only")
         records.saveAbility(CharacterAbility("INT", score = 19, magicModifier = 4), source = "Private test sentinel")
         remote.setEnabled(true)
@@ -102,6 +142,7 @@ class RemoteStatUpdatesTest {
     }
 
     @Test fun approvedUpdateUsesExistingAtomicSaveAndPreservesMagicNotesAndBeforeProvenance() = runBlocking {
+        assumeTrue("This fictional remote-stat scenario is a debug-only feature", BuildConfig.DEBUG)
         remote.setEnabled(true)
         records.saveAbility(CharacterAbility("INT", RemoteStatProtocol.PROFILE_ID, 12, 3, "Fictional local note"), source = "Original local provenance")
         val payload = command(16, 1)
@@ -124,6 +165,7 @@ class RemoteStatUpdatesTest {
     }
 
     @Test fun editsAfterArrivalCauseConflictAndMustBeExplicitlyRejected() = runBlocking {
+        assumeTrue("This fictional remote-stat scenario is a debug-only feature", BuildConfig.DEBUG)
         remote.setEnabled(true)
         val payload = command()
         remote.refresh()
@@ -138,6 +180,7 @@ class RemoteStatUpdatesTest {
     }
 
     @Test fun sameCommandReplayCannotResetLaterPlayerEditOrAddAnotherAudit() = runBlocking {
+        assumeTrue("This fictional remote-stat scenario is a debug-only feature", BuildConfig.DEBUG)
         remote.setEnabled(true)
         val payload = command()
         remote.refresh(); remote.apply(payload.commandId)
@@ -149,6 +192,7 @@ class RemoteStatUpdatesTest {
     }
 
     @Test fun commandIdCollisionAndWrongSessionOrOuterIdDoNotModifyOriginalProposal() = runBlocking {
+        assumeTrue("This fictional remote-stat scenario is a debug-only feature", BuildConfig.DEBUG)
         remote.setEnabled(true)
         val payload = command()
         remote.refresh()
@@ -172,6 +216,7 @@ class RemoteStatUpdatesTest {
     }
 
     @Test fun offlineDeliveryWaitsForNetworkAndConfirmationAndOffSwitchPersists() = runBlocking {
+        assumeTrue("This fictional remote-stat scenario is a debug-only feature", BuildConfig.DEBUG)
         remote.setEnabled(true)
         val payload = command()
         api.offline = true
@@ -190,6 +235,7 @@ class RemoteStatUpdatesTest {
     }
 
     @Test fun lostOutcomeResponseRecoversOriginalReceiptWithoutSecondPost() = runBlocking {
+        assumeTrue("This fictional remote-stat scenario is a debug-only feature", BuildConfig.DEBUG)
         remote.setEnabled(true)
         val payload = command()
         remote.refresh(); remote.apply(payload.commandId)
@@ -206,6 +252,7 @@ class RemoteStatUpdatesTest {
     }
 
     @Test fun outcomeRevisionConflictPreservesOriginalAttemptAndDoesNotReapplyStat() = runBlocking {
+        assumeTrue("This fictional remote-stat scenario is a debug-only feature", BuildConfig.DEBUG)
         remote.setEnabled(true)
         val payload = command()
         remote.refresh(); remote.apply(payload.commandId)
@@ -223,6 +270,7 @@ class RemoteStatUpdatesTest {
     }
 
     @Test fun verifiedReceiptStaysCommittedWhenFollowingHistoryRefreshGoesOffline() = runBlocking {
+        assumeTrue("This fictional remote-stat scenario is a debug-only feature", BuildConfig.DEBUG)
         remote.setEnabled(true)
         val payload = command()
         remote.refresh(); remote.reject(payload.commandId)
@@ -236,6 +284,7 @@ class RemoteStatUpdatesTest {
     }
 
     @Test fun mismatchedReceiptCannotClaimConfirmationDelivery() = runBlocking {
+        assumeTrue("This fictional remote-stat scenario is a debug-only feature", BuildConfig.DEBUG)
         remote.setEnabled(true)
         val payload = command()
         remote.refresh(); remote.reject(payload.commandId)
@@ -250,6 +299,7 @@ class RemoteStatUpdatesTest {
     }
 
     @Test fun corruptedReceiptOutboxCannotUploadPrivateFields() = runBlocking {
+        assumeTrue("This fictional remote-stat scenario is a debug-only feature", BuildConfig.DEBUG)
         remote.setEnabled(true)
         val payload = command()
         remote.refresh(); remote.reject(payload.commandId)
@@ -265,6 +315,7 @@ class RemoteStatUpdatesTest {
     }
 
     @Test fun physicalDatabaseReopenRecoversApprovedTransactionExactlyOnceAfterCrashWindow() = runBlocking {
+        assumeTrue("This fictional remote-stat scenario is a debug-only feature", BuildConfig.DEBUG)
         val names = listOf("remote-stat-campaign-reopen.db", "remote-stat-sandbox-reopen.db", "remote-stat-inbox-reopen.db")
         names.forEach(context::deleteDatabase)
         var c = Room.databaseBuilder(context, CampaignLedgerDb::class.java, names[0]).build()

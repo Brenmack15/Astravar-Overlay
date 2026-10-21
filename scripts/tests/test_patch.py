@@ -59,13 +59,16 @@ class PatchTests(unittest.TestCase):
         for relative in mod.ADDITIONS:
             self.assertTrue((mod.BUNDLE_ROOT / relative).is_file(), relative)
 
-    def test_v2_network_is_debug_only_and_explicit(self):
+    def test_network_is_https_only_and_experimental_packages_remain_distinct(self):
         manifest = (mod.BUNDLE_ROOT / 'app/src/debug/AndroidManifest.xml').read_text()
         self.assertIn('android.permission.INTERNET', manifest)
         self.assertIn('usesCleartextTraffic="false"', manifest)
         self.assertIn('android:label="${astravarDebugLabel}"', manifest)
         main = (mod.BUNDLE_ROOT / 'app/src/main/AndroidManifest.xml').read_text()
-        self.assertNotIn('android.permission.INTERNET', main)
+        # The 2.1 owner-authorized connection architecture supersedes the old
+        # debug-only networking boundary. Real-campaign adapters remain absent.
+        self.assertIn('android.permission.INTERNET', main)
+        self.assertIn('usesCleartextTraffic="false"', main)
         gradle = (mod.BUNDLE_ROOT / FILENAME_GRADLE).read_text()
         self.assertIn('applicationIdSuffix = ".v2uidebug"', gradle)
         self.assertIn('applicationIdSuffix = ".v2statdebug"', gradle)

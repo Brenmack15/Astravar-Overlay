@@ -36,9 +36,10 @@ import kotlinx.serialization.encodeToString
 
 @Composable fun Dashboard(s: Campaign,a: Actions,start: ()->Unit,grant: ()->Unit,stop: ()->Unit,preferences: Preferences,prefs: OverlayPrefs) {
     val view=LocalView.current
-    val ability=prefs.mode
-    val blast=ability in listOf(Ability.DISCHARGE,Ability.SHATTER)
-    val magic=ability in listOf(Ability.SPELL,Ability.DISCHARGE,Ability.SHATTER)
+    val ability=if(prefs.mode==Ability.SHATTER) Ability.ARCANE else prefs.mode
+    val blast=ability==Ability.DISCHARGE
+    val melee=ability in listOf(Ability.GAUNTLET,Ability.SPELL_GAUNTLET,Ability.GUARDIAN)
+    val magic=ability in listOf(Ability.SPELL,Ability.DISCHARGE,Ability.SPELL_GAUNTLET)
     val selected=prefs.selectedPayloads.filter {id->s.installed?.payloads?.any {it.id==id}==true}.toSet()
     var immediate by androidx.compose.runtime.saveable.rememberSaveable(prefs.immediateId) {mutableStateOf(prefs.immediateId)}
     var manualSlot by androidx.compose.runtime.saveable.rememberSaveable(prefs.manualSlot) {mutableStateOf(prefs.manualSlot)}
@@ -56,7 +57,7 @@ import kotlinx.serialization.encodeToString
     fun options()=RollOptions(advantage,disadvantage)
     fun plan()=Engine.plan(s,UUID.randomUUID().toString(),ability,if(magic) selected.toList() else emptyList(),
         if(magic) s.templates.find {it.id==immediate} else null,prefs.elements,direct && blast,
-        distance.intValue("Distance",0,180),target,manualSlot)
+        if(melee) 5 else distance.intValue("Distance",0,180),target,manualSlot)
     fun prepare(manual:Boolean=false) {
         try { options().validate(); externalDice=manual; preview=plan() }
         catch(e:Exception) {a.message=e.message ?: "Check attack settings"}
@@ -99,12 +100,12 @@ import kotlinx.serialization.encodeToString
                     ApprovedAttackMedallion(ability.approvedArt(),Modifier.size(64.dp))
                     Column(Modifier.weight(1f)) {
                         Text(ability.title,style=MaterialTheme.typography.titleLarge,color=Brass)
-                        Text(if(blast) "Area release" else if(ability==Ability.SPELL) "Stored / configured spell" else "Ranged attack",style=MaterialTheme.typography.bodySmall,color=Muted)
+                        Text(if(blast) "Area release" else if(melee) "Melee attack · 5 ft reach" else if(ability==Ability.SPELL) "Stored / configured spell" else "Ranged attack",style=MaterialTheme.typography.bodySmall,color=Muted)
                     }
                     PlayerTextButton(onClick={overlay="Attacks"}) {Text("Change")}
                 }
             }
-            if(ability==Ability.ELEMENTAL || blast) {
+            if(ability==Ability.ELEMENTAL || ability==Ability.GAUNTLET || blast) {
                 PlayerCard(onClick={overlay="Element"}) {
                     Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                         ElementParticle(prefs.elements.firstOrNull() ?: DamageType.FORCE,Modifier.size(40.dp))
@@ -125,13 +126,22 @@ import kotlinx.serialization.encodeToString
                 Row(verticalAlignment=Alignment.CenterVertically) {
                     Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
                         Text(activePlan?.let {Engine.components(it).joinToString(" + "){c->"${c.damage.dice} ${c.damage.type.name.lowercase().replaceFirstChar(Char::titlecase)}"}}
-                            ?: "${s.profile.base} Force",style=MaterialTheme.typography.titleMedium,color=Frost)
-                        Text(if(saveOnly) "DC ${s.profile.saveDc} Dexterity · ${if(ability==Ability.SHATTER) 60 else 15} ft radius"
+                            ?: if(melee) "Review accepted melee configuration" else "${s.profile.base} Force",style=MaterialTheme.typography.titleMedium,color=Frost)
+                        Text(if(saveOnly) "DC ${s.profile.saveDc} Dexterity · 15 ft radius"
+                            else if(melee) "${(if(ability==Ability.GUARDIAN) s.profile.melee?.guardianAttackBonus else s.profile.melee?.attackBonus)?.let { if(it>=0) "+$it" else it.toString() } ?: "Unconfigured"} attack · 5 ft reach"
                             else "+${s.profile.attack} Attack · 60 / 180 ft",style=MaterialTheme.typography.bodySmall,color=Muted)
                     }
                     Text("›",color=Frost,fontSize=24.sp)
                 }
             }
+            if(melee && ability!=Ability.GUARDIAN) PlayerCard {
+                Text(if(s.gauntletCharge != null) "Charged Gauntlet prepared" else "Charged Gauntlet", style=MaterialTheme.typography.titleMedium, color=Brass)
+                Text(if(s.gauntletCharge != null) "The next melee attempt consumes the saved charge, including a miss. It expires when you confirm your next turn." else "A Bonus Action prepares the accepted STR + DEX + INT bonus for your next melee strike.", style=MaterialTheme.typography.bodySmall, color=Muted)
+                if(s.gauntletCharge == null) PlayerTextButton(onClick={a.change("Charged Gauntlet prepared · Bonus Action") {Engine.chargeGauntlet(it)}},enabled=!a.busy && Engine.meleeLockReason(s.profile)==null && s.profile.melee?.chargedDamageType!=null && !s.turn.bonus) {Text("Prepare charged strike")}
+                if(s.turn.bonus && s.gauntletCharge==null) Text("Bonus Action already spent this turn.",style=MaterialTheme.typography.bodySmall,color=Muted)
+                if(s.profile.melee?.chargedDamageType==null) Text("Charged bonus damage type needs an accepted ruling in Gauntlet configuration.", style=MaterialTheme.typography.bodySmall, color=Frost)
+            }
+            if(s.turn.spellShots>0 || s.turn.bonus || s.gauntletCharge!=null) PlayerTextButton(onClick={a.change("Player confirmed next weapon turn") {Engine.resetWeaponActions(it)}},enabled=!a.busy) {Text("My next turn · reset weapon actions")}
             if(last!=null) RollResultCard(last) else PlayerCard {
                 Text("Latest result",color=Muted,style=MaterialTheme.typography.bodySmall)
                 Text("No rolls yet",style=MaterialTheme.typography.titleMedium)
@@ -139,7 +149,8 @@ import kotlinx.serialization.encodeToString
             if(unresolved!=null) PlayerTextButton(onClick={overlay="Resolve"}) {Text("Complete saved ${unresolved.plan.ability.title.lowercase()}")}
             if(!s.attuned) Action("Confirm attunement",!a.busy) {a.change("Attunement confirmed by player") {it.copy(attuned=true)}}
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
-                PlayerTextButton(onClick={overlay="Core"}) {Text(s.installed?.name ?: "Choose core")}
+                Text("Internal core · ${s.installed?.readiness(s.gameSeconds) ?: "Not configured"}",
+                    style=MaterialTheme.typography.bodySmall,color=Muted)
                 PlayerTextButton(onClick={start}) {Text("Floating controls")}
             }
         }
@@ -150,18 +161,24 @@ import kotlinx.serialization.encodeToString
                 a.run("") {preferences.targeting(options())}
             }
             CombatRollAction(ability,if(saveOnly) "Roll ${ability.title.lowercase()}" else "Roll attack",
-                !a.busy && activePlan!=null && unresolved==null,danger=ability==Ability.SHATTER) {
+                !a.busy && activePlan!=null && unresolved==null) {
                 if(blast) prepare() else activePlan?.let(::fire)
             }
             if(planned.isFailure && unresolved==null) Text(planned.exceptionOrNull()?.message ?: "Review systems",color=Muted,style=MaterialTheme.typography.bodySmall)
         }
     }
     when(overlay) {
-        "Attacks" -> AttackChooserRebuild(ability,{overlay=null}) {value->a.run("") {preferences.mode(value)};overlay=null}
+        "Attacks" -> AttackChooserRebuild(ability,{overlay=null},onSelect={value->
+            if(value in listOf(Ability.GAUNTLET,Ability.SPELL_GAUNTLET,Ability.GUARDIAN)) { distance="5"; a.run("") { preferences.mode(value);preferences.aim(5,target,false,immediate,manualSlot) } }
+            else a.run("") { preferences.mode(value) }
+            overlay=null
+        },profile=s.profile,charged=s.gauntletCharge!=null,onCharge={
+            a.run("Charged Gauntlet prepared · Bonus Action") {a.repo.mutate(label="Charged Gauntlet prepared · Bonus Action") {Engine.chargeGauntlet(it)};preferences.mode(Ability.GAUNTLET);preferences.aim(5,target,false,immediate,manualSlot);distance="5";overlay=null}
+        })
         "Element" -> ElementWheelV2(s.profile,prefs.elements,{overlay=null}) {type->
             a.run("") {
-                if(type==DamageType.FORCE) {preferences.elements(emptyList());if(!blast) preferences.mode(Ability.ARCANE)}
-                else {preferences.elements(if(s.profile.elementCapacity==1) listOf(type) else if(type in prefs.elements) prefs.elements-type else (prefs.elements+type).takeLast(s.profile.elementCapacity));if(!blast) preferences.mode(Ability.ELEMENTAL)}
+                if(type==DamageType.FORCE) {preferences.elements(emptyList());if(!blast && !melee) preferences.mode(Ability.ARCANE)}
+                else {preferences.elements(elementSelectionAfterChoice(s.profile,prefs.elements,type));if(!blast && !melee) preferences.mode(Ability.ELEMENTAL)}
             };overlay=null
         }
         "Core" -> CorePicker(s,a) {overlay=null}
@@ -188,7 +205,7 @@ import kotlinx.serialization.encodeToString
             actions={PlayerTextButton(onClick={
                 a.run("Attack options saved") {preferences.targeting(options());preferences.aim(distance.intValue("Distance",0,180),target,direct,immediate,manualSlot);overlay=null}
             },enabled=!a.busy) {Text("Save")}}) {
-            Field("Distance in feet",distance,{distance=it})
+            if(melee) Text("Melee reach: 5 feet",color=Frost) else Field("Distance in feet",distance,{distance=it})
             if(blast) {
                 Field("Blast location",target,{target=it})
                 Toggle("Include direct impact attack",direct) {direct=it}
@@ -199,13 +216,12 @@ import kotlinx.serialization.encodeToString
             WeaponActionWindow(s,a)
         }
     }
-    preview?.let {p->ArcaneDialog(onDismissRequest={preview=null;restoreSavedOptions()},title={Text(if(p.ability==Ability.SHATTER) "Destroy core?" else "Confirm ${p.ability.title.lowercase()}")},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+    preview?.let {p->ArcaneDialog(onDismissRequest={preview=null;restoreSavedOptions()},title={Text("Confirm ${p.ability.title.lowercase()}")},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
         Text(p.actionCost)
         Engine.components(p).forEach {Text("${it.damage.dice} ${it.damage.type.name.lowercase()} · ${it.label}")}
         if(p.hasSpell) Text("Consumes ${p.selectedPayloads.size} stored spell(s)${p.immediate?.let {" and one level-${it.castingLevel} slot"} ?: ""} on execution.")
         if(p.ability==Ability.DISCHARGE) Text("Core recovery: 600 game seconds. Unselected spells remain.")
-        if(p.ability==Ability.SHATTER) Text("Destroys ${s.core(p.coreId).name} and all remaining stored spells.",color=MaterialTheme.colorScheme.error)
-    }},confirmButton={PlayerTextButton(onClick={if(externalDice) a.run("Enter external dice") {a.repo.commit(p,"main");clearExecutedPayloadSelection(p)} else fire(p);preview=null},enabled=!a.busy) {Text(if(externalDice) "Commit" else if(p.ability==Ability.SHATTER) "Destroy core & roll" else "Roll now")}},dismissButton={PlayerTextButton(onClick={preview=null;restoreSavedOptions()}) {Text("Cancel")}})}
+    }},confirmButton={PlayerTextButton(onClick={if(externalDice) a.run("Enter external dice") {a.repo.commit(p,"main");clearExecutedPayloadSelection(p)} else fire(p);preview=null},enabled=!a.busy) {Text(if(externalDice) "Commit" else "Roll now")}},dismissButton={PlayerTextButton(onClick={preview=null;restoreSavedOptions()}) {Text("Cancel")}})}
 }
 
 @Composable private fun CombatRollAction(ability:Ability,label:String,enabled:Boolean,danger:Boolean=false,onClick:()->Unit) {
@@ -223,31 +239,41 @@ import kotlinx.serialization.encodeToString
     }
 }
 
-private data class ApprovedAttackChoice(val art:ApprovedAttackArt,val name:String,val classification:String,val mode:Ability?)
-@Composable fun AttackChooserRebuild(selected:Ability,onDismiss:()->Unit,onSelect:(Ability)->Unit) {
+private data class ApprovedAttackChoice(val art:ApprovedAttackArt,val name:String,val classification:String,val mode:Ability,val charge:Boolean=false)
+@Composable fun AttackChooserRebuild(selected:Ability,onDismiss:()->Unit,onSelect:(Ability)->Unit,
+    profile:Profile=Profile(),charged:Boolean=false,onCharge:(()->Unit)?=null) {
+    val meleeLock=Engine.meleeLockReason(profile)
+    val chargeLock=meleeLock ?: if(profile.melee?.chargedDamageType==null) "Needs accepted charged bonus damage type" else null
     val choices=listOf(
         ApprovedAttackChoice(ApprovedAttackArt.ELEMENTAL,"Elemental shot","Ranged attack",Ability.ELEMENTAL),
-        ApprovedAttackChoice(ApprovedAttackArt.GAUNTLET,"Gauntlet strike","Mechanics pending",null),
-        ApprovedAttackChoice(ApprovedAttackArt.CHARGED_GAUNTLET,"Charged gauntlet","Mechanics pending",null),
+        ApprovedAttackChoice(ApprovedAttackArt.GAUNTLET,"Guardian gauntlet","Ordinary Thunder melee",Ability.GUARDIAN),
+        ApprovedAttackChoice(ApprovedAttackArt.GAUNTLET,"Gauntlet strike","Melee · 5 ft",Ability.GAUNTLET),
+        ApprovedAttackChoice(ApprovedAttackArt.CHARGED_GAUNTLET,"Charged gauntlet",if(charged) "Charge prepared" else "Bonus Action + melee",Ability.GAUNTLET,true),
         ApprovedAttackChoice(ApprovedAttackArt.SPELL_SHOT,"Spell-imbued shot","Configured spell",Ability.SPELL),
-        ApprovedAttackChoice(ApprovedAttackArt.SPELL_STRIKE,"Spell-imbued strike","Mechanics pending",null),
+        ApprovedAttackChoice(ApprovedAttackArt.SPELL_STRIKE,"Spell-imbued strike","Melee + spell",Ability.SPELL_GAUNTLET),
         ApprovedAttackChoice(ApprovedAttackArt.DISCHARGE,"Discharge","Save-based area",Ability.DISCHARGE))
     PlayerSheet("Choose attack",onDismiss) {
+        val reasons=listOfNotNull(meleeLock,Engine.guardianLockReason(profile),chargeLock).distinct()
+        if(reasons.isNotEmpty()) PlayerDisclosure("Gauntlet requirements") {
+            reasons.forEach { Text(it,style=MaterialTheme.typography.bodySmall,color=Frost) }
+            Text("Review Config → Rules & profile → Gauntlet configuration. Accepted modifiers and damage types stay explicit.",style=MaterialTheme.typography.bodySmall,color=Muted)
+        }
         choices.chunked(2).forEach {row->Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
             row.forEach {choice->
-                val available=choice.mode!=null
-                val active=choice.mode==selected || (selected==Ability.ARCANE && choice.mode==Ability.ELEMENTAL)
+                val lock=if(choice.charge) chargeLock else if(choice.mode==Ability.GUARDIAN) Engine.guardianLockReason(profile) else if(choice.mode in listOf(Ability.GAUNTLET,Ability.SPELL_GAUNTLET)) meleeLock else null
+                val available=lock==null && (!choice.charge || charged || onCharge!=null)
+                val active=choice.mode==selected && (choice.mode!=Ability.GAUNTLET || choice.charge==charged) || (selected==Ability.ARCANE && choice.mode==Ability.ELEMENTAL)
                 PlayerCard(Modifier.weight(1f).fillMaxHeight().then(if(!available) Modifier.semantics {disabled()} else Modifier),
-                    onClick=choice.mode?.let {mode->{onSelect(mode)}},padding=12.dp,spacing=4.dp) {
+                    onClick=if(available) {{if(choice.charge && !charged) onCharge?.invoke() else onSelect(choice.mode)}} else null,padding=12.dp,spacing=4.dp) {
                     ApprovedAttackMedallion(choice.art,Modifier.size(64.dp).alpha(if(available) 1f else .45f))
                     Text(choice.name,style=MaterialTheme.typography.titleMedium,color=if(available) MaterialTheme.colorScheme.onSurface else Muted)
-                    Text(if(active) "Selected" else choice.classification,style=MaterialTheme.typography.bodySmall,color=Muted)
+                    Text(if(lock!=null) if(choice.charge && meleeLock==null) "Locked · confirm charged damage type" else if(choice.mode==Ability.GUARDIAN && meleeLock==null) "Locked · confirm Guardian attack bonus" else "Locked · configure melee profile"
+                        else if(active) "Selected · ${choice.classification}" else choice.classification,style=MaterialTheme.typography.bodySmall,color=Muted)
                 }
             }
         }}
         PlayerDisclosure("Existing weapon modes") {
             PlayerEntry("Arcane shot","Neutral Force · existing ranged attack","Weapon",{onSelect(Ability.ARCANE)})
-            PlayerEntry("Shatter","Destroys the installed core · review before rolling","Core",{onSelect(Ability.SHATTER)})
         }
     }
 }
@@ -399,7 +425,7 @@ private data class ApprovedAttackChoice(val art:ApprovedAttackArt,val name:Strin
                 Text(roll.attackTotal?.let {"$it to hit"} ?: "Blast dice ready",style=MaterialTheme.typography.headlineLarge,color=Frost)
                 Text(roll.attackDescription(p))
                 if(roll.suggestedOutcome==Outcome.CRITICAL) Text("NATURAL 20 · critical dice included",color=Brass)
-                if(roll.suggestedOutcome==Outcome.MISS) Text("Miss · the blast still detonates")
+                if(roll.suggestedOutcome==Outcome.MISS) Text(if(p.blast) "Miss · the blast still detonates" else "Miss · no damage applied; spent magic and charges stay consumed")
                 val shown=components.groupBy {it.damage.type}.mapValues {(_,cs)->cs.sumOf {roll.damage.getValue(it.id).total}}
                 Text(shown.damageText(),style=MaterialTheme.typography.headlineSmall,color=Brass)
                 DiceDetails(pending)

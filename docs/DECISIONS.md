@@ -1,5 +1,25 @@
 # Engineering decisions
 
+## Current 2.1 preservation requirement
+
+The owner's 18 October 2026 master upgrade supersedes the destructive history
+retention decision recorded below for application 1.5.1. The newest 20 rolls and
+accounting operations remain the bounded interactive/undo view. Original older
+rolls, events, campaign snapshots and legacy archives must survive normalization,
+later actions, imports and complete backup/restore. Malformed historical bodies
+must be preserved as opaque records even when they cannot enter the active view.
+An old enum decoding successfully is not evidence that its original record was
+retained. Data deleted by an earlier release cannot be recreated by this update.
+
+The correction uses immutable raw records in the existing `archives` table and
+a streaming complete-backup format; it introduces no second inventory database
+or change to frozen historical Room schema JSON. Focused startup/migration,
+rollback, replay and complete-backup regressions pass in both Android variants.
+See [history preservation](HISTORY_PRESERVATION.md) for the contract and limits;
+consult the exact source and final report for full-build/native acceptance. The older
+sections below describe their named releases, not permission to delete history
+in 2.1.
+
 ## Toolchain
 
 Pinned stable versions: Android compile/target API 36; min API 26; AGP 8.13.2; Gradle 8.13; Kotlin/Compose compiler 2.2.21; Compose BOM 2025.12.01; Room 2.8.4; DataStore 1.2.0; KSP 2.2.21-2.0.4; Activity Compose 1.12.2; Lifecycle 2.10.0; core-ktx 1.17.0; JDK 17. No previews or dynamic dependency versions.

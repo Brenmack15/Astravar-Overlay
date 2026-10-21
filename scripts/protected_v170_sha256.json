@@ -3,10 +3,10 @@
   "files": {
     "app/schemas/com.yazsras.astravar.data.AstravarDb/2.json": "d82ab53b42c7f22d3e902f9874fb850e3f165c71639a98b46e65278f7e9f0a78",
     "app/schemas/com.yazsras.astravar.data.AstravarDb/3.json": "9e5e5d180cb4ffbc65623805795dde7e00e71dac707b46ed25db9cafd5de9585",
-    "app/src/main/java/com/yazsras/astravar/data/HistoryStorage.kt": "62c5c6412de5e5fd6ff12c1083c1fe3c793e5d3d4cfe56ce080c704eb2371c54",
-    "app/src/main/java/com/yazsras/astravar/data/Store.kt": "c6602445a62cc9b23df11bb663f54cb8b5d06011db05dcb82ada704d647cf03d",
+    "app/src/main/java/com/yazsras/astravar/data/HistoryStorage.kt": "c7968f73293f5d8f46fa148be3fbbb74352565e914ef3b1762f88800104dbb62",
+    "app/src/main/java/com/yazsras/astravar/data/Store.kt": "17c00ac0996007b028b99af360205c59f0694b258e7184b267067ffa038ed3be",
     "app/src/main/java/com/yazsras/astravar/overlay/ArcaneSurface.kt": "e73af0007da85e7807f1e8d3245347eb6256d507c17b67bbb4dd456285669cbb",
-    "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": "90851da55e3bb18274946a37e1bac8aa43f1f329f7aad4b47f93767cf16b8bb3",
+    "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": "60c2f1874d21a60f4bc6dd8490a6a295cbe75786601d438283fc9e53df79ef3e",
     "app/src/main/res/drawable-nodpi/astravar_cutout.webp": "580c7e31c3cab1ebfef5b5b449b660c45d3b055ff88c876f8f12876115cce7c4",
     "app/src/main/res/drawable-nodpi/astravar_reference.jpg": "c60543080b52334ec9e8637f6509c1a146e7f284d39d15a2d9c696a48e6df3dd",
     "app/src/main/res/font/cinzel.ttf": "7edcff5bbab3644c973b7df42f57368fa5e71ebf49ce5ea24f74f80bcd679cbb",
@@ -18,21 +18,140 @@
     "app/src/main/res/raw/font_notices_keep.xml": "99f596b50913cd4b7cbfa4e08f4203273e92c1adceb50b19f3af8f6c31b68ff3",
     "app/src/main/res/raw/inter_ofl.txt": "5b9321a4298cfeb6b34354164a1c3afc3db114569984c502b9b35d988fd58c57",
     "rules/build.gradle.kts": "25d6eac2ed7ca251ffc432e18d6e8f44a94211a54e2768623c7f102cc875fa7b",
-    "rules/src/main/kotlin/com/yazsras/astravar/rules/BackupCodec.kt": "c0dee331adc50ac4a042379203d4b0e4b459e81046bf873bdcdd7b099feb0fbc",
-    "rules/src/main/kotlin/com/yazsras/astravar/rules/DiceRoller.kt": "24f613cf445f16e1c6dbe6cfa67576cb4e3f3b52a04c1528d10e52c670d3b257",
-    "rules/src/main/kotlin/com/yazsras/astravar/rules/Engine.kt": "16261ebf284139f3d2a937bf394b09cbf0671b6e3fc5be83da9f7fd61bff4971",
+    "rules/src/main/kotlin/com/yazsras/astravar/rules/BackupCodec.kt": "0549c5fdf4766ad88a81e3d58f5ac8d16dbb6e781859c18e72097c042412a4e1",
+    "rules/src/main/kotlin/com/yazsras/astravar/rules/DiceRoller.kt": "c3ab14fe38139e85630e7ccbf2f7c07bc983254ca3da2dfb52bb3957be283899",
+    "rules/src/main/kotlin/com/yazsras/astravar/rules/Engine.kt": "7228b65f1b492266a1a0fd97f8e0534a89cce87f2ace3f1a1c3bb690ad30d7df",
     "rules/src/main/kotlin/com/yazsras/astravar/rules/HistoryJson.kt": "82a94a6275e539237357c53677488a263f3d006ffe2ad6fd4a49eeb8f08b4a1f",
-    "rules/src/main/kotlin/com/yazsras/astravar/rules/HistoryRetention.kt": "af2bcb67a804f92b07cfb593f595c465bae131d4c6014cd55f471c800555399d",
-    "rules/src/main/kotlin/com/yazsras/astravar/rules/Model.kt": "13108810a2e713f8463e8edbd4f46ec8f05a9729df9d185dd2242e2765499d86",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/BackupCodecTest.kt": "1d6515853bb4dc20c8d87ce4d0b9f0903e5f9dcb9b8a8177b4a4556eb1cac640",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/DiceRollerTest.kt": "53d9b9937630e0770b6cd1b5b3a2a0596f091be6fcd5d2730925a9f7d036cd77",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/ElementalSelectorTest.kt": "f7a842f9be15c5f71d1e2ed4f7042f621017684af6075850c488ed16b16a2fdd",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/EmergencyScalingTest.kt": "126b13b9288211dfd3fee6430b705273ff128feb3a3821e215a4e417aea5d939",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/EngineTest.kt": "ede950caa725db7f226d0f4ff98ffb119df36471e4e023268641e687ddb28470",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/ForceMigrationTest.kt": "3fd1f2f5b4f39dd938170443a71ef94ef15a36b604c55f48b824a0052735933a",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/HistoryRetentionTest.kt": "4a83a858d72c1c9098d1b48901162b220503d5c221d40d41409700e9f0097a45",
-    "rules/src/test/kotlin/com/yazsras/astravar/rules/PrimaryForceTest.kt": "d50c4329e34a2e31922d9d37db3867d63c732e362b3ce579c72dc1c615967662",
+    "rules/src/main/kotlin/com/yazsras/astravar/rules/HistoryRetention.kt": "ff179553fdd944ffa020211589a47cdf13d387ed5a2217b67131e7c66f1d97e9",
+    "rules/src/main/kotlin/com/yazsras/astravar/rules/Model.kt": "0c17dde66699844d0a87c32506e9a61eb48f1f4de98b10e3f3355e06c990618d",
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/BackupCodecTest.kt": "76ad5eea212aff956648d1e636817a56dc816387c074b085490e2ef74971a8d6",
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/DiceRollerTest.kt": "d815341ebed13c7eff66afc13dca59164996fd0c715687b57715f5f91edd8f44",
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/ElementalSelectorTest.kt": "ea8a48788c545b06c98e7bb72cca460f7f086990c69eb4632cf1373097459599",
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/EmergencyScalingTest.kt": "e147ca1fd0da0dbd98b0efec29aa136722bffd0a8d28af9003b3dc8f769b8490",
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/EngineTest.kt": "d10f11611b43050964eafa3c834535d0348b5ddcac0537bffb92a30a93888cf5",
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/ForceMigrationTest.kt": "e25301c9403ae2b79c65a5d2ddf3e7b91d46460bc34de0451d40f985a9b58e63",
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/HistoryRetentionTest.kt": "42162dbe3ae23bae6333b71b3abe6c36313f5aca68ea2c770f77b392b9885aff",
+    "rules/src/test/kotlin/com/yazsras/astravar/rules/PrimaryForceTest.kt": "f7f8c9339d4250c53b194aa9aaf570d302b2146ecc8b47e0498a3fd58b7e5d21",
     "rules/src/test/kotlin/com/yazsras/astravar/rules/SelectorMigrationTest.kt": "c7a1b535fdb76b48f0bc3b4df865b957411942b443e4ae155ca03d71210d491d",
     "rules/src/test/kotlin/com/yazsras/astravar/rules/WeaponWorkflowTest.kt": "36d788ce7e2e7174e8b391c3e330c6e81c23ff0656b9fd8896277571a55ac425"
+  },
+  "authorized_player_first_source_changes": {
+    "authorization": "Owner Astravar2.1 master development directive,18October2026",
+    "verified_pr4_base": "28c890a9af83a5e83f33d639f0fed2734af35a0f",
+    "scope": "Reviewed source evolution; original artwork, historical schema JSON and owner signing block remain immutable. Test results are recorded separately.",
+    "files": {
+      "app/src/main/java/com/yazsras/astravar/data/Store.kt": {
+        "previous_pinned_sha256": "c6602445a62cc9b23df11bb663f54cb8b5d06011db05dcb82ada704d647cf03d",
+        "reviewed_sha256": "17c00ac0996007b028b99af360205c59f0694b258e7184b267067ffa038ed3be",
+        "reason": "Selectively retire stale Shatter preference; preserve other preferences and immutable history. Preserve original history before mutations/imports, retain omitted shots without duplicate dice graphs, and deduplicate old command IDs beyond the recent window; expose complete streaming backup hooks.",
+        "additional_reviews": [
+          {
+            "previous_reviewed_sha256": "61dc33220fec3d279b93047bc14e53d4101c62431fc2087c95c41a6501e02fc6",
+            "reviewed_sha256": "17c00ac0996007b028b99af360205c59f0694b258e7184b267067ffa038ed3be",
+            "reason": "Preserve original history before mutations/imports, retain omitted shots without duplicate dice graphs, and deduplicate old command IDs beyond the recent window; expose complete streaming backup hooks.",
+            "source_commit": "ddf1a50"
+          }
+        ]
+      },
+      "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": {
+        "previous_pinned_sha256": "30f890627065eee06373db12499118b2107176cedd1abe9d92fa02c7b8d09576",
+        "reviewed_sha256": "355b4b5bf6e8fa934eba59c453ddb83d0d11ca1001d34bbf72fa38f032141153",
+        "reason": "Native permanent-nexus controls and accepted sourced melee; shared engine remains authoritative. Shared selector keeps unlocked advanced elements usable individually alongside accepted basic-only Dual Resonance. Payload selection preserves already chosen Discharge or Spell-Imbued Gauntlet instead of changing attack type. Explicit result-dial and mode-callback statements resolve lint indentation diagnostics without behavior changes."
+      },
+      "rules/src/main/kotlin/com/yazsras/astravar/rules/BackupCodec.kt": {
+        "previous_pinned_sha256": "c0dee331adc50ac4a042379203d4b0e4b459e81046bf873bdcdd7b099feb0fbc",
+        "reviewed_sha256": "0549c5fdf4766ad88a81e3d58f5ac8d16dbb6e781859c18e72097c042412a4e1",
+        "reason": "Validate added sourced profiles/adoption while preserving historical Shatter decoding. Document the unchanged bounded codec as a working-view compatibility API; complete Android history backup uses the separately tested streaming archive transport.",
+        "additional_reviews": [
+          {
+            "previous_reviewed_sha256": "1090f801d99c3acde1af9437fe470d60bb10812384f8726e43ec408048282b1c",
+            "reviewed_sha256": "0549c5fdf4766ad88a81e3d58f5ac8d16dbb6e781859c18e72097c042412a4e1",
+            "reason": "Document the unchanged bounded codec as a working-view compatibility API; complete Android history backup uses the separately tested streaming archive transport.",
+            "source_commit": "ddf1a50"
+          }
+        ]
+      },
+      "rules/src/main/kotlin/com/yazsras/astravar/rules/DiceRoller.kt": {
+        "previous_pinned_sha256": "24f613cf445f16e1c6dbe6cfa67576cb4e3f3b52a04c1528d10e52c670d3b257",
+        "reviewed_sha256": "c3ab14fe38139e85630e7ccbf2f7c07bc983254ca3da2dfb52bb3957be283899",
+        "reason": "Accepted melee critical/flat semantics and shared persistent accounting."
+      },
+      "rules/src/main/kotlin/com/yazsras/astravar/rules/Engine.kt": {
+        "previous_pinned_sha256": "16261ebf284139f3d2a937bf394b09cbf0671b6e3fc5be83da9f7fd61bff4971",
+        "reviewed_sha256": "7228b65f1b492266a1a0fd97f8e0534a89cce87f2ace3f1a1c3bb690ad30d7df",
+        "reason": "New-play Shatter/spare-core denial, sourced melee, versioned formulas, one-time sourced legacy adoption."
+      },
+      "rules/src/main/kotlin/com/yazsras/astravar/rules/Model.kt": {
+        "previous_pinned_sha256": "13108810a2e713f8463e8edbd4f46ec8f05a9729df9d185dd2242e2765499d86",
+        "reviewed_sha256": "0c17dde66699844d0a87c32506e9a61eb48f1f4de98b10e3f3355e06c990618d",
+        "reason": "Additive serialized profiles, charge/adoption state; retain legacy names and snapshot defaults."
+      },
+      "rules/src/test/kotlin/com/yazsras/astravar/rules/BackupCodecTest.kt": {
+        "previous_pinned_sha256": "1d6515853bb4dc20c8d87ce4d0b9f0903e5f9dcb9b8a8177b4a4556eb1cac640",
+        "reviewed_sha256": "76ad5eea212aff956648d1e636817a56dc816387c074b085490e2ef74971a8d6",
+        "reason": "Keep historical combat fixtures explicit after retiring their execution for new play; assertions retain old results."
+      },
+      "rules/src/test/kotlin/com/yazsras/astravar/rules/DiceRollerTest.kt": {
+        "previous_pinned_sha256": "53d9b9937630e0770b6cd1b5b3a2a0596f091be6fcd5d2730925a9f7d036cd77",
+        "reviewed_sha256": "d815341ebed13c7eff66afc13dca59164996fd0c715687b57715f5f91edd8f44",
+        "reason": "Keep historical combat fixtures explicit after retiring their execution for new play; assertions retain old results."
+      },
+      "rules/src/test/kotlin/com/yazsras/astravar/rules/ElementalSelectorTest.kt": {
+        "previous_pinned_sha256": "f7a842f9be15c5f71d1e2ed4f7042f621017684af6075850c488ed16b16a2fdd",
+        "reviewed_sha256": "ea8a48788c545b06c98e7bb72cca460f7f086990c69eb4632cf1373097459599",
+        "reason": "Keep historical combat fixtures explicit after retiring their execution for new play; assertions retain old results."
+      },
+      "rules/src/test/kotlin/com/yazsras/astravar/rules/EmergencyScalingTest.kt": {
+        "previous_pinned_sha256": "126b13b9288211dfd3fee6430b705273ff128feb3a3821e215a4e417aea5d939",
+        "reviewed_sha256": "e147ca1fd0da0dbd98b0efec29aa136722bffd0a8d28af9003b3dc8f769b8490",
+        "reason": "Keep historical combat fixtures explicit after retiring their execution for new play; assertions retain old results."
+      },
+      "rules/src/test/kotlin/com/yazsras/astravar/rules/EngineTest.kt": {
+        "previous_pinned_sha256": "ede950caa725db7f226d0f4ff98ffb119df36471e4e023268641e687ddb28470",
+        "reviewed_sha256": "d10f11611b43050964eafa3c834535d0348b5ddcac0537bffb92a30a93888cf5",
+        "reason": "Keep historical combat fixtures explicit after retiring their execution for new play; assertions retain old results."
+      },
+      "rules/src/test/kotlin/com/yazsras/astravar/rules/ForceMigrationTest.kt": {
+        "previous_pinned_sha256": "3fd1f2f5b4f39dd938170443a71ef94ef15a36b604c55f48b824a0052735933a",
+        "reviewed_sha256": "e25301c9403ae2b79c65a5d2ddf3e7b91d46460bc34de0451d40f985a9b58e63",
+        "reason": "Keep historical combat fixtures explicit after retiring their execution for new play; assertions retain old results."
+      },
+      "rules/src/test/kotlin/com/yazsras/astravar/rules/HistoryRetentionTest.kt": {
+        "previous_pinned_sha256": "4a83a858d72c1c9098d1b48901162b220503d5c221d40d41409700e9f0097a45",
+        "reviewed_sha256": "42162dbe3ae23bae6333b71b3abe6c36313f5aca68ea2c770f77b392b9885aff",
+        "reason": "Keep historical combat fixtures explicit after retiring their execution for new play; assertions retain old results."
+      },
+      "rules/src/test/kotlin/com/yazsras/astravar/rules/PrimaryForceTest.kt": {
+        "previous_pinned_sha256": "d50c4329e34a2e31922d9d37db3867d63c732e362b3ce579c72dc1c615967662",
+        "reviewed_sha256": "f7f8c9339d4250c53b194aa9aaf570d302b2146ecc8b47e0498a3fd58b7e5d21",
+        "reason": "Keep historical combat fixtures explicit after retiring their execution for new play; assertions retain old results."
+      },
+      "app/src/main/java/com/yazsras/astravar/data/HistoryStorage.kt": {
+        "previous_pinned_sha256": "62c5c6412de5e5fd6ff12c1083c1fe3c793e5d3d4cfe56ce080c704eb2371c54",
+        "reviewed_sha256": "c7968f73293f5d8f46fa148be3fbbb74352565e914ef3b1762f88800104dbb62",
+        "reason": "Supersede destructive retention with transactional raw preservation before recent-view normalization; retain legacy archives and separate malformed decoding from SQLite failures.",
+        "source_commit": "ddf1a50"
+      },
+      "rules/src/main/kotlin/com/yazsras/astravar/rules/HistoryRetention.kt": {
+        "previous_pinned_sha256": "af2bcb67a804f92b07cfb593f595c465bae131d4c6014cd55f471c800555399d",
+        "reviewed_sha256": "ff179553fdd944ffa020211589a47cdf13d387ed5a2217b67131e7c66f1d97e9",
+        "reason": "Clarify that the unchanged twenty-entry limit applies to the working/undo projection, not destruction of immutable history or complete backups.",
+        "source_commit": "ddf1a50"
+      }
+    }
+  },
+  "authorized_campaign_sync_source_changes": {
+    "authorization": "Owner ASTRAVAR2.2 complete campaign integration directive,21October2026",
+    "verified_source_baseline": "abae4f49beec75d14a364be91f7d0fb4303524ad",
+    "scope": "Reviewed additive campaign synchronization and wallet/backup evolution. Historical source provenance, original assets, protected combat engine, immutable historical schemas and owner signing configuration are retained. Test evidence is recorded separately.",
+    "files": {
+      "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": {
+        "previous_pinned_sha256": "355b4b5bf6e8fa934eba59c453ddb83d0d11ca1001d34bbf72fa38f032141153",
+        "reviewed_sha256": "60c2f1874d21a60f4bc6dd8490a6a295cbe75786601d438283fc9e53df79ef3e",
+        "reason": "Insert only the foreground campaign delivery loop into the existing session. Combat, dice, weapon formulas, controls, artwork, accounting and all other overlay source remain byte-identical after removing that exact insertion.",
+        "exact_authorized_insertion": "        // The existing visible foreground session keeps delivery active while the player uses ChatGPT.\n        // A successful network poll alone never becomes a claimed committed gameplay save.\n        scope.launch(Dispatchers.IO) {\n            val campaign = CampaignConnectionClient(applicationContext)\n            try {\n                while (isActive) {\n                    try { campaign.foreground() }\n                    catch (e: CancellationException) { throw e }\n                    catch (_: Exception) { /* Durable inbox/outbox and verified status survive network interruption. */ }\n                    delay(5_000)\n                }\n            } finally { campaign.close() }\n        }\n",
+        "after_removing_exact_insertion_sha256": "355b4b5bf6e8fa934eba59c453ddb83d0d11ca1001d34bbf72fa38f032141153"
+      }
+    }
   }
 }

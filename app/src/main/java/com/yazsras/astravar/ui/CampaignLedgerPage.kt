@@ -29,14 +29,16 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.ByteArrayOutputStream
+import java.util.UUID
 
 /** Presentation only: stable identities, revisions, events and transactions remain repository-owned. */
 @Composable
-fun CampaignLedgerPage(repository: CampaignLedgerRepository) {
+fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (() -> Unit)? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val records = repository.records
     val items by repository.items.collectAsState(initial = emptyList())
+    val placements by repository.party.placements.collectAsState(initial = emptyList())
     val itemDetails by records.itemDetails.collectAsState(initial = emptyList())
     val itemProperties by records.itemProperties.collectAsState(initial = emptyList())
     val links by records.links.collectAsState(initial = emptyList())
@@ -48,6 +50,8 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository) {
     var filter by rememberSaveable { mutableStateOf("All") }
     var mode by rememberSaveable { mutableStateOf("") }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    // A saved Activity state can predate a successful Room commit. Replaying that draft must return its receipt.
+    var profileCommandId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
     // Frozen serializable editor baselines survive recreation, including their optimistic revision.
     val itemDraft = rememberUiDraftText()
     var itemSnapshot by itemDraft
@@ -97,6 +101,7 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository) {
 
     val eventsFlow = remember(selectedId) { selectedId?.let(repository::eventsForItem) }
     val events = eventsFlow?.collectAsState(initial = emptyList())?.value.orEmpty()
+    val structuredPlacement = placements.firstOrNull { it.itemId == selectedId }
     val stale = selected != null && loadedItem != null && selected.revision != loadedItem.revision
     val details = itemDetails.firstOrNull { it.itemId == selectedId }
     val staleDetails = details != null && loadedDetails != null && details.revision != loadedDetails.revision
@@ -135,6 +140,7 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository) {
     }
     fun load(item: LedgerItem?) {
         itemSnapshot = item?.let { Json.encodeToString(it) }; selectedId = item?.id; draftToken++
+        profileCommandId = UUID.randomUUID().toString()
         // An explicit reopen/reload replaces failed draft references from authoritative state.
         detailsSnapshot = null; propertySnapshot = null
         title = item?.title.orEmpty(); category = item?.category ?: "Other"; owner = item?.owner ?: "Unknown"
@@ -165,7 +171,7 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository) {
             notionPageId = notionId.trim().ifEmpty { null }, imageBase64 = iconData, archived = archived)
         execute {
             require(raw.isEmpty() || raw.toIntOrNull() != null) { "Quantity must be a whole number or blank." }
-            val saved = if (before == null) repository.create(draft) else repository.update(before.id, before.revision, draft, draft.source)
+            val saved = if (before == null) repository.create(draft, profileCommandId) else repository.update(before.id, before.revision, draft, draft.source, profileCommandId)
             load(saved); mode = if (saved.archived) "" else "detail"; message = "Item saved"
         }
     }
@@ -192,6 +198,7 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository) {
             PlayerButton(onClick = { load(null); mode = "create" }, enabled = !busy) { Text("Add Item") }
         }
         PlayerSearch(query, { query = it }, "Search inventory")
+        if (openReferences != null) PlayerEntry("Inventory source archive", "Original descriptions, acquisitions and historical records", "History", openReferences)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             (listOf("All") + items.map { it.category }.distinct().sorted()).forEach { name ->
                 PlayerFilterChip(selected = filter == name, onClick = { filter = name }, label = { Text(name) })
@@ -256,14 +263,14 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository) {
                     Field("Item name", title, { title = it }, enabled = !busy)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Box(Modifier.weight(1f)) { Choices("Category", listOf("Armor", "Weapon", "Tool", "Component", "Material", "Magic Item", "Consumable", "Treasure", "Other"), category, enabled = !busy) { category = it } }
-                        Box(Modifier.weight(1f)) { Field("Quantity", quantity, { quantity = it }, enabled = !busy) }
+                        Box(Modifier.weight(1f)) { Field("Quantity", quantity, { quantity = it }, enabled = !busy && structuredPlacement == null) }
                     }
-                    Text("Blank quantity means unknown", style = MaterialTheme.typography.labelSmall, color = Muted)
+                    Text(if (structuredPlacement == null) "Blank quantity means unknown" else "Party → Equipment records ownership and quantity changes atomically. These fields are read-only here.", style = MaterialTheme.typography.labelSmall, color = Muted)
                     Field("Description / appearance", description, { description = it }, single = false, enabled = !busy)
                     ExpandableRecordSection("Ownership & location") {
-                        Field("Owner / holder label", owner, { owner = it }, enabled = !busy)
-                        Choices("Current state", listOf("Unknown", "Carried", "Equipped", "Installed", "Stored", "Consumed", "Sold", "Lost"), itemState, enabled = !busy) { itemState = it }
-                        Field("Specific location / container (optional)", location, { location = it }, enabled = !busy)
+                        Field("Owner / holder label", owner, { owner = it }, enabled = !busy && structuredPlacement == null)
+                        Choices("Current state", listOf("Unknown", "Carried", "Equipped", "Installed", "Stored", "Consumed", "Sold", "Lost"), itemState, enabled = !busy && structuredPlacement == null) { itemState = it }
+                        Field("Specific location / container (optional)", location, { location = it }, enabled = !busy && structuredPlacement == null)
                     }
                     ExpandableRecordSection("Properties & research notes") {
                         Field("Known properties / legacy notes", known, { known = it }, single = false, enabled = !busy)
@@ -327,8 +334,11 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository) {
                         events.take(historyLimit).forEach { entry ->
                             PlayerTextButton(onClick = { eventId = entry.commandId; mode = "event" }) { Column(Modifier.fillMaxWidth()) { Text(entry.kind.replace('_', ' '), color = Frost); Text(entry.detail, color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis) } }
                         }
-                        audit.filter { entry -> entry.recordId == item.id || entry.recordId in itemProperties.filter { p -> p.itemId == item.id }.map { p -> p.id } || entry.recordId in links.filter { link -> (link.fromType == "item" && link.fromId == item.id) || (link.toType == "item" && link.toId == item.id) }.map { it.id } }.take(historyLimit).forEach { entry -> RecordValue(entry.kind, entry.source) }
-                        if (events.size > historyLimit) PlayerTextButton(onClick = { historyLimit += 40 }) { Text("Show more item history") }
+                        val propertyIds = itemProperties.filter { it.itemId == item.id }.map { it.id }.toSet()
+                        val linkIds = links.filter { (it.fromType == "item" && it.fromId == item.id) || (it.toType == "item" && it.toId == item.id) }.map { it.id }.toSet()
+                        val relatedAudit = audit.filter { it.recordId == item.id || it.recordId in propertyIds || it.recordId in linkIds }
+                        relatedAudit.take(historyLimit).forEach { entry -> RecordValue(entry.kind, entry.source) }
+                        if (events.size > historyLimit || relatedAudit.size > historyLimit) PlayerTextButton(onClick = { historyLimit += 40 }) { Text("Show more item history") }
                         Text(item.id, color = Muted, style = MaterialTheme.typography.labelSmall)
                     }
                 }

@@ -1,4 +1,4 @@
-"""Fail if the UI reconstruction alters the verified engineering foundation."""
+"""Verify immutable assets/signing and explicitly reviewed 2.1 source digests."""
 import hashlib
 import json
 from pathlib import Path
@@ -14,4 +14,10 @@ if hashlib.sha256(owner.encode()).hexdigest() != manifest['owner_signing_block_s
     changed.append('owner signing configuration')
 if changed:
     raise SystemExit('Verified foundation changed: ' + ', '.join(changed))
-print(f"Preserved {len(manifest['files'])} foundation files and owner signing block from {manifest['base']}")
+sync_review = manifest.get('authorized_campaign_sync_source_changes', {})
+assert sync_review.get('verified_source_baseline') == 'abae4f49beec75d14a364be91f7d0fb4303524ad'
+for name, review in sync_review['files'].items():
+    assert review['reviewed_sha256'] == manifest['files'][name] and review['previous_pinned_sha256'] != review['reviewed_sha256']
+
+reviewed = len(manifest.get('authorized_player_first_source_changes', {}).get('files', {}))
+print(f"Verified {len(manifest['files'])} pinned foundation files ({reviewed} reviewed 2.1 source changes) and unchanged owner signing block")

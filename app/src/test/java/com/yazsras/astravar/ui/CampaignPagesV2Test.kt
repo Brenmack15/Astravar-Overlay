@@ -40,6 +40,10 @@ class CampaignPagesV2Test {
         ApplicationProvider.getApplicationContext(), CampaignLedgerDb::class.java
     ).build()
 
+    private fun snapshot(repository: CampaignLedgerRepository) = runBlocking {
+        campaignJson.decodeFromString<LedgerExport>(repository.export()).copy(exportedAt = 0)
+    }
+
     @Test fun openingEekNeverInitializesHistoricalHpOrRecovery() {
         val db = database()
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
@@ -80,6 +84,91 @@ class CampaignPagesV2Test {
                 assertTrue(db.recordsDao().allCrafts().isEmpty())
                 assertEquals(1, db.recordsDao().allAudit().size)
             }
+        } finally { activity.pause().stop().destroy(); db.close() }
+    }
+
+    @Test fun researchAndMaterialLinksRemainReferencesRegardlessOfProjectStatus() {
+        val db = database()
+        val repo = CampaignLedgerRepository(db)
+        val projects = listOf("Proposed", "Completed").map { status ->
+            InventionProject(title = "Synthetic $status design", status = status)
+        }
+        runBlocking {
+            val clue = repo.create(LedgerDraft(title = "Synthetic research sample", quantity = null, source = "Synthetic research"))
+            val material = repo.create(LedgerDraft(title = "Synthetic stored plates", quantity = 4, source = "Synthetic material purchase"))
+            projects.forEach { project ->
+                repo.records.saveProject(project, source = "Synthetic recorded design status")
+                repo.records.saveRequirement(MaterialRequirement(projectId = project.id, label = "Plates needed", itemId = material.id, quantity = null), source = "Synthetic unconfirmed requirement")
+                repo.records.saveLink(CampaignLink("item", clue.id, "project", project.id, "Fictional research clue"), source = "Synthetic research association")
+                repo.records.saveLink(CampaignLink("project", project.id, "item", material.id, "Purchased materials reference"), source = "Synthetic material association")
+            }
+        }
+        val before = snapshot(repo)
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { AstravarTheme { InventionsPageV2(repo) } }
+            projects.forEach { project ->
+                compose.waitUntil(10_000) { compose.onAllNodesWithText(project.title).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText(project.title).performScrollTo().performClick()
+                compose.onNodeWithText("Physical output").performScrollTo().performClick()
+                compose.onNodeWithText("No linked physical output or equipment").performScrollTo().assertIsDisplayed()
+                compose.onNodeWithText("Synthetic research sample").assertDoesNotExist()
+                compose.onNodeWithText("Synthetic stored plates").assertDoesNotExist()
+                compose.onNodeWithText("References & associations").performScrollTo().performClick()
+                compose.onNodeWithText("Fictional research clue").performScrollTo().assertIsDisplayed()
+                compose.onNodeWithText("Synthetic research sample").performScrollTo().assertIsDisplayed()
+                compose.onNodeWithText("Purchased materials reference").performScrollTo().assertIsDisplayed()
+                compose.onNodeWithText("Synthetic stored plates").performScrollTo().assertIsDisplayed()
+                compose.onNodeWithText("Close").performClick()
+            }
+            assertEquals(before, snapshot(repo))
+            assertTrue(before.records.crafts.isEmpty())
+            assertTrue(before.records.consumptions.isEmpty())
+            assertNull(before.items.single { it.title == "Synthetic research sample" }.quantity)
+        } finally { activity.pause().stop().destroy(); db.close() }
+    }
+
+    @Test fun confirmedCraftOutputIsSeparateFromResearchAndViewingDoesNotReplayCraft() {
+        val db = database()
+        val repo = CampaignLedgerRepository(db)
+        val project = InventionProject(title = "Synthetic confirmed workshop", status = "Blueprint")
+        runBlocking {
+            repo.records.saveProject(project, source = "Synthetic design")
+            val material = repo.create(LedgerDraft(title = "Synthetic craft copper", quantity = 4, source = "Synthetic materials"))
+            val clue = repo.create(LedgerDraft(title = "Synthetic craft research sample", quantity = null, source = "Synthetic research"))
+            repo.records.saveRequirement(MaterialRequirement(projectId = project.id, label = "Copper needed", itemId = material.id, quantity = 2), source = "Synthetic design")
+            repo.records.saveLink(CampaignLink("item", clue.id, "project", project.id, "Fictional research clue"), source = "Synthetic research association")
+            repo.records.saveLink(CampaignLink("project", project.id, "item", material.id, "Material source reference"), source = "Synthetic material association")
+            repo.records.confirmCraft(CraftCommand(project.id, project.revision,
+                listOf(MaterialConsumption(material.id, material.revision, 2)),
+                LedgerDraft(title = "Synthetic confirmed instrument", quantity = 1, source = "Synthetic confirmed construction"),
+                "Synthetic confirmed construction", "synthetic-ui-confirmed-craft"))
+        }
+        val before = snapshot(repo)
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { AstravarTheme { InventionsPageV2(repo) } }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText(project.title).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(project.title).performScrollTo().performClick()
+            compose.onNodeWithText("Physical output").performScrollTo().performClick()
+            compose.onNodeWithText("Confirmed craft output").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Synthetic confirmed instrument").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("No linked physical output or equipment").assertDoesNotExist()
+            compose.onNodeWithText("Synthetic craft research sample").assertDoesNotExist()
+            compose.onNodeWithText("Synthetic craft copper").assertDoesNotExist()
+            compose.onNodeWithText("Physical output").performScrollTo().performClick()
+            compose.onNodeWithText("References & associations").performScrollTo().performClick()
+            compose.onNodeWithText("Fictional research clue").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Synthetic craft research sample").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Material source reference").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Synthetic craft copper").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Synthetic confirmed instrument").assertDoesNotExist()
+            compose.onNodeWithText("Confirmed craft output").assertDoesNotExist()
+            assertEquals(before, snapshot(repo))
+            assertEquals("Completed", before.records.projects.single().status)
+            assertEquals(2, before.items.single { it.title == "Synthetic craft copper" }.quantity)
+            assertEquals(1, before.records.crafts.size)
+            assertEquals(1, before.records.consumptions.size)
         } finally { activity.pause().stop().destroy(); db.close() }
     }
 

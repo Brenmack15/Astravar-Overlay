@@ -6,6 +6,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -23,12 +27,26 @@ import com.yazsras.astravar.rules.*
 import kotlin.math.cos
 import kotlin.math.sin
 
+/** Shared native/overlay selection policy; combinations remain constrained by the engine. */
+fun elementSelectionAfterChoice(profile: Profile, current: List<DamageType>, chosen: DamageType): List<DamageType> {
+    if (chosen == DamageType.FORCE) return emptyList()
+    require(chosen in Engine.elements(profile)) { "Choose an unlocked element" }
+    if (profile.elementCapacity == 1) return listOf(chosen)
+    // Accepted Dual Resonance combines basic elements only. An unlocked advanced
+    // element is still usable by itself; selecting it replaces the pair, and
+    // choosing a basic element afterwards starts a new basic selection.
+    if (profile.elementCapacityOverride == null && (chosen !in Engine.basic || current.any { it !in Engine.basic }))
+        return listOf(chosen)
+    return if (chosen in current) current - chosen else (current + chosen).takeLast(profile.elementCapacity)
+}
+
 /** The approved clockwise order surrounds neutral Force; availability remains engine-owned. */
 @Composable
 fun ElementWheelV2(profile: Profile, selected: List<DamageType>, close: () -> Unit, choose: (DamageType) -> Unit) {
     val ring = listOf(DamageType.FIRE, DamageType.COLD, DamageType.LIGHTNING, DamageType.ACID,
         DamageType.POISON, DamageType.THUNDER, DamageType.NECROTIC, DamageType.PSYCHIC, DamageType.RADIANT)
-    val allowed = if (profile.elementCapacity > 1 && profile.elementCapacityOverride == null) Engine.basic else Engine.elements(profile)
+    val allowed = Engine.elements(profile)
+    var showUnlocks by rememberSaveable { mutableStateOf(false) }
     PlayerSheet("Choose an element", close) {
         BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio(.9f).testTag("element-wheel")) {
             val centerX = maxWidth / 2
@@ -37,7 +55,9 @@ fun ElementWheelV2(profile: Profile, selected: List<DamageType>, close: () -> Un
             val nodeHeight = maxHeight * .25f
             val radiusX = maxWidth * .36f
             val radiusY = maxHeight * .36f
-            ArcaneDial(Modifier.fillMaxSize(), RebuildPalette.BlueAccent.copy(alpha = .65f))
+            // Center the dial on the 48dp particle, whose center is 2dp padding
+            // + 24dp from its node's top. Labels must not move the visual center.
+            ArcaneDial(Modifier.fillMaxSize().offset(y = 26.dp - nodeHeight / 2), RebuildPalette.BlueAccent.copy(alpha = .65f))
             ring.forEachIndexed { index, type ->
                 val angle = Math.toRadians(-90.0 + index * 40.0)
                 val enabled = type in allowed
@@ -57,6 +77,12 @@ fun ElementWheelV2(profile: Profile, selected: List<DamageType>, close: () -> Un
                 close()
             }
         }
+        if (profile.elementCapacity > 1 && profile.elementCapacityOverride == null) Text("Dual Resonance combines two basic elements. An unlocked advanced element replaces that pair and is used alone.", style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
+        TextButton(onClick = { showUnlocks = !showUnlocks }, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text("Radiant, Psychic & Necrotic unlocks")
+        }
+        if (showUnlocks) Text("These elements require Artificer level 8 or higher and the confirmed Advanced Elements upgrade in Rules & profile. Configure each damage formula there. An unconfirmed capacity override does not grant an upgrade.",
+            style = MaterialTheme.typography.bodyMedium, color = RebuildPalette.Ice)
     }
 }
 

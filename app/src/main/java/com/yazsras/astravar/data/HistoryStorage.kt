@@ -6,7 +6,7 @@ import com.yazsras.astravar.rules.*
 import kotlinx.serialization.encodeToString
 import java.io.Reader
 
-/** Runs before Room exposes legacy state to any observer. No full history cursor is used. */
+/** Bounded working views; immutable raw archives preserve every source before normalization. */
 object HistoryStorage {
     const val ROLLS_QUERY="SELECT * FROM rolls ORDER BY sequence DESC, id DESC LIMIT " + HistoryRetention.MAX_HISTORY_ENTRIES
     const val EVENTS_QUERY="SELECT * FROM events ORDER BY revision DESC, id DESC LIMIT " + HistoryRetention.MAX_HISTORY_ENTRIES
@@ -18,8 +18,11 @@ object HistoryStorage {
         db.execSQL("CREATE INDEX IF NOT EXISTS index_events_revision_id ON events(revision DESC,id DESC)")
         db.execSQL("CREATE TRIGGER IF NOT EXISTS bound_rolls AFTER INSERT ON rolls BEGIN $PRUNE_ROLLS; END")
         db.execSQL("CREATE TRIGGER IF NOT EXISTS bound_events AFTER INSERT ON events BEGIN $PRUNE_EVENTS; END")
+        HistoryPreservation.install(db)
     }
     fun cleanup(db: SupportSQLiteDatabase) {
+        // Original bytes, including malformed and oversized records, must commit before any bounded-view cleanup.
+        HistoryPreservation.preserveAll(db)
         db.execSQL(PRUNE_EVENTS);db.execSQL(PRUNE_ROLLS)
         val hasState=db.query("SELECT id FROM campaign WHERE id=1").use {it.moveToFirst()}
         if(hasState) {
@@ -33,22 +36,26 @@ object HistoryStorage {
         // Only indexed identifiers are collected, already bounded by SQL. Each body is streamed separately.
         val ids=db.query("SELECT id FROM events ORDER BY revision DESC,id DESC LIMIT ${HistoryRetention.MAX_HISTORY_ENTRIES}").use {c->buildList {while(c.moveToNext()) add(c.getString(0))}}
         ids.forEach {id ->
-            try {
+            val event=try {
                 val stream=HistoryJson(reader(db,"events",id));val raw=stream.eventText();stream.finish()
-                val event=HistoryRetention.compact(BackupCodec.decodeHistoryEntry(raw)).also(BackupCodec::validateHistory)
-                db.execSQL("UPDATE events SET body=?,label=?,gameSeconds=?,undone=? WHERE id=?",arrayOf(BackupCodec.json.encodeToString(event),event.label,event.gameSeconds,if(event.undone) 1 else 0,id))
+                HistoryRetention.compact(BackupCodec.decodeHistoryEntry(raw)).also(BackupCodec::validateHistory)
             } catch(e: Exception) {
-                Log.w("AstravarHistory","Discarding invalid accounting record $id",e)
-                db.execSQL("DELETE FROM events WHERE id=?",arrayOf(id))
+                if(e is HistoryReadFailure || e is android.database.sqlite.SQLiteException) throw e
+                Log.w("AstravarHistory","Quarantining invalid accounting record $id",e)
+                null
             }
+            if(event == null) db.execSQL("DELETE FROM events WHERE id=?",arrayOf(id))
+            else db.execSQL("UPDATE events SET body=?,label=?,gameSeconds=?,undone=? WHERE id=?",arrayOf(BackupCodec.json.encodeToString(event),event.label,event.gameSeconds,if(event.undone) 1 else 0,id))
         }
         val rollIds=db.query("SELECT id FROM rolls ORDER BY sequence DESC,id DESC LIMIT ${HistoryRetention.MAX_HISTORY_ENTRIES}").use {c->buildList {while(c.moveToNext()) add(c.getString(0))}}
         rollIds.forEach {id ->try {val stream=HistoryJson(reader(db,"rolls",id));require(BackupCodec.decodeShot(stream.shotText()).plan.id==id);stream.finish()} catch(e: Exception) {
-            Log.w("AstravarHistory","Discarding invalid roll $id",e);db.execSQL("DELETE FROM rolls WHERE id=?",arrayOf(id))
+            if(e is HistoryReadFailure || e is android.database.sqlite.SQLiteException) throw e
+            Log.w("AstravarHistory","Quarantining invalid roll $id",e);db.execSQL("DELETE FROM rolls WHERE id=?",arrayOf(id))
         }}
-        // Prior imports duplicated the entire journal here. They are not another retained roll source.
-        db.execSQL("DELETE FROM archives")
+        // Legacy archives remain untouched. Opaque preserved copies are carried by complete backups.
+        HistoryPreservation.normalizePending(db)
     }
+    private class HistoryReadFailure(cause: Exception): RuntimeException("History storage read failed; original records retained.",cause)
     /** SQLite substr limits both cursor-window and JVM string allocations, including oversized rows. */
     private fun reader(db: SupportSQLiteDatabase,table: String,id: Any): Reader = object: java.io.InputStream() {
         private var offset=1L
@@ -61,7 +68,11 @@ object HistoryStorage {
             if(position==chunk.size) {
                 if(end) return -1
                 // BLOB offsets are bytes: no repeated UTF-8 prefix scanning for late chunks.
-                chunk=db.query("SELECT substr(CAST(body AS BLOB),?,8192) FROM $table WHERE id=?",arrayOf(offset,id)).use {c->if(c.moveToFirst()) c.getBlob(0) else byteArrayOf()}
+                chunk=try {
+                    db.query("SELECT substr(CAST(body AS BLOB),?,8192) FROM $table WHERE id=?",arrayOf(offset,id)).use {c->
+                        check(c.moveToFirst()) {"History source disappeared"}; c.getBlob(0)
+                    }
+                } catch(e: Exception) {throw HistoryReadFailure(e)}
                 position=0;offset+=chunk.size
                 if(chunk.isEmpty()) {end=true;return -1}
             }

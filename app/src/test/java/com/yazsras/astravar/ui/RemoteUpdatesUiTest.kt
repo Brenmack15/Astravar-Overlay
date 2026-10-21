@@ -23,6 +23,7 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.unit.dp
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.yazsras.astravar.BuildConfig
 import com.yazsras.astravar.data.*
 import com.yazsras.astravar.rules.Campaign
 import com.yazsras.astravar.rules.Profile
@@ -32,6 +33,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -43,6 +45,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.annotation.LooperMode
 import java.io.IOException
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
@@ -71,6 +74,7 @@ class RemoteUpdatesUiTest {
         val transport = SandboxTransport { _, _, _ -> networkCalls.incrementAndGet(); throw IOException("Synthetic offline") }
         val sandbox = SandboxSyncRepository(sandboxDb, transport)
         val remote = RemoteStatRepository(remoteDb, records.records, sandbox, transport)
+        private val presentationSession = UUID.randomUUID().toString()
         val activity: ActivityController<ComponentActivity> = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         val originalConfiguration = Configuration(activity.get().resources.configuration)
         @Suppress("DEPRECATION")
@@ -86,9 +90,9 @@ class RemoteUpdatesUiTest {
             } }
         }
         suspend fun command(key: String = "STR", score: Int = 18, revision: Long = 0): RemoteStatCommand {
-            val settings = remote.settings.first()!!
-            val payload = RemoteAbilityPayload("a5811ddd-ac91-411b-83e6-02d96ff089d0", settings.sessionId, key, revision, score)
-            return RemoteStatCommand(payload.commandId, settings.sessionId, PublicSandbox.DEFAULT_ORIGIN,
+            val session = remote.settings.first()?.sessionId?.takeIf { it.isNotBlank() } ?: presentationSession
+            val payload = RemoteAbilityPayload("a5811ddd-ac91-411b-83e6-02d96ff089d0", session, key, revision, score)
+            return RemoteStatCommand(payload.commandId, session, PublicSandbox.DEFAULT_ORIGIN,
                 "afeb6ce2-9c78-4859-962c-8662d35e233d", RemoteStatProtocol.encode(payload), key, score, revision, receivedAt = 1)
         }
         override fun close() {
@@ -125,6 +129,7 @@ class RemoteUpdatesUiTest {
     }
 
     @Test fun optInCreatesOnlyEmptyDisposableProfileAndDoesNotBorrowRealCharacterValues() {
+        assumeTrue("Disposable remote-stat opt-in is debug-only", BuildConfig.DEBUG)
         Fixture().use { f ->
             runBlocking {
                 f.records.records.saveProfile(CharacterProfile(name = "Real sheet fixture", level = 7), source = "Synthetic local fixture")
@@ -164,7 +169,6 @@ class RemoteUpdatesUiTest {
 
     @Test fun closingProposalDefersWithoutApplyingOrRejectingAndExplicitRejectIsSeparate() {
         Fixture().use { f ->
-            runBlocking { f.remote.setEnabled(true) }
             val command = runBlocking { f.command() }
             var open by mutableStateOf(true)
             var applied = 0; var rejected = 0; var dismissed = 0
@@ -187,6 +191,7 @@ class RemoteUpdatesUiTest {
     }
 
     @Test fun confirmedApplyImmediatelyUpdatesDisposableArmorTileAndPreservesRealSheetAndMagicModifier() {
+        assumeTrue("Disposable remote-stat application is debug-only", BuildConfig.DEBUG)
         Fixture().use { f ->
             runBlocking {
                 f.remote.setEnabled(true)
@@ -226,7 +231,6 @@ class RemoteUpdatesUiTest {
 
     @Test fun conflictingOrDisabledProposalCannotApplyButConflictCanBeRejected() {
         Fixture().use { f ->
-            runBlocking { f.remote.setEnabled(true) }
             val command = runBlocking { f.command(revision = 1) }
             val current = CharacterAbility("STR", RemoteStatProtocol.PROFILE_ID, 15, revision = 2)
             var applied = 0; var rejected = 0
@@ -247,7 +251,8 @@ class RemoteUpdatesUiTest {
     @Test fun switchingProfileClosesUnsavedEditorWithoutMovingDraftIntoAnotherCharacter() {
         Fixture().use { f ->
             runBlocking {
-                f.remote.setEnabled(true)
+                f.records.records.saveProfile(CharacterProfile(id = RemoteStatProtocol.PROFILE_ID, name = "Disposable stat test"),
+                    source = "Synthetic profile-switching fixture")
                 f.records.records.saveProfile(CharacterProfile(name = "Real sheet fixture"), source = "Synthetic fixture")
                 f.records.records.saveAbility(CharacterAbility("STR", score = 12, magicModifier = 4), source = "Synthetic real-sheet fixture")
                 f.records.records.saveAbility(CharacterAbility("STR", RemoteStatProtocol.PROFILE_ID, 14, 2), source = "Synthetic test fixture")
@@ -272,7 +277,6 @@ class RemoteUpdatesUiTest {
     @Config(qualifiers = "w360dp-h780dp-xhdpi")
     fun narrowLargeTextConfirmationKeepsBothDecisionButtonsVisible() {
         Fixture().use { f ->
-            runBlocking { f.remote.setEnabled(true) }
             val command = runBlocking { f.command() }
             f.render(fontScale = 1.35f) {
                 RemoteStatReviewOverlay(command, null, true, false, onApply = {}, onReject = {}, onDismiss = {})
@@ -293,6 +297,25 @@ class RemoteUpdatesUiTest {
             compose.onNodeWithTag("remote-reject").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
             compose.onNodeWithText("Close").assertIsDisplayed()
             capture("remote-stat-confirmation-360-font135", f.activity.get(), modal = true)
+        }
+    }
+
+    @Test fun remoteTestOptInControlMatchesBuildVariantWithoutNetworkOrCharacterWrites() {
+        Fixture().use { f ->
+            f.render { RemoteUpdatesPage(f.remote) {} }
+            if (BuildConfig.DEBUG) compose.onNodeWithTag("remote-test-toggle").assertExists()
+            else {
+                compose.onNodeWithTag("remote-test-toggle").assertDoesNotExist()
+                compose.onNodeWithText("Check for updates").assertDoesNotExist()
+                compose.onNodeWithText("Copy test session").assertDoesNotExist()
+            }
+            assertEquals(0, f.networkCalls.get())
+            runBlocking {
+                assertTrue(f.records.records.characterProfiles.first().isEmpty())
+                assertTrue(f.records.records.characterAbilities.first().isEmpty())
+                assertTrue(f.records.records.audit.first().isEmpty())
+                assertNull(f.remote.settings.first())
+            }
         }
     }
 }

@@ -52,6 +52,27 @@ class CharacterOverviewV2Test {
         ApplicationProvider.getApplicationContext(), CampaignLedgerDb::class.java
     ).build()
 
+    @Test fun conflictingCharacterAndWeaponSourcesRemainVisibleAndUnmodified() {
+        val db = database()
+        val repo = CampaignLedgerRepository(db)
+        runBlocking {
+            repo.records.saveProfile(CharacterProfile(name = "Synthetic character", level = 5), source = "Synthetic accepted status")
+            repo.records.saveAbility(CharacterAbility(key = "INT", score = 14, magicModifier = 0), source = "Synthetic accepted ability")
+        }
+        val before = runBlocking { db.recordsDao().allAudit() }
+        val campaign = Campaign(onboarded = true, profile = com.yazsras.astravar.rules.Profile(level = 6, intelligence = 4))
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { AstravarTheme { Page { CharacterOverviewV2(repo, campaign) } } }
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("character-weapon-conflict").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("character-weapon-conflict").assertTextContains("Character level 5; weapon Artificer level 6", substring = true)
+            compose.onNodeWithTag("character-weapon-conflict").assertTextContains("Character INT modifier +2; weapon INT +4", substring = true)
+            assertEquals(before, runBlocking { db.recordsDao().allAudit() })
+            assertEquals(5, runBlocking { db.recordsDao().allCharacterProfiles().single().level })
+            assertEquals(4, campaign.profile.intelligence)
+        } finally { activity.pause().stop().destroy(); db.close() }
+    }
+
     @Test fun openingOverviewAndCancellingStatusDoesNotSeedCharacterValues() {
         val db = database()
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()

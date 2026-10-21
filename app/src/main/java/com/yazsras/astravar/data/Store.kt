@@ -61,6 +61,8 @@ abstract class AstravarDb: RoomDatabase() {
 }
 class Repository(private val db: AstravarDb,scope: CoroutineScope) {
     private val dao=db.dao()
+    internal val historyDb: AstravarDb get() = db
+    internal suspend fun awaitHistoryReady() { ready.await() }
     val error=MutableStateFlow<String?>(null)
     // Gates every read/write, including eager flows. New databases also receive storage triggers.
     private val ready=scope.async(Dispatchers.IO) {db.withTransaction {HistoryStorage.create(db.openHelper.writableDatabase);HistoryStorage.cleanup(db.openHelper.writableDatabase)}}
@@ -77,19 +79,25 @@ class Repository(private val db: AstravarDb,scope: CoroutineScope) {
         ready.await()
         return db.withTransaction {
             val before=current()
-            if(dao.event(id)!=null) return@withTransaction before
+            if(dao.event(id)!=null || HistoryPreservation.hasEvent(db.openHelper.writableDatabase,id)) return@withTransaction before
             val changed=change(before)
             val after=HistoryRetention.campaign(changed.copy(profile=changed.profile.currentForceRules(),revision=maxOf(before.revision,changed.revision)+1))
             BackupCodec.validate(after)
+            // Preserve only omitted individual snapshots; ordinary reinsertion deduplicates their existing raw bodies.
+            // This also retains new shots supplied by a bulk mutation without repeating a 20-roll graph per action.
+            changed.pending.dropLast(HistoryRetention.MAX_HISTORY_ENTRIES).forEach { omitted ->
+                HistoryPreservation.preserveText(db.openHelper.writableDatabase,"rolls",omitted.plan.id,BackupCodec.json.encodeToString(omitted))
+            }
             val e=HistoryRetention.compact(HistoryEntry(id,label,after.gameSeconds,before,after,origin))
             dao.insert(EventRow(id,after.revision,BackupCodec.json.encodeToString(e),origin,e.label,e.gameSeconds,e.undone))
             dao.pruneEvents()
-            // The at-most-20 immutable snapshots are the only persisted dice source. Observers
-            // see this replacement atomically with campaign resource consumption and pruning.
+            // These are the recent20 working rows. Preservation triggers retain every prior/new body before replacement.
+            // Observers see the working view and resource accounting atomically.
             dao.clearRolls()
             after.pending.forEachIndexed {i,shot->dao.putRoll(RollRow(shot.plan.id,i.toLong(),BackupCodec.json.encodeToString(shot)))}
             dao.pruneRolls()
             dao.put(StateRow(body=BackupCodec.json.encodeToString(after.copy(pending=emptyList()))))
+            HistoryPreservation.normalizePending(db.openHelper.writableDatabase)
             after
         }
     }
@@ -105,15 +113,26 @@ class Repository(private val db: AstravarDb,scope: CoroutineScope) {
             mutate(label="Undo/correction of ${e.id}: ${e.label}",origin="correction") {s->e.before.copy(pending=HistoryRetention.restoreRolls(s.pending,e))}
         }
     }
+    /** Bounded working-state JSON compatibility API. Production backup UI uses complete HistoryBackup ZIP. */
     suspend fun export(): String {
         ready.await()
         return db.withTransaction {BackupCodec.encode(Backup(campaign=current(),history=dao.events().asReversed().map {BackupCodec.decodeHistoryEntry(it.body)}))}
     }
-    suspend fun import(text: String,operationId: String) = import(BackupCodec.decode(text),operationId)
+    suspend fun import(text: String,operationId: String) {
+        ready.await()
+        db.withTransaction {
+            HistoryPreservation.preserveText(db.openHelper.writableDatabase,"imports",operationId,text)
+            import(BackupCodec.decode(text),operationId)
+        }
+    }
     suspend fun import(incoming: Backup,operationId: String) {
-        // Revalidate the bounded preview; never retain the original oversized import text.
-        val validated=BackupCodec.decode(BackupCodec.encode(incoming))
-        mutate(operationId,"Replaced campaign from backup; recent rolls limited to ${HistoryRetention.MAX_HISTORY_ENTRIES}","import") {validated.campaign}
+        ready.await()
+        db.withTransaction {
+            // Preserve the supplied object before the working-view codec applies its recent20 projection.
+            HistoryPreservation.preserveText(db.openHelper.writableDatabase,"imports",operationId,BackupCodec.json.encodeToString(incoming))
+            val validated=BackupCodec.decode(BackupCodec.encode(incoming))
+            mutate(operationId,"Restored current weapon state; complete source history preserved separately","import") {validated.campaign}
+        }
     }
 }
 internal object RetireTargetAc: androidx.datastore.core.DataMigration<androidx.datastore.preferences.core.Preferences> {
@@ -122,15 +141,25 @@ internal object RetireTargetAc: androidx.datastore.core.DataMigration<androidx.d
     override suspend fun migrate(currentData: androidx.datastore.preferences.core.Preferences)=currentData.toMutablePreferences().apply {remove(key)}.toPreferences()
     override suspend fun cleanUp() {}
 }
-val Context.overlayPreferences by preferencesDataStore("overlay",produceMigrations={listOf(RetireTargetAc)})
+/** Only the current mode preference changes; historical Ability.SHATTER snapshots remain untouched. */
+internal object RetireShatterMode: androidx.datastore.core.DataMigration<androidx.datastore.preferences.core.Preferences> {
+    private val key=stringPreferencesKey("mode")
+    override suspend fun shouldMigrate(currentData: androidx.datastore.preferences.core.Preferences)=currentData[key]==Ability.SHATTER.name
+    override suspend fun migrate(currentData: androidx.datastore.preferences.core.Preferences)=currentData.toMutablePreferences().apply {
+        if(this[key]==Ability.SHATTER.name) this[key]=Ability.ARCANE.name
+    }.toPreferences()
+    override suspend fun cleanUp() {}
+}
+private fun currentMode(value: Ability)=if(value==Ability.SHATTER) Ability.ARCANE else value
+val Context.overlayPreferences by preferencesDataStore("overlay",produceMigrations={listOf(RetireTargetAc,RetireShatterMode)})
 data class OverlayPrefs(val portraitX: Int=0,val portraitY: Int=160,val landscapeX: Int=0,val landscapeY: Int=80,val scale: Float=1f,val image: String="",val elements: List<DamageType> = emptyList(),val mode: Ability=Ability.ARCANE,val selectedPayloads: Set<String> = emptySet(),val advantage: Boolean=false,val disadvantage: Boolean=false,val haptics: Boolean=true,val manualOverrides: Boolean=false,val distance: Int=30,val targetPoint: String="",val directImpact: Boolean=false,val immediateId: String?=null,val manualSlot: Boolean=false)
 class Preferences(private val context: Context) {
-    val flow=context.overlayPreferences.data.map { p -> OverlayPrefs(p[intPreferencesKey("portrait_x")] ?: 0,p[intPreferencesKey("portrait_y")] ?: 160,p[intPreferencesKey("landscape_x")] ?: 0,p[intPreferencesKey("landscape_y")] ?: 80,p[floatPreferencesKey("scale")] ?: 1f,p[stringPreferencesKey("image")] ?: "",p[stringPreferencesKey("elements")]?.split(',')?.mapNotNull {runCatching {DamageType.valueOf(it)}.getOrNull()} ?: emptyList(),runCatching {Ability.valueOf(p[stringPreferencesKey("mode")] ?: "ARCANE")}.getOrDefault(Ability.ARCANE),p[stringSetPreferencesKey("selected_payloads")] ?: emptySet(),p[booleanPreferencesKey("advantage")] ?: false,p[booleanPreferencesKey("disadvantage")] ?: false,p[booleanPreferencesKey("haptics")] ?: true,p[booleanPreferencesKey("manual_overrides")] ?: false,p[intPreferencesKey("distance")] ?: 30,p[stringPreferencesKey("target_point")] ?: "",p[booleanPreferencesKey("direct_impact")] ?: false,p[stringPreferencesKey("immediate_id")],p[booleanPreferencesKey("manual_slot")] ?: false) }
+    val flow=context.overlayPreferences.data.map { p -> OverlayPrefs(p[intPreferencesKey("portrait_x")] ?: 0,p[intPreferencesKey("portrait_y")] ?: 160,p[intPreferencesKey("landscape_x")] ?: 0,p[intPreferencesKey("landscape_y")] ?: 80,p[floatPreferencesKey("scale")] ?: 1f,p[stringPreferencesKey("image")] ?: "",p[stringPreferencesKey("elements")]?.split(',')?.mapNotNull {runCatching {DamageType.valueOf(it)}.getOrNull()} ?: emptyList(),currentMode(runCatching {Ability.valueOf(p[stringPreferencesKey("mode")] ?: "ARCANE")}.getOrDefault(Ability.ARCANE)),p[stringSetPreferencesKey("selected_payloads")] ?: emptySet(),p[booleanPreferencesKey("advantage")] ?: false,p[booleanPreferencesKey("disadvantage")] ?: false,p[booleanPreferencesKey("haptics")] ?: true,p[booleanPreferencesKey("manual_overrides")] ?: false,p[intPreferencesKey("distance")] ?: 30,p[stringPreferencesKey("target_point")] ?: "",p[booleanPreferencesKey("direct_impact")] ?: false,p[stringPreferencesKey("immediate_id")],p[booleanPreferencesKey("manual_slot")] ?: false) }
     suspend fun position(landscape: Boolean,x: Int,y: Int) { context.overlayPreferences.edit { val key=if(landscape) "landscape" else "portrait"; it[intPreferencesKey("${key}_x")]=x; it[intPreferencesKey("${key}_y")]=y } }
     suspend fun scale(scale: Float) { context.overlayPreferences.edit { it[floatPreferencesKey("scale")]=scale.coerceIn(.85f,1.3f) } }
     suspend fun image(uri: String) { context.overlayPreferences.edit { it[stringPreferencesKey("image")]=uri } }
     suspend fun elements(values: List<DamageType>) { context.overlayPreferences.edit {it[stringPreferencesKey("elements")]=values.distinct().joinToString(",") {x->x.name}} }
-    suspend fun mode(value: Ability) { context.overlayPreferences.edit {it[stringPreferencesKey("mode")]=value.name} }
+    suspend fun mode(value: Ability) { context.overlayPreferences.edit {it[stringPreferencesKey("mode")]=currentMode(value).name} }
     suspend fun payloads(ids: Set<String>) {context.overlayPreferences.edit {it[stringSetPreferencesKey("selected_payloads")]=ids}}
     suspend fun haptics(enabled: Boolean) {context.overlayPreferences.edit {it[booleanPreferencesKey("haptics")]=enabled}}
     suspend fun manualOverrides(enabled: Boolean) {context.overlayPreferences.edit {it[booleanPreferencesKey("manual_overrides")]=enabled}}

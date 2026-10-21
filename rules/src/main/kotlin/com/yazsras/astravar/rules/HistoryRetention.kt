@@ -2,7 +2,7 @@ package com.yazsras.astravar.rules
 
 import kotlinx.serialization.Serializable
 
-/** One limit for persisted rolls, the bounded undo journal, queries, migration and backups. */
+/** Limit for the recent working view and undo codec. Android HistoryBackup separately retains complete immutable raw history. */
 object HistoryRetention {
     const val MAX_HISTORY_ENTRIES = 20
     fun campaign(s: Campaign) = s.copy(pending=s.pending.takeLast(MAX_HISTORY_ENTRIES))

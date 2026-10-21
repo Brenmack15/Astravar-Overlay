@@ -50,6 +50,8 @@ private object ApprovedArtCache {
 fun Ability.approvedArt() = when (this) {
     Ability.ARCANE, Ability.ELEMENTAL -> ApprovedAttackArt.ELEMENTAL
     Ability.SPELL -> ApprovedAttackArt.SPELL_SHOT
+    Ability.GAUNTLET, Ability.GUARDIAN -> ApprovedAttackArt.GAUNTLET
+    Ability.SPELL_GAUNTLET -> ApprovedAttackArt.SPELL_STRIKE
     Ability.DISCHARGE, Ability.SHATTER -> ApprovedAttackArt.DISCHARGE
 }
 

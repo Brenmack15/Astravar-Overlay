@@ -77,11 +77,12 @@ data class LedgerDraft(
 @Serializable
 data class LedgerExport(
     val format: String = "astravar-campaign-items",
-    val schema: Int = 2,
+    val schema: Int = 5,
     val exportedAt: Long,
     val items: List<LedgerItem>,
     val events: List<LedgerEvent>,
-    val records: CampaignRecordsExport = CampaignRecordsExport()
+    val records: CampaignRecordsExport = CampaignRecordsExport(),
+    val archive: CampaignArchiveState = CampaignArchiveState()
 )
 
 @Dao
@@ -120,21 +121,30 @@ interface LedgerDao {
     CompanionState::class, CompanionResource::class, ItemDetails::class, ItemProperty::class,
     CharacterProfile::class, CharacterAbility::class,
     CampaignLink::class, CampaignAudit::class, CommandReceipt::class,
-    CraftExecution::class, CraftConsumption::class], version = 2, exportSchema = true)
+    CraftExecution::class, CraftConsumption::class, PartySheetRecord::class, ItemPlacement::class,
+    PartyWallet::class, CampaignCheckpoint::class, ExternalRecordReference::class,
+    CampaignReferenceRecord::class, CampaignReferenceRelation::class, CampaignImportReceipt::class,
+    CampaignImportBackup::class, CampaignArchiveSource::class], version = 5, exportSchema = true)
+@TypeConverters(PartyConverters::class)
 abstract class CampaignLedgerDb : RoomDatabase() {
     abstract fun ledgerDao(): LedgerDao
     abstract fun recordsDao(): CampaignRecordsDao
+    abstract fun partyDao(): PartyRecordsDao
+    abstract fun archiveDao(): CampaignArchiveDao
 
     companion object {
         fun open(context: Context): CampaignLedgerDb = Room.databaseBuilder(
             context.applicationContext, CampaignLedgerDb::class.java, "astravar-campaign-ledger.db"
-        ).addMigrations(CAMPAIGN_MIGRATION_1_2).build() // NEVER fallbackToDestructiveMigration()
+        ).enableMultiInstanceInvalidation()
+            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4, CAMPAIGN_MIGRATION_4_5).build() // NEVER fallbackToDestructiveMigration()
     }
 }
 
 class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
     private val dao = db.ledgerDao()
     val records = CampaignRecordsRepository(db)
+    val party = PartyRecordsRepository(db)
+    val archive = CampaignArchiveRepository(db)
     val items: Flow<List<LedgerItem>> = dao.observeItems()
     fun eventsForItem(itemId: String): Flow<List<LedgerEvent>> = dao.eventsForItem(itemId)
 
@@ -173,10 +183,12 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
     )
 
     /** Repeating the *same* command is safe; reusing its ID with different content is rejected. */
-    suspend fun create(input: LedgerDraft, commandId: String = UUID.randomUUID().toString()): LedgerItem = db.withTransaction {
+    suspend fun create(input: LedgerDraft, commandId: String = UUID.randomUUID().toString(), recordId: String? = null): LedgerItem = db.withTransaction {
         val clean = validate(input)
         require(commandId.isNotBlank() && commandId.length <= 120)
-        val fp = fingerprint("CREATE", json.encodeToString(clean))
+        require(recordId == null || recordId.length in 1..120) { "Invalid item identity." }
+        val fp = if (recordId == null) fingerprint("CREATE", json.encodeToString(clean))
+            else fingerprint("CREATE_WITH_ID_V1", recordId, json.encodeToString(clean))
         val previous = dao.event(commandId)
         if (previous != null) {
             require(previous.kind == "CREATE" && previous.payloadFingerprint == fp) { "Command ID collision; item not created." }
@@ -185,7 +197,7 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
         require(db.recordsDao().receipt(commandId) == null) { "Command ID collision; item not created." }
         val time = System.currentTimeMillis()
         val item = LedgerItem(
-            id = UUID.randomUUID().toString(), title = clean.title, category = clean.category,
+            id = recordId ?: UUID.randomUUID().toString(), title = clean.title, category = clean.category,
             owner = clean.owner, itemState = clean.itemState, location = clean.location,
             evidenceStatus = clean.evidenceStatus, quantity = clean.quantity, description = clean.description,
             knownProperties = clean.knownProperties, possibleUses = clean.possibleUses,
@@ -220,6 +232,14 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
         require(db.recordsDao().receipt(commandId) == null) { "Command ID collision; edit rejected." }
         val before = dao.getItem(itemId) ?: error("This item no longer exists.")
         check(before.revision == expectedRevision) { "Item changed since editing began. Reopen it before saving." }
+        db.partyDao().placement(itemId)?.let {
+            require(clean.owner == before.owner && clean.itemState == before.itemState && clean.location == before.location && clean.quantity == before.quantity) {
+                "This item has structured ownership. Use equipment transfer or quantity commands to change its owner, state, location or amount."
+            }
+        }
+        if (clean.archived || clean.itemState in setOf("Consumed", "Sold", "Lost") || clean.quantity == 0) {
+            require(db.partyDao().allPlacements().none { it.containerItemId == itemId }) { "Remove this container's contents before making it unavailable." }
+        }
         val after = before.copy(
             title = clean.title, category = clean.category, owner = clean.owner,
             itemState = clean.itemState, location = clean.location, evidenceStatus = clean.evidenceStatus,
@@ -279,15 +299,15 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
 
     /** Player-controlled JSON export includes compact embedded item icons and the full audit history. */
     suspend fun export(): String = db.withTransaction {
-        supportedCampaignBackup(json.encodeToString(LedgerExport(exportedAt = System.currentTimeMillis(),
-            items = dao.allItems(), events = dao.allEvents(), records = records.snapshot())))
+        campaignBackupJson(LedgerExport(exportedAt = System.currentTimeMillis(),
+            items = dao.allItems(), events = dao.allEvents(), records = records.snapshot(), archive = archive.snapshot()))
     }
 
     /** Historical compatibility export only: does not include new inventions/connections/companion records. */
     suspend fun exportLegacy(): String = db.withTransaction {
         val value = LedgerExport(schema = 1, exportedAt = System.currentTimeMillis(), items = dao.allItems(), events = dao.allEvents())
         val objectValue = json.encodeToJsonElement(LedgerExport.serializer(), value) as kotlinx.serialization.json.JsonObject
-        supportedCampaignBackup(kotlinx.serialization.json.JsonObject(objectValue.filterKeys { it != "records" }).toString())
+        supportedCampaignBackup(kotlinx.serialization.json.JsonObject(objectValue.filterKeys { it != "records" && it != "archive" }).toString())
     }
 
     /** Import preview is read-only; restore never replaces an existing different record. */

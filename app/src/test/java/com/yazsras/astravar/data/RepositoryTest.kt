@@ -64,10 +64,14 @@ class RepositoryTest {
         val old=SQLiteDatabase.openOrCreateDatabase(path,null)
         old.execSQL("CREATE TABLE campaign (id INTEGER NOT NULL PRIMARY KEY, body TEXT NOT NULL)")
         old.execSQL("CREATE TABLE events (id TEXT NOT NULL PRIMARY KEY, revision INTEGER NOT NULL, body TEXT NOT NULL)")
-        old.execSQL("INSERT INTO campaign (id,body) VALUES (1,?)",arrayOf(BackupCodec.json.encodeToString(Campaign.serializer(),seed())))
+        val originalBody=BackupCodec.json.encodeToString(Campaign.serializer(),seed())
+        old.execSQL("INSERT INTO campaign (id,body) VALUES (1,?)",arrayOf(originalBody))
         old.version=1;old.close()
         val db=Room.databaseBuilder(context,AstravarDb::class.java,"migration-test.db").addMigrations(AstravarDb.MIGRATION_1_2,AstravarDb.MIGRATION_2_3).build()
-        assertNotNull(db.dao().state());assertTrue(db.dao().archives().isEmpty());db.close()
+        assertNotNull(db.dao().state())
+        val sha=java.security.MessageDigest.getInstance("SHA-256").digest(originalBody.toByteArray(Charsets.UTF_8)).joinToString("") {"%02x".format(it)}
+        val archived=HistoryPreservation.openBody(db.openHelper.readableDatabase,HistoryPreservation.id("campaign","1",sha)).use {it.readBytes().toString(Charsets.UTF_8)}
+        assertEquals(originalBody,archived);db.close()
     }
     @Test fun repeatedUndoStepsBackInsteadOfRedoing()=runBlocking {
         val db=Room.inMemoryDatabaseBuilder(context,AstravarDb::class.java).build();val scope=CoroutineScope(SupervisorJob()+Dispatchers.Default);val repo=Repository(db,scope)

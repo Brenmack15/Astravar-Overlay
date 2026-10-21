@@ -9,7 +9,7 @@ class DiceRollerTest {
         val queue=ArrayDeque(values.toList())
         return {sides->check(queue.isNotEmpty()) {"Unexpected extra d$sides"};queue.removeFirst().also {check(it in 1..sides)}}
     }
-    private fun plan(ability: Ability=Ability.ARCANE,profile: Profile=Profile())=Engine.plan(seed(profile),"shot",ability,elements=if(ability==Ability.ELEMENTAL) listOf(DamageType.FIRE) else emptyList())
+    private fun plan(ability: Ability=Ability.ARCANE,profile: Profile=Profile())=historicalPlan(seed(profile),"shot",ability,elements=if(ability==Ability.ELEMENTAL) listOf(DamageType.FIRE) else emptyList())
     @Test fun standardAttackPreservesEveryFaceModifierTypeAndTotal() {
         val p=plan();val r=DiceRoller.roll(p,die=dice(14,7,4),atMillis=1234)
         assertEquals(listOf(14),r.attackFaces);assertEquals(14,r.natural);assertEquals(22,r.attackTotal)
@@ -48,7 +48,7 @@ class DiceRollerTest {
         assertNull(r.suggestedOutcome);assertEquals(17,r.natural)
     }
     @Test fun longRangeAddsDisadvantageAndCancelsAdvantage() {
-        val p=Engine.plan(seed(),"long",Ability.ARCANE,distance=90)
+        val p=historicalPlan(seed(),"long",Ability.ARCANE,distance=90)
         val normal=DiceRoller.roll(p,die=dice(18,3,5,2));assertEquals(RollMode.DISADVANTAGE,normal.mode);assertEquals(11,normal.attackTotal)
         val cancelled=DiceRoller.roll(p,RollOptions(advantage=true),dice(12,5,6));assertEquals(RollMode.NORMAL,cancelled.mode);assertEquals(listOf(12),cancelled.attackFaces)
     }
@@ -70,18 +70,18 @@ class DiceRollerTest {
     @Test fun criticalSpellDoublesEligibleDiceOnlyAndConsumesStoredPayloadOnce() {
         val template=Template("cold","Cold spell",2,2,listOf(TypedDice(Dice(3,6,2),DamageType.COLD)),DamageType.COLD,true)
         val initial=Engine.charge(seed(),"core",template,"payload",SourceKind.SLOT,true)
-        val p=Engine.plan(initial,"shot",Ability.SPELL,listOf("payload"))
+        val p=historicalPlan(initial,"shot",Ability.SPELL,listOf("payload"))
         assertEquals(1,initial.core("core").payloads.size)
-        val after=DiceRoller.fire(initial,p,die={if(it==20) 20 else 1})
+        val after=historicalFire(initial,p,die={if(it==20) 20 else 1})
         assertEquals(1,after.slots[2]);assertTrue(after.core("core").payloads.isEmpty())
         val r=after.pending.single().rolled!!
         assertEquals(4,r.damage.getValue("direct").faces.size);assertEquals(6,r.damage.getValue("payload0_0").faces.size);assertEquals(4,r.damage.getValue("overcharge0").faces.size)
         assertEquals(5,r.damage.getValue("direct").flat);assertEquals(2,r.damage.getValue("payload0_0").flat)
-        try {DiceRoller.fire(after,p);fail("duplicate shot accepted")} catch(_:IllegalArgumentException) {}
+        try {historicalFire(after,p);fail("duplicate shot accepted")} catch(_:IllegalArgumentException) {}
     }
     @Test fun bothEmergencySavesHalveTheSameFullRollRoundedDownWithoutRerolling() {
         for(ability in listOf(Ability.DISCHARGE,Ability.SHATTER)) {
-            val p=Engine.plan(seed(),"blast",ability,point="Archway")
+            val p=historicalPlan(seed(),"blast",ability,point="Archway")
             val faces=if(ability==Ability.DISCHARGE) listOf(12,11,10,9,8,7) else List(41) {5}+6
             val values=ArrayDeque(faces);val requested=mutableListOf<Int>()
             val roll=DiceRoller.roll(p,die={requested+=it;values.removeFirst()})
@@ -98,18 +98,18 @@ class DiceRollerTest {
         }
     }
     @Test fun directImpactCriticalDoesNotDoubleTheBlast() {
-        val p=Engine.plan(seed(),"blast",Ability.SHATTER,direct=true,point="Gate")
+        val p=historicalPlan(seed(),"blast",Ability.SHATTER,direct=true,point="Gate")
         val r=DiceRoller.roll(p,die={if(it==20) 20 else 1})
         assertEquals(4,r.damage.getValue("direct").faces.size);assertEquals(42,r.damage.getValue("blast").faces.size)
         assertEquals(5,r.damage.getValue("direct").flat);assertEquals(0,r.damage.getValue("blast").flat)
     }
     @Test fun unknownAcAllowsAnotherAttackWithoutManualEntry() {
         var s=seed()
-        repeat(2) {i->s=DiceRoller.fire(s,Engine.plan(s,"shot$i",Ability.ARCANE),die={if(it==20) 14 else 7})}
+        repeat(2) {i->s=historicalFire(s,historicalPlan(s,"shot$i",Ability.ARCANE),die={if(it==20) 14 else 7})}
         assertEquals(2,s.pending.size);assertTrue(s.pending.all {it.result?.outcome==Outcome.UNCONFIRMED})
     }
     @Test fun backupRoundTripKeepsDiceCorePayloadTimeAndMode() {
-        val s=DiceRoller.fire(seed(),plan(),RollOptions(advantage=true),dice(17,6,4,3))
+        val s=historicalFire(seed(),plan(),RollOptions(advantage=true),dice(17,6,4,3))
         val restored=BackupCodec.decode(BackupCodec.encode(Backup(campaign=s))).campaign
         assertEquals(s,restored);val roll=restored.pending.single().rolled!!
         assertEquals("Core One",roll.coreName);assertTrue(roll.rolledAtMillis>0);assertEquals(RollMode.ADVANTAGE,roll.mode)
@@ -117,7 +117,7 @@ class DiceRollerTest {
         assertTrue(shotSummary(restored.pending.single()).contains("DM determines the hit"))
     }
     @Test fun legacySavedShotsWithoutNewFieldStillRestore() {
-        val saved=Engine.commit(seed(),plan())
+        val saved=historicalCommit(seed(),plan())
         val json=BackupCodec.encode(Backup(campaign=saved)).replace(",\"rolled\":null","")
         assertNull(BackupCodec.decode(json).campaign.pending.single().rolled)
     }
@@ -154,7 +154,7 @@ class DiceRollerTest {
         val spell=Template("fire","Fire payload",2,2,listOf(TypedDice(Dice(3,6),DamageType.FIRE)),DamageType.FIRE,true)
         for(count in listOf(1,2,3,4,10)) for(ability in listOf(Ability.DISCHARGE,Ability.SHATTER)) {
             val before=seed(Profile(baseDamageDiceCount=count))
-            val p=Engine.plan(before,"impact-$count",ability,immediate=spell,direct=true,point="Gate")
+            val p=historicalPlan(before,"impact-$count",ability,immediate=spell,direct=true,point="Gate")
             val r=DiceRoller.roll(p,die={if(it==20) 20 else 1})
             assertEquals(2*count,r.damage.getValue("direct").faces.size)
             val expected=count*if(ability==Ability.SHATTER) 21 else 3
@@ -175,14 +175,14 @@ class DiceRollerTest {
         try {DiceRoller.roll(p,die={0});fail("invalid random source accepted")} catch(_:IllegalArgumentException) {}
     }
     @Test fun rollingPreviouslyCommittedShotDoesNotSpendResourcesAgain() {
-        val s=seed();val p=Engine.plan(s,"blast",Ability.DISCHARGE,point="Door")
-        val committed=Engine.commit(s,p);val after=DiceRoller.rollPending(committed,p.id,die={1})
+        val s=seed();val p=historicalPlan(s,"blast",Ability.DISCHARGE,point="Door")
+        val committed=historicalCommit(s,p);val after=DiceRoller.rollPending(committed,p.id,die={1})
         assertEquals(600L,after.core("core").exhaustedUntil);assertEquals(committed.turn,after.turn)
         try {DiceRoller.rollPending(after,p.id);fail("reroll accepted")} catch(_:IllegalArgumentException) {}
     }
     @Test fun recentRollsKeepTwentyNewestWithoutDeletingAuditHistory() {
         var state=Campaign(onboarded=true,attuned=true,installedId="core",cores=listOf(Core("core","Test core")))
-        repeat(25) {n->state=DiceRoller.fire(state,Engine.plan(state,"shot-$n",Ability.ARCANE),die={1})}
+        repeat(25) {n->state=historicalFire(state,historicalPlan(state,"shot-$n",Ability.ARCANE),die={1})}
         assertEquals(25,state.pending.size)
         assertEquals(20,state.recentRolls().size)
         assertEquals("shot-24",state.recentRolls().first().plan.id)

@@ -18,11 +18,12 @@ import kotlin.math.roundToInt
 ) {
     var baseCount by remember(profile.baseDamageDiceCount) { mutableIntStateOf(profile.baseDamageDiceCount) }
     var selectorCount by remember(profile.elementalSelectorDiceCount) { mutableIntStateOf(profile.elementalSelectorDiceCount) }
-    val preview=profile.copy(baseDamageDiceCount=baseCount,elementalSelectorDiceCount=selectorCount)
+    val preview=profile.copy(baseDamageDiceCount=baseCount,elementalSelectorDiceCount=selectorCount,elementDamageProfiles=emptyMap())
     fun expression(ability: Ability)=Engine.previewComponents(preview,ability,elements).joinToString(" + ") {
         "${it.damage.dice} ${it.damage.type.name.lowercase().replaceFirstChar(Char::titlecase)}"
     }
     Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+        if(profile.elementDamageProfiles.values.any {it.approved}) Text("These are inherited defaults. Confirmed individual formulas take precedence for their damage types.",style=MaterialTheme.typography.bodySmall)
         DamageCountSlider("PRIMARY FORCE DAMAGE","Primary Force damage",preview.base.copy(flat=0).toString(),preview.primaryForceDieSides,baseCount,enabled,
             onChange={baseCount=it},onFinished={if(baseCount!=profile.baseDamageDiceCount) onBaseCountSelected(baseCount)})
         Text("Primary Force: ${preview.base} Force")
@@ -32,9 +33,8 @@ import kotlin.math.roundToInt
         Text(if(elements.isEmpty()) "NEUTRAL SHOT" else "ELEMENTAL SHOT",style=MaterialTheme.typography.labelLarge)
         Text(expression(Ability.ELEMENTAL),style=MaterialTheme.typography.titleMedium)
         Text("Discharge: ${expression(Ability.DISCHARGE)}")
-        Text("Shatter: ${expression(Ability.SHATTER)}")
-        Text("Discharge = 3× Primary Force dice. Shatter = 7× Discharge dice. No flat weapon modifier on explosions.",style=MaterialTheme.typography.bodySmall)
-        Text("Each active element adds ${preview.selector} once to an elemental shot or explosion; explosion selector dice are never multiplied or critical. Neutral has no selector. Spell shots replace free selector dice.",style=MaterialTheme.typography.bodySmall)
+        Text("Discharge inherits 3× Primary Force dice. No flat weapon modifier on explosions.",style=MaterialTheme.typography.bodySmall)
+        Text("Each active element adds its configured formula once to an elemental shot or explosion; explosion selector dice are never multiplied or critical. Neutral has no selector. Spell shots replace free selector dice.",style=MaterialTheme.typography.bodySmall)
     }
 }
 

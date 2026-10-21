@@ -14,6 +14,7 @@ import com.yazsras.astravar.data.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 /** Presentation state only; repositories own revision checks and transactional persistence. */
 internal class LocalRecordActions(private val scope: CoroutineScope) {
@@ -71,6 +72,8 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
     val audit by records.audit.collectAsState(initial = emptyList())
     val actions = rememberLocalRecordActions()
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var projectDraftId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
+    var projectCommandId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
     var mode by rememberSaveable { mutableStateOf("") }
     val projectDraft = rememberUiDraftText()
     var projectSnapshot by projectDraft
@@ -153,6 +156,8 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
         else -> false
     }
     fun load(project: InventionProject?) {
+        projectDraftId = project?.id ?: UUID.randomUUID().toString()
+        projectCommandId = UUID.randomUUID().toString()
         projectSnapshot = project?.let { Json.encodeToString(it) }; selectedId = project?.id
         stageSnapshot = null; requirementSnapshot = null
         craftReviewJson = null; craftLabelsJson = "[]"; consumedJson = "{}"
@@ -232,8 +237,8 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
             when(mode) {
                 "create", "edit" -> PlayerButton(onClick = {
                     val before = editorProject; val provenance = source
-                    val model = before?.copy(title = title, description = description, status = status) ?: InventionProject(title = title, description = description, status = status)
-                    actions.run { val receipt = records.saveProject(model, before?.revision, provenance); projectSnapshot = Json.encodeToString(model.copy(revision = receipt.resultingRevision, source = provenance, updatedAt = receipt.createdAt)); selectedId = model.id; mode = "detail"; "Invention saved · no resources consumed" }
+                    val model = before?.copy(title = title, description = description, status = status) ?: InventionProject(title = title, description = description, status = status, id = projectDraftId)
+                    actions.run { val receipt = records.saveProject(model, before?.revision, provenance, projectCommandId); projectSnapshot = Json.encodeToString(model.copy(revision = receipt.resultingRevision, source = provenance, updatedAt = receipt.createdAt)); selectedId = model.id; mode = "detail"; "Invention saved · no resources consumed" }
                 }, enabled = !actions.busy && projectDraftValid && !stale && title.isNotBlank() && source.isNotBlank()) { Text(if (mode == "create") "Save invention" else "Save invention changes") }
                 "detail" -> PlayerButton(onClick = { selected?.let(::load); mode = "edit" }, enabled = !actions.busy) { Text("Edit invention") }
                 "stage" -> PlayerButton(onClick = {
@@ -268,6 +273,15 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
                     Text("A design is separate from its physical output.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 }
                 "detail" -> selected?.let { project ->
+                    val (physicalOutputs, associations) = links.filter {
+                        (it.fromType == "project" && it.fromId == project.id) ||
+                            (it.toType == "project" && it.toId == project.id)
+                    }.partition {
+                        // This is the directed relationship written by an explicitly confirmed craft.
+                        // A project status or a research/material link does not establish equipment.
+                        it.fromType == "project" && it.fromId == project.id &&
+                            it.toType == "item" && it.label == "Confirmed craft output"
+                    }
                     Text(project.status, color = Frost, style = MaterialTheme.typography.labelLarge)
                     ExpandableRecordSection("Concept & Blueprint", true) {
                         Text(project.description.ifBlank { "No design notes recorded" }, color = if (project.description.isBlank()) Muted else MaterialTheme.colorScheme.onSurface)
@@ -293,10 +307,25 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
                         PlayerTextButton(onClick = { requirementSnapshot = null; materialId = null; materialLabel = ""; materialQuantity = ""; materialNotes = ""; source = project.source; baselineSource = source; mode = "material" }) { Text("Add material") }
                     }
                     ExpandableRecordSection("Physical output") {
-                        val related = links.filter { (it.fromType == "project" && it.fromId == project.id) || (it.toType == "project" && it.toId == project.id) }
-                        if (related.isEmpty()) Text("No linked physical output or equipment", color = Muted)
-                        related.forEach { link -> val itemId = if (link.fromType == "item") link.fromId else if (link.toType == "item") link.toId else null; RecordValue(link.label, items.firstOrNull { it.id == itemId }?.title ?: "Linked record") }
+                        if (physicalOutputs.isEmpty()) Text("No linked physical output or equipment", color = Muted)
+                        physicalOutputs.forEach { link ->
+                            RecordValue(link.label, items.firstOrNull { it.id == link.toId }?.title ?: "item · ${link.toId}")
+                        }
                         PlayerTextButton(onClick = ::beginCraft) { Text("Confirm a resolved craft") }
+                    }
+                    ExpandableRecordSection("References & associations") {
+                        if (associations.isEmpty()) Text("No linked references or associations", color = Muted)
+                        associations.forEach { link ->
+                            val outgoing = link.fromType == "project" && link.fromId == project.id
+                            val type = if (outgoing) link.toType else link.fromType
+                            val id = if (outgoing) link.toId else link.fromId
+                            val title = when (type) {
+                                "item" -> items.firstOrNull { it.id == id }?.title
+                                "project" -> projects.firstOrNull { it.id == id }?.title
+                                else -> null
+                            }
+                            RecordValue(link.label, title ?: "$type · $id")
+                        }
                     }
                     ExpandableRecordSection("History") {
                         val relatedIds = setOf(project.id) + stages.map { it.id } + requirements.map { it.id } + links.filter { it.fromId == project.id || it.toId == project.id }.map { it.id }

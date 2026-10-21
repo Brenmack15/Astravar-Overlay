@@ -3,6 +3,7 @@ package com.yazsras.astravar.data
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.yazsras.astravar.BuildConfig
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
@@ -23,6 +24,7 @@ import java.util.UUID
 @Config(sdk = [35])
 class RemoteStatLiveTest {
     @Test fun actualHttpsCommandWaitsForApprovalSurvivesRestartAndReturnsOneDecision() = runBlocking {
+        assumeTrue("Live remote-stat tests are available only in debug builds", BuildConfig.DEBUG)
         assumeTrue("Live remote-stat test requires ASTRAVAR_LIVE_REMOTE_STATS=true",
             System.getenv("ASTRAVAR_LIVE_REMOTE_STATS") == "true")
         val context = ApplicationProvider.getApplicationContext<Context>()

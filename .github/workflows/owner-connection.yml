@@ -1,0 +1,93 @@
+name: Astravar owner connection verification
+# Pair this full regression with owner-hp-native.yml after archive/recovery changes.
+# Both verify the exact pushed source; the original owner-signed APK is checked separately.
+on:
+  push:
+    branches: ['feat/astravar-2.1-player-first']
+    paths:
+      - 'backend/owner-bridge/**'
+      - 'app/**'
+      - 'rules/**'
+      - '.github/workflows/owner-connection.yml'
+      - '.github/workflows/owner-hp-native.yml'
+      - 'scripts/ui_foundation_sha256.json'
+      - 'scripts/verify_ui_foundation.py'
+      - 'scripts/ci-owner-hp-native.sh'
+      - 'scripts/ci-owner-native-server.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: astravar-owner-connection-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      ASTRAVAR_VERSION_CODE: '36'
+      ASTRAVAR_VERSION_NAME: '2.2.0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Backend protocol, authorization and MCP regression tests
+        run: node --test backend/owner-bridge/*.test.mjs
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install checksum-verified Android SDK
+        timeout-minutes: 9
+        run: |
+          export ANDROID_HOME="$RUNNER_TEMP/android-sdk"
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          curl --connect-timeout 15 --max-time 150 -fsSL https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip -o "$RUNNER_TEMP/android-cli.zip"
+          echo '7ec965280a073311c339e571cd5de778b9975026cfcbe79f2b1cdcb1e15317ee  '"$RUNNER_TEMP/android-cli.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/android-cli.zip" -d "$ANDROID_HOME/cmdline-tools"
+          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/19.0"
+          export PATH="$ANDROID_HOME/cmdline-tools/19.0/bin:$ANDROID_HOME/platform-tools:$PATH"
+          printf 'y\n%.0s' {1..100} | timeout -k 5s 60s sdkmanager --licenses >/dev/null
+          timeout -k 10s 360s sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+      - name: Preserve source, artwork and historical schema invariants
+        run: |
+          python3 -m unittest discover -s scripts/tests -v
+          python3 scripts/verify_v2_protected_source.py
+          python3 scripts/verify_ui_foundation.py
+          python3 scripts/verify_branding.py
+          python3 scripts/verify_particle_resources.py
+          python3 scripts/verify_upgrade_integrity.py
+      - name: Kotlin, Room and native Compose regressions, lint and APK builds
+        timeout-minutes: 45
+        run: |
+          # The owner key is never uploaded to CI. This short-lived signer exists
+          # only to exercise minification and optimized APK packaging.
+          export ASTRAVAR_KEYSTORE="$RUNNER_TEMP/owner-connection-ci-only.p12"
+          export ASTRAVAR_STORE_PASSWORD=temporary-ci-only
+          export ASTRAVAR_KEY_PASSWORD=temporary-ci-only
+          export ASTRAVAR_KEY_ALIAS=astravar-ci
+          keytool -genkeypair -noprompt -keystore "$ASTRAVAR_KEYSTORE" -storetype PKCS12 -storepass "$ASTRAVAR_STORE_PASSWORD" -keypass "$ASTRAVAR_KEY_PASSWORD" -alias "$ASTRAVAR_KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 2 -dname 'CN=Astravar owner connection CI test only'
+          trap 'rm -f "$ASTRAVAR_KEYSTORE"' EXIT
+          bash ./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease
+          mkdir -p validation/owner-connection
+          cp app/build/outputs/apk/release/app-release.apk validation/owner-connection/Astravar-2.2-CI-ONLY-code36.apk
+          python3 scripts/inspect_release_apk.py validation/owner-connection/Astravar-2.2-CI-ONLY-code36.apk --package com.yazsras.astravar --version-name 2.2.0 --version-code 36 --output validation/owner-connection/ci-apk-metadata.json
+          git rev-parse HEAD > validation/owner-connection/SOURCE_COMMIT.txt
+          sha256sum validation/owner-connection/*.apk > validation/owner-connection/SHA256SUMS.txt
+          printf '%s\n' 'CI TEST ONLY. Disposable signer; not an owner-signed update. These unit and Compose checks do not establish deployed HTTPS, physical device approval, MCP discovery, install/update or backup/restore acceptance.' > validation/owner-connection/VERIFICATION_LIMITS.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: Astravar-owner-connection-verification
+          path: |
+            app/build/reports/
+            app/build/test-results/
+            rules/build/reports/
+            rules/build/test-results/
+            validation/owner-connection/
+          retention-days: 14

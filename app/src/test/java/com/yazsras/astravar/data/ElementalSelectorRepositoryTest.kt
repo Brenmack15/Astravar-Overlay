@@ -73,7 +73,11 @@ class ElementalSelectorRepositoryTest {
             val exported=main.export()
             main.import(exported,"reimport")
             assertTrue(BackupCodec.decodeHistoryEntry(db.dao().event(event.id)!!.body).after.pending.isEmpty())
-            assertTrue(db.dao().archives().isEmpty())
+            run {
+                val sha=java.security.MessageDigest.getInstance("SHA-256").digest(oldArchive.toByteArray(Charsets.UTF_8)).joinToString("") {"%02x".format(it)}
+                val original=HistoryPreservation.openBody(db.openHelper.readableDatabase,HistoryPreservation.id("archives",archive.id,sha)).use {it.readBytes().toString(Charsets.UTF_8)}
+                assertEquals(oldArchive,original)
+            }
             val backup=BackupCodec.decode(main.export())
             assertEquals(after.pending,backup.campaign.pending)
             assertTrue(backup.archives.isEmpty())
