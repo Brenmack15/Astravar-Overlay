@@ -5,6 +5,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.encodeToString
 import java.util.UUID
 
@@ -57,12 +59,15 @@ data class ItemPlacement(
     val source: String = "", val updatedAt: Long = 0
 )
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable @Entity(tableName = "party_wallets", foreignKeys = [ForeignKey(entity = CharacterProfile::class,
     parentColumns = ["id"], childColumns = ["holderProfileId"], onDelete = ForeignKey.RESTRICT)], indices = [Index("holderProfileId")])
 data class PartyWallet(
     @PrimaryKey val id: String, val holderProfileId: String? = null, val name: String,
     val copper: Long? = null, val silver: Long? = null, val gold: Long? = null,
-    val revision: Long = 1, val source: String = "", val updatedAt: Long = 0, val campaignId: String = "local-campaign"
+    val revision: Long = 1, val source: String = "", val updatedAt: Long = 0, val campaignId: String = "local-campaign",
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val electrum: Long? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val platinum: Long? = null
 )
 
 @Serializable @Entity(tableName = "campaign_checkpoints", indices = [Index("campaignId")])
@@ -85,10 +90,12 @@ class PartyConverters {
     @TypeConverter fun stringsToJson(value: List<String>): String = campaignJson.encodeToString(value)
 }
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class ItemMoveCommand(
     val itemId: String, val expectedItemRevision: Long, val expectedPlacementRevision: Long? = null,
     val holderProfileId: String? = null, val containerItemId: String? = null, val installedProjectId: String? = null,
-    val state: String = "Carried", val source: String, val commandId: String = UUID.randomUUID().toString()
+    val state: String = "Carried", val source: String, val commandId: String = UUID.randomUUID().toString(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val preserveOwner: Boolean = false
 )
 @Serializable data class QuantityCommand(
     val itemId: String, val expectedItemRevision: Long, val delta: Int, val source: String,
@@ -98,9 +105,12 @@ class PartyConverters {
     val itemId: String, val expectedItemRevision: Long, val quantity: Int?, val source: String,
     val commandId: String = UUID.randomUUID().toString()
 )
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class CurrencyCommand(
     val walletId: String, val expectedRevision: Long, val copperDelta: Long = 0, val silverDelta: Long = 0,
-    val goldDelta: Long = 0, val source: String, val commandId: String = UUID.randomUUID().toString()
+    val goldDelta: Long = 0, val source: String, val commandId: String = UUID.randomUUID().toString(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val electrumDelta: Long = 0,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val platinumDelta: Long = 0
 )
 
 @Serializable data class PartyExchangeCommand(
@@ -222,7 +232,7 @@ class PartyRecordsRepository(private val db: CampaignLedgerDb) {
             command.holderProfileId != null -> "Actor:${command.holderProfileId}"
             else -> "Unknown"
         }
-        val after = before.copy(owner = holder?.name?.ifBlank { holder.id } ?: "Unknown", itemState = command.state,
+        val after = before.copy(owner = if (command.preserveOwner) before.owner else holder?.name?.ifBlank { holder.id } ?: "Unknown", itemState = command.state,
             location = location, revision = before.revision + 1, updatedAt = placement.updatedAt, source = command.source)
         dao.put(placement)
         inventory.updateItem(after)
@@ -359,7 +369,7 @@ class PartyRecordsRepository(private val db: CampaignLedgerDb) {
 
     suspend fun adjustCurrency(command: CurrencyCommand): CommandReceipt = db.withTransaction {
         checkId(command.walletId); checkSource(command.source)
-        require(listOf(command.copperDelta, command.silverDelta, command.goldDelta).any { it != 0L }) { "Record a non-zero currency change." }
+        require(listOf(command.copperDelta, command.silverDelta, command.goldDelta, command.electrumDelta, command.platinumDelta).any { it != 0L }) { "Record a non-zero currency change." }
         val fp = campaignHash(campaignJson.encodeToString(command.copy(commandId = "")))
         retry(command.commandId, fp)?.let { return@withTransaction it }
         val before = dao.wallet(command.walletId) ?: error("Wallet not found.")
@@ -373,7 +383,8 @@ class PartyRecordsRepository(private val db: CampaignLedgerDb) {
         }
         val now = System.currentTimeMillis()
         val after = before.copy(copper = change(before.copper, command.copperDelta), silver = change(before.silver, command.silverDelta),
-            gold = change(before.gold, command.goldDelta), revision = before.revision + 1, source = command.source, updatedAt = now)
+            gold = change(before.gold, command.goldDelta), electrum = change(before.electrum, command.electrumDelta),
+            platinum = change(before.platinum, command.platinumDelta), revision = before.revision + 1, source = command.source, updatedAt = now)
         dao.put(after)
         audit(command.commandId, fp, "wallet", before.id, before.revision, after.revision, command.source, now,
             campaignJson.encodeToString(before), campaignJson.encodeToString(after), kind = "CURRENCY").also { records.insert(it) }
@@ -465,7 +476,7 @@ class PartyRecordsRepository(private val db: CampaignLedgerDb) {
 
     internal fun validateWallet(wallet: PartyWallet) {
         checkId(wallet.id); checkText(wallet.name, 120, true); checkId(wallet.campaignId)
-        listOf(wallet.copper, wallet.silver, wallet.gold).forEach { require(it == null || it in 0..1_000_000_000L) }
+        listOf(wallet.copper, wallet.silver, wallet.gold, wallet.electrum, wallet.platinum).forEach { require(it == null || it in 0..1_000_000_000L) }
     }
     internal fun validateCheckpoint(checkpoint: CampaignCheckpoint) {
         checkId(checkpoint.id); checkId(checkpoint.campaignId); checkText(checkpoint.title, 120, true)
@@ -524,3 +535,11 @@ internal val campaignV3CreateStatements = listOf(
     "CREATE TABLE IF NOT EXISTS external_record_references (id TEXT NOT NULL PRIMARY KEY, namespace TEXT NOT NULL, externalId TEXT NOT NULL, recordType TEXT NOT NULL, recordId TEXT NOT NULL, url TEXT NOT NULL, revision INTEGER NOT NULL, source TEXT NOT NULL, updatedAt INTEGER NOT NULL, campaignId TEXT NOT NULL)",
     "CREATE UNIQUE INDEX IF NOT EXISTS index_external_record_references_namespace_externalId ON external_record_references(namespace,externalId)"
 )
+
+/** All old wallet values, revisions and immutable receipts remain unchanged. Unknown new coins stay null. */
+val CAMPAIGN_MIGRATION_4_5: Migration = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE party_wallets ADD COLUMN electrum INTEGER")
+        db.execSQL("ALTER TABLE party_wallets ADD COLUMN platinum INTEGER")
+    }
+}

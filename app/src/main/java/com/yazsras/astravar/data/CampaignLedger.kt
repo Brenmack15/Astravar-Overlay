@@ -77,7 +77,7 @@ data class LedgerDraft(
 @Serializable
 data class LedgerExport(
     val format: String = "astravar-campaign-items",
-    val schema: Int = 4,
+    val schema: Int = 5,
     val exportedAt: Long,
     val items: List<LedgerItem>,
     val events: List<LedgerEvent>,
@@ -124,7 +124,7 @@ interface LedgerDao {
     CraftExecution::class, CraftConsumption::class, PartySheetRecord::class, ItemPlacement::class,
     PartyWallet::class, CampaignCheckpoint::class, ExternalRecordReference::class,
     CampaignReferenceRecord::class, CampaignReferenceRelation::class, CampaignImportReceipt::class,
-    CampaignImportBackup::class, CampaignArchiveSource::class], version = 4, exportSchema = true)
+    CampaignImportBackup::class, CampaignArchiveSource::class], version = 5, exportSchema = true)
 @TypeConverters(PartyConverters::class)
 abstract class CampaignLedgerDb : RoomDatabase() {
     abstract fun ledgerDao(): LedgerDao
@@ -136,7 +136,7 @@ abstract class CampaignLedgerDb : RoomDatabase() {
         fun open(context: Context): CampaignLedgerDb = Room.databaseBuilder(
             context.applicationContext, CampaignLedgerDb::class.java, "astravar-campaign-ledger.db"
         ).enableMultiInstanceInvalidation()
-            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4).build() // NEVER fallbackToDestructiveMigration()
+            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4, CAMPAIGN_MIGRATION_4_5).build() // NEVER fallbackToDestructiveMigration()
     }
 }
 
@@ -183,10 +183,12 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
     )
 
     /** Repeating the *same* command is safe; reusing its ID with different content is rejected. */
-    suspend fun create(input: LedgerDraft, commandId: String = UUID.randomUUID().toString()): LedgerItem = db.withTransaction {
+    suspend fun create(input: LedgerDraft, commandId: String = UUID.randomUUID().toString(), recordId: String? = null): LedgerItem = db.withTransaction {
         val clean = validate(input)
         require(commandId.isNotBlank() && commandId.length <= 120)
-        val fp = fingerprint("CREATE", json.encodeToString(clean))
+        require(recordId == null || recordId.length in 1..120) { "Invalid item identity." }
+        val fp = if (recordId == null) fingerprint("CREATE", json.encodeToString(clean))
+            else fingerprint("CREATE_WITH_ID_V1", recordId, json.encodeToString(clean))
         val previous = dao.event(commandId)
         if (previous != null) {
             require(previous.kind == "CREATE" && previous.payloadFingerprint == fp) { "Command ID collision; item not created." }
@@ -195,7 +197,7 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
         require(db.recordsDao().receipt(commandId) == null) { "Command ID collision; item not created." }
         val time = System.currentTimeMillis()
         val item = LedgerItem(
-            id = UUID.randomUUID().toString(), title = clean.title, category = clean.category,
+            id = recordId ?: UUID.randomUUID().toString(), title = clean.title, category = clean.category,
             owner = clean.owner, itemState = clean.itemState, location = clean.location,
             evidenceStatus = clean.evidenceStatus, quantity = clean.quantity, description = clean.description,
             knownProperties = clean.knownProperties, possibleUses = clean.possibleUses,

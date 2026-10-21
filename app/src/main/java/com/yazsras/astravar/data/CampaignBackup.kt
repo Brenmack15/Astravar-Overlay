@@ -2,9 +2,7 @@ package com.yazsras.astravar.data
 
 import androidx.room.withTransaction
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.*
 
 internal const val CAMPAIGN_BACKUP_MAX_CHARACTERS = 32_000_000
 internal fun supportedCampaignBackup(text: String): String {
@@ -107,7 +105,7 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
 
     internal fun validate(incoming: LedgerExport, current: LedgerExport): List<String> {
         val errors = mutableListOf<String>()
-        if (incoming.format != "astravar-campaign-items" || incoming.schema !in 1..4) {
+        if (incoming.format != "astravar-campaign-items" || incoming.schema !in 1..5) {
             return listOf("Unsupported backup format or schema. No data will be imported.")
         }
         if (incoming.schema == 1 && incoming.records != CampaignRecordsExport()) errors += "Schema 1 cannot contain v2 records."
@@ -124,6 +122,7 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         checkRows("Item", incoming.items, current.items) { it.id }
         checkRows("Inventory event", incoming.events, current.events) { it.commandId }
         errors += CampaignArchiveRepository.validateState(incoming.archive, current.archive)
+        if (incoming.schema < 5 && incoming.records.wallets.any { it.electrum != null || it.platinum != null }) errors += "Electrum and platinum balances require backup schema 5."
         if (incoming.schema < 4 && incoming.archive != CampaignArchiveState()) errors += "Archive reference records require backup schema 4."
         val r = incoming.records
         val c = current.records
@@ -317,12 +316,47 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
                 identity == event.recordId && obj["revision"]?.jsonPrimitive?.longOrNull == revision
             }
         } catch (_: Exception) { false }
+        fun syncAuditMatches(record: CampaignSyncRecord, snapshot: String?): Boolean = try {
+            val original = requireNotNull(snapshot).let { campaignJson.parseToJsonElement(it).jsonObject }
+            val normalized = when (record.kind) {
+                "item", "connection" -> JsonObject(original + ("imageBase64" to JsonNull))
+                "party-sheet" -> {
+                    val content = campaignJson.parseToJsonElement(original.getValue("contentJson").jsonPrimitive.content).jsonObject
+                    JsonObject(original + ("contentJson" to JsonPrimitive(campaignJson.encodeToString(
+                        campaignJson.decodeFromJsonElement<PartySheetData>(content).copy(portraitBase64 = null)))))
+                }
+                "wallet" -> JsonObject(original + mapOf("electrum" to (original["electrum"] ?: JsonNull), "platinum" to (original["platinum"] ?: JsonNull)))
+                else -> original
+            }
+            normalized == record.fields
+        } catch (_: Exception) { false }
+        fun validateSyncAudit(event: CampaignAudit): Boolean = try {
+            require(incoming.schema >= 5 && event.kind == "TRUSTED_DM_TRANSACTION" && event.id == event.commandId &&
+                event.commandId.matches(Regex("campaign-sync-[0-9a-f]{48}")) && event.priorRevision == 0L && event.resultingRevision == 1L)
+            val receipt = requireNotNull(allReceipts[event.commandId])
+            require(receipt.kind == "CAMPAIGN_SYNC_V2" && receipt.recordId == event.recordId && receipt.outcomeJson == event.afterJson)
+            val after = campaignJson.decodeFromString<List<CampaignSyncRecord>>(requireNotNull(event.afterJson))
+            val before = campaignJson.decodeFromString<List<CampaignSyncRecord>>(requireNotNull(event.beforeJson))
+            require(after.size in 1..100 && after.map { it.kind to it.recordId }.distinct().size == after.size)
+            val prefix = event.commandId.take("campaign-sync-".length + 40) + "-"
+            val children = allReceipts.keys.filter { it.startsWith(prefix) }.toSet()
+            require(children.size in 1..100)
+            val childrenAudit = audit.values.filter { it.commandId in children && it.source == event.source }
+            fun localKind(kind: String) = when (kind) { "companion-state" -> "companion"; "companion-resource" -> "resource"; "reference" -> "external-reference"; else -> kind }
+            require(after.all { record -> childrenAudit.any { child -> child.recordType == localKind(record.kind) &&
+                child.recordId == record.recordId && child.resultingRevision == record.revision && syncAuditMatches(record,child.afterJson) } })
+            require(before.all { record -> childrenAudit.any { child -> child.recordType == localKind(record.kind) &&
+                child.recordId == record.recordId && child.priorRevision == record.revision && syncAuditMatches(record,child.beforeJson) } })
+            true
+        } catch (_: Exception) { false }
         r.audit.forEach { event ->
             if (event.commandId !in allReceipts || event.priorRevision < 0 || event.resultingRevision != event.priorRevision + 1) {
                 errors += "Audit ${event.id} has no original receipt or an invalid revision."
             }
             if (event.recordType == "backup") {
                 if (event.kind != "RESTORE" || event.afterJson.isNullOrBlank()) errors += "Invalid restore audit ${event.id}."
+            } else if (event.recordType == "campaign-transaction") {
+                if (!validateSyncAudit(event)) errors += "Campaign transaction ${event.id} has invalid or missing committed child outcomes."
             } else if (event.recordId !in recordIds[event.recordType].orEmpty() ||
                 !auditSnapshotMatches(event, event.afterJson, event.resultingRevision) ||
                 (event.priorRevision == 0L && event.beforeJson != null) ||
@@ -402,7 +436,7 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
             checkHistory("item", id, rows.map { event -> CampaignAudit(event.commandId, event.commandId, "item", id,
                 event.kind, event.source, event.priorRevision, event.resultingRevision, event.createdAt, event.beforeJson, event.afterJson) })
         }
-        (r.audit + c.audit).distinctBy { it.id }.filter { it.recordType != "backup" }
+        (r.audit + c.audit).distinctBy { it.id }.filter { it.recordType !in setOf("backup", "campaign-transaction") }
             .groupBy { it.recordType to it.recordId }.forEach { (key, rows) -> checkHistory(key.first, key.second, rows) }
         return errors.distinct()
     }

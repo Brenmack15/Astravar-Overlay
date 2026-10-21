@@ -73,7 +73,7 @@ fun interface OwnerConnectionTransport {
 class OwnerConnectionHttpsTransport : OwnerConnectionTransport {
     override suspend fun request(origin: String, path: String, credential: OwnerSyncCredential?, serviceAccess: String?, body: String?): OwnerSyncResponse = withContext(Dispatchers.IO) {
         val endpoint = OwnerSyncProtocol.origin(origin)
-        require(path.matches(Regex("/v1/[A-Za-z0-9_./-]+")) && !path.contains(".."))
+        require(path.matches(Regex("/v[12]/[A-Za-z0-9_./:%-]+")) && !path.contains(".."))
         credential?.let { require(it.origin == endpoint && it.expiresAt > System.currentTimeMillis()) }
         val connection = URL(endpoint + path).openConnection() as HttpURLConnection
         connection.instanceFollowRedirects = false; connection.connectTimeout = 8000; connection.readTimeout = 8000
