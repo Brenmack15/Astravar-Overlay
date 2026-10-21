@@ -13,8 +13,11 @@ import com.yazsras.astravar.ui.LiveHpConnectionPage
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.*
 import org.junit.*
@@ -143,7 +146,44 @@ class LiveHpNativeHttpsTest {
     private fun waitFor(label: String) = compose.waitUntil(30_000) {
         compose.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty()
     }
-    private fun tap(label: String) { waitFor(label); compose.onAllNodesWithText(label).onFirst().performScrollTo().performClick() }
+    private fun tap(label: String) {
+        waitFor(label)
+        val button = hasText(label) and hasClickAction()
+        compose.onAllNodes(button).onFirst().performScrollTo()
+        compose.waitUntil(30_000) { compose.onAllNodes(button and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+        val enabled = compose.onAllNodes(button and isEnabled()).onFirst()
+        enabled.assertIsEnabled()
+        InstrumentationRegistry.getInstrumentation().sendStatus(0, Bundle().apply {
+            putString("stream", "\nUI_ACTION: $label · clickable and enabled after scrolling\n")
+        })
+        enabled.performClick()
+    }
+    private fun nativeTest(body: suspend CoroutineScope.() -> Unit): Unit = runBlocking {
+        try { body() } catch (failure: Throwable) {
+            runCatching {
+                // This isolated test contains only the explicitly seeded fictional profiles.
+                File(context.getExternalFilesDir(null), "failure-semantics.txt")
+                    .writeText(compose.onRoot().printToString())
+            }
+            withContext(NonCancellable) { runCatching {
+                val snapshot = withTimeout(5_000) { client.snapshot() }
+                val safe = buildJsonObject {
+                    put("fictionalOnly", true)
+                    listOf("connected", "status").forEach { key -> snapshot[key]?.let { put(key, it) } }
+                    (snapshot["current"] as? JsonObject)?.let { current -> put("current", buildJsonObject {
+                        listOf("currentHp", "maximumHp", "temporaryHp", "revision").forEach { key -> current[key]?.let { put(key, it) } }
+                    }) }
+                    put("pending", buildJsonArray { (snapshot["pending"] as? JsonArray)?.forEach { element ->
+                        val pending = element.jsonObject
+                        add(buildJsonObject { listOf("state", "currentHp", "proposedHp", "expectedRevision", "currentRevision").forEach { key -> pending[key]?.let { put(key, it) } } })
+                    } })
+                }
+                File(context.getExternalFilesDir(null), "failure-state.json").writeText(safe.toString())
+                InstrumentationRegistry.getInstrumentation().sendStatus(0, Bundle().apply { putString("stream", "\nFAILURE_STATE: $safe\n") })
+            } }
+            throw failure
+        }
+    }
     private fun checkpoint(name: String, hp: Int, revision: Long) {
         val json = buildJsonObject { put("syntheticOnly", true); put("emulatorApi", android.os.Build.VERSION.SDK_INT)
             put("profileId", profileId); put("checkpoint", name); put("currentHp", hp); put("revision", revision)
@@ -160,7 +200,7 @@ class LiveHpNativeHttpsTest {
         client.sync()
     }
 
-    @Test fun aNativeKeystorePublicationApprovalRejectionAndOfflineIntent() = runBlocking {
+    @Test fun aNativeKeystorePublicationApprovalRejectionAndOfflineIntent() = nativeTest {
         invariant(38, 1)
         val wrongHost = URL("https://wrong-hp-bridge.example/__ci/health").openConnection() as HttpsURLConnection
         wrongHost.connectTimeout = 10_000; wrongHost.readTimeout = 10_000
@@ -230,7 +270,7 @@ class LiveHpNativeHttpsTest {
         checkpoint("offline-intent", 30, 3)
     }
 
-    @Test fun bRestartRetryAndValidatedBackupRestore() = runBlocking {
+    @Test fun bRestartRetryAndValidatedBackupRestore() = nativeTest {
         invariant(30, 3); assertRemote(31, 2)
         request("/__ci/fault", buildJsonObject { put("offline", false); put("dropNextDecision", true) })
         // First delivery commits server-side and loses its HTTP response.
@@ -261,7 +301,7 @@ class LiveHpNativeHttpsTest {
         checkpoint("restart-retry-backup-restore", 30, 3)
     }
 
-    @Test fun cSimultaneousLocalEditAndAuthorizationRevocation() = runBlocking {
+    @Test fun cSimultaneousLocalEditAndAuthorizationRevocation() = nativeTest {
         invariant(30, 3); assertRemote(30, 3)
         val stale = UUID.randomUUID().toString()
         mcp("propose_hp_adjustment", proposal(stale, 3, 30, -2)); client.sync()
