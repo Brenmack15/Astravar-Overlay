@@ -353,13 +353,14 @@ class CampaignConnectionClient internal constructor(private val context: Context
     private suspend fun registerPush(value: CampaignConnectionSettings) {
         requireAutomaticAllowed()
         if (!CampaignFirebase.configured || value.revokePending || value.deviceId.isBlank()) return
-        val g = checkedGrant(value, grant(value)); credential(value)
+        val g = checkedGrant(value, grant(value)); val secret = credential(value)
+        val binding = pushBinding(value, g, secret)
+        pushStore.bindEnrollment(binding, minOf(secret.expiresAt, g.getValue("expiresAt").jsonPrimitive.long))
         // Ask the SDK for its current cached token on reconnect as well as handling onNewToken;
         // a missed process-boundary callback must not pin a stale registration indefinitely.
         runCatching { CampaignFirebase.messaging(context)?.token?.addOnSuccessListener { refreshed ->
             val store = CampaignPushStore(context)
-            if (store.token() != refreshed) {
-                runCatching { store.saveToken(refreshed) }
+            if (store.token() != refreshed && runCatching { store.saveTokenIfBound(refreshed, binding) }.getOrDefault(false)) {
                 CampaignConnectionSyncJob.enqueue(context)
             }
         } }
@@ -381,6 +382,15 @@ class CampaignConnectionClient internal constructor(private val context: Context
             pushStore.registration = ""
         } catch (_: java.io.IOException) { pushStore.registration = "" }
     }
+    private fun pushBinding(value: CampaignConnectionSettings, grant: JsonObject, secret: OwnerSyncCredential) =
+        OwnerSyncProtocol.hash(listOf(value.origin, value.campaignId, value.deviceId, grant.getValue("grantId").jsonPrimitive.content,
+            OwnerSyncProtocol.hash(secret.bearer)).joinToString("\n"))
+    /** Read-only snapshot; persistence still requires the store's current enrollment binding CAS. */
+    suspend fun currentPushBinding(): String? = runCatching {
+        val value = setting()
+        require(value.deviceId.isNotBlank() && !value.revokePending)
+        pushBinding(value, checkedGrant(value, grant(value)), credential(value))
+    }.getOrNull()
     suspend fun hasPushEnrollment(): Boolean = runCatching {
         val value = setting()
         require(value.deviceId.isNotBlank() && !value.revokePending)
@@ -737,6 +747,9 @@ class CampaignConnectionClient internal constructor(private val context: Context
         snapshotUnlocked()
     }
     private suspend fun revokeUnlocked(value: CampaignConnectionSettings) {
+        // Invalidate queued SDK callbacks before any suspension or remote request. The shared
+        // store lock makes token deletion and callback persistence mutually exclusive.
+        pushStore.forgetToken()
         // Best-effort explicit removal precedes credential destruction. Server revocation also
         // deletes registrations atomically if the optional push route is temporarily unavailable.
         try { request(value, base(value) + "/push-token", delete = true) }

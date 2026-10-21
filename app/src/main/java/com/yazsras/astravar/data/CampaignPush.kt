@@ -68,10 +68,10 @@ object CampaignFirebase {
 }
 
 /** FCM token is installation-sensitive and encrypted with a non-exportable Android Keystore key. */
-class CampaignPushStore(context: Context) {
+class CampaignPushStore(context: Context, private val keyProvider: (() -> SecretKey)? = null) {
     private val prefs = context.applicationContext.getSharedPreferences("astravar-campaign-push", Context.MODE_PRIVATE)
     companion object { private val storeLock = Any() }
-    private fun key(): SecretKey = synchronized(storeLock) {
+    private fun key(): SecretKey = keyProvider?.invoke() ?: synchronized(storeLock) {
         val alias = "astravar-campaign-push-v1"
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey(alias, null) as? SecretKey)?.let { return@synchronized it }
@@ -90,12 +90,22 @@ class CampaignPushStore(context: Context) {
         }
         plain.toString(Charsets.UTF_8).also { plain.fill(0) }
     }.getOrNull()
-    @Synchronized fun saveToken(token: String) {
+    private fun saveToken(token: String) {
         require(token.matches(Regex("[A-Za-z0-9:_-]{40,4096}")))
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()); updateAAD("astravar-fcm-v1".toByteArray()) }
         val bytes = token.toByteArray(Charsets.UTF_8)
         val encrypted = cipher.doFinal(bytes); bytes.fill(0)
         check(prefs.edit().putString("token", Base64.encodeToString(cipher.iv + encrypted, Base64.NO_WRAP)).remove("registered").commit())
+    }
+    /** A verified enrollment activates callbacks; revocation invalidates them atomically with deletion. */
+    fun bindEnrollment(binding: String, expiresAt: Long) = synchronized(storeLock) {
+        require(binding.matches(Regex("[a-f0-9]{64}")) && expiresAt > 0)
+        check(prefs.edit().putString("enrollmentBinding", binding).putLong("enrollmentExpiresAt", expiresAt).commit())
+    }
+    fun saveTokenIfBound(token: String, binding: String, now: Long = System.currentTimeMillis()): Boolean = synchronized(storeLock) {
+        if (binding.isBlank() || prefs.getString("enrollmentBinding", "") != binding || prefs.getLong("enrollmentExpiresAt", 0) <= now) return@synchronized false
+        if (token() != token) saveToken(token)
+        true
     }
     var registration: String
         get() = prefs.getString("registered", "") ?: ""
@@ -124,8 +134,12 @@ class CampaignPushStore(context: Context) {
         prefs.edit().putString("timings", JsonArray((prior + event).takeLast(256)).toString()).apply()
     }
     fun timings(): JsonArray = runCatching { Json.parseToJsonElement(prefs.getString("timings", "[]")!!).jsonArray }.getOrDefault(JsonArray(emptyList()))
-    fun clearRegistration() { registration = ""; prefs.edit().remove("wakes").apply() }
-    fun forgetToken() { clearRegistration(); check(prefs.edit().remove("token").commit()) }
+    fun clearRegistration() = synchronized(storeLock) {
+        check(prefs.edit().remove("registered").remove("wakes").remove("enrollmentBinding").remove("enrollmentExpiresAt").commit())
+    }
+    fun forgetToken() = synchronized(storeLock) {
+        check(prefs.edit().remove("registered").remove("wakes").remove("enrollmentBinding").remove("enrollmentExpiresAt").remove("token").commit())
+    }
     override fun toString() = "CampaignPushStore(redacted)"
 }
 
@@ -133,15 +147,14 @@ class CampaignPushStore(context: Context) {
 class AstravarMessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
         if (!CampaignFirebase.configured) return
-        val enrolled = runCatching { runBlocking(Dispatchers.IO) {
+        val binding = runCatching { runBlocking(Dispatchers.IO) {
             withTimeoutOrNull(2_000) {
                 val client = CampaignConnectionClient(applicationContext)
-                try { client.hasPushEnrollment() } finally { client.close() }
-            } == true
-        } }.getOrDefault(false)
-        if (!enrolled) return
-        runCatching { CampaignPushStore(this).saveToken(token) }
-        if (!CampaignSyncPreferences(this).paused) CampaignConnectionSyncJob.enqueue(this)
+                try { client.currentPushBinding() } finally { client.close() }
+            }
+        } }.getOrNull() ?: return
+        val saved = runCatching { CampaignPushStore(this).saveTokenIfBound(token, binding) }.getOrDefault(false)
+        if (saved && !CampaignSyncPreferences(this).paused) CampaignConnectionSyncJob.enqueue(this)
     }
     override fun onMessageReceived(message: RemoteMessage) {
         if (!CampaignFirebase.configured || CampaignSyncPreferences(this).paused || message.notification != null ||
