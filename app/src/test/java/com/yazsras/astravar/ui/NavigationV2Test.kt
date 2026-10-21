@@ -1,9 +1,12 @@
 package com.yazsras.astravar.ui
 
 import android.graphics.Bitmap
+import android.content.ComponentName
+import android.content.Intent
 import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.room.MultiInstanceInvalidationService
 import androidx.compose.runtime.*
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -43,8 +46,16 @@ class NavigationV2Test {
         }
     }
 
+    @OptIn(androidx.room.ExperimentalRoomApi::class)
     @Test(timeout = 90_000) fun campaignPagesAndBackupsRemainAccessibleBeforeWeaponOnboardingWithoutChangingWeaponState() {
         val app = ApplicationProvider.getApplicationContext<AstravarApp>()
+        // Android supplies a non-null ComponentName and the Room service binder when binding.
+        // Robolectric's default unconfigured bind instead invokes the callback with nulls.
+        // Use the actual service so production cross-instance invalidation stays enabled.
+        val invalidationIntent = Intent(app, MultiInstanceInvalidationService::class.java)
+        val invalidationService = Robolectric.buildService(MultiInstanceInvalidationService::class.java).create()
+        shadowOf(app).setComponentNameAndServiceForBindServiceForIntent(invalidationIntent,
+            ComponentName(app, MultiInstanceInvalidationService::class.java), invalidationService.get().onBind(invalidationIntent))
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         var overlayStarts = 0
         var permissionRequests = 0
@@ -111,7 +122,7 @@ class NavigationV2Test {
             assertTrue(records.getValue("entities").jsonArray.isEmpty())
             assertTrue(records.getValue("characterProfiles").jsonArray.isEmpty())
             assertTrue(records.getValue("partySheets").jsonArray.isEmpty())
-        } finally { activity.pause().stop().destroy() }
+        } finally { activity.pause().stop().destroy(); invalidationService.destroy() }
     }
 
     @Test fun primaryNavigationExposesSelectedDestinationAndReportsEachUserSelection() {
