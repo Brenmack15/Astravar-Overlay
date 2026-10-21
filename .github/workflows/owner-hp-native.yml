@@ -12,10 +12,10 @@ concurrency:
 jobs:
   native-hp:
     runs-on: ubuntu-latest
-    timeout-minutes: 65
+    timeout-minutes: 80
     env:
-      ASTRAVAR_VERSION_CODE: '35'
-      ASTRAVAR_VERSION_NAME: '2.1.1'
+      ASTRAVAR_VERSION_CODE: '36'
+      ASTRAVAR_VERSION_NAME: '2.2.0'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -43,17 +43,17 @@ jobs:
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "$ANDROID_HOME/cmdline-tools/19.0/bin" >> "$GITHUB_PATH"
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
-      - name: Build baseline34 and exact-head candidate35 test APKs
+      - name: Build published baseline35 and exact-head candidate36 test APKs
         timeout-minutes: 35
         run: |
-          git fetch --no-tags --depth=1 origin e24d2d2c64fb187a68a2fdbb474fe122cbd6e3f5
-          git worktree add --detach "$RUNNER_TEMP/astravar-hp-baseline" e24d2d2c64fb187a68a2fdbb474fe122cbd6e3f5
-          (cd "$RUNNER_TEMP/astravar-hp-baseline" && ASTRAVAR_VERSION_CODE=34 ASTRAVAR_VERSION_NAME=2.1.0 bash ./gradlew --no-daemon --console=plain :app:assembleDebug)
-          cp "$RUNNER_TEMP/astravar-hp-baseline/app/build/outputs/apk/debug/app-debug.apk" "$RUNNER_TEMP/astravar-hp-baseline34.apk"
+          git fetch --no-tags --depth=1 origin abae4f49beec75d14a364be91f7d0fb4303524ad
+          git worktree add --detach "$RUNNER_TEMP/astravar-hp-baseline" abae4f49beec75d14a364be91f7d0fb4303524ad
+          (cd "$RUNNER_TEMP/astravar-hp-baseline" && ASTRAVAR_VERSION_CODE=35 ASTRAVAR_VERSION_NAME=2.1.1 bash ./gradlew --no-daemon --console=plain :app:assembleDebug)
+          cp "$RUNNER_TEMP/astravar-hp-baseline/app/build/outputs/apk/debug/app-debug.apk" "$RUNNER_TEMP/astravar-hp-baseline35.apk"
           bash ./gradlew --no-daemon --console=plain :app:assembleDebug :app:assembleDebugAndroidTest
-          echo "ASTRAVAR_BASELINE_DEBUG_APK=$RUNNER_TEMP/astravar-hp-baseline34.apk" >> "$GITHUB_ENV"
-      - name: Native TLS, AndroidKeyStore, approval, restart, restore and negatives
-        timeout-minutes: 18
+          echo "ASTRAVAR_BASELINE_DEBUG_APK=$RUNNER_TEMP/astravar-hp-baseline35.apk" >> "$GITHUB_ENV"
+      - name: Native campaign Auto-Sync, TLS, AndroidKeyStore, transactions, clipboard and recovery
+        timeout-minutes: 25
         run: bash scripts/ci-owner-hp-native.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
