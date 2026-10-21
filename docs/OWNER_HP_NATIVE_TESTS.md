@@ -31,6 +31,13 @@ ownership. This avoids treating the intentional `adbd` disconnect from
 `remount -R` as a completed remount. Any remount, ownership, hosts write or
 resolution failure still aborts before app credentials are installed.
 
+Before injecting credentials, the harness records host/guest epoch differences
+and synchronizes only the verified fresh emulator clock, with a measured bounded
+two-second setting margin. The isolated test DNS does not provide network time.
+Native bootstrap diagnostics retain only binding/window booleans and numeric
+age/expiry differences, never challenge values, keys or credentials. Production
+expiry, origin, campaign, nonce and replay guards are unchanged.
+
 Native test phases exercise:
 
 1. Real emulator AndroidKeyStore encryption/decryption, tamper rejection and
