@@ -24,6 +24,15 @@ assert entry['after_removing_exact_insertion_sha256'] == original_overlay
 block = entry['exact_authorized_insertion']
 assert block.count('\n') == 13
 current = (root / overlay).read_text()
+fast = manifest.get('authorized_fast_sync_source_changes', {})
+if fast:
+    assert fast.get('verified_source_baseline') == '045bfaed33393675c8d8d621bf260636deb04dd8'
+    # Reverse only the reviewed pause/screen-lock loop changes. The complete
+    # previous file must match before applying the original combat-source proof.
+    for replacement in fast.get('exact_overlay_replacements', []):
+        assert current.count(replacement['after']) == 1, 'Exact authorized sync guard changed'
+        current = current.replace(replacement['after'], replacement['before'], 1)
+    assert hashlib.sha256(current.encode()).hexdigest() == fast['files'][overlay]['previous_pinned_sha256']
 assert current.count(block) == 1, 'Exact authorized foreground sync insertion changed'
 assert hashlib.sha256(current.replace(block, '', 1).encode()).hexdigest() == original_overlay, 'Overlay combat/source changed outside the authorized delivery loop'
 
