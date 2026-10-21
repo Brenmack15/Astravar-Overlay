@@ -61,3 +61,23 @@ fictional protocol, not this separately scoped authenticated HP extension.
 Preserve the existing private Site audience, package and owner signing certificate.
 Do not request routine manual testing; the only indispensable owner actions are
 account/device consent, one verified APK installation and the real HP approval.
+
+## Campaign integration authorization (21 October 2026)
+
+The owner's Astravar 2.2 directive extends the existing private service to typed,
+scoped player-known campaign reads and domain transactions. Explicit one-time
+campaign enrollment and independently revocable read/write scopes are required;
+existing fictional or HP permissions do not silently grant campaign access.
+Trusted DM Auto-Sync may apply resolved, explicitly authorized gameplay operations
+within standing scopes without a fresh native approval. Manual approval remains
+available. Both backend and Android enforce grants, revisions, command identity,
+atomicity and immutable receipts; report pending delivery until Android commits
+and independent receipt/readback agree. Preserve unknown values and all existing
+stores, backups, mechanics and source identities. Real-data migration/cutover
+still requires separate owner authorization. Test failures only against isolated
+fictional data. Keep private exports and signing material out of source control.
+The existing owner-private Site and plugin identity must be reused; the separate
+legacy DM Bridge and disposable public sandbox remain unchanged. Routine source,
+CI, included hosting deployment and release preparation are authorized. Physical
+installation, account pairing, standing grants and platform consent remain owner
+actions and must never be reported complete without evidence.

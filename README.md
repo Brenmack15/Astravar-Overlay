@@ -1,4 +1,4 @@
-# Astravar 2.1
+# Astravar 2.2
 
 Native Android tabletop companion by Yazsras Studios, continuing the verified
 Astravar 2.0 source. Development branch: `feat/astravar-2.1-player-first`.
@@ -24,7 +24,8 @@ Full authoritative Party statistics still await approved source reconciliation a
 import. Sheets support descriptive creature/spell records without invented level-up
 grants. Equipping/installing an item does not automatically apply its bonuses;
 transfers move whole recorded stacks, with no split/merge command. Wallets track
-copper, silver and gold independently.
+copper, silver, electrum, gold and platinum independently, preserving unknown
+balances without conversion.
 
 Campaign retains inventory, inventions, relationships and player-known facts,
 with versioned checkpoints and merge-only reviewed backups. Config includes
@@ -44,30 +45,37 @@ Advanced elements retain accepted upgrade gates.
 No real character values, level-ups, speculative upgrades or private review
 sheets are seeded. Original approved artwork and launcher portrait are preserved.
 
-Campaign Room migrates additively 1→2→3→4. Existing weapon Room migrations and
+Campaign Room migrates additively 1→2→3→4→5. Existing weapon Room migrations and
 historical backup compatibility remain intact. The same inventory database
 owns items, placements, crafting, audits and receipts. Real Notion records are
 not automatically imported or declared canonical.
 
 ## Connection boundary
 
-Config's Owner connection provides a separate HP protocol for an existing selected
-profile. New account/device consent binds the exact profile and campaign scope.
-Only name, current/maximum/temporary HP, source, update time and the existing profile
-revision are mirrored. ChatGPT may read and propose a signed current-HP adjustment;
-only explicit native approval commits it through the campaign repository. Durable
-intent, local and server receipts, revision checks and independent readback protect
-retries and restarts. Unknown or stale HP cannot be used to create a proposal.
-Maximum HP, temporary HP, combat mechanics and unrelated records are preserved.
-Original fictional tools and credentials remain separate and cannot authorize HP
-access. Wider party/item/currency operations and real campaign migration are outside
-this narrowly scoped connection extension.
+Config's unified Owner connection enrolls an existing saved campaign with explicit
+read and permitted-update categories. Trusted DM Auto-Sync applies only resolved,
+authorized typed gameplay within standing server and device grants; manual mode
+remains available. HP, resources, inventory, equipment, wallets, engineering,
+companions, relationships and checkpoints share one versioned transaction and
+delivery system. Combat configuration and dice history remain read-only mirrors.
+Visible pairing codes support accessible tap-to-copy. Advanced diagnostics retain
+the earlier fictional and manual HP protocols without granting campaign access.
+
+The local campaign database remains authoritative. Durable intent, optimistic
+revisions, immutable domain/server receipts and independent committed-record
+readback protect retries, interruption and atomic costs/acquisitions. A pending
+command never counts as a completed save. Unknown values and unresolved source
+conflicts remain explicit. Active app/overlay sessions synchronize while in use;
+Android background delivery is scheduled and may be delayed. Source reconciliation
+and real-data import/cutover still require the necessary owner authorization.
+See the [campaign connection guide](docs/CAMPAIGN_SYNC_V22.md) and
+[V2 wire contract](backend/owner-bridge/CAMPAIGN_V2_CONTRACT.md).
 
 The native HTTPS workflow runs isolated fictional records in an accelerated
 emulator, including in-place update, approval, rejection, interruption, restart,
 backup restoration, authorization and revocation checks. Emulator evidence is not
 physical-device or ordinary-ChatGPT acceptance. Deployment, installed connector
-discovery and the owner-approved real HP readback must each have independent
+discovery and owner-authorized real campaign readback must each have independent
 evidence before being reported successful. See the [HP contract](docs/OWNER_HP_CONNECTION_CONTRACT.md),
 [MCP definitions](backend/owner-bridge/HP_MCP_TOOLS.md) and
 [automated native checks](docs/OWNER_HP_NATIVE_TESTS.md).
@@ -93,7 +101,7 @@ variants, optimized packaging, native overlay/accessibility and a same-key
 synthetic update. Its public APKs are explicitly **CI ONLY** and use a temporary
 signer. Never confuse them with the owner-signed candidate.
 
-Permanent release target: `com.yazsras.astravar`, version2.1.1/code35, existing
+Permanent release target: `com.yazsras.astravar`, version2.2.0/code36, existing
 owner signing identity. The original private identity was recovered and its
 certificate matches available historical owner APKs. Signing material is never
 stored here or sent to CI. A production release requires final owner approval.
