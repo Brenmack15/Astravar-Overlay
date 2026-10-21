@@ -69,11 +69,22 @@ class CampaignSyncDomainTest {
     }
     @Test fun legacyAcquisitionHistoryKeepsOriginalLedgerCommandAndScopedItemIdentity() = runBlocking {
         val item=ledger.create(LedgerDraft("Fictional historical lens",quantity=1,source="Resolved historical acquisition"),"legacy-acquisition")
-        val record=domain.snapshot(campaign).single {it.kind=="audit" && it.fields["commandId"]?.jsonPrimitive?.content=="legacy-acquisition"}
+        val snapshot=domain.snapshot(campaign)
+        val evidence=snapshot.filter {it.kind=="audit" && it.fields["commandId"]?.jsonPrimitive?.content=="legacy-acquisition"}
+        assertEquals(2,evidence.size)
+        val record=evidence.single {it.recordId=="ledger:${campaignHash("legacy-acquisition").take(48)}"}
+        val original=requireNotNull(db.ledgerDao().event("legacy-acquisition"))
+        assertEquals(campaignJson.encodeToJsonElement(original).jsonObject,record.fields)
         assertEquals(item.id,record.fields.getValue("itemId").jsonPrimitive.content)
         assertEquals("Resolved historical acquisition",record.fields.getValue("source").jsonPrimitive.content)
         assertEquals(1L,record.revision);assertEquals("CREATE",record.fields.getValue("kind").jsonPrimitive.content)
-        assertFalse(domain.snapshot("synthetic-other-campaign").any {it.recordId==record.recordId})
+        val modern=evidence.single {it.recordId=="legacy-acquisition"}
+        val originalAudit=db.recordsDao().allAudit().single {it.id=="legacy-acquisition"}
+        assertEquals(campaignJson.encodeToJsonElement(originalAudit).jsonObject,modern.fields)
+        assertEquals(item.id,modern.fields.getValue("recordId").jsonPrimitive.content)
+        assertNotEquals(record.recordId,modern.recordId)
+        assertEquals(snapshot.size,snapshot.map {it.kind to it.recordId}.distinct().size)
+        assertFalse(domain.snapshot("synthetic-other-campaign").any {it.recordId in setOf(record.recordId,modern.recordId)})
     }
     @Test fun healthKeepsTemporaryMaximumAndUnknownAndRetriesExactlyOnce() = runBlocking {
         val op=CampaignSyncOperation("adjust_hp","synthetic-player","character-profile",1,fields("delta" to number(-3)))
