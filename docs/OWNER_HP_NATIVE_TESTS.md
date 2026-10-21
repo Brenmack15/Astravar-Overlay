@@ -14,9 +14,14 @@ This is a debug-key update test, not evidence of an owner-key phone update.
 
 An isolated Node HTTPS/SQLite server imports the tracked Worker, HTTP and MCP
 handlers. A process-local ephemeral CA configures only the instrumentation
-process; production TLS and hostname verification are unchanged. DNS resolves
-only reserved test names; `adb reverse` connects guest port 443 to the runner's
-loopback server. A wrong certificate hostname must be rejected. The temporary
+process; production TLS and hostname verification are unchanged. The verified
+fresh AVD uses a session-only writable system image with two reserved `.example`
+hosts mapped to guest loopback. Both names must resolve to `127.0.0.1` before any
+app credentials are injected; a failed remount or write aborts the job. Android's
+[documented writable-system option](https://developer.android.com/studio/run/emulator-commandline)
+creates a temporary image destroyed on emulator exit. `adb reverse` connects guest
+port 443 to the runner's loopback server. A wrong certificate hostname must still
+be rejected. No system-wide CA or production TLS override is installed. The temporary
 gateway strips caller identity headers and accepts its privileged controller
 only with an ephemeral secret held outside retained evidence.
 
