@@ -6,7 +6,7 @@ import https from 'node:https';
 import dgram from 'node:dgram';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual, createHash } from 'node:crypto';
 import worker from '../backend/owner-bridge/worker.mjs';
 import { SqliteAdapter } from '../backend/owner-bridge/sqlite-adapter.mjs';
 
@@ -16,7 +16,30 @@ const origin = 'https://hp-bridge.example';
 const config = JSON.parse(readFileSync(resolve(directory, 'server-config.json')));
 if (config.origin !== origin || config.profileId !== 'hp-native-player' || !config.ownerId.startsWith('ci-fictional-')) throw Error('Only isolated fictional acceptance is permitted');
 const db = new SqliteAdapter(resolve(directory, 'bridge.sqlite'));
-db.exec(readFileSync(new URL('../backend/owner-bridge/schema.sql', import.meta.url), 'utf8'));
+// This disposable gateway deliberately restarts against the same durable fixture.
+// Applied production migrations are one-time SQL. Re-executing their master DDL
+// on restart would erase neither data nor bugs, but fails on V2's new tables.
+// Create only an empty fixture, then verify every noninternal schema object on
+// reuse. A partial/obsolete schema fails closed; it is never cleared or rebuilt.
+const masterSchema = readFileSync(new URL('../backend/owner-bridge/schema.sql', import.meta.url), 'utf8');
+const schemaObjects = database => database.db.prepare(
+  "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
+).all().map(row => ({ type: row.type, name: row.name, table: row.tbl_name,
+  sql: String(row.sql ?? '').replace(/\s+/g, ' ').trim() }));
+const expectedFixture = new SqliteAdapter();
+let reusedFixture = false;
+try {
+  expectedFixture.exec(masterSchema);
+  const existing = schemaObjects(db);
+  if (existing.length === 0) db.exec(masterSchema);
+  else reusedFixture = true;
+  if (JSON.stringify(schemaObjects(db)) !== JSON.stringify(schemaObjects(expectedFixture))) {
+    throw Error('CI_FIXTURE_SCHEMA_MISMATCH: existing synthetic database schema does not match the reviewed source');
+  }
+} catch (error) { db.close(); throw error; }
+finally { expectedFixture.close(); }
+console.log(JSON.stringify({ syntheticOnly: true, databaseInitialization: reusedFixture ? 'VERIFIED_EXISTING' : 'FRESH',
+  schemaSha256: createHash('sha256').update(masterSchema).digest('hex') }));
 const env = { DB: db, OWNER_SITE_USER_ID: config.ownerId, SITES_SERVICE_ACCESS_BEARER: config.serviceBearer };
 let offline = false;
 let dropNextDecision = false;
