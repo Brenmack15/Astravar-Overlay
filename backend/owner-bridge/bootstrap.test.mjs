@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
+import { readFileSync } from 'node:fs';
+import { SqliteAdapter } from './sqlite-adapter.mjs';
 import { encryptBootstrapBundle, bootstrapAad, handleBootstrap } from './bootstrap.mjs';
 
 const origin = 'https://owner.example';
@@ -9,6 +11,11 @@ const nonce = 'N'.repeat(43);
 const env = { OWNER_SITE_USER_ID: 'fictional-site-owner', SITES_SERVICE_ACCESS_BEARER: 'test-transport-only-'.repeat(4) };
 const encode = value => Buffer.from(value).toString('base64url');
 const decode = value => new Uint8Array(Buffer.from(value, 'base64url'));
+function downloadEnv() {
+  const DB = new SqliteAdapter();
+  DB.exec(readFileSync(new URL('./schema.sql', import.meta.url), 'utf8'));
+  return { ...env, DB };
+}
 async function keys() {
   const pair = await crypto.subtle.generateKey({ name: 'RSA-OAEP', hash: 'SHA-256', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]) }, true, ['encrypt', 'decrypt']);
   return { ...pair, spki: encode(await crypto.subtle.exportKey('spki', pair.publicKey)) };
@@ -78,12 +85,20 @@ test('bootstrap rejects live campaigns, malformed keys, foreign origins, extra f
   assert.equal((await html.text()).includes(env.SITES_SERVICE_ACCESS_BEARER), false);
 });
 
-test('native form download returns only an attachment encrypted in the exact existing Android envelope', async () => {
+test('native form download redirects to an owner-bound attachment encrypted in the exact existing Android envelope', async t => {
   const pair = await keys(), different = await keys();
+  const configuration = downloadEnv(); t.after(() => configuration.DB.close());
   const startedAt = Date.now();
-  const response = await handleBootstrap(formRequest({ origin, campaignId, nonce, publicKeySpki: pair.spki }, {
+  const prepared = await handleBootstrap(formRequest({ origin, campaignId, nonce, publicKeySpki: pair.spki }, {
     'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-  }), env);
+  }), configuration);
+  assert.equal(prepared.status, 303);
+  assert.match(prepared.headers.get('location'), /^\/owner\/bootstrap\/download\/[A-Za-z0-9_-]{43}$/);
+  assert.equal(prepared.headers.get('content-disposition'), null);
+  assert.equal(prepared.headers.get('cache-control'), 'no-store');
+  assert.equal(prepared.headers.get('referrer-policy'), 'no-referrer');
+  assert.equal(prepared.headers.get('location').includes(env.SITES_SERVICE_ACCESS_BEARER), false);
+  const response = await handleBootstrap(request(prepared.headers.get('location')), configuration);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('content-disposition'), 'attachment; filename="Astravar-encrypted-authorization.json"');
   assert.equal(response.headers.get('content-type'), 'application/json; charset=utf-8');
@@ -109,6 +124,51 @@ test('native form download returns only an attachment encrypted in the exact exi
   assert.equal(api.status, 200);
   assert.equal(api.headers.get('content-disposition'), null);
   assert.equal((await decrypt(pair, await api.json())).serviceAccessBearer, env.SITES_SERVICE_ACCESS_BEARER);
+});
+
+test('ticket GET, repeated GET, HEAD and Range retain exact ciphertext without requiring POST headers', async t => {
+  const configuration = downloadEnv(); t.after(() => configuration.DB.close());
+  const pair = await keys();
+  const prepared = await handleBootstrap(formRequest({ origin, campaignId, nonce, publicKeySpki: pair.spki }), configuration);
+  const location = prepared.headers.get('location'), token = location.split('/').at(-1);
+  const first = await handleBootstrap(request(location), configuration), ciphertext = await first.text();
+  const second = await handleBootstrap(request(location), configuration);
+  assert.equal(second.status, 200); assert.equal(await second.text(), ciphertext);
+  const head = await handleBootstrap(request(location, 'HEAD'), configuration);
+  assert.equal(head.status, 200); assert.equal(await head.text(), '');
+  assert.equal(head.headers.get('content-length'), String(Buffer.byteLength(ciphertext)));
+  const ranged = await handleBootstrap(request(location, 'GET', undefined, { Range: 'bytes=0-9' }), configuration);
+  assert.equal(ranged.status, 200); assert.equal(await ranged.text(), ciphertext);
+  assert.equal(ranged.headers.get('accept-ranges'), 'none');
+  assert.equal(ranged.headers.get('content-range'), null);
+  const row = configuration.DB.db.prepare('SELECT * FROM bridge_bootstrap_downloads').get();
+  assert.equal(row.ticket_hash, Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))).toString('hex'));
+  assert.equal(JSON.stringify(row).includes(token), false);
+  assert.equal(row.envelope_json, ciphertext);
+  assert.equal(row.owner_id, env.OWNER_SITE_USER_ID);
+  assert.ok(row.expires_at - row.created_at <= 120_000);
+  assert.equal(JSON.stringify(row).includes(env.SITES_SERVICE_ACCESS_BEARER), false);
+  assert.equal((await handleBootstrap(request('/owner/bootstrap/download/' + 'X'.repeat(43)), configuration)).status, 404);
+  assert.equal((await handleBootstrap(request(location, 'GET', undefined, { 'oai-authenticated-user-id': 'viewer' }), configuration)).status, 401);
+  const otherOwner = { ...configuration, OWNER_SITE_USER_ID: 'different-owner' };
+  assert.equal((await handleBootstrap(request(location, 'GET', undefined, { 'oai-authenticated-user-id': otherOwner.OWNER_SITE_USER_ID }), otherOwner)).status, 404);
+  configuration.DB.db.prepare('UPDATE bridge_bootstrap_downloads SET expires_at=?').run(Date.now() - 1);
+  const expired = await handleBootstrap(request(location), configuration);
+  assert.equal(expired.status, 404); assert.equal(expired.headers.get('content-disposition'), null);
+  assert.equal(configuration.DB.db.prepare('SELECT COUNT(*) AS count FROM bridge_bootstrap_downloads').get().count, 0);
+});
+
+test('ticket preparation enforces eight active downloads per owner and recovers after expiry cleanup', async t => {
+  const configuration = downloadEnv(); t.after(() => configuration.DB.close());
+  const pair = await keys(), body = { origin, campaignId, nonce, publicKeySpki: pair.spki };
+  for (let i = 0; i < 8; i++) assert.equal((await handleBootstrap(formRequest(body), configuration)).status, 303);
+  const overLimit = await handleBootstrap(formRequest(body), configuration);
+  assert.equal(overLimit.status, 429); assert.equal((await overLimit.json()).error, 'DOWNLOAD_LIMIT');
+  assert.equal(configuration.DB.db.prepare('SELECT COUNT(*) AS count FROM bridge_bootstrap_downloads').get().count, 8);
+  configuration.DB.db.prepare('UPDATE bridge_bootstrap_downloads SET expires_at=?').run(Date.now() - 1);
+  assert.equal((await handleBootstrap(formRequest(body), configuration)).status, 303);
+  assert.equal(configuration.DB.db.prepare('SELECT COUNT(*) AS count FROM bridge_bootstrap_downloads').get().count, 1);
+  assert.equal((await handleBootstrap(formRequest(body), env)).status, 503);
 });
 
 test('attachment download requires verified owner, HTTPS, strict same-origin form submission and provisioned transport', async () => {

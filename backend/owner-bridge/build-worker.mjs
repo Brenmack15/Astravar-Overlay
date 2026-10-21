@@ -31,13 +31,31 @@ for (const [file, name] of modules) {
 bundle += '\nexport default ENTRY.default;\n';
 await mkdir(resolve(output, 'server'), { recursive: true });
 await writeFile(resolve(output, 'server/index.js'), bundle);
-const migrationPath = resolve(root, 'drizzle/0000_owner_bridge.sql');
 const normalizeSql = value => value.replace(/^--> statement-breakpoint\s*$/gm, '').replace(/\s+/g, ' ').trim();
-if (normalizeSql(await readFile(migrationPath, 'utf8')) !== normalizeSql(await readFile(resolve(root, 'schema.sql'), 'utf8'))) throw Error('Reviewed migration does not match the initial schema. Append a new migration after deployment; never rewrite applied SQL.');
+const journal = JSON.parse(await readFile(resolve(root, 'drizzle/meta/_journal.json'), 'utf8'));
+if (journal.dialect !== 'sqlite' || !Array.isArray(journal.entries) || !journal.entries.length) throw Error('Invalid migration journal.');
+const migrationFiles = ['meta/_journal.json'];
+const migrationSql = [];
+let previousSnapshotId = '00000000-0000-0000-0000-000000000000';
+for (const [index, entry] of journal.entries.entries()) {
+  const prefix = String(index).padStart(4, '0');
+  if (entry.idx !== index || !new RegExp('^' + prefix + '_[A-Za-z0-9_-]+$').test(entry.tag) || entry.version !== '6' || entry.breakpoints !== true) throw Error('Invalid migration journal entry.');
+  const snapshotFile = 'meta/' + prefix + '_snapshot.json';
+  const snapshot = JSON.parse(await readFile(resolve(root, 'drizzle', snapshotFile), 'utf8'));
+  if (snapshot.dialect !== 'sqlite' || snapshot.prevId !== previousSnapshotId || typeof snapshot.id !== 'string') throw Error('Invalid migration snapshot chain.');
+  previousSnapshotId = snapshot.id;
+  migrationFiles.push(entry.tag + '.sql', snapshotFile);
+  migrationSql.push(await readFile(resolve(root, 'drizzle', entry.tag + '.sql'), 'utf8'));
+}
+if (normalizeSql(migrationSql.join('\n')) !== normalizeSql(await readFile(resolve(root, 'schema.sql'), 'utf8'))) throw Error('Reviewed migration chain does not match the schema. Append migrations; never rewrite applied SQL.');
 // Sites discovers hosted migrations beneath the artifact's .openai directory.
 // A sibling output/drizzle directory is not consumed by the deployment migrator.
 await mkdir(resolve(output, '.openai'), { recursive: true });
-await cp(resolve(root, 'drizzle'), resolve(output, '.openai', 'drizzle'), { recursive: true });
+for (const file of migrationFiles) {
+  const destination = resolve(output, '.openai', 'drizzle', file);
+  await mkdir(dirname(destination), { recursive: true });
+  await copyFile(resolve(root, 'drizzle', file), destination);
+}
 let hostingConfigured = false;
 try {
   const hosting = JSON.parse(await readFile(resolve(root, '.openai/hosting.json'), 'utf8'));
@@ -46,4 +64,4 @@ try {
   await copyFile(resolve(root, '.openai/hosting.json'), resolve(output, '.openai/hosting.json'));
   hostingConfigured = true;
 } catch (error) { if (error.code !== 'ENOENT') throw error; }
-console.log(JSON.stringify({ worker: resolve(output, 'server/index.js'), migration: resolve(output, '.openai/drizzle/0000_owner_bridge.sql'), hostingConfigured, deployed: false }));
+console.log(JSON.stringify({ worker: resolve(output, 'server/index.js'), migration: resolve(output, '.openai/drizzle/0000_owner_bridge.sql'), migrations: journal.entries.map(entry => resolve(output, '.openai/drizzle', entry.tag + '.sql')), hostingConfigured, deployed: false }));

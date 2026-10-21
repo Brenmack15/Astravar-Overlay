@@ -97,3 +97,13 @@ CREATE TRIGGER IF NOT EXISTS bridge_receipt_apply AFTER INSERT ON bridge_receipt
  END;
 CREATE INDEX IF NOT EXISTS bridge_pending_by_campaign ON bridge_proposals(owner_id,campaign_id);
 CREATE INDEX IF NOT EXISTS bridge_receipts_by_campaign ON bridge_receipts(owner_id,campaign_id,sequence);
+CREATE TABLE IF NOT EXISTS bridge_bootstrap_downloads (
+ ticket_hash TEXT PRIMARY KEY, owner_id TEXT NOT NULL, envelope_json TEXT NOT NULL,
+ expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS bridge_bootstrap_downloads_owner_expiry
+ ON bridge_bootstrap_downloads(owner_id,expires_at);
+CREATE TRIGGER IF NOT EXISTS bridge_bootstrap_downloads_quota BEFORE INSERT ON bridge_bootstrap_downloads
+ WHEN (SELECT COUNT(*) FROM bridge_bootstrap_downloads WHERE owner_id=NEW.owner_id
+  AND expires_at>NEW.created_at)>=8
+ BEGIN SELECT RAISE(ABORT,'BOOTSTRAP_DOWNLOAD_LIMIT'); END;

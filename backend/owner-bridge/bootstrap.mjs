@@ -5,6 +5,10 @@
 const BOOTSTRAP_CAMPAIGN = 'synthetic-owner-acceptance';
 const BOOTSTRAP_ALGORITHM = 'RSA-OAEP-256+A256GCM';
 const bootstrapEncoder = new TextEncoder();
+const BOOTSTRAP_TICKET_TTL_MS = 2 * 60_000;
+async function bootstrapTicketHash(value) {
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bootstrapEncoder.encode(value)))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
 function bootstrapJson(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: {
     'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store',
@@ -52,6 +56,24 @@ export async function handleBootstrap(request, env) {
   if (!env.OWNER_SITE_USER_ID || request.headers.get('oai-authenticated-user-id') !== env.OWNER_SITE_USER_ID) return bootstrapJson({ error: 'OWNER_AUTHENTICATION_REQUIRED' }, 401);
   const url = new URL(request.url);
   if (url.protocol !== 'https:' || url.port) return bootstrapJson({ error: 'HTTPS_REQUIRED' }, 400);
+  const ticketMatch = url.pathname.match(/^\/owner\/bootstrap\/download\/([A-Za-z0-9_-]{43})$/);
+  if (ticketMatch && (request.method === 'GET' || request.method === 'HEAD')) {
+    if (!env.DB) return bootstrapJson({ error: 'DOWNLOAD_STORAGE_NOT_PROVISIONED' }, 503);
+    try {
+      const now = Date.now();
+      await env.DB.prepare('DELETE FROM bridge_bootstrap_downloads WHERE expires_at<=?').bind(now).run();
+      const ticket = await env.DB.prepare('SELECT envelope_json FROM bridge_bootstrap_downloads WHERE ticket_hash=? AND owner_id=? AND expires_at>?')
+        .bind(await bootstrapTicketHash(ticketMatch[1]), env.OWNER_SITE_USER_ID, now).first();
+      if (!ticket) return bootstrapJson({ error: 'DOWNLOAD_EXPIRED_OR_UNKNOWN' }, 404);
+      // Android download managers may retry with GET, HEAD or Range. Keep the same
+      // ciphertext available until expiry; a Range request deliberately gets full 200.
+      return new Response(request.method === 'HEAD' ? null : ticket.envelope_json, { status: 200, headers: {
+        'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': 'attachment; filename="Astravar-encrypted-authorization.json"',
+        'Content-Length': String(bootstrapEncoder.encode(ticket.envelope_json).byteLength), 'Accept-Ranges': 'none',
+        'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
+      } });
+    } catch { return bootstrapJson({ error: 'DOWNLOAD_STORAGE_UNAVAILABLE' }, 503); }
+  }
   if (url.pathname === '/owner/bootstrap' && request.method === 'GET') {
     const scriptNonce = bootstrapBase64(crypto.getRandomValues(new Uint8Array(24)));
     return new Response(BOOTSTRAP_HTML.replace('BOOTSTRAP_NONCE', scriptNonce), { headers: {
@@ -83,8 +105,22 @@ export async function handleBootstrap(request, env) {
       body = Object.fromEntries(entries);
     } else body = JSON.parse(text);
     if (!body || Array.isArray(body) || Object.keys(body).sort().join(',') !== 'campaignId,nonce,origin,publicKeySpki' || body.origin !== url.origin) throw new Error();
-    const response = bootstrapJson(await encryptBootstrapBundle(body.publicKeySpki, { ...body, serviceAccessBearer: env.SITES_SERVICE_ACCESS_BEARER }));
-    if (download) response.headers.set('Content-Disposition', 'attachment; filename="Astravar-encrypted-authorization.json"');
-    return response;
+    const bundle = await encryptBootstrapBundle(body.publicKeySpki, { ...body, serviceAccessBearer: env.SITES_SERVICE_ACCESS_BEARER });
+    if (!download) return bootstrapJson(bundle);
+    if (!env.DB) return bootstrapJson({ error: 'DOWNLOAD_STORAGE_NOT_PROVISIONED' }, 503);
+    const ticket = bootstrapBase64(crypto.getRandomValues(new Uint8Array(32))), now = Date.now();
+    try {
+      await env.DB.batch([
+        env.DB.prepare('DELETE FROM bridge_bootstrap_downloads WHERE expires_at<=?').bind(now),
+        env.DB.prepare('INSERT INTO bridge_bootstrap_downloads(ticket_hash,owner_id,envelope_json,expires_at,created_at) VALUES(?,?,?,?,?)')
+          .bind(await bootstrapTicketHash(ticket), env.OWNER_SITE_USER_ID, JSON.stringify(bundle), Math.min(now + BOOTSTRAP_TICKET_TTL_MS, bundle.expiresAt), now),
+      ]);
+    } catch (error) {
+      return bootstrapJson({ error: String(error).includes('BOOTSTRAP_DOWNLOAD_LIMIT') ? 'DOWNLOAD_LIMIT' : 'DOWNLOAD_STORAGE_UNAVAILABLE' }, String(error).includes('BOOTSTRAP_DOWNLOAD_LIMIT') ? 429 : 503);
+    }
+    return new Response(null, { status: 303, headers: {
+      Location: '/owner/bootstrap/download/' + ticket, 'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
+    } });
   } catch { return bootstrapJson({ error: 'INVALID_BOOTSTRAP_REQUEST' }, 400); }
 }

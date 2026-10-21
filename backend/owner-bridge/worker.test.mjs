@@ -95,7 +95,7 @@ test('Sites artifact migration layout initializes the hosted-style database befo
     const { stdout } = await execute(process.execPath, [fileURLToPath(new URL('./build-worker.mjs', import.meta.url)), directory]);
     assert.equal(JSON.parse(stdout).migration, join(directory, '.openai/drizzle/0000_owner_bridge.sql'));
     const migrationRoot = join(directory, '.openai/drizzle');
-    for (const file of ['0000_owner_bridge.sql', 'meta/_journal.json', 'meta/0000_snapshot.json']) {
+    for (const file of ['0000_owner_bridge.sql', '0001_bootstrap_downloads.sql', 'meta/_journal.json', 'meta/0000_snapshot.json', 'meta/0001_snapshot.json']) {
       assert.equal(await readFile(join(migrationRoot, file), 'utf8'), await readFile(new URL('./drizzle/' + file, import.meta.url), 'utf8'));
     }
     await assert.rejects(readFile(join(directory, 'drizzle/0000_owner_bridge.sql')), { code: 'ENOENT' });
@@ -106,7 +106,7 @@ test('Sites artifact migration layout initializes the hosted-style database befo
         await db.prepare(statement).bind().run();
       }
     }
-    assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name LIKE 'bridge_%'").bind().first()).count, 6);
+    assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name LIKE 'bridge_%'").bind().first()).count, 7);
     const bundled = await import(pathToFileURL(join(directory, 'server/index.js')));
     const response = await bundled.default.fetch(ownerRequest('/mcp', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
