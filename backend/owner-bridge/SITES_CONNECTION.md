@@ -1,72 +1,69 @@
-# Astravar Owner Connection deployment and phone acceptance
+# Astravar Owner Connection: existing private Site HP extension
 
-This is **separate service source**, distinct from the existing private Test Merchant bridge and anonymous Cloudflare lab. The source package does not itself register or deploy a Site. A locally passing MCP request is not evidence that the ChatGPT app has connected to this service. The original five fictional tools are preserved; additional owner-approved HP tools are defined in [HP_MCP_TOOLS.md](HP_MCP_TOOLS.md). Deployment and acceptance status must come from the current release evidence.
+This guide extends the **existing owner-private Astravar Owner Connection Site** with a separately approved, profile-scoped HP path. Reuse that Site, database, audience, owner identity and private transport configuration. Do not register a replacement Site or database, change unrelated Cloudflare resources, or modify the separate private Test Merchant bridge or anonymous lab. Source, a published URL and passing local tests do not establish live ChatGPT or phone acceptance.
 
-## Security boundary
+## Deployment gate and preservation
 
-`worker.mjs` is specifically for an owner-private Sites deployment. Sites must authenticate access and replace the `oai-authenticated-user-id` header before invoking the Worker. Never deploy this adapter as an unrestricted raw Worker that trusts caller-supplied identity headers. The server pins the exact verified, Site-scoped owner ID in `OWNER_SITE_USER_ID`; an arbitrary signed-in viewer cannot act as owner or connector.
+**The additional hosting cost has not been verified. HP deployment remains blocked until the current account/provider confirms no new payment method, subscription, paid binding or unexpected charge is required.** Existing Site access or an eligible ChatGPT subscription does not establish zero additional hosting cost. Cloudflare free-tier quotas do not establish Sites pricing. Do not activate payment, credits or a new subscription to resolve this gate.
 
-Android requires two independent credentials: the private Sites transport bearer, and a narrower revocable device credential. A device token by itself cannot cross the private Sites gateway. The encrypted bootstrap download supplies only the transport credential to the requesting installation. Device pairing and permission approval remain separate. Disconnect requests server-side device revocation before clearing local credentials.
+After that gate is satisfied, the release operator must inspect the existing Site's current private audience and source/version metadata, retain its exact project identity, and deploy the reviewed commit through its supported source/build workflow. Preserve these server-only bindings; never copy their values into GitHub, chat, logs or a download:
 
-Runtime configuration is server-only:
-
-| Name | Purpose |
+| Binding | Required preservation |
 | --- | --- |
-| `DB` | New isolated D1 database; never the existing bridge database |
-| `OWNER_SITE_USER_ID` | Exact verified owner identity for this new Site |
-| `SITES_SERVICE_ACCESS_BEARER` | Platform-provided private service access credential; never source, logs, chat, or a plaintext download |
+| `DB` | Existing owner-connection database and stored records/receipts |
+| `OWNER_SITE_USER_ID` | Existing exact platform-verified, Site-scoped owner pin |
+| `SITES_SERVICE_ACCESS_BEARER` | Existing private Site transport credential |
 
-The original fictional service and its five tool schemas accept only campaign `synthetic-owner-acceptance`, profile `owner-sync-fixture`, and Intelligence record `owner-sync-fixture-int`. The separately authorized HP path requires an explicit campaign/profile binding and its own native device scopes; fictional credentials cannot access it. Other record types and combat-engine writes remain outside this connection. Connector tools can propose changes; only an authenticated enrolled Android device can submit approval or rejection. Approval in ChatGPT never substitutes for the native player control.
+Keep the existing `.openai/hosting.json` project ID and configuration (`d1: "DB"`, `r2: null`, `capabilities: ["mcp"]`). Applied `0000_owner_bridge` and `0001_bootstrap_downloads` migrations and metadata remain unchanged. Append only `0002_live_hp`, which adds isolated HP tables; do not replace the database or run schema creation from request handlers.
 
-## Source and deployment preparation
+Run `node --test backend/owner-bridge/*.test.mjs`, then `node backend/owner-bridge/build-worker.mjs` from the repository. The generated artifact must contain `server/index.js`, `.openai/hosting.json` from the existing Site checkout, and the ordered migration SQL/journal/snapshots under `.openai/drizzle/`. A sibling `drizzle/` artifact directory alone is not discovered by hosted migration deployment. Save the exact reviewed build and record its returned version ID, deployed commit, migration result and unchanged private audience. These instructions are not a deployment claim.
 
-1. Obtain the owner's explicit approval for a **new production deployment** and verify the chosen service's current free-tier limits. Do not change unrelated Cloudflare resources, the old private bridge, its audience/database, or the anonymous lab.
-2. Register one new owner-private Site through the supported Sites workflow. Copy the returned ID unchanged into `.openai/hosting.json`, preserving the fields from `hosting.example.json`. Do not reuse an ID from another project. Copy the returned expected origin exactly; an expected origin is not proof of a live deployment.
-3. Run `node --test backend/owner-bridge/*.test.mjs` from the Android repository. Build the Worker with `node backend/owner-bridge/build-worker.mjs` into a clean output directory. The output contains `server/index.js` and the journal-listed `.openai/drizzle/*.sql` migrations with their `.openai/drizzle/meta` journal and snapshots. Once the Site hosting configuration exists, the output also contains `.openai/hosting.json`. In a `dist` artifact these paths must be `dist/server/index.js`, `dist/.openai/hosting.json`, and `dist/.openai/drizzle/...`; `dist/drizzle` alone is not discovered by hosted migration deployment. The supported Sites packager also copies a Site checkout's root `drizzle` directory into this same `dist/.openai/drizzle` artifact location. Keep the source migrations and hosting configuration in the Site checkout and use its supported build/source helper. Do not run schema creation from request handlers. Applied `0000` SQL and metadata remain immutable; `0001_bootstrap_downloads` adds only the isolated ephemeral ciphertext-ticket table. The build validates the ordered journal/snapshot chain and combined schema before packaging its allowlisted files.
-4. Push the exact source through the new Site's source helper, save that exact commit/build artifact, then deploy the saved version privately. Before owner configuration, only nonsecret MCP discovery/tool schemas and the requesting visitor's own verified identity setup route work. All record operations, pairing and owner administration fail closed. Record the returned saved-version ID, deployed commit, migration result, URL and plugin ID. No package should claim these fields before the platform returns them.
-5. Open `/owner/setup/identity` through the new private Site while signed in as its owner. This route returns only the caller's platform-verified Site-scoped ID and cannot claim ownership or read/write records. Pin that exact value as server-side `OWNER_SITE_USER_ID`. Provision the platform-returned service access bearer for this **same Site** as server-side secret `SITES_SERVICE_ACCESS_BEARER`, using supported runtime-secret administration without putting it in chat or source. Verify configuration and repeat authenticated calls. Do not take an owner ID from an arbitrary Android request, email address, display label, or guess.
-6. Call `get_site(include_mcp_connection=true)` for the **new returned project ID**. The returned `mcp_url`, OAuth resource and `plugin_id` define the real connector. Merely creating a backend URL does not install or connect it.
+## Authentication and narrow authority
 
-The existing bridge's verified manifest shape is `{"d1":"DB","r2":null,"capabilities":["mcp"]}` plus its own project ID. This source deliberately contains no invented new project ID, endpoint, plugin identity, or credential.
+`worker.mjs` requires owner-private Sites dispatch to authenticate and replace `oai-authenticated-user-id`. Do not expose a raw Worker that trusts caller-supplied identity headers. Data operations require the exact configured owner pin. Nonsecret MCP discovery and schema listing grant no record access.
 
-## ChatGPT tool contract
+Android needs both the private transport credential and a separate revocable device credential. The installation-bound encrypted bootstrap supplies transport access only; it does not enroll a profile or grant HP permissions. Device pairing requires explicit consent for the actual existing campaign/profile identity. HP device scopes are only `hp:read`, `hp:publish` and `hp:decide`; legacy fictional credentials cannot access live HP records. Re-pairing replaces the earlier writer for that profile without transferring pending approvals. Secure disconnect requests server-side device revocation.
 
-The stateless JSON-RPC `POST /mcp` implements `server/discover`, `initialize`, `tools/list` and `tools/call`. The preferred MCP version is `2026-07-28`. It returns MCP text and structured content; typed operation errors set `isError: true` without leaking credentials or database exception strings.
+ChatGPT receives only `hp:read`, `hp:propose` and `hp:receipt`. It cannot approve, reject, publish records, enroll or revoke devices. Unknown current/maximum HP stays unknown. Proposals require a matching revision/current value and sufficiently recent device synchronization; reading the server or waiting for a countdown does not refresh that evidence. The server computes the exact signed adjustment and rejects values outside zero through the known maximum without clamping. No ability, inventory, currency, temporary/maximum HP or weapon-engine change is authorized by this path.
 
-| Tool | Required arguments | Result |
-| --- | --- | --- |
-| `get_character` | `campaignId`, `profileId` | Latest device-published fictional profile, abilities, revisions and provenance |
-| `get_character_abilities` | `campaignId`, `profileId` | Only sourced ability records and revisions |
-| `propose_record_update` | `campaignId`, canonical `commandId` UUID, `recordId`, `expectedRevision`, `fields:{score}`, `source` | Staged difference; the saved record stays unchanged |
-| `get_pending_updates` | `campaignId` | Pending current/proposed differences |
-| `get_command_receipt` | `campaignId`, `commandId` | Independent immutable result, or `RECEIPT_NOT_READY` |
-| `get_owner_connection` | None | Only approved live HP binding/publication metadata |
-| `get_character_hp` | `campaignId`, `profileId` | One approved profile's device-published HP record, revision and freshness |
-| `propose_hp_adjustment` | `campaignId`, `profileId`, `commandId`, `expectedRevision`, `expectedCurrentHp`, signed `adjustment`, `source` | Server-computed HP difference staged for native approval |
-| `get_hp_pending_updates` | `campaignId` | Pending HP-only differences within active approved campaign bindings |
-| `get_hp_command_receipt` | `campaignId`, `commandId` | Independent immutable HP outcome, or an unverified error |
+## ChatGPT tools and connection
 
-`mcp.mjs` is the exact schema source. Additional fields, invalid or unapproved targets, noninteger values, stale revisions, sources above 1,900 characters and caller-supplied authority are rejected. The original fictional tools cannot target live records. Sources are never truncated. There is no MCP approval, character publish, enrollment or credential tool. Nonsecret discovery and schema listing can run before owner configuration for platform provisioning; `tools/call` always requires the configured owner and verified identity. The HP tool guide defines its separate native consent, bounds and exact proposal fingerprint.
+The JSON-RPC `POST /mcp` endpoint implements `server/discover`, `initialize`, `tools/list` and `tools/call`; preferred protocol version is `2026-07-28`. `mcp.mjs` contains the strict schemas. Additional fields and caller-supplied authority are rejected. See [HP_MCP_TOOLS.md](HP_MCP_TOOLS.md) for numeric bounds, provenance, fingerprints, repair metadata and receipt semantics.
 
-When Sites reports the new plugin available, inspect the actual current tool registry and invoke a read operation. If the plugin is missing, use `plugin_management.suggest_plugins` with the exact returned plugin ID. If installation reports **Already installed** but tools remain absent, start a new ChatGPT conversation with the plugin connected. The phone path is Plugins → Personal → Created by you → Install or Connect. No developer computer, local MCP configuration, or API key is required for this Sites connector path.
+| Primary HP tool | Required arguments |
+| --- | --- |
+| `get_owner_connection` | None; approved binding/publication metadata only |
+| `get_character_hp` | `campaignId`, `profileId` |
+| `propose_hp_adjustment` | `campaignId`, `profileId`, `commandId`, `expectedRevision`, `expectedCurrentHp`, signed `adjustment`, `source` |
+| `get_hp_pending_updates` | `campaignId` |
+| `get_hp_command_receipt` | `campaignId`, `commandId` |
 
-## Phone-only pairing and fictional acceptance
+Five legacy diagnostic tools remain available only for their original fixed fictional records:
 
-After an owner-signed APK has been verified for the installed package/signature/version:
+| Legacy tool | Required arguments |
+| --- | --- |
+| `get_character` | `campaignId`, `profileId` |
+| `get_character_abilities` | `campaignId`, `profileId` |
+| `propose_record_update` | `campaignId`, `commandId`, `recordId`, `expectedRevision`, `fields: {score}`, `source` |
+| `get_pending_updates` | `campaignId` |
+| `get_command_receipt` | `campaignId`, `commandId` |
 
-1. Preserve an existing campaign backup. Install the update over `com.yazsras.astravar`; do not uninstall or clear data to resolve a package, signature or version error.
-2. In Astravar → Config → Owner Connection, enter the verified new HTTPS origin. Start the private transport authorization and open its link on this phone. Sign in through the owner-private Site. Confirm the request code matches Astravar, download the encrypted authorization and import it into Astravar before its 10-minute expiration. A strict same-origin form POST prepares the encrypted envelope and redirects to an opaque, owner-authenticated GET attachment valid for two minutes. Browser/DownloadManager GET, HEAD and Range retries return the same full encrypted bytes until expiry; no credential or ciphertext appears in the URL. Tickets are stored only as hashes with owner-bound ciphertext, capped at eight active entries, and expired entries are deleted. The file is encrypted for that installation's AndroidKeyStore key and cannot enroll another phone. A successful HTTP response does not prove the browser saved the file.
-3. Start device pairing in Astravar. Open the new service's `/owner` page using the same owner account, compare the pairing code with Astravar, and approve the device. Complete pairing in Astravar and inspect the account label, device and read/publish/decision scopes.
-4. Explicitly expose the fictional fixture from the native screen. This must create/publish an actual local Room record; it must not select `local-player`, Zerg, or the weapon engine.
-5. With the new plugin genuinely connected, ask ChatGPT to read the fixture. Save the returned value, record ID and revision. Ask it to propose one Intelligence score change with that revision and a new command UUID. Before native approval, independently read the fixture and verify that its saved value has not changed and no final receipt exists.
-6. Sync Astravar. Confirm the native screen shows the same command, source, old value and proposed value. Tap **Approve**. The app must commit one local revision and its durable outcome, then retry authenticated delivery if interrupted. ChatGPT must read both the immutable command receipt and the resulting record independently and confirm the same score, provenance and revision.
-7. Restart Astravar and repeat the readback. Complete actual Android backup/restore acceptance using the app's validated backup workflow. Server SQLite persistence/backup tests do not prove Android Room backup/restore.
-8. Repeat rejection, stale revision, command replay, network disconnect/retry, invalid/expired authorization, owner revocation and simultaneous local/remote edits. For a lost phone, use `/owner` to list and revoke the device; revocation must take effect on the next authenticated server call. Record observed native logs and outcomes without credentials or campaign data.
+Those tools retain campaign `synthetic-owner-acceptance`, profile `owner-sync-fixture` and Intelligence record `owner-sync-fixture-int`; they are not live character synchronization. Their enrollment, proposals and receipts remain separate from HP permissions and data.
 
-Only after that complete acceptance and separate live-data authorization should scopes, schemas and native adapters be extended to Zerg's real records. This source does not reconcile the Level 9 character versus Level 5 weapon-engine discrepancy, infer current HP, heal, refresh resources, alter homebrew, or construct research proposals.
+After an approved deployment, inspect `get_site(include_mcp_connection=true)` for the **existing Site** and its returned MCP/plugin metadata. Refresh the existing plugin connection rather than inventing an endpoint or registering another service. Inspect the actual ChatGPT tool registry and perform an authenticated invocation of the new HP tools. If tools remain absent, use the exact returned plugin ID with the supported plugin connection flow; a fresh conversation may be needed after refresh. Report the exact missing connection/authorization action if blocked. A local HTTP request, backend test or successful legacy fictional invocation does not prove the new HP tools are callable from ChatGPT.
 
-## Evidence limits
+## Phone-only owner actions and acceptance
 
-Local tests exercise actual SQLite durability, typed HTTP/MCP handlers, authenticated roles, proposal-only writes, receipts, revisions, encryption and the generated Worker. They do not establish platform publication, hosted D1 migration acceptance, plugin discovery/authorization in ChatGPT, native HTTPS on the Galaxy S26, user approval on the installed app, installation/update preservation, or the complete requested Android backup/restore loop. Those gates must be reported as pending until independently observed. Device credentials expire after 30 days and require explicit re-pairing; automatic renewal is not implemented.
+The owner is asked for only the final installation, scoped connection consent and requested HP approval:
 
-No hosting plan or price guarantee is encoded in this source. The production deployment approval must identify the chosen provider and currently verified limits, confirm the applicable account remains within its free plan, and exclude paid activation. Cloudflare's published Worker/D1 free-tier limits do not by themselves prove the pricing or quota policy of a Sites deployment.
+1. Install the verified owner-signed update over `com.yazsras.astravar`, with a compatible signature and higher version code. Preserve the existing backup and app data; do not uninstall or clear storage to bypass an update error.
+2. In Config → Owner Connection, use the verified existing HTTPS origin. Reuse valid private transport access or complete its encrypted authorization download/import on this phone. The file is encrypted to this installation's AndroidKeyStore key, expires promptly and contains no plaintext credential. Then review and approve pairing for the selected existing profile and HP scopes through the same private owner account. Transport authorization and profile consent are separate.
+3. Once ChatGPT has genuinely discovered the new tools, let it read the approved binding and published HP record. For the owner's requested adjustment, Astravar must display the existing/proposed HP, revision and source. The owner taps **Approve** once. The app commits one local revision and delivers its durable outcome; ChatGPT independently reads the immutable receipt and saved HP record and confirms the same value and revision. A proposal alone never commits a change.
+
+Automated protocol, rejection, replay, conflict, authorization, offline/retry, restart, update-preservation and backup/restore checks belong to engineering verification, not a repeated owner checklist. See [OWNER_HP_NATIVE_TESTS.md](../../docs/OWNER_HP_NATIVE_TESTS.md) and [OWNER_HP_CONNECTION_CONTRACT.md](../../docs/OWNER_HP_CONNECTION_CONTRACT.md). Test logs must contain only fictional fixtures and safe identifiers, never credentials or real campaign exports.
+
+## Readiness boundary
+
+Local SQLite/HTTP/MCP tests and the native emulator workflow provide distinct engineering evidence. Emulator update tests use a temporary debug signer; they do not prove an owner-signed update on the Galaxy S26. Local MCP calls do not prove ordinary ChatGPT discovery, and emulator approval does not prove approval on the installed phone.
+
+**Live HP acceptance remains unverified, and deployment is paused at the unresolved hosting cost gate.** Record actual hosted migration, new-tool discovery/invocation, installed-app preservation, scoped pairing and the owner's approval/receipt/independent-readback results separately when observed. Do not describe a missing receipt, failed request or repair marker as a confirmed change or rollback.
