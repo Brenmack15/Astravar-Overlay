@@ -171,11 +171,32 @@ class LiveHpNativeHttpsTest {
         val bundle = owner("/owner/bootstrap/bundle", buildJsonObject {
             put("origin", origin); fragment.forEach { (key, value) -> put(key, value) }
         })
+        val challenge = context.getSharedPreferences("astravar-owner-bootstrap", Context.MODE_PRIVATE)
+        val importNow = System.currentTimeMillis()
+        val createdAt = challenge.getLong("createdAt", 0)
+        val expiresAt = bundle.getValue("expiresAt").jsonPrimitive.long
+        val bindings = buildJsonObject {
+            put("fictionalOnly", true)
+            put("originMatches", bundle.getValue("origin").jsonPrimitive.content == origin && challenge.getString("origin", null) == origin)
+            put("campaignMatches", bundle.getValue("campaignId").jsonPrimitive.content == campaignId && challenge.getString("campaign", null) == campaignId)
+            put("nonceMatches", challenge.getString("nonce", null) == bundle.getValue("nonce").jsonPrimitive.content && fragment["nonce"] == bundle.getValue("nonce").jsonPrimitive.content)
+            put("challengeAgeMs", importNow - createdAt)
+            put("remainingTtlMs", expiresAt - importNow)
+            put("serverIssuedMinusDeviceNowMs", expiresAt - 600_000L - importNow)
+            put("localWindowValid", createdAt > 0 && importNow >= createdAt && importNow - createdAt <= 600_000L)
+            put("serverWindowValid", expiresAt > importNow && expiresAt <= importNow + 600_000L)
+        }
+        File(context.getExternalFilesDir(null), "bootstrap-bindings.json").writeText(bindings.toString())
+        InstrumentationRegistry.getInstrumentation().sendStatus(0, Bundle().apply { putString("stream", "\nBOOTSTRAP_BINDINGS: $bindings\n") })
+        for (binding in listOf("originMatches", "campaignMatches", "nonceMatches", "localWindowValid", "serverWindowValid")) {
+            assertTrue("Nonsecret bootstrap diagnostic $binding must hold before decryption", bindings.getValue(binding).jsonPrimitive.boolean)
+        }
         val encrypted = bundle.getValue("ciphertext").jsonPrimitive.content
         val tampered = (if (encrypted.first() == 'A') "B" else "A") + encrypted.drop(1)
         assertTrue(runCatching { client.importServiceAuthorization(JsonObject(bundle + ("ciphertext" to JsonPrimitive(tampered))).toString().toByteArray()) }.isFailure)
         client.importServiceAuthorization(bundle.toString().toByteArray())
         assertTrue(runCatching { client.importServiceAuthorization(bundle.toString().toByteArray()) }.isFailure)
+        checkpoint("native-bootstrap-imported", 38, 1)
         pair(); assertRemote(38, 1)
         mcp("propose_hp_adjustment", proposal(command1, 1, 38, -7))
         client.sync(); invariant(38, 1); assertRemote(38, 1)
