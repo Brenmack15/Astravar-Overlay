@@ -79,7 +79,9 @@ export class OwnerBridge {
   return {profileId:binding?.profile_id,ownerId:r.owner_id,role:r.role,credentialId:r.id,campaignId:r.campaign_id,scopes:JSON.parse(r.scopes_json),deviceName:r.device_name,inactive};
  }
  async requestPairing(body) {
-  exact(body,['campaignId','deviceName','deviceSecretHash'],['profileId']);
+  exact(body,['campaignId','deviceName','deviceSecretHash'],['profileId','campaignAccess']);
+  const access=body.campaignAccess;
+  if(access!==undefined){exact(access,['readScopes','writeScopes']);const allowed=['hp','resources','inventory','currency','character','companions','engineering','continuity','combat'];for(const key of ['readScopes','writeScopes'])if(!Array.isArray(access[key])||new Set(access[key]).size!==access[key].length||access[key].some(x=>!allowed.includes(x)))fail(400,'INVALID_CAMPAIGN_SCOPES');if(!access.readScopes.length||access.writeScopes.some(x=>!access.readScopes.includes(x))||body.campaignId===CAMPAIGN)fail(400,'INVALID_CAMPAIGN_SCOPES');}
   const live=body.campaignId!==CAMPAIGN;
   if(live && (typeof body.campaignId!=='string'||typeof body.profileId!=='string'||!ID.test(body.campaignId)||!ID.test(body.profileId)||body.profileId===PROFILE||body.profileId===RECORD)) fail(400,'INVALID_LIVE_BINDING');
   if(!live&&body.profileId!==undefined) fail(400,'INVALID_REQUEST');
@@ -87,10 +89,12 @@ export class OwnerBridge {
   if(!/^[0-9a-f]{64}$/.test(body.deviceSecretHash)) fail(400,'INVALID_DEVICE_PROOF');
   const deviceCode=random(), userCode=random(12), id=crypto.randomUUID(), expiresAt=this.now()+10*60_000;
   try { await this.db.batch([
+   this.s('DELETE FROM bridge_campaign_pairings WHERE pairing_id IN (SELECT id FROM bridge_pairings WHERE owner_id=? AND expires_at<=?)',this.ownerId,this.now()),
    this.s('DELETE FROM bridge_hp_bindings WHERE owner_id=? AND credential_id IS NULL AND pairing_id IN (SELECT id FROM bridge_pairings WHERE owner_id=? AND expires_at<=?)',this.ownerId,this.ownerId,this.now()),
    this.s('DELETE FROM bridge_pairings WHERE owner_id=? AND expires_at<=?',this.ownerId,this.now()),
    this.s('INSERT INTO bridge_pairings(id,owner_id,campaign_id,device_code_hash,user_code_hash,secret_hash,device_name,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?)',id,this.ownerId,body.campaignId,await sha256(deviceCode),await sha256(userCode),body.deviceSecretHash,body.deviceName,expiresAt,this.now()),
-   ...(live?[this.s('INSERT INTO bridge_hp_bindings(pairing_id,owner_id,campaign_id,profile_id) VALUES(?,?,?,?)',id,this.ownerId,body.campaignId,body.profileId)]:[])
+   ...(live?[this.s('INSERT INTO bridge_hp_bindings(pairing_id,owner_id,campaign_id,profile_id) VALUES(?,?,?,?)',id,this.ownerId,body.campaignId,body.profileId)]:[]),
+   ...(access?[this.s('INSERT INTO bridge_campaign_pairings(pairing_id,read_scopes_json,write_scopes_json) VALUES(?,?,?)',id,canonical([...access.readScopes].sort()),canonical([...access.writeScopes].sort()))]:[])
   ]); } catch(error) { if(String(error).includes('PAIRING_LIMIT')) fail(429,'PAIRING_LIMIT');throw error; }
   return this.envelope(body.campaignId,{deviceCode,userCode,expiresAt,pollIntervalSeconds:5});
  }
@@ -101,13 +105,15 @@ export class OwnerBridge {
   if(p.credential_id) return this.envelope(p.campaign_id,{status:'APPROVED',credentialId:p.credential_id});
   const binding=await this.s('SELECT * FROM bridge_hp_bindings WHERE pairing_id=? AND owner_id=?',p.id,this.ownerId).first();
   if(p.campaign_id!==CAMPAIGN&&!binding) fail(403,'LIVE_BINDING_REQUIRED');
+  const campaignAccess=await this.s('SELECT * FROM bridge_campaign_pairings WHERE pairing_id=?',p.id).first();
   const credentialId=crypto.randomUUID(),expiresAt=this.now()+30*24*60*60_000;
   try {
    await this.db.batch([
     ...(binding?[this.s('UPDATE bridge_credentials SET revoked=1 WHERE id IN (SELECT credential_id FROM bridge_hp_bindings WHERE owner_id=? AND campaign_id=? AND profile_id=?)',this.ownerId,p.campaign_id,binding.profile_id)]:[]),
-    this.s('INSERT INTO bridge_credentials(id,owner_id,campaign_id,token_hash,role,scopes_json,device_name,expires_at) VALUES(?,?,?,?,?,?,?,?)',credentialId,this.ownerId,p.campaign_id,p.secret_hash,'device',canonical(binding?HP_DEVICE_SCOPES:DEVICE_SCOPES),p.device_name,expiresAt),
+    this.s('INSERT INTO bridge_credentials(id,owner_id,campaign_id,token_hash,role,scopes_json,device_name,expires_at) VALUES(?,?,?,?,?,?,?,?)',credentialId,this.ownerId,p.campaign_id,p.secret_hash,'device',canonical(campaignAccess?['campaign:sync']:binding?HP_DEVICE_SCOPES:DEVICE_SCOPES),p.device_name,expiresAt),
     this.s('UPDATE bridge_pairings SET credential_id=? WHERE id=? AND credential_id IS NULL',credentialId,p.id),
-    ...(binding?[this.s('UPDATE bridge_hp_bindings SET credential_id=? WHERE pairing_id=? AND credential_id IS NULL',credentialId,p.id)]:[])
+    ...(binding?[this.s('UPDATE bridge_hp_bindings SET credential_id=? WHERE pairing_id=? AND credential_id IS NULL',credentialId,p.id)]:[]),
+    ...(campaignAccess?[this.s('UPDATE bridge_campaign_grants SET revoked=1 WHERE owner_id=? AND campaign_id=? AND revoked=0',this.ownerId,p.campaign_id),this.s('INSERT INTO bridge_campaign_grants(id,owner_id,campaign_id,credential_id,read_scopes_json,write_scopes_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?)',crypto.randomUUID(),this.ownerId,p.campaign_id,credentialId,campaignAccess.read_scopes_json,campaignAccess.write_scopes_json,expiresAt,this.now())]:[])
    ]);
   } catch(error) {
    const existing=await this.s('SELECT credential_id FROM bridge_pairings WHERE id=?',p.id).first();
@@ -126,14 +132,16 @@ export class OwnerBridge {
   const c=await this.s('SELECT * FROM bridge_credentials WHERE id=?',p.credential_id).first();
   if(!c||c.revoked||c.expires_at<=this.now()) fail(401,'CREDENTIAL_REVOKED_OR_EXPIRED');
   const binding=await this.s('SELECT profile_id FROM bridge_hp_bindings WHERE credential_id=?',c.id).first();
-  return this.envelope(p.campaign_id,{...(binding?{profileId:binding.profile_id}:{}),status:'PAIRED',credentialId:c.id,expiresAt:c.expires_at,deviceName:c.device_name,ownerId:this.ownerId,ownerLabel:'Owner '+this.ownerId,scopes:JSON.parse(c.scopes_json)});
+  const grant=await this.s('SELECT * FROM bridge_campaign_grants WHERE credential_id=? AND revoked=0',c.id).first();
+  return this.envelope(p.campaign_id,{...(binding?{profileId:binding.profile_id}:{}),...(grant?{campaignAccess:{grantId:grant.id,revision:grant.revision,readScopes:JSON.parse(grant.read_scopes_json),writeScopes:JSON.parse(grant.write_scopes_json),autoSyncScopes:JSON.parse(grant.auto_scopes_json),expiresAt:grant.expires_at}}:{}),status:'PAIRED',credentialId:c.id,expiresAt:c.expires_at,deviceName:c.device_name,ownerId:this.ownerId,ownerLabel:'Owner '+this.ownerId,scopes:JSON.parse(c.scopes_json)});
  }
  async pairingSummary(principal,body) {
   this.scope(principal,CAMPAIGN,['owner']); exact(body,['userCode']); text(body.userCode,100);
   const p=await this.s('SELECT * FROM bridge_pairings WHERE owner_id=? AND user_code_hash=?',this.ownerId,await sha256(body.userCode)).first();
   if(!p||p.expires_at<=this.now()) fail(404,'PAIRING_EXPIRED_OR_UNKNOWN');
   const b=await this.s('SELECT profile_id FROM bridge_hp_bindings WHERE pairing_id=?',p.id).first();
-  return this.envelope(p.campaign_id,{deviceName:p.device_name,profileId:b?.profile_id??null,scopes:b?HP_DEVICE_SCOPES:DEVICE_SCOPES,boundary:b?'Only this character name and HP are shared. ChatGPT may propose current HP adjustments; only this phone may approve. Approving replaces any earlier writer for this character.':'Fictional character test only.',expiresAt:p.expires_at});
+  const access=await this.s('SELECT * FROM bridge_campaign_pairings WHERE pairing_id=?',p.id).first();
+  return this.envelope(p.campaign_id,{deviceName:p.device_name,profileId:b?.profile_id??null,...(access?{campaignAccess:{readScopes:JSON.parse(access.read_scopes_json),writeScopes:JSON.parse(access.write_scopes_json),autoSyncScopes:[]},campaignBoundary:'Selected player-known campaign categories may be published by this device. The owner may enable Trusted DM Auto-Sync for approved write categories in Astravar. All other categories remain denied.'}:{}),scopes:access?['campaign:sync']:b?HP_DEVICE_SCOPES:DEVICE_SCOPES,boundary:access?'Only the selected campaign categories below are delegated. Legacy HP authority is not granted. Automatic saving starts disabled until selected on this phone.':b?'Only this character name and HP are shared. ChatGPT may propose current HP adjustments; only this phone may approve. Approving replaces any earlier writer for this character.':'Fictional character test only.',expiresAt:p.expires_at});
  }
  async revokeDevice(principal,campaign,credentialId) {
   if(!principal||principal.ownerId!==this.ownerId||!['owner','device'].includes(principal.role)) fail(403,'ROLE_DENIED');

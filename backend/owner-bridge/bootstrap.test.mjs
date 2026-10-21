@@ -236,8 +236,9 @@ test('bootstrap page submits a native same-origin form without Blob downloads or
   function executePage(fragment) {
     const inputs = Object.fromEntries(['origin','campaignId','nonce','publicKeySpki'].map(name => [name, { value: '' }]));
     const elements = { authorization: { elements: { namedItem: name => inputs[name] }, addEventListener: (name, callback) => { assert.equal(name, 'submit'); elements.authorization.submit = callback; } }, download: { disabled: true }, status: { textContent: '' }, code: { textContent: 'Invalid request' } };
-    runInNewContext(script, { URLSearchParams, location: { origin, hash: '#' + fragment }, document: { getElementById: id => elements[id] } });
-    return { elements, inputs };
+    elements['copy-request-code']={disabled:true,addEventListener:(name,cb)=>{assert.equal(name,'click');elements['copy-request-code'].click=cb;}};elements['copy-code-status']={textContent:''};const clipboard=[];
+    runInNewContext(script, {navigator:{clipboard:{writeText:async value=>{clipboard.push(value);}}}, URLSearchParams, location: { origin, hash: '#' + fragment }, document: { getElementById: id => elements[id] } });
+    return { elements, inputs,clipboard };
   }
   const encoded = new URLSearchParams({ campaignId, nonce, publicKeySpki: pair.spki }).toString();
   const page = executePage(encoded);
@@ -245,6 +246,12 @@ test('bootstrap page submits a native same-origin form without Blob downloads or
   assert.equal(page.inputs.origin.value, origin);
   assert.equal(page.inputs.publicKeySpki.value, pair.spki);
   assert.equal(page.elements.code.textContent, nonce.slice(0, 12));
+  assert.equal(page.elements['copy-request-code'].disabled,false);
+  await page.elements['copy-request-code'].click();
+  assert.deepEqual(page.clipboard,[nonce.slice(0,12)]);
+  assert.equal(page.elements['copy-code-status'].textContent,'Copied to clipboard.');
+  assert.match(html, /button\{min-height:52px/);
+  assert.match(html, /aria-label="Copy displayed request code"/);
   let prevented = false;
   page.elements.authorization.submit({ preventDefault: () => { prevented = true; } });
   assert.equal(prevented, false);

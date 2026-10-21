@@ -20,13 +20,13 @@ function fixture() {
   return { calls, bridge };
 }
 
-test('MCP preserves five fictional tools and adds five HP-scoped tools without an approval operation', async () => {
+test('MCP preserves five fictional tools and adds HP and scoped campaign tools without an approval operation', async () => {
   const { bridge } = fixture();
   const discovery = await (await handleMcp(request(rpc('server/discover')), bridge, { ownerId })).json();
   assert.deepEqual(discovery.result.supportedVersions, [MCP_VERSION]);
   const listed = await (await handleMcp(request(rpc('tools/list')), bridge, { ownerId })).json();
-  assert.equal(listed.result.tools.length, 10);
-  assert.deepEqual(listed.result.tools.slice(0, 5).map(tool => tool.name), ['get_character', 'get_character_abilities', 'propose_record_update', 'get_pending_updates', 'get_command_receipt']);
+  assert.equal(listed.result.tools.length, 29);
+  assert.deepEqual(listed.result.tools.slice(19, 24).map(tool => tool.name), ['get_character', 'get_character_abilities', 'propose_record_update', 'get_pending_updates', 'get_command_receipt']);
   assert.deepEqual(listed.result.tools.map(tool => tool.name), TOOLS.map(tool => tool.name));
   assert.equal(listed.result.tools.some(tool => /approve|commit|revoke|enroll/.test(tool.name)), false);
 });
@@ -65,11 +65,9 @@ test('MCP only passes a server-constructed connector principal to scoped core op
   assert.deepEqual(saved.fields, { score: 20 });
 });
 
-test('MCP rejects live targets, extra fields, fabricated authority, invalid values and approval calls', async () => {
+test('MCP rejects extra fields, fabricated authority, invalid values and approval calls', async () => {
   const { bridge, calls } = fixture();
   const invalid = [
-    ['get_character', { campaignId: 'zerg-real-campaign', profileId }],
-    ['get_character', { campaignId, profileId: 'local-player' }],
     ['get_character', { campaignId, profileId, includeDatabase: true }],
     ['propose_record_update', { ...proposal(), confirmed: true }],
     ['propose_record_update', { ...proposal(), principal: { role: 'device' } }],
@@ -87,6 +85,8 @@ test('MCP rejects live targets, extra fields, fabricated authority, invalid valu
     assert.equal(response.error.code, -32602);
   }
   assert.equal(calls.length, 0);
+  const live=await (await handleMcp(request(call('get_character',{campaignId:'live-unauthorized',profileId:'local-player'})),bridge,{ownerId})).json();
+  assert.equal(live.result.isError,true);
 });
 
 test('MCP accepts the exact sourced provenance limit without truncation', async () => {

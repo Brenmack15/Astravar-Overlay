@@ -17,7 +17,7 @@ async function readBody(request) {
 /** Outer host must separately enforce its authenticated Site/service gateway.
  * ownerPrincipal must originate from verified host identity, never request JSON/header supplied by a device.
  */
-export async function handleOwnerApi(request,bridge,{ownerPrincipal=null,liveHp=null}={}) {
+export async function handleOwnerApi(request,bridge,{ownerPrincipal=null,liveHp=null,campaignBridge=null}={}) {
  try {
   const url=new URL(request.url),path=url.pathname,method=request.method;
   // No browser-origin bypass: owner routes require a verified host principal and same-origin fetch.
@@ -46,6 +46,24 @@ export async function handleOwnerApi(request,bridge,{ownerPrincipal=null,liveHp=
    const c=await bridge.s('SELECT campaign_id FROM bridge_credentials WHERE id=? AND owner_id=?',b.credentialId,bridge.ownerId).first();
    if(!c) throw new BridgeError(404,'DEVICE_UNKNOWN');
    return response(200,await bridge.revokeDevice(ownerPrincipal,c.campaign_id,b.credentialId));
+  }
+  const v2=path.match(/^\/v2\/campaigns\/([A-Za-z0-9._-]+)\/(.+)$/);
+  if(v2){
+   if(!campaignBridge)throw new BridgeError(503,'CAMPAIGN_CONNECTION_NOT_CONFIGURED');
+   const [,campaign,action]=v2,authorization=request.headers.get('authorization')||'';
+   if(!authorization.startsWith('Bearer '))throw new BridgeError(401,'AUTHENTICATION_REQUIRED');
+   const principal=await bridge.authenticate(request.headers.get('X-Astravar-Credential')||'',authorization.slice(7),{forSelfRevocation:method==='POST'&&action==='devices/revoke'});let value;
+   if(method==='GET'&&action==='grant')value=await campaignBridge.getGrant(principal,campaign);
+   else if(method==='POST'&&action==='grant')value=await campaignBridge.configureGrant(principal,campaign,await readBody(request));
+   else if(method==='POST'&&action==='records')value=await campaignBridge.publish(principal,campaign,await readBody(request));
+   else if(method==='GET'&&action==='records')value=await campaignBridge.read(principal,campaign,{kinds:url.searchParams.has('kind')?[url.searchParams.get('kind')]:[],recordId:url.searchParams.get('recordId'),after:url.searchParams.get('after')??'',limit:Number(url.searchParams.get('limit')??25)});
+   else if(method==='GET'&&action.startsWith('records/')){const bits=action.split('/');if(bits.length!==3)throw new BridgeError(404,'NOT_FOUND');const result=await campaignBridge.read(principal,campaign,{kinds:[decodeURIComponent(bits[1])],recordId:decodeURIComponent(bits[2])});if(!result.records.length)throw new BridgeError(404,'RECORD_NOT_PUBLISHED');const row=result.records[0];value={...result,record:{recordId:row.recordId,kind:row.kind,revision:row.revision,fields:row.fields}};}
+   else if(method==='GET'&&/^publications\/[0-9a-f-]+$/.test(action))value=await campaignBridge.publicationReadback(principal,campaign,action.split('/')[1]);
+   else if(method==='GET'&&action==='pending')value=await campaignBridge.pending(principal,campaign);
+   else if(method==='POST'&&action==='decisions')value=await campaignBridge.decide(principal,campaign,await readBody(request));
+   else if(method==='GET'&&/^receipts\/[0-9a-f-]+$/.test(action))value=await campaignBridge.getReceipt(principal,campaign,action.split('/')[1]);
+   else if(method==='POST'&&action==='devices/revoke'){const b=await readBody(request);if(!b||Object.keys(b).length!==0)throw new BridgeError(400,'INVALID_REQUEST');value={...await bridge.revokeDevice(principal,campaign,principal.credentialId),mode:'ASTRAVAR_CAMPAIGN_V2'};}
+   else throw new BridgeError(404,'NOT_FOUND');return response(200,value);
   }
   const liveMatch=path.match(/^\/v1\/hp\/campaigns\/([A-Za-z0-9._-]+)\/(.+)$/);
   const match=liveMatch||path.match(/^\/v1\/campaigns\/([A-Za-z0-9._-]+)\/(.+)$/);
@@ -77,7 +95,7 @@ export async function handleOwnerApi(request,bridge,{ownerPrincipal=null,liveHp=
   else throw new BridgeError(404,'NOT_FOUND');
   return response(200,value);
  } catch(error) {
-  if(error instanceof BridgeError) return response(error.status,{mode:new URL(request.url).pathname.startsWith('/v1/hp/')?'ASTRAVAR_OWNER_HP_V1':MODE,error:{code:error.code}});
+  if(error instanceof BridgeError) return response(error.status,{mode:new URL(request.url).pathname.startsWith('/v2/')?'ASTRAVAR_CAMPAIGN_V2':new URL(request.url).pathname.startsWith('/v1/hp/')?'ASTRAVAR_OWNER_HP_V1':MODE,error:{code:error.code}});
   // Never return SQL, credentials, source records or exception strings to callers.
   return response(503,{mode:MODE,error:{code:'SERVICE_UNAVAILABLE'}});
  }

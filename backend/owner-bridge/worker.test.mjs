@@ -36,7 +36,7 @@ test('Sites Worker fails closed without DB or pinned owner and rejects unmatched
   const page = await handleWorker(ownerRequest('/owner'), env);
   assert.equal(page.status, 200);
   assert.match(page.headers.get('content-security-policy'), /script-src 'nonce-/);
-  assert.equal((await page.text()).includes('separately approved character HP'), true);
+  assert.equal((await page.text()).includes('Trusted DM Auto-Sync'), true);
 });
 
 test('new private Site can discover schemas and its verified identity before configuration without exposing or changing records', async () => {
@@ -83,7 +83,7 @@ test('deterministic bundled Worker imports and serves the same authenticated MCP
     assert.equal(await readFile(join(directory, 'server/index.js'), 'utf8'), first);
     const bundled = await import(pathToFileURL(join(directory, 'server/index.js')));
     const response = await bundled.default.fetch(ownerRequest('/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) }), { DB: {}, OWNER_SITE_USER_ID: ownerId });
-    assert.equal((await response.json()).result.tools.length, 10);
+    assert.equal((await response.json()).result.tools.length, 29);
     assert.equal((await readFile(join(directory, '.openai/drizzle/0000_owner_bridge.sql'), 'utf8')).includes('CREATE TABLE'), true);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
@@ -95,7 +95,7 @@ test('Sites artifact migration layout initializes the hosted-style database befo
     const { stdout } = await execute(process.execPath, [fileURLToPath(new URL('./build-worker.mjs', import.meta.url)), directory]);
     assert.equal(JSON.parse(stdout).migration, join(directory, '.openai/drizzle/0000_owner_bridge.sql'));
     const migrationRoot = join(directory, '.openai/drizzle');
-    for (const file of ['0000_owner_bridge.sql', '0001_bootstrap_downloads.sql', 'meta/_journal.json', 'meta/0000_snapshot.json', 'meta/0001_snapshot.json', '0002_live_hp.sql', 'meta/0002_snapshot.json']) {
+    for (const file of ['0000_owner_bridge.sql', '0001_bootstrap_downloads.sql', 'meta/_journal.json', 'meta/0000_snapshot.json', 'meta/0001_snapshot.json', '0002_live_hp.sql', 'meta/0002_snapshot.json', '0003_campaign_sync.sql', 'meta/0003_snapshot.json']) {
       assert.equal(await readFile(join(migrationRoot, file), 'utf8'), await readFile(new URL('./drizzle/' + file, import.meta.url), 'utf8'));
     }
     await assert.rejects(readFile(join(directory, 'drizzle/0000_owner_bridge.sql')), { code: 'ENOENT' });
@@ -106,7 +106,7 @@ test('Sites artifact migration layout initializes the hosted-style database befo
         await db.prepare(statement).bind().run();
       }
     }
-    assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name LIKE 'bridge_%'").bind().first()).count, 11);
+    assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name LIKE 'bridge_%'").bind().first()).count, 18);
     const bundled = await import(pathToFileURL(join(directory, 'server/index.js')));
     const response = await bundled.default.fetch(ownerRequest('/mcp', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
