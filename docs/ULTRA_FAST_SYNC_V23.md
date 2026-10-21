@@ -42,4 +42,3 @@ Full acceptance requires a legitimate authorized transaction while the updated G
 - https://developer.android.com/develop/background-work/background-tasks/persistent/getting-started/define-work
 - https://developer.android.com/about/versions/16/behavior-changes-all
 - https://developer.android.com/about/versions/17/behavior-changes-all
-
