@@ -107,7 +107,7 @@ val rebuildDestinations = listOf("Armor", "Combat", "Party", "Campaign", "Config
         PlayerEntry("Overlay & appearance", "Floating controls & app preferences", "Settings", { open("Overlay & appearance") })
         PlayerEntry("Campaign backup", "Items, projects, connections & companion", "History", { open("Campaign backup") })
         PlayerEntry("Campaign import", "Private source archive · preview, backup & receipts", "History", { open("Campaign import") })
-        PlayerEntry("Owner connection", "Authenticated connection & offline queue", "Settings", { open("Owner connection") })
+        PlayerEntry("Owner connection", "Character HP · owner pairing & approvals", "Settings", { open("Owner connection") })
         PlayerEntry("Weapon backup", "Separate combat save", "History", { open("Weapon backup") })
         PlayerEntry("Fictional sync", "Public disposable test records", "More", { open("Fictional sync") })
         if (com.yazsras.astravar.BuildConfig.DEBUG) {
