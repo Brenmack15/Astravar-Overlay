@@ -6,9 +6,9 @@
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/1.json": "8f92801eb01d6ed7d6ff4c5508e9fc4131146fbbcf9a9f8aad92e2596536ec30",
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/2.json": "50a395a8b87a7a119312af1b1edba8246f68aed77be8900baa29a5caff964361",
     "app/schemas/com.yazsras.astravar.data.SandboxSyncDb/1.json": "23de63787037f830e1295ba7cd7efbc7d62cf18e3ba836c4e511bec8fd6cef03",
-    "app/src/main/AndroidManifest.xml": "5327740cec5694eb7d35741d29f2c75fde0dadfad5d9614bbf36cf359fa479df",
+    "app/src/main/AndroidManifest.xml": "9e25b9ee647fe23770a5414a37d8c6f7a70c58f2686233d9f443155819a783cb",
     "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": "4bc371c0ada32d604e07dad8f4705a9e20f7c623860c6e7be9346d923bb84ca6",
-    "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": "083954872f38de5652f7b11a75a36b9fe75cc01f4452e1dceb218fbe813bc388",
+    "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": "eb0a3fffa6d2209ca8c20ab35bc7b018573eb0eb35d503ab18a32cde32b09943",
     "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": "7e5b92d763929c131ddef1f8ee5f08bad520233939f51234feace666b45c77c3",
     "app/src/main/java/com/yazsras/astravar/data/HistoryStorage.kt": "c7968f73293f5d8f46fa148be3fbbb74352565e914ef3b1762f88800104dbb62",
     "app/src/main/java/com/yazsras/astravar/data/SandboxSync.kt": "25f71e8aac585b24f83975796e9a4a7aa01b7c6a8c6f94607544bdf8775f5cf9",
@@ -332,6 +332,24 @@
         "sha256": "5327740cec5694eb7d35741d29f2c75fde0dadfad5d9614bbf36cf359fa479df",
         "reason": "Android14+ requires normal ACCESS_NETWORK_STATE permission when scheduling jobs with a network constraint. No data access scope, signing configuration, domain schema or mechanics change.",
         "official_reference": "https://developer.android.com/about/versions/14/behavior-changes-14#jobscheduler-reinforces-callback-and-network-behavior"
+      }
+    }
+  },
+  "authorized_owner_hp_connection_changes": {
+    "baseline": "e24d2d2c64fb187a68a2fdbb474fe122cbd6e3f5",
+    "reviewed_source_head": "657e67939789429e65d2eea6b70839449f0ee332",
+    "authorization": "Owner narrowly scoped HP connection directive,20October2026",
+    "scope": "Exactly the HP JobService registration and cross-instance Room observer refresh. Historical schema JSON, weapon mechanics, artwork, owner signing configuration, and all other foundation hashes remain pinned. Test results are recorded separately.",
+    "files": {
+      "app/src/main/AndroidManifest.xml": {
+        "previous_sha256": "5327740cec5694eb7d35741d29f2c75fde0dadfad5d9614bbf36cf359fa479df",
+        "sha256": "9e25b9ee647fe23770a5414a37d8c6f7a70c58f2686233d9f443155819a783cb",
+        "reason": "Register only the nonexported BIND_JOB_SERVICE-protected HP retry service; existing permissions, components, TLS and backup policy remain unchanged."
+      },
+      "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": {
+        "previous_sha256": "083954872f38de5652f7b11a75a36b9fe75cc01f4452e1dceb218fbe813bc388",
+        "sha256": "eb0a3fffa6d2209ca8c20ab35bc7b018573eb0eb35d503ab18a32cde32b09943",
+        "reason": "Enable Room multi-instance invalidation so existing Armor/Party collectors observe authenticated HP writes from separate client/job database instances; schemas and the exact migration chain remain unchanged."
       }
     }
   }
