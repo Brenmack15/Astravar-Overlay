@@ -29,6 +29,7 @@ class OwnerConnectionTest {
     private val time = 1_900_000_000_000L
     @Before fun open() {
         context = ApplicationProvider.getApplicationContext()
+        CampaignSyncPreferences(context).paused = false
         db = Room.inMemoryDatabaseBuilder(context, OwnerConnectionDb::class.java).build()
         campaign = Room.inMemoryDatabaseBuilder(context, CampaignLedgerDb::class.java).build()
         vault = OwnerSyncCredentialVault(context, { time }) { SecretKeySpec(ByteArray(32) { 8 }, "AES") }
@@ -44,6 +45,21 @@ class OwnerConnectionTest {
         return client
     }
     private suspend fun current() = campaign.recordsDao().characterAbility(OwnerConnectionProtocol.PROFILE, "INT")!!
+    @Test fun pausedLegacyAutomaticRecoveryPreservesCredentialAndProposalUntilManualChoice() = runBlocking {
+        val remote = Remote(); val client = paired(remote); val id=remote.propose(20)
+        CampaignSyncPreferences(context).paused = true
+        remote.offline = true
+        client.automaticSync()
+        assertNull(db.connection().proposal(id))
+        assertEquals(16,current().score)
+        assertNotNull(vault.credential(origin,OwnerConnectionProtocol.CAMPAIGN))
+        remote.offline = false
+        client.sync()
+        assertNotNull(db.connection().proposal(id))
+        assertEquals(16,current().score)
+        assertTrue(CampaignSyncPreferences(context).paused)
+        CampaignSyncPreferences(context).paused = false
+    }
     @Test fun network_retry_job_has_required_android14_permissions_and_schedules() {
         val permissions = context.packageManager
         assertEquals(android.content.pm.PackageManager.PERMISSION_GRANTED,

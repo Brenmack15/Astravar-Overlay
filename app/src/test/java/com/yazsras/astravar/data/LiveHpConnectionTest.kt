@@ -31,6 +31,7 @@ class LiveHpConnectionTest {
     private var time = 1_900_000_000_000L
     @Before fun open() {
         context = ApplicationProvider.getApplicationContext()
+        CampaignSyncPreferences(context).paused = false
         db = Room.inMemoryDatabaseBuilder(context, LiveHpConnectionDb::class.java).build()
         campaign = Room.inMemoryDatabaseBuilder(context, CampaignLedgerDb::class.java).build()
         vault = OwnerSyncCredentialVault(context, { time }) { SecretKeySpec(ByteArray(32) { 7 }, "AES") }; vault.forgetAll()
@@ -44,6 +45,22 @@ class LiveHpConnectionTest {
     private suspend fun paired(remote: Remote, seeded: Boolean = false): LiveHpConnectionClient {
         if (!seeded) seed()
         val client = client(remote); client.beginPairing(origin, profileId, "Test device"); client.finishPairing(); return client
+    }
+    @Test fun pausedAutomaticHpRecoveryDoesNotContactServerWhileManualSyncRemainsAvailable() = runBlocking {
+        val remote = Remote(); val client = paired(remote)
+        CampaignRecordsRepository(campaign).saveProfile(current().copy(currentHp=16),1,"Explicit fictional local edit")
+        CampaignSyncPreferences(context).paused = true
+        remote.offline = true
+        client.foreground()
+        assertEquals(1L, remote.revision)
+        assertEquals(16, current().currentHp)
+        assertNotNull(vault.credential(origin,campaignId))
+        remote.offline = false
+        client.sync()
+        assertEquals(2L, remote.revision)
+        assertEquals(16, remote.fields!!.getValue("currentHp").jsonPrimitive.int)
+        assertTrue(CampaignSyncPreferences(context).paused)
+        CampaignSyncPreferences(context).paused = false
     }
     @Test fun first_pairing_publishes_existing_revision_and_only_narrow_profile_fields_without_local_write() = runBlocking {
         seed(); val records = CampaignRecordsRepository(campaign); records.saveProfile(current().copy(name = "Edited test traveller"), 1, "Test edit before connection")

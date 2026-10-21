@@ -4,6 +4,10 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.*
 import org.junit.After
 import org.junit.Assert.*
@@ -30,6 +34,14 @@ class CampaignConnectionTest {
     private var time = 1_900_000_000_000L
     @Before fun setup() = runBlocking {
         context = ApplicationProvider.getApplicationContext()
+        // Robolectric does not automatically run manifest ContentProvider startup.
+        // Native instrumentation uses the real AndroidX Startup provider.
+        runCatching { androidx.work.WorkManager.getInstance(context) }.getOrElse {
+            androidx.startup.AppInitializer.getInstance(context).initializeComponent(androidx.work.WorkManagerInitializer::class.java)
+        }
+        CampaignSyncPreferences(context).paused = false
+        CampaignSyncPreferences(context).notificationsEnabled = false
+        context.getSharedPreferences("astravar-campaign-push", Context.MODE_PRIVATE).edit().clear().commit()
         journal = Room.inMemoryDatabaseBuilder(context, CampaignConnectionDb::class.java).build()
         campaign = Room.inMemoryDatabaseBuilder(context, CampaignLedgerDb::class.java).build()
         vault = OwnerSyncCredentialVault(context, { time }) { SecretKeySpec(ByteArray(32) { 9 }, "AES") }
@@ -163,6 +175,71 @@ class CampaignConnectionTest {
         assertFalse(c.snapshot().getValue("connected").jsonPrimitive.boolean)
         remote.offline=false; c.sync(); assertFalse(journal.connection().settings()!!.revokePending); assertNull(vault.credential(origin,campaignId))
     }
+    private fun wake(remote: Remote, bearer: String = "q".repeat(43)): Map<String, String> {
+        val data = linkedMapOf("type" to CampaignWakeProtocol.TYPE, "version" to "1", "campaignId" to campaignId,
+            "credentialId" to deviceId, "grantId" to remote.grant.getValue("grantId").jsonPrimitive.content,
+            "grantRevision" to remote.grant.getValue("revision").jsonPrimitive.content,
+            "issuedAt" to time.toString(), "expiresAt" to (time + 30_000).toString(), "wakeId" to UUID.randomUUID().toString())
+        val mac = javax.crypto.Mac.getInstance("HmacSHA256").apply {
+            init(SecretKeySpec(OwnerSyncProtocol.hash(bearer).toByteArray(Charsets.UTF_8), "HmacSHA256"))
+        }.doFinal(data.values.joinToString("\n").toByteArray(Charsets.UTF_8))
+        return data + ("signature" to android.util.Base64.encodeToString(mac,
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING))
+    }
+    @Test fun authenticatedWakeBindsCurrentCredentialGrantAndSurvivesClientRecreationWithoutReplay() = runBlocking {
+        val remote = Remote(); val c = paired(remote); val signed = wake(remote)
+        assertTrue(c.acceptWake(signed))
+        assertFalse(client(remote).acceptWake(signed))
+        assertFalse(c.acceptWake(wake(remote) + ("campaignId" to "foreign-campaign")))
+        assertFalse(c.acceptWake(wake(remote) + ("signature" to "A".repeat(43))))
+        assertFalse(c.acceptWake(wake(remote) + ("payload" to "no gameplay in FCM")))
+        val stale = wake(remote); time += 30_001
+        assertFalse(c.acceptWake(stale))
+        val oldCredential = wake(remote)
+        vault.enroll(OwnerSyncCredential(deviceId,campaignId,origin,time+1_000_000,"z".repeat(43)))
+        assertFalse(c.acceptWake(oldCredential))
+        assertTrue(c.acceptWake(wake(remote, "z".repeat(43))))
+        assertEquals(17, current().currentHp)
+        assertEquals(1L, current().revision)
+    }
+    @Test fun authenticatedWakeIsValidatedWhileForegroundNetworkDrainIsBlocked() = runBlocking {
+        val remote = Remote(); val c = paired(remote); val signed = wake(remote)
+        val entered = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        remote.blockPending = entered to release
+        val foreground = async(Dispatchers.IO) { c.foreground() }
+        try {
+            withTimeout(5_000) { entered.await() }
+            // The foreground method holds the execution mutex while waiting for transport.
+            // A valid wake must still be authenticated locally before the FCM callback budget.
+            assertTrue(withTimeout(1_000) { client(remote).acceptWake(signed) })
+            assertFalse(withTimeout(1_000) { client(remote).acceptWake(signed) })
+            assertEquals(17, current().currentHp)
+            assertEquals(1L, current().revision)
+        } finally {
+            release.complete(Unit)
+            withTimeout(5_000) { foreground.await() }
+        }
+    }
+    @Test fun pauseBlocksAutomaticNetworkAndWakeWhileManualSyncRetainsQueueAndStandingGrant() = runBlocking {
+        val remote = Remote(); val c = paired(remote); c.setAutoSync(setOf("hp")); val id = remote.propose()
+        val originalGrant = remote.grant
+        val signed = wake(remote)
+        CampaignSyncPreferences(context).paused = true
+        remote.offline = true
+        assertFalse(c.acceptWake(signed))
+        c.foreground()
+        assertEquals(17, current().currentHp)
+        assertTrue(remote.decisions.isEmpty())
+        assertEquals(originalGrant, remote.grant)
+        assertNotNull(vault.credential(origin,campaignId))
+        remote.offline = false
+        c.sync()
+        assertEquals(14, current().currentHp)
+        assertEquals("VERIFIED", journal.connection().command(id)!!.state)
+        assertTrue(CampaignSyncPreferences(context).paused)
+        assertEquals(originalGrant, remote.grant)
+        CampaignSyncPreferences(context).paused = false
+    }
     private inner class Remote: OwnerConnectionTransport {
         var grant=buildJsonObject { put("grantId","fixture-grant");put("revision",1);put("readScopes",CampaignConnectionProtocol.scopeArray(CampaignConnectionProtocol.categories));put("writeScopes",CampaignConnectionProtocol.scopeArray(CampaignConnectionProtocol.categories));put("autoSyncScopes",JsonArray(emptyList()));put("expiresAt",time+1_000_000) }
         val records=linkedMapOf<Pair<String,String>,JsonObject>()
@@ -170,6 +247,7 @@ class CampaignConnectionTest {
         val commands=linkedMapOf<String,JsonObject>(); val decisions=linkedMapOf<String,JsonObject>()
         val grantCommands=mutableMapOf<String,String>();val grantRequests=mutableListOf<String>()
         var loseDecision=false;var loseGrant=false;var offline=false;var lastDecision:String?=null;var receiptReads=0;var recordReads=0
+        var blockPending: Pair<CompletableDeferred<Unit>,CompletableDeferred<Unit>>? = null
         fun propose():String {
             val id=UUID.randomUUID().toString();val row=records.getValue("character-profile" to profileId)
             val fields=row.getValue("fields").jsonObject
@@ -194,7 +272,10 @@ class CampaignConnectionTest {
                     }else require(grantCommands[id]==body)
                     if(loseGrant){loseGrant=false;throw IOException("Lost fixture grant response")};answer("grant" to grant)
                 }
-                path.endsWith("/pending") -> answer("commands" to JsonArray(commands.filterKeys{it !in decisions}.values.toList()))
+                path.endsWith("/pending") -> {
+                    blockPending?.let { (entered, release) -> entered.complete(Unit); release.await() }
+                    answer("commands" to JsonArray(commands.filterKeys{it !in decisions}.values.toList()))
+                }
                 path.endsWith("/records") -> {
                     val rows=b!!.getValue("records").jsonArray.map {it.jsonObject}
                     (b["removed"] as? JsonArray).orEmpty().forEach { raw -> val r=raw.jsonObject;records.remove(r.getValue("kind").jsonPrimitive.content to r.getValue("recordId").jsonPrimitive.content) }

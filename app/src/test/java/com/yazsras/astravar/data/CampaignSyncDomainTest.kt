@@ -112,6 +112,55 @@ class CampaignSyncDomainTest {
         assertEquals("synthetic-coil",db.ledgerDao().allItems().single().id)
         assertEquals(2,campaignJson.decodeFromString<List<CampaignSyncRecord>>(receipt.outcomeJson).size)
     }
+    private fun acquisition(id: String, holder: String, holderRevision: Int = 1, state: String = "Carried"): CampaignSyncOperation =
+        CampaignSyncOperation("acquire_item",id,"item",0,buildJsonObject {
+            put("title","Confirmed fictional lens"); put("evidenceStatus","Confirmed"); put("quantity",1)
+            put("placement",buildJsonObject { put("holderProfileId",holder); put("expectedHolderRevision",holderRevision); put("state",state) })
+        })
+    @Test fun acquisitionAssignsOnePhysicalItemToVerifiedCompanionInOneImmutableReceipt() = runBlocking {
+        ledger.records.saveProfile(CharacterProfile(id="synthetic-owl-profile",name="Fictional owl"),source=source)
+        ledger.records.saveCompanionState(CompanionState("Fictional owl",companionId="synthetic-owl-profile"),source=source)
+        val operation=acquisition("synthetic-owl-lens","synthetic-owl-profile",state="Equipped")
+        val receipt=apply("acquire-owl-once",operation)
+        assertEquals(receipt,apply("acquire-owl-once",operation))
+        val item=requireNotNull(db.ledgerDao().getItem("synthetic-owl-lens"))
+        val placement=requireNotNull(db.partyDao().placement(item.id))
+        assertEquals(1L,item.revision);assertEquals(1L,placement.revision)
+        assertEquals("Fictional owl",item.owner);assertEquals("Actor:synthetic-owl-profile",item.location)
+        assertEquals("Equipped",item.itemState);assertEquals("synthetic-owl-profile",placement.holderProfileId)
+        assertEquals(1,db.ledgerDao().allItems().size)
+        val result=campaignJson.decodeFromString<List<CampaignSyncRecord>>(receipt.outcomeJson)
+        assertEquals(setOf("item","item-placement"),result.map{it.kind}.toSet())
+        assertTrue(result.all{it.recordId==item.id && it.revision==1L})
+        rejects {apply("acquire-owl-another-command",operation)}
+        assertEquals(1,db.ledgerDao().allItems().size)
+    }
+    @Test fun acquisitionFailureRollsBackEarlierCurrencyAndCannotInventCompanionProfile() = runBlocking {
+        ledger.records.saveCompanionState(CompanionState("Profile-less fictional owl",companionId="synthetic-state-only-owl"),source=source)
+        for ((suffix,holder,revision,state) in listOf(
+            listOf("unknown","invented-owl","1","Carried"),
+            listOf("state-only","synthetic-state-only-owl","1","Carried"),
+            listOf("stale","synthetic-player","2","Carried"),
+            listOf("invalid-state","synthetic-player","1","Installed"))) {
+            val command="invalid-acquire-$suffix"
+            rejects {apply(command,CampaignSyncOperation("adjust_currency","synthetic-wallet","wallet",1,fields("goldDelta" to number(-4))),
+                acquisition("synthetic-$suffix",holder,revision.toInt(),state))}
+            assertEquals(10L,db.partyDao().wallet("synthetic-wallet")?.gold)
+            assertTrue(db.ledgerDao().allItems().isEmpty());assertTrue(db.partyDao().allPlacements().isEmpty())
+            assertNull(db.recordsDao().receipt(CampaignSyncDomain.receiptId(command)))
+        }
+        assertNull(db.recordsDao().characterProfile("synthetic-state-only-owl"))
+    }
+    @Test fun acquisitionCannotAssignForeignCampaignHolderOrConflictingDraftFields() = runBlocking {
+        ledger.records.saveProfile(CharacterProfile(id="synthetic-foreign-holder",name="Foreign fictional holder"),source=source)
+        db.partyDao().put(PartySheetRecord("synthetic-foreign-holder",campaignJson.encodeToString(PartySheetData()),campaignId="synthetic-other-campaign"))
+        rejects {apply("foreign-acquire",acquisition("synthetic-foreign-tool","synthetic-foreign-holder"))}
+        val operation=acquisition("synthetic-conflict-tool","synthetic-player")
+        for ((name,value) in listOf("owner" to JsonPrimitive("Someone else"),"location" to JsonPrimitive("Elsewhere"),"quantity" to number(0),"archived" to JsonPrimitive(true))) {
+            rejects {apply("conflicting-acquire-$name",operation.copy(fields=JsonObject(operation.fields+(name to value))))}
+        }
+        assertTrue(db.ledgerDao().allItems().isEmpty());assertTrue(db.partyDao().allPlacements().isEmpty())
+    }
     @Test fun failedAtomicPurchaseRollsBackWalletItemAndAllReceipts() = runBlocking {
         val bad=LedgerDraft("",evidenceStatus="Confirmed",quantity=1,itemState="Carried")
         rejects { apply("bad-purchase",CampaignSyncOperation("adjust_currency","synthetic-wallet","wallet",1,fields("goldDelta" to number(-4))),
