@@ -78,12 +78,15 @@ object CampaignPushy {
         if (!configured || !CampaignSyncPreferences(app).pushyEnabled || CampaignSyncPreferences(app).paused || !registering.compareAndSet(false, true)) return
         scope.launch {
             try {
+                configure(app)
                 val store = CampaignPushStore(app)
                 val cached = store.token()
+                // The SDK can clear its credentials after MQTT authorization failure while
+                // Astravar retains its encrypted copy. A local token alone cannot restart it.
+                val usableCached = cachedTokenForSdk(cached, Pushy.getDeviceCredentials(app)?.token)
                 // Failed account/network setup is retried conservatively; it never stalls sync.
-                if (cached == null && android.os.SystemClock.elapsedRealtime() < nextRegistrationAttemptAt) return@launch
-                configure(app)
-                val token = cached ?: run {
+                if (usableCached == null && android.os.SystemClock.elapsedRealtime() < nextRegistrationAttemptAt) return@launch
+                val token = usableCached ?: run {
                     nextRegistrationAttemptAt = android.os.SystemClock.elapsedRealtime() + 300_000
                     Pushy.register(app)
                 }
@@ -105,6 +108,8 @@ object CampaignPushy {
             } finally { registering.set(false) }
         }
     }
+    internal fun cachedTokenForSdk(cached: String?, sdkToken: String?): String? =
+        cached?.takeIf { it.isNotBlank() && it == sdkToken }
     internal fun shouldEnqueueTokenRefresh(previous: String?, current: String) = previous != current
     fun disable(context: Context) = synchronized(controlLock) {
         runCatching { configure(context); Pushy.toggleNotifications(false, context); components(context, false) }
