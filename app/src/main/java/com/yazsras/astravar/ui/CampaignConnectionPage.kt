@@ -39,11 +39,13 @@ import java.io.IOException
     val syncPreferences = remember(context) { CampaignSyncPreferences(context) }
     var syncPaused by remember { mutableStateOf(syncPreferences.paused) }
     var syncNotifications by remember { mutableStateOf(syncPreferences.notificationsEnabled) }
+    var pushyEnabled by remember { mutableStateOf(syncPreferences.pushyEnabled) }
     var notificationAvailable by remember { mutableStateOf(CampaignSyncNotifications.canShow(context)) }
     DisposableEffect(syncPreferences) {
         val observer = syncPreferences.observeControls {
             syncPaused = syncPreferences.paused
             syncNotifications = syncPreferences.notificationsEnabled
+            pushyEnabled = syncPreferences.pushyEnabled
             notificationAvailable = CampaignSyncNotifications.canShow(context)
         }
         onDispose { observer.close() }
@@ -147,7 +149,7 @@ import java.io.IOException
     } else {
         val view = campaignConnectionView(snapshot).copy(busy = busy, error = error, message = message,
             automaticSyncPaused = syncPaused, syncNotificationEnabled = syncNotifications,
-            syncNotificationAvailable = notificationAvailable)
+            syncNotificationAvailable = notificationAvailable, pushEnabled = pushyEnabled)
         CampaignConnectionContent(view,
             onPair = { origin, profile, name, reads, writes -> operate {
                 val result = client.beginPairing(origin, profile, name, reads, writes)
@@ -179,6 +181,18 @@ import java.io.IOException
                 } finally {
                     if (paused) CampaignConnectionSyncJob.cancel(context)
                     CampaignSyncNotifications.refresh(context)
+                }
+            },
+            onPushy = { enabled ->
+                try {
+                    syncPreferences.pushyEnabled = enabled
+                    pushyEnabled = enabled
+                    if (!syncPreferences.paused) CampaignConnectionSyncJob.enqueue(context)
+                    operate { client.snapshot() }
+                } catch (_: IOException) {
+                    pushyEnabled = syncPreferences.pushyEnabled
+                    error = true
+                    message = "Android could not save the Pushy preference. Cloudflare synchronization remains available."
                 }
             },
             onSyncNotification = { enabled ->

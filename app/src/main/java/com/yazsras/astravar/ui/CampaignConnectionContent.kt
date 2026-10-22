@@ -48,7 +48,8 @@ data class CampaignConnectionView(
     val pending: List<CampaignPendingView> = emptyList(), val receipts: List<CampaignReceiptView> = emptyList(),
     val busy: Boolean = false, val message: String = "", val error: Boolean = false,
     val automaticSyncPaused: Boolean = false, val syncNotificationEnabled: Boolean = false,
-    val syncNotificationAvailable: Boolean = false, val pushConfigured: Boolean = false, val pushRegistered: Boolean = false
+    val syncNotificationAvailable: Boolean = false, val pushConfigured: Boolean = false, val pushRegistered: Boolean = false,
+    val pushEnabled: Boolean = false
 )
 
 @Composable fun CampaignConnectionContent(view: CampaignConnectionView,
@@ -58,7 +59,8 @@ data class CampaignConnectionView(
     onRevoke: () -> Unit, onRenew: (String, String) -> Unit,
     onImportAuthorization: () -> Unit, onDiagnostics: () -> Unit,
     onRestrictPermissions: (Set<String>, Set<String>) -> Unit = { _, _ -> },
-    onPauseSync: (Boolean) -> Unit = {}, onSyncNotification: (Boolean) -> Unit = {}
+    onPauseSync: (Boolean) -> Unit = {}, onSyncNotification: (Boolean) -> Unit = {},
+    onPushy: (Boolean) -> Unit = {}
 ) {
     var origin by rememberSaveable(view.origin) { mutableStateOf(view.origin) }
     var deviceName by rememberSaveable(view.deviceName) { mutableStateOf(view.deviceName) }
@@ -110,13 +112,19 @@ data class CampaignConnectionView(
                     modifier = Modifier.testTag("campaign-sync-notification").semantics { contentDescription = "Show background campaign sync notification" })
             }
             if (view.syncNotificationEnabled && !view.syncNotificationAvailable) {
-                Text("Android notification permission or this notification channel is off. Push remains normal priority; Android may defer background delivery.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                Text("Android notification permission or this notification channel is off. Android may defer background delivery.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
                 PlayerOutlinedButton(onClick = { onSyncNotification(true) }, modifier = Modifier.fillMaxWidth()) { Text("Enable notification permission") }
             }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Use Pushy wake notifications", modifier = Modifier.weight(1f))
+                Switch(view.pushEnabled, onPushy, enabled = view.pushConfigured && (view.connected || view.pushEnabled),
+                    modifier = Modifier.testTag("campaign-sync-pushy").semantics { contentDescription = "Use optional Pushy campaign wake notifications" })
+            }
             Text(when {
-                !view.pushConfigured -> "Push is not configured in this build. Sync on open and Android's scheduled recovery remain available."
-                !view.pushRegistered -> "Push registration is pending. Sync on open and scheduled recovery remain available."
-                else -> "Push wakes a short synchronization job. Delivery can be delayed by Android, connectivity or battery settings."
+                !view.pushEnabled -> "Cloudflare sync is active on open and through Android's scheduled recovery. Pushy is optional and off."
+                !view.pushConfigured -> "Pushy is unavailable in this build. Cloudflare sync on open and scheduled recovery remain available."
+                !view.pushRegistered -> "Pushy setup or registration is pending. Cloudflare sync on open and scheduled recovery remain available."
+                else -> "Pushy sends only a signed wake hint, then Astravar syncs through Cloudflare. Screen-off, Doze and Samsung battery settings may delay delivery."
             }, color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
         }
         if (!view.connected && !view.revokePending) PlayerCard {
@@ -330,6 +338,7 @@ internal fun campaignConnectionView(snapshot: JsonObject, now: Long = System.cur
         automaticSyncPaused = (snapshot["automaticSyncPaused"] as? JsonPrimitive)?.booleanOrNull == true,
         pushConfigured = (snapshot["pushConfigured"] as? JsonPrimitive)?.booleanOrNull == true,
         pushRegistered = (snapshot["pushRegistered"] as? JsonPrimitive)?.booleanOrNull == true,
+        pushEnabled = (snapshot["pushEnabled"] as? JsonPrimitive)?.booleanOrNull == true,
         pending = snapshot.connectionRows("pending").map { row -> CampaignPendingView(row.connectionText("commandId"), row.connectionText("state"), row.connectionText("source"), row.connectionText("message"),
             row.connectionRows("operations").map { op -> CampaignOperationView(op.connectionText("type"), op.connectionText("recordId"), op.connectionLong("expectedRevision"),
                 op.connectionLong("currentRevision"), displayFields(op["current"] ?: op["currentFields"]), displayFields(op["proposedFields"] ?: op["fields"]),
