@@ -147,7 +147,7 @@ class CampaignNativeHttpsTest {
     }
     private fun mcpErrorCode(response: JsonObject): String? = runCatching {
         Json.parseToJsonElement(response.getValue("content").jsonArray.single().jsonObject.getValue("text").jsonPrimitive.content)
-            .jsonObject.getValue("error").jsonObject.getValue("code").jsonPrimitive.content
+            .jsonObject.getValue("error").jsonPrimitive.content
     }.getOrNull()
     private fun mcp(name: String, arguments: JsonObject): JsonObject {
         val response = rpc(name, arguments)
@@ -270,7 +270,7 @@ class CampaignNativeHttpsTest {
             while (receipt == null && SystemClock.elapsedRealtime() < deadline) {
                 val response = rpc("get_campaign_command_receipt", arguments, allowReceiptPending = true)
                 if (response.getValue("isError").jsonPrimitive.boolean) {
-                    assertEquals("Only an uncommitted receipt may be pending", "RECEIPT_NOT_READY", mcpErrorCode(response))
+                    assertEquals("Only an uncommitted receipt may be pending; isolated fictional MCP response: $response", "RECEIPT_NOT_READY", mcpErrorCode(response))
                     delay(250)
                 } else receipt = response.getValue("structuredContent").jsonObject.getValue("receipt").jsonObject
             }
