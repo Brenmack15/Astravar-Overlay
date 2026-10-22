@@ -6,7 +6,7 @@
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/1.json": "8f92801eb01d6ed7d6ff4c5508e9fc4131146fbbcf9a9f8aad92e2596536ec30",
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/2.json": "50a395a8b87a7a119312af1b1edba8246f68aed77be8900baa29a5caff964361",
     "app/schemas/com.yazsras.astravar.data.SandboxSyncDb/1.json": "23de63787037f830e1295ba7cd7efbc7d62cf18e3ba836c4e511bec8fd6cef03",
-    "app/src/main/AndroidManifest.xml": "e7b394da965e1c1d0e11909017a82c7bd7739a7cfa434b4f4298e98a296d3c59",
+    "app/src/main/AndroidManifest.xml": "b9438dec1584b67306d62cc0eca0c000fabaa7def2d8df159c9048e880c596fd",
     "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": "f7eefb74ebec642b318ab67053605ec5ede36dd02b38a2ae0c85819178821251",
     "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": "18e19a4abe551da58a02314124ef229420e8abe49f4ff5371552fae1fe800f6f",
     "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": "7e5b92d763929c131ddef1f8ee5f08bad520233939f51234feace666b45c77c3",
@@ -418,5 +418,17 @@
         "after": "                    try { if (!CampaignSyncPreferences(applicationContext).paused && !hidden &&\n                        !getSystemService(KeyguardManager::class.java).isKeyguardLocked) campaign.foreground() }\n"
       }
     ]
+  },
+  "authorized_pushy_source_changes": {
+    "authorization": "Owner ASTRAVAR2.3.2 replace Firebase with Pushy directive,22October2026",
+    "verified_source_baseline": "e00359f6c9f6ad6ecb116937fbe8471536237615",
+    "scope": "Replace only retired Firebase metadata/service with nonexported optional Pushy receiver/socket/job components and disabled boot/update receivers. Add normal WAKE_LOCK; preserve existing package, overlay special-use service, HTTPS-only/backup policy, campaign services, artwork, Room schemas, and original signing block. No exact alarm or battery exemption permission.",
+    "files": {
+      "app/src/main/AndroidManifest.xml": {
+        "previous_pinned_sha256": "e7b394da965e1c1d0e11909017a82c7bd7739a7cfa434b4f4298e98a296d3c59",
+        "reviewed_sha256": "b9438dec1584b67306d62cc0eca0c000fabaa7def2d8df159c9048e880c596fd",
+        "reason": "Owner-authorized optional provider replacement; separate default-off consent enables Pushy components only after authenticated registration. No campaign storage/schema or combat changes."
+      }
+    }
   }
 }

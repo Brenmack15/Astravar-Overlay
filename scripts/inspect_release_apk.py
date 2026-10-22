@@ -13,6 +13,64 @@ import zipfile
 OWNER_CERTIFICATE = "4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847"
 
 
+def dex_defined_types(data: bytes) -> set[str]:
+    """Read class definitions, excluding optional unresolved SDK references."""
+    if len(data) < 112 or not data.startswith(b"dex\n"):
+        raise ValueError("Invalid APK DEX header")
+    string_count, strings_offset, type_count, types_offset = struct.unpack_from("<IIII", data, 56)
+    class_count, classes_offset = struct.unpack_from("<II", data, 96)
+    for count, offset, size in ((string_count, strings_offset, 4),
+                                (type_count, types_offset, 4), (class_count, classes_offset, 32)):
+        if offset + count * size > len(data):
+            raise ValueError("Invalid APK DEX table")
+    names = set()
+    for index in range(class_count):
+        class_index = struct.unpack_from("<I", data, classes_offset + index * 32)[0]
+        if class_index >= type_count:
+            raise ValueError("Invalid APK DEX class type")
+        string_index = struct.unpack_from("<I", data, types_offset + class_index * 4)[0]
+        if string_index >= string_count:
+            raise ValueError("Invalid APK DEX type descriptor")
+        offset = struct.unpack_from("<I", data, strings_offset + string_index * 4)[0]
+        # String data begins with a uleb128 UTF-16 length, at most five bytes.
+        for _ in range(5):
+            if offset >= len(data):
+                raise ValueError("Invalid APK DEX string")
+            byte = data[offset]
+            offset += 1
+            if not byte & 0x80:
+                break
+        else:
+            raise ValueError("Invalid APK DEX string length")
+        end = data.find(b"\0", offset)
+        if end < 0:
+            raise ValueError("Invalid APK DEX string terminator")
+        names.add(data[offset:end].decode("utf-8", errors="replace"))
+    return names
+
+
+def verify_push_transport(manifest: str, resources: str, dex_files: list[bytes]) -> dict:
+    """Reject provider migration leftovers in the packaged product, not just source."""
+    forbidden_manifest = (
+        "com.google.firebase", "com.google.android.c2dm", "firebase_",
+        "AstravarMessagingService", "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.USE_EXACT_ALARM", "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+        "android.permission.FOREGROUND_SERVICE_DATA_SYNC", "PushyForegroundService",
+    )
+    if any(value in manifest for value in forbidden_manifest):
+        raise ValueError("APK retains retired messaging components or unnecessary background permissions")
+    for resource in ("google_app_id", "gcm_defaultSenderId", "google_api_key", "firebase_database_url"):
+        if re.search(r":string/" + re.escape(resource) + r":", resources):
+            raise ValueError("APK retains retired Firebase client configuration")
+    # The Pushy SDK can reference optional FCM classes without bundling them.
+    # Check defined classes rather than mistaking an unresolved type for Firebase.
+    if any(name.startswith("Lcom/google/firebase/")
+           for data in dex_files for name in dex_defined_types(data)):
+        raise ValueError("APK contains Firebase classes")
+    return dict(firebase_components_absent=True, firebase_client_resources_absent=True,
+                firebase_dex_types_absent=True, no_new_background_special_permissions=True)
+
+
 def inspect(apk: Path, sdk: Path, package: str, version_name: str, version_code: int,
             owner_signed: bool = False) -> dict:
     tools = sdk / "build-tools/35.0.0"
@@ -47,12 +105,20 @@ def inspect(apk: Path, sdk: Path, package: str, version_name: str, version_code:
     foreground_id, foreground_file = foreground.groups()
     approved = json.loads((Path(__file__).parent / "branding_assets_sha256.json").read_text())
     expected_foreground = approved["files"]["app/src/main/res/drawable-nodpi/astravar_launcher_foreground.png"]
+    push_transport = None
     with zipfile.ZipFile(apk) as archive:
         if any(icon not in archive.namelist() for icon in icons):
             raise ValueError("Launcher references an absent APK entry")
         foreground_hash = hashlib.sha256(archive.read(foreground_file)).hexdigest()
         if foreground_hash != expected_foreground:
             raise ValueError("Packaged portrait differs from approved supplied artwork")
+        if version_code >= 39:
+            manifest = run("aapt", "dump", "xmltree", apk, "AndroidManifest.xml")
+            dex_files = [archive.read(name) for name in archive.namelist()
+                         if re.fullmatch(r"classes\d*\.dex", name)]
+            if not dex_files:
+                raise ValueError("APK executable code missing")
+            push_transport = verify_push_transport(manifest, resources, dex_files)
         native_alignment = {}
         for name in archive.namelist():
             if not name.startswith(("lib/arm64-v8a/", "lib/x86_64/")) or not name.endswith(".so"):
@@ -88,7 +154,8 @@ def inspect(apk: Path, sdk: Path, package: str, version_name: str, version_code:
                 debuggable=debuggable, native_64bit_load_alignment=native_alignment,
                 owner_signature_verified=certificate == OWNER_CERTIFICATE,
                 signing_status="owner fingerprint matches" if certificate == OWNER_CERTIFICATE else "test signer; not a permanent owner release",
-                apk_sha256=hashlib.sha256(apk.read_bytes()).hexdigest(), alignment_16kb_verified=True)
+                apk_sha256=hashlib.sha256(apk.read_bytes()).hexdigest(), alignment_16kb_verified=True,
+                optional_push_transport=push_transport)
 
 
 if __name__ == "__main__":

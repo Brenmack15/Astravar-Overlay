@@ -243,7 +243,7 @@ run_independent_test 'com.yazsras.astravar.data.CampaignSyncNativeTest#nativeAto
 run_independent_test 'com.yazsras.astravar.data.CampaignSyncNativeTest#nativeCompanionAndStageChangesKeepIndependentResourcesAndLaterWork' native-campaign-companion-stage.txt
 # Native 2.3 wake authentication, encrypted token storage, durable duplicate rejection,
 # real WorkManager pause controls and ordinary quiet notification. These fixtures do
-# not simulate FCM transport delivery or establish Galaxy/Doze latency.
+# not simulate Pushy transport delivery or establish Galaxy/Doze latency.
 run_independent_test 'com.yazsras.astravar.data.CampaignWakeNativeTest#nativeWakeAuthenticationAndReplayRemainStrictWithScreenOff' native-campaign-wake-auth-screen-off.txt
 run_independent_test 'com.yazsras.astravar.data.CampaignWakeNativeTest#nativePauseBlocksAutomaticWorkAndRetainsManualChoice' native-campaign-pause-manual.txt
 run_independent_test 'com.yazsras.astravar.data.CampaignWakeNativeTest#nativeInjectedWakeSchedulingRespectsBatterySaverDozeAndPause' native-campaign-power-state-scheduling.txt
@@ -263,7 +263,7 @@ p=pathlib.Path(sys.argv[1]); power=json.loads((p/'campaign-power-state-schedulin
 (p/'SCOPE.json').write_text(json.dumps({'fictionalOnly':True,'emulatorApi':36,
  'nativeHttps':True,'nativeAndroidKeyStore':True,'productionComposeApprovalAndRejection':True,
  'forceStopRestart':True,'separateDatabaseValidatedBackupRestore':True,'sameDebugKeyUpdate':'published35 to candidate'+os.environ['ASTRAVAR_VERSION_CODE'],
- 'actualOwnerSigningIdentityTestedInCi':False,'realChatGptHostInvocation':False,'physicalGalaxy':False,'nativeClipboardExactCopy':True,'nativeKeyboardActivation':True,'nativeLargeFontScale':2,'nativeCampaignRoomDomainTransactions':True,'campaignRoomPersistenceAfterCloseReopen':True,'campaignHttps':True,'campaignHostedMcpAcceptance':False,'nativeWakeAuthentication':True,'nativeEncryptedPushToken':True,'nativeDuplicateWakeDurability':True,'nativeWorkManagerPause':True,'nativeQuietNotification':True,'actualFcmDelivery':False,'actualDozeWakeLatency':False,'nativePowerStateScheduling':power,
+ 'actualOwnerSigningIdentityTestedInCi':False,'realChatGptHostInvocation':False,'physicalGalaxy':False,'nativeClipboardExactCopy':True,'nativeKeyboardActivation':True,'nativeLargeFontScale':2,'nativeCampaignRoomDomainTransactions':True,'campaignRoomPersistenceAfterCloseReopen':True,'campaignHttps':True,'campaignHostedMcpAcceptance':False,'nativeWakeAuthentication':True,'nativeEncryptedPushToken':True,'nativeDuplicateWakeDurability':True,'nativeWorkManagerPause':True,'nativeQuietNotification':True,'actualPushyDelivery':False,'actualDozeWakeLatency':False,'nativePowerStateScheduling':power,
  'isolatedGatewaySimulatesSitesIdentity':True,'noProductionTlsChanges':True,'temporaryEmulatorHosts':True,'normalResolverForOsValidation':True,'networkValidationForced':False},indent=2)+'\n')
 rows=[]
 for line in (p/'gateway.log').read_text().splitlines():
