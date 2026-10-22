@@ -13,7 +13,9 @@ import android.util.Base64
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.Until
 import androidx.work.WorkManager
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -320,10 +322,34 @@ class CampaignWakeNativeTest {
         InstrumentationRegistry.getInstrumentation().waitForIdleSync()
         assertTrue("Sync Now must retain Pause", CampaignSyncPreferences(context).paused)
         assertTrue("Sync Now must enqueue the explicit manual job", managerWork.getWorkInfosForUniqueWork(CampaignConnectionSyncJob.MANUAL).get(10, TimeUnit.SECONDS).isNotEmpty())
-        awaitNotification("after manual Sync Now", "Resume", "Paused")
-        device.openNotification(); device.waitForIdle()
-        val evidence = File(context.getExternalFilesDir(null), "campaign-sync-notification-paused.png")
-        assertTrue(device.takeScreenshot(evidence))
-        device.pressBack()
+        val finalPaused = awaitNotification("after manual Sync Now", "Resume", "Paused")
+        val pausedTitle = finalPaused.extras.getCharSequence("android.title").toString()
+        val titleSelector = By.pkg("com.android.systemui").text(pausedTitle)
+        val evidenceDirectory = context.getExternalFilesDir(null)
+        device.wakeUp()
+        device.executeShellCommand("wm dismiss-keyguard")
+        try {
+            val opened = device.openNotification()
+            var titleVisible = device.wait(Until.hasObject(titleSelector), 5_000)
+            var fallbackResult = "not needed"
+            if (!titleVisible) {
+                // A successful request to expand the shade is not proof that its card is visible.
+                // Retry through SystemUI only after observing that the real title is absent.
+                fallbackResult = device.executeShellCommand("cmd statusbar expand-notifications").trim()
+                titleVisible = device.wait(Until.hasObject(titleSelector), 5_000)
+            }
+            val hierarchy = File(evidenceDirectory, "campaign-sync-notification-paused-hierarchy.xml")
+            device.dumpWindowHierarchy(hierarchy)
+            observe("paused shade screenshot", "openNotification=$opened; fallback=$fallbackResult; titleVisible=$titleVisible")
+            if (!titleVisible) {
+                device.takeScreenshot(File(evidenceDirectory, "campaign-sync-notification-paused-not-visible.png"))
+                throw AssertionError("Paused notification title was not visible in SystemUI; hierarchy=${hierarchy.name}; diagnostics=${observations.last()}")
+            }
+            val title = device.findObject(titleSelector)
+            assertNotNull("The paused SystemUI notification must remain visible before capture", title)
+            val bounds = title.visibleBounds
+            assertTrue("The paused notification title must occupy visible screen space: $bounds", bounds.width() > 0 && bounds.height() > 0)
+            assertTrue("Capture the observed paused notification card", device.takeScreenshot(File(evidenceDirectory, "campaign-sync-notification-paused.png")))
+        } finally { device.pressBack() }
     }
 }
