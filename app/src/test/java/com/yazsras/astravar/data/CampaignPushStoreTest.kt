@@ -61,6 +61,21 @@ class CampaignPushStoreTest {
         assertNull(campaignPushyWakeData(intent().putExtra("version", 2)))
         assertNull(campaignPushyWakeData(intent().setAction("foreign.sender")))
     }
+    @Test fun sdkCredentialResetOrRotationRequiresRegistrationDespiteLocalToken() {
+        val local = "0123456789abcdef0123"
+        // Pushy clears its own credentials after MQTT authorization failure. Its listen()
+        // returns without registration when credentials are absent; our local copy cannot help.
+        assertNull(CampaignPushy.cachedTokenForSdk(local, null))
+        assertNull(CampaignPushy.cachedTokenForSdk(local, ""))
+        assertNull(CampaignPushy.cachedTokenForSdk(local, "different-sdk-token"))
+        assertNull(CampaignPushy.cachedTokenForSdk(null, local))
+        assertNull(CampaignPushy.cachedTokenForSdk("", ""))
+        assertEquals(local, CampaignPushy.cachedTokenForSdk(local, local))
+        // SDK recovery returning the same token restores delivery without another sync loop;
+        // an actual replacement must still schedule authenticated server registration.
+        assertFalse(CampaignPushy.shouldEnqueueTokenRefresh(local, local))
+        assertTrue(CampaignPushy.shouldEnqueueTokenRefresh(local, "different-sdk-token"))
+    }
     @Test fun cachedPushyTokenNeverSchedulesARecursiveSyncWorker() {
         assertTrue(CampaignPushy.shouldEnqueueTokenRefresh(null, "0123456789abcdef0123"))
         assertFalse(CampaignPushy.shouldEnqueueTokenRefresh("0123456789abcdef0123", "0123456789abcdef0123"))
