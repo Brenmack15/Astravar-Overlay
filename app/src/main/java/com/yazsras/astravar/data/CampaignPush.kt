@@ -4,12 +4,16 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
-import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
-import com.google.firebase.messaging.FirebaseMessaging
-import com.google.firebase.messaging.FirebaseMessagingService
-import com.google.firebase.messaging.RemoteMessage
+import android.content.BroadcastReceiver
+import android.content.Intent
+import android.content.ComponentName
+import android.content.pm.PackageManager
 import com.yazsras.astravar.BuildConfig
+import me.pushy.sdk.Pushy
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -27,18 +31,15 @@ import javax.crypto.spec.SecretKeySpec
 /** Wake signals are hints only. No command, item, source prose or gameplay data is accepted here. */
 object CampaignWakeProtocol {
     const val TYPE = "ASTRAVAR_CAMPAIGN_SYNC_WAKE"
-    private val fields = setOf("type", "version", "campaignId", "credentialId", "grantId", "grantRevision", "issuedAt", "expiresAt", "wakeId", "signature")
-    fun verified(data: Map<String, String>, campaignId: String, credentialId: String, grantId: String,
-                 grantRevision: Long, credentialHash: String, now: Long): Boolean = runCatching {
+    internal val fields = setOf("type", "version", "issuedAt", "expiresAt", "wakeId", "signature")
+    fun verified(data: Map<String, String>, credentialHash: String, now: Long): Boolean = runCatching {
         require(data.keys == fields && data.values.all { it.length <= 256 })
-        require(data["type"] == TYPE && data["version"] == "1")
-        require(data["campaignId"] == campaignId && data["credentialId"] == credentialId && data["grantId"] == grantId)
-        require(data.getValue("grantRevision") == grantRevision.toString())
+        require(data["type"] == TYPE && data["version"] == "2")
         require(UUID.fromString(data.getValue("wakeId")).toString() == data["wakeId"])
         val issued = data.getValue("issuedAt").toLong(); val expires = data.getValue("expiresAt").toLong()
         require(issued > 0 && issued <= now + 60_000 && expires > now && expires > issued && expires - issued <= 30_000)
         require(credentialHash.matches(Regex("[a-f0-9]{64}")))
-        val input = listOf("type", "version", "campaignId", "credentialId", "grantId", "grantRevision", "issuedAt", "expiresAt", "wakeId")
+        val input = listOf("type", "version", "issuedAt", "expiresAt", "wakeId")
             .joinToString("\n") { data.getValue(it) }.toByteArray(Charsets.UTF_8)
         val mac = Mac.getInstance("HmacSHA256").apply { init(SecretKeySpec(credentialHash.toByteArray(Charsets.UTF_8), "HmacSHA256")) }.doFinal(input)
         val signature = Base64.decode(data.getValue("signature"), Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
@@ -47,29 +48,83 @@ object CampaignWakeProtocol {
     }.getOrDefault(false)
 }
 
-/** No Firebase installation/token traffic is initiated until a valid campaign has been enrolled. */
-object CampaignFirebase {
-    val configured: Boolean get() = BuildConfig.ASTRAVAR_FIREBASE_APP_ID.isNotBlank() &&
-        BuildConfig.ASTRAVAR_FIREBASE_PROJECT_ID.isNotBlank() && BuildConfig.ASTRAVAR_FIREBASE_SENDER_ID.isNotBlank() &&
-        BuildConfig.ASTRAVAR_FIREBASE_API_KEY.isNotBlank()
-    @Synchronized fun messaging(context: Context): FirebaseMessaging? {
-        if (!configured) return null
-        val app = FirebaseApp.getApps(context).firstOrNull { it.name == FirebaseApp.DEFAULT_APP_NAME } ?:
-            FirebaseApp.initializeApp(context.applicationContext, FirebaseOptions.Builder()
-                .setApplicationId(BuildConfig.ASTRAVAR_FIREBASE_APP_ID).setProjectId(BuildConfig.ASTRAVAR_FIREBASE_PROJECT_ID)
-                .setGcmSenderId(BuildConfig.ASTRAVAR_FIREBASE_SENDER_ID).setApiKey(BuildConfig.ASTRAVAR_FIREBASE_API_KEY).build())
-        require(app.options.gcmSenderId == BuildConfig.ASTRAVAR_FIREBASE_SENDER_ID)
-        return FirebaseMessaging.getInstance().also { it.isAutoInitEnabled = true }
+/** Optional, device-consented socket wake transport. It never carries campaign records.
+ * SDK registration runs independently: a missing Pushy account cannot block Cloudflare sync. */
+object CampaignPushy {
+    val configured: Boolean get() = !BuildConfig.DEBUG
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val registering = AtomicBoolean(false)
+    private val controlLock = Any()
+    @Volatile private var nextRegistrationAttemptAt = 0L
+    private fun components(context: Context, enabled: Boolean) {
+        val state = if (enabled) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+        listOf("me.pushy.sdk.receivers.PushyBootReceiver", "me.pushy.sdk.receivers.PushyUpdateReceiver").forEach {
+            context.packageManager.setComponentEnabledSetting(ComponentName(context, it), state, PackageManager.DONT_KILL_APP)
+        }
     }
-    fun disable(context: Context) {
-        if (FirebaseApp.getApps(context).none { it.name == FirebaseApp.DEFAULT_APP_NAME }) return
-        runCatching { FirebaseMessaging.getInstance().apply { isAutoInitEnabled = false; deleteToken() } }
+    private fun configure(context: Context) {
+        Pushy.toggleFCM(false, context)
+        Pushy.togglePushPayloadLogging(false, context)
+        Pushy.toggleForegroundService(false, context)
+    }
+    fun initialize(context: Context) {
+        configure(context)
+        // A validated enrollment must explicitly restart the SDK after process creation.
+        // Boot/update receivers remain disabled until registration succeeds.
+        if (!configured || !CampaignSyncPreferences(context).pushyEnabled || CampaignSyncPreferences(context).paused) disable(context)
+    }
+    fun requestToken(context: Context, binding: String) {
+        val app = context.applicationContext
+        if (!configured || !CampaignSyncPreferences(app).pushyEnabled || CampaignSyncPreferences(app).paused || !registering.compareAndSet(false, true)) return
+        scope.launch {
+            try {
+                val store = CampaignPushStore(app)
+                val cached = store.token()
+                // Failed account/network setup is retried conservatively; it never stalls sync.
+                if (cached == null && android.os.SystemClock.elapsedRealtime() < nextRegistrationAttemptAt) return@launch
+                configure(app)
+                val token = cached ?: run {
+                    nextRegistrationAttemptAt = android.os.SystemClock.elapsedRealtime() + 300_000
+                    Pushy.register(app)
+                }
+                val active = synchronized(controlLock) {
+                    val preferences = CampaignSyncPreferences(app)
+                    if (!preferences.pushyEnabled || preferences.paused || !store.saveTokenIfBound(token, binding)) {
+                        disable(app); false
+                    } else {
+                        Pushy.toggleNotifications(true, app)
+                        components(app, true)
+                        Pushy.listen(app)
+                        true
+                    }
+                }
+                // Cached SDK results must never recursively append another sync worker.
+                if (active && shouldEnqueueTokenRefresh(cached, token)) CampaignConnectionSyncJob.enqueue(app)
+            } catch (_: Exception) {
+                // Authentication, missing provider setup, or connectivity leave Cloudflare operational.
+            } finally { registering.set(false) }
+        }
+    }
+    internal fun shouldEnqueueTokenRefresh(previous: String?, current: String) = previous != current
+    fun disable(context: Context) = synchronized(controlLock) {
+        runCatching { configure(context); Pushy.toggleNotifications(false, context); components(context, false) }
+        Unit
     }
 }
 
-/** FCM token is installation-sensitive and encrypted with a non-exportable Android Keystore key. */
+/** Pushy token is installation-sensitive and encrypted with a non-exportable Android Keystore key. */
 class CampaignPushStore(context: Context, private val keyProvider: (() -> SecretKey)? = null) {
     private val prefs = context.applicationContext.getSharedPreferences("astravar-campaign-push", Context.MODE_PRIVATE)
+    init {
+        // Retire provider-specific token ciphertext and enrollment only. Timing and wake sequence
+        // evidence survives the upgrade; campaign credentials and all Room stores are untouched.
+        synchronized(storeLock) {
+            if (prefs.getString("provider", "") != "pushy") {
+                check(prefs.edit().remove("token").remove("registered").remove("wakes")
+                    .remove("enrollmentBinding").remove("enrollmentExpiresAt").putString("provider", "pushy").commit())
+            }
+        }
+    }
     companion object { private val storeLock = Any() }
     private fun key(): SecretKey = keyProvider?.invoke() ?: synchronized(storeLock) {
         val alias = "astravar-campaign-push-v1"
@@ -86,13 +141,13 @@ class CampaignPushStore(context: Context, private val keyProvider: (() -> Secret
         val bytes = Base64.decode(raw, Base64.NO_WRAP); require(bytes.size >= 29)
         val plain = Cipher.getInstance("AES/GCM/NoPadding").run {
             init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
-            updateAAD("astravar-fcm-v1".toByteArray()); doFinal(bytes.copyOfRange(12, bytes.size))
+            updateAAD("astravar-pushy-v1".toByteArray()); doFinal(bytes.copyOfRange(12, bytes.size))
         }
         plain.toString(Charsets.UTF_8).also { plain.fill(0) }
     }.getOrNull()
     private fun saveToken(token: String) {
-        require(token.matches(Regex("[A-Za-z0-9:_-]{40,4096}")))
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()); updateAAD("astravar-fcm-v1".toByteArray()) }
+        require(token.matches(Regex("[A-Za-z0-9:_-]{16,4096}")))
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()); updateAAD("astravar-pushy-v1".toByteArray()) }
         val bytes = token.toByteArray(Charsets.UTF_8)
         val encrypted = cipher.doFinal(bytes); bytes.fill(0)
         check(prefs.edit().putString("token", Base64.encodeToString(cipher.iv + encrypted, Base64.NO_WRAP)).remove("registered").commit())
@@ -110,9 +165,16 @@ class CampaignPushStore(context: Context, private val keyProvider: (() -> Secret
     var registration: String
         get() = prefs.getString("registered", "") ?: ""
         set(value) { check(prefs.edit().putString("registered", value).commit()) }
-    var lastReceivedAt: Long
-        get() = prefs.getLong("lastReceivedAt", 0)
-        set(value) { prefs.edit().putLong("lastReceivedAt", value).apply() }
+    val lastReceivedAt: Long get() = prefs.getLong("lastReceivedAt", 0)
+    // Drain identity must not depend on wall-clock time: clock corrections and two
+    // wakes in the same millisecond must still produce distinct recovery work.
+    val lastWakeSequence: Long get() = prefs.getLong("wakeSequence", 0)
+    fun isWakeCompleted(sequence: Long): Boolean = sequence > 0 && sequence <= prefs.getLong("completedWakeSequence", 0)
+    fun completeWake(sequence: Long): Unit = synchronized(storeLock) {
+        require(sequence > 0 && sequence <= lastWakeSequence)
+        val completed = prefs.getLong("completedWakeSequence", 0)
+        if (sequence > completed) check(prefs.edit().putLong("completedWakeSequence", sequence).commit())
+    }
     var lastWorkStartedAt: Long
         get() = prefs.getLong("lastWorkStartedAt", 0)
         set(value) { prefs.edit().putLong("lastWorkStartedAt", value).apply() }
@@ -124,7 +186,10 @@ class CampaignPushStore(context: Context, private val keyProvider: (() -> Secret
             val pair = entry.split('|'); if (pair.size != 2) null else pair[1].toLongOrNull()?.let { pair[0] to it }
         }.filter { it.second > now }
         if (previous.any { it.first == id }) return@synchronized false
-        check(prefs.edit().putString("wakes", (previous + (id to expiresAt)).takeLast(64).joinToString(",") { "${it.first}|${it.second}" }).commit())
+        val sequence = Math.addExact(lastWakeSequence.coerceAtLeast(0), 1L)
+        check(prefs.edit()
+            .putString("wakes", (previous + (id to expiresAt)).takeLast(64).joinToString(",") { "${it.first}|${it.second}" })
+            .putLong("wakeSequence", sequence).putLong("lastReceivedAt", now).commit())
         true
     }
     fun recordStage(stage: String, at: Long, identity: String? = null) = synchronized(storeLock) {
@@ -143,32 +208,30 @@ class CampaignPushStore(context: Context, private val keyProvider: (() -> Secret
     override fun toString() = "CampaignPushStore(redacted)"
 }
 
-/** GMS delivers DATA-only messages to this non-exported service. Authentication is checked again locally. */
-class AstravarMessagingService : FirebaseMessagingService() {
-    override fun onNewToken(token: String) {
-        if (!CampaignFirebase.configured) return
-        val binding = runCatching { runBlocking(Dispatchers.IO) {
-            withTimeoutOrNull(2_000) {
-                val client = CampaignConnectionClient(applicationContext)
-                try { client.currentPushBinding() } finally { client.close() }
-            }
-        } }.getOrNull() ?: return
-        val saved = runCatching { CampaignPushStore(this).saveTokenIfBound(token, binding) }.getOrDefault(false)
-        if (saved && !CampaignSyncPreferences(this).paused) CampaignConnectionSyncJob.enqueue(this)
-    }
-    override fun onMessageReceived(message: RemoteMessage) {
-        if (!CampaignFirebase.configured || CampaignSyncPreferences(this).paused || message.notification != null ||
-            message.from != BuildConfig.ASTRAVAR_FIREBASE_SENDER_ID) return
-        // Local credential/Room verification only; network work never runs inside onMessageReceived.
+/** Pushy 1.0.129 adds a raw JSON wrapper to its broadcast. It is transport metadata,
+ * never parsed, logged or treated as authority. Every other field remains strictly checked. */
+internal fun campaignPushyWakeData(intent: Intent): Map<String, String>? = runCatching {
+    if (intent.action != "pushy.me") return null
+    val extras = intent.extras ?: return null
+    val keys = extras.keySet() - "__json"
+    if (keys != CampaignWakeProtocol.fields) return null
+    keys.associateWith { key -> (extras.get(key) as? String) ?: return null }
+}.getOrNull()
+
+/** Non-exported SDK receiver. Strict authenticated wake validation precedes constrained work. */
+class AstravarPushyReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != "pushy.me" || !CampaignPushy.configured || !CampaignSyncPreferences(context).pushyEnabled || CampaignSyncPreferences(context).paused) return
+        val data = campaignPushyWakeData(intent) ?: return
+        // Local credential/Room verification only; network work never runs in the receiver.
         val accepted = runCatching { runBlocking(Dispatchers.IO) {
             withTimeoutOrNull(2_000) {
-                val client = CampaignConnectionClient(applicationContext)
-                try { client.acceptWake(message.data) } finally { client.close() }
+                val client = CampaignConnectionClient(context.applicationContext)
+                try { client.acceptWake(data) } finally { client.close() }
             } == true
         } }.getOrDefault(false)
         if (!accepted) return
-        val visible = CampaignSyncNotifications.canShow(this)
-        if (visible) CampaignSyncNotifications.wakeReceived(this)
-        CampaignConnectionSyncJob.enqueue(this, expedited = visible && message.priority == RemoteMessage.PRIORITY_HIGH, wakeAt = CampaignPushStore(this).lastReceivedAt)
+        if (CampaignSyncNotifications.canShow(context)) CampaignSyncNotifications.wakeReceived(context)
+        CampaignConnectionSyncJob.enqueue(context, wakeSequence = CampaignPushStore(context).lastWakeSequence)
     }
 }

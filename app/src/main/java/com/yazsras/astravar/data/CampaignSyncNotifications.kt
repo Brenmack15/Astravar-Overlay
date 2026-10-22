@@ -20,11 +20,21 @@ import java.text.DateFormat
 import java.util.Date
 
 /** Device-local transport controls. These never change owner grants or discard the journal. */
-class CampaignSyncPreferences(context: Context) {
+class CampaignSyncPreferences(private val context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences("campaign-sync-controls-v1", Context.MODE_PRIVATE)
     var paused: Boolean
         get() = preferences.getBoolean("paused", false)
-        set(value) { if (!preferences.edit().putBoolean("paused", value).commit()) throw IOException("Automatic sync setting could not be saved.") }
+        set(value) {
+            try { if (!preferences.edit().putBoolean("paused", value).commit()) throw IOException("Automatic sync setting could not be saved.") }
+            finally { if (value) CampaignPushy.disable(context) }
+        }
+    /** Provider consent is independent of existing campaign grants and notification controls. */
+    var pushyEnabled: Boolean
+        get() = preferences.getBoolean("pushyEnabled", false)
+        set(value) {
+            try { if (!preferences.edit().putBoolean("pushyEnabled", value).commit()) throw IOException("Push wake setting could not be saved.") }
+            finally { if (!value) CampaignPushy.disable(context) }
+        }
     var notificationsEnabled: Boolean
         get() = preferences.getBoolean("notificationsEnabled", false)
         set(value) { if (!preferences.edit().putBoolean("notificationsEnabled", value).commit()) throw IOException("Notification setting could not be saved.") }
@@ -33,7 +43,7 @@ class CampaignSyncPreferences(context: Context) {
         set(value) { preferences.edit().putString("status", value).apply() }
     fun observeControls(changed: () -> Unit): AutoCloseable {
         val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key in setOf("paused", "notificationsEnabled")) changed()
+            if (key in setOf("paused", "notificationsEnabled", "pushyEnabled")) changed()
         }
         preferences.registerOnSharedPreferenceChangeListener(listener)
         return AutoCloseable { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
@@ -44,6 +54,7 @@ internal data class CampaignSyncStatus(val state: String, val verifiedAt: Long?,
     fun label(): String = when (state) {
         "SYNCED" -> "Synced at ${formatCampaignSyncTime(verifiedAt!!)}"
         "PENDING" -> "Pending $pending"
+        "PENDING_MORE" -> "Pending more"
         "PAUSED" -> "Paused"
         "SYNCING" -> "Syncing"
         "SCHEDULED" -> "Sync scheduled"
@@ -72,6 +83,7 @@ internal fun campaignSyncStatus(snapshot: JsonObject, paused: Boolean, now: Long
         text("status") == "Syncing" -> "SYNCING"
         text("lastError").isNotBlank() || text("status").contains("offline", true) -> "OFFLINE"
         !connected -> "DISCONNECTED"
+        (snapshot["serverPendingUnfetched"] as? JsonPrimitive)?.booleanOrNull == true -> "PENDING_MORE"
         pendingCount > 0 -> "PENDING"
         verifiedAt != null -> "SYNCED"
         else -> "DISCONNECTED"
@@ -109,6 +121,7 @@ object CampaignSyncNotifications {
             put("lastError", (snapshot["lastError"] as? JsonPrimitive)?.contentOrNull.orEmpty().take(80))
             put("lastSyncAt", status.verifiedAt ?: 0)
             put("pendingCount", status.pending)
+            put("serverPendingUnfetched", (snapshot["serverPendingUnfetched"] as? JsonPrimitive)?.booleanOrNull == true)
             if (status.state == "CONFLICT") put("status", "Conflict requires review")
         }.toString()
         refresh(context)
