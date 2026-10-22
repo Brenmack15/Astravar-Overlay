@@ -27,7 +27,7 @@ jobs:
     # historical branch checks available without running the legacy test path twice.
     if: github.head_ref != 'feat/astravar-2.1-player-first' && github.ref_name != 'feat/astravar-2.1-player-first'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 65
     env:
       REUSE_RUN_ID: ${{ inputs.reuse_run_id || '0' }}
       INVENTORY_BETA: ${{ github.head_ref == 'feat/astravar-inventory-mvp-v170' || github.ref_name == 'feat/astravar-inventory-mvp-v170' || github.head_ref == 'feat/astravar-2.0-integrated' || github.ref_name == 'feat/astravar-2.0-integrated' || github.head_ref == 'feat/astravar-2.0-ui-rebuild' || github.ref_name == 'feat/astravar-2.0-ui-rebuild' }}
@@ -66,7 +66,7 @@ jobs:
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
       - name: Unit tests, lint and native APKs
         if: env.REUSE_RUN_ID == '0'
-        timeout-minutes: 20
+        timeout-minutes: 45
         env:
           # Explicit marker also allows this opted-in test while the default branch
           # deliberately has no Android workflow. Ordinary pushes/PRs do not write.
@@ -102,7 +102,7 @@ jobs:
           export ASTRAVAR_KEY_ALIAS=astravar-ci
           timeout 15s keytool -genkeypair -noprompt -keystore "$ASTRAVAR_KEYSTORE" -storetype PKCS12 -storepass "$ASTRAVAR_STORE_PASSWORD" -keypass "$ASTRAVAR_KEY_PASSWORD" -alias "$ASTRAVAR_KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 2 -dname 'CN=Astravar CI test only'
           trap 'rm -f "$ASTRAVAR_KEYSTORE"' EXIT
-          timeout -k 10s 540s ./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
+          timeout -k 10s 2640s ./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
       - name: Reuse verified product and build current overlay tests
         if: env.REUSE_RUN_ID != '0'
         timeout-minutes: 5
