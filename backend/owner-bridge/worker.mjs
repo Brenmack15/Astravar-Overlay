@@ -49,10 +49,10 @@ async function handleWorkerRequest(request, env, context) {
   const configured = Boolean(env?.DB && typeof ownerId === 'string' && ownerId.trim());
   const bridge = configured ? new OwnerBridge(env.DB, { ownerId }) : null;
   const liveHp = configured ? new LiveHpBridge(env.DB,{ownerId}) : null;
-  // FCM configuration is optional: missing credentials never interrupt normal
+  // Pushy configuration is optional: missing credentials never interrupt normal
   // device sync, command persistence, or the existing owner connection.
-  const campaignPush=configured?new CampaignPushTransport(env.DB,{ownerId,projectId:env.FCM_PROJECT_ID,
-    serviceAccountJson:env.FCM_SERVICE_ACCOUNT_JSON,encryptionKeyBase64:env.ASTRAVAR_PUSH_KEY_B64,observe:metric=>observeSync(env,metric)}):null;
+  const campaignPush=configured?new CampaignPushTransport(env.DB,{ownerId,apiKey:env.PUSHY_API_KEY,
+    encryptionKeyBase64:env.ASTRAVAR_PUSH_KEY_B64,observe:metric=>observeSync(env,metric)}):null;
   const campaignBridge=configured?new CampaignBridge(env.DB,{ownerId,onCommandQueued:info=>{
     observeSync(env,{component:'campaign_sync',stage:'queue_accepted',at:Date.now(),commandId:info.commandId});
     if(!campaignPush?.configured||!context?.waitUntil)return;
