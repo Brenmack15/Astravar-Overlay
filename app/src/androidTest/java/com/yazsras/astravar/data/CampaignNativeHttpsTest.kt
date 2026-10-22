@@ -224,7 +224,7 @@ class CampaignNativeHttpsTest {
     }
 
     /** A locally injected authenticated wake exercises the real named-store worker, HTTPS fetch,
-     * Room commit and immutable receipt while screen-off. No FCM delivery or Doze claim is made. */
+     * Room commit and immutable receipt while screen-off. No Pushy delivery or Doze claim is made. */
     private suspend fun screenOffWorkerCommitsCheckpoint(): JsonObject {
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         val manager = WorkManager.getInstance(context)
@@ -287,10 +287,9 @@ class CampaignNativeHttpsTest {
             assertEquals("PENDING_DEVICE_COMMIT", queued.getValue("confirmation").jsonPrimitive.content)
             assertEquals("PENDING_DELIVERY", queued.getValue("command").jsonObject.getValue("status").jsonPrimitive.content)
             assertNull("Queue acceptance alone has not saved the checkpoint", db.partyDao().checkpoint(checkpointId))
+            CampaignSyncPreferences(context).pushyEnabled = true
             val issuedAt = System.currentTimeMillis()
-            val wake = linkedMapOf("type" to CampaignWakeProtocol.TYPE, "version" to "1", "campaignId" to campaign,
-                "credentialId" to credential.credentialId, "grantId" to grant.getValue("grantId").jsonPrimitive.content,
-                "grantRevision" to grant.getValue("revision").jsonPrimitive.content, "issuedAt" to issuedAt.toString(),
+            val wake = linkedMapOf("type" to CampaignWakeProtocol.TYPE, "version" to "2", "issuedAt" to issuedAt.toString(),
                 "expiresAt" to minOf(issuedAt + 30_000, credential.expiresAt, grant.getValue("expiresAt").jsonPrimitive.long).toString(),
                 "wakeId" to UUID.randomUUID().toString())
             val signature = Mac.getInstance("HmacSHA256").apply {
@@ -300,7 +299,7 @@ class CampaignNativeHttpsTest {
             assertTrue("The production client accepts the injected authenticated wake", client.acceptWake(signed))
             assertFalse("The same injected wake is claimed once", client.acceptWake(signed))
             val wakeAt = CampaignPushStore(context).lastReceivedAt
-            CampaignConnectionSyncJob.enqueue(context, wakeAt = wakeAt)
+            CampaignConnectionSyncJob.enqueue(context, wakeSequence = CampaignPushStore(context).lastWakeSequence)
             val deadline = SystemClock.elapsedRealtime() + 90_000
             val arguments = buildJsonObject { put("campaignId", campaign); put("commandId", id) }
             var receipt: JsonObject? = null
@@ -337,7 +336,7 @@ class CampaignNativeHttpsTest {
                 event["stage"]?.jsonPrimitive?.content == "receipt_verified" && event["identity"]?.jsonPrimitive?.content == id
             })
             return buildJsonObject {
-                put("screenOff", true); put("injectedAuthenticatedWake", true); put("actualFcmDelivery", false)
+                put("screenOff", true); put("injectedAuthenticatedWake", true); put("actualPushyDelivery", false)
                 put("validatedNetworkBeforeWake", validatedBeforeWake.getValue("validated")); put("networkBeforeWake", validatedBeforeWake)
                 put("actualWorkManagerHttpsRoomCommit", true); put("workerSucceeded", true); put("receiptAndIndependentReadback", true)
                 put("durationMs", SystemClock.elapsedRealtime() - started); put("recordCount", 1)
@@ -347,7 +346,7 @@ class CampaignNativeHttpsTest {
             throw failure
         } finally {
             // Preserve genuine scheduler/network observations before cancellation changes them.
-            // No bearer, FCM token, wake signature, command payload, IP address or SSID is retained.
+            // No bearer, Pushy token, wake signature, command payload, IP address or SSID is retained.
             runCatching {
                 val diagnostic = buildJsonObject {
                     put("syntheticOnly", true); put("beforeWorkerCancellation", true); put("failed", observedFailure != null)

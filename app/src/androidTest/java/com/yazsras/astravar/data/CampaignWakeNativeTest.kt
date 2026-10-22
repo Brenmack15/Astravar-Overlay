@@ -33,8 +33,8 @@ import java.util.concurrent.CountDownLatch
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
-/** Native emulator transport/control evidence. FCM delivery, Doze wake and physical-phone latency
- * require the owner's configured Firebase project and phone; these tests do not imply them. */
+/** Native emulator transport/control evidence. Pushy delivery, Doze wake and physical-phone latency
+ * require the owner's configured Pushy app and phone; these tests do not imply them. */
 @RunWith(AndroidJUnit4::class)
 class CampaignWakeNativeTest {
     private lateinit var context: Context
@@ -78,15 +78,13 @@ class CampaignWakeNativeTest {
         // here can kill the instrumentation UID before its result is reported.
     }
     private fun signed(): Map<String, String> {
-        val data = linkedMapOf("type" to CampaignWakeProtocol.TYPE, "version" to "1", "campaignId" to "fixture-campaign",
-            "credentialId" to "fixture-device", "grantId" to "fixture-grant", "grantRevision" to "2",
+        val data = linkedMapOf("type" to CampaignWakeProtocol.TYPE, "version" to "2",
             "issuedAt" to now.toString(), "expiresAt" to (now + 30_000).toString(), "wakeId" to UUID.randomUUID().toString())
         val input = data.values.joinToString("\n").toByteArray(Charsets.UTF_8)
         val mac = Mac.getInstance("HmacSHA256").apply { init(SecretKeySpec(hash.toByteArray(Charsets.UTF_8), "HmacSHA256")) }.doFinal(input)
         return data + ("signature" to Base64.encodeToString(mac, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP))
     }
-    private fun valid(data: Map<String, String>, at: Long = now) = CampaignWakeProtocol.verified(data,
-        "fixture-campaign", "fixture-device", "fixture-grant", 2, hash, at)
+    private fun valid(data: Map<String, String>, at: Long = now) = CampaignWakeProtocol.verified(data, hash, at)
 
     @Test fun nativeWakeAuthenticationAndReplayRemainStrictWithScreenOff() {
         val wake = signed()
@@ -95,9 +93,9 @@ class CampaignWakeNativeTest {
         assertFalse(valid(wake + ("credentialId" to "foreign-device")))
         assertFalse(valid(wake + ("grantRevision" to "3")))
         assertFalse(valid(wake, now + 30_001))
-        assertFalse(valid(wake + ("command" to "never execute FCM gameplay")))
+        assertFalse(valid(wake + ("command" to "never execute Pushy gameplay")))
         val store = CampaignPushStore(context)
-        val token = "fixture-only-not-a-real-fcm-token_".repeat(3)
+        val token = "fixture-only-not-a-real-pushy-token_".repeat(3)
         store.bindEnrollment(hash, now + 1_000_000)
         assertTrue(store.saveTokenIfBound(token, hash, now))
         assertEquals(token, CampaignPushStore(context).token())
@@ -114,7 +112,7 @@ class CampaignWakeNativeTest {
     @Test fun nativePauseBlocksAutomaticWorkAndRetainsManualChoice() {
         val manager = WorkManager.getInstance(context)
         CampaignConnectionSyncJob.schedule(context)
-        CampaignConnectionSyncJob.enqueue(context, wakeAt = now)
+        CampaignConnectionSyncJob.enqueue(context, wakeSequence = CampaignPushStore(context).lastWakeSequence)
         assertTrue(CampaignSyncPreferences(context).paused)
         assertTrue(manager.getWorkInfosForUniqueWork(CampaignConnectionSyncJob.PERIODIC).get(10, TimeUnit.SECONDS).all { it.state.isFinished })
         assertTrue(manager.getWorkInfosForUniqueWork(CampaignConnectionSyncJob.WAKE).get(10, TimeUnit.SECONDS).all { it.state.isFinished })
@@ -124,7 +122,7 @@ class CampaignWakeNativeTest {
     }
 
     /** Injected, authenticated wake scheduling under actual emulator power states. This does not
-     * send an FCM message, wake a terminated process, or assert that a campaign record committed. */
+     * send an Pushy message, wake a terminated process, or assert that a campaign record committed. */
     @Test fun nativeInjectedWakeSchedulingRespectsBatterySaverDozeAndPause() = runBlocking {
         val power = context.getSystemService(PowerManager::class.java)
         val screenWasOn = device.isScreenOn
@@ -165,8 +163,7 @@ class CampaignWakeNativeTest {
         }
         fun signedWake(): Map<String, String> {
             val issuedAt = System.currentTimeMillis()
-            val data = linkedMapOf("type" to CampaignWakeProtocol.TYPE, "version" to "1", "campaignId" to campaign,
-                "credentialId" to credentialId, "grantId" to grantId, "grantRevision" to "1",
+            val data = linkedMapOf("type" to CampaignWakeProtocol.TYPE, "version" to "2",
                 "issuedAt" to issuedAt.toString(), "expiresAt" to (issuedAt + 30_000).toString(), "wakeId" to UUID.randomUUID().toString())
             val signature = Mac.getInstance("HmacSHA256").apply {
                 init(SecretKeySpec(OwnerSyncProtocol.hash(bearer).toByteArray(Charsets.UTF_8), "HmacSHA256"))
@@ -178,11 +175,12 @@ class CampaignWakeNativeTest {
                 rows += buildJsonObject { put("state", state); put("supported", false); put("observed", observed.take(120)); put("wakeSchedulingTested", false) }
                 return
             }
+            CampaignSyncPreferences(context).pushyEnabled = true
             CampaignSyncPreferences(context).paused = false
             val before = manager.getWorkInfosForUniqueWork(CampaignConnectionSyncJob.WAKE).get(15, TimeUnit.SECONDS).map { it.id }.toSet()
             val wake = signedWake()
             assertTrue("Locally signed wake must authenticate in $state", client.acceptWake(wake))
-            CampaignConnectionSyncJob.enqueue(context, wakeAt = CampaignPushStore(context).lastReceivedAt)
+            CampaignConnectionSyncJob.enqueue(context, wakeSequence = CampaignPushStore(context).lastWakeSequence)
             val queued = manager.getWorkInfosForUniqueWork(CampaignConnectionSyncJob.WAKE).get(15, TimeUnit.SECONDS)
             val added = queued.filter { it.id !in before }
             assertEquals("One unique worker must be appended for one authenticated wake in $state", 1, added.size)
@@ -193,7 +191,7 @@ class CampaignWakeNativeTest {
             CampaignSyncPreferences(context).paused = true
             CampaignConnectionSyncJob.cancel(context)
             assertFalse("Pause must reject an otherwise valid new wake in $state", client.acceptWake(signedWake()))
-            CampaignConnectionSyncJob.enqueue(context, wakeAt = System.currentTimeMillis())
+            CampaignConnectionSyncJob.enqueue(context, wakeSequence = CampaignPushStore(context).lastWakeSequence)
             val afterPause = manager.getWorkInfosForUniqueWork(CampaignConnectionSyncJob.WAKE).get(15, TimeUnit.SECONDS).map { it.id }.toSet()
             assertTrue("Pause must not add another automatic job in $state", (afterPause - afterDuplicate).isEmpty())
             rows += buildJsonObject {
@@ -226,7 +224,7 @@ class CampaignWakeNativeTest {
             vault.forget(origin, campaign)
             client.close()
             val evidence = buildJsonObject {
-                put("syntheticOnly", true); put("injectedWake", true); put("actualFcmDelivery", false)
+                put("syntheticOnly", true); put("injectedWake", true); put("actualPushyDelivery", false)
                 put("actualRoomCommit", false); put("actualDozeWakeLatency", false); put("powerStates", JsonArray(rows))
                 put("restoredPowerSaveMode", power.isPowerSaveMode); put("powerSaveModeBefore", powerSaveBefore); put("powerModeRestored", powerRestored)
                 put("deepStateAfterRestore", device.executeShellCommand("dumpsys deviceidle get deep").trim())
