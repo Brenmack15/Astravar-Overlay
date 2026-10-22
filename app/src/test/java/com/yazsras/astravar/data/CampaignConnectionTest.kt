@@ -41,6 +41,7 @@ class CampaignConnectionTest {
         }
         CampaignSyncPreferences(context).paused = false
         CampaignSyncPreferences(context).notificationsEnabled = false
+        CampaignSyncPreferences(context).pushyEnabled = true
         context.getSharedPreferences("astravar-campaign-push", Context.MODE_PRIVATE).edit().clear().commit()
         journal = Room.inMemoryDatabaseBuilder(context, CampaignConnectionDb::class.java).build()
         campaign = Room.inMemoryDatabaseBuilder(context, CampaignLedgerDb::class.java).build()
@@ -58,6 +59,37 @@ class CampaignConnectionTest {
         journal.connection().settings(CampaignConnectionSettings(origin=origin,campaignId=campaignId,profileId=profileId,deviceName="Fixture device",deviceId=deviceId,
             requestedReadJson=scopes,requestedWriteJson=scopes,grantJson=remote.grant.toString()))
         return client(remote).also { it.sync() }
+    }
+    @Test fun injectedTransportFixturesNeverEnrollProductionPushy() = runBlocking {
+        val remote = Remote()
+        val c = paired(remote)
+        c.sync()
+        val pushPreferences = context.getSharedPreferences("astravar-campaign-push", Context.MODE_PRIVATE)
+        assertFalse(pushPreferences.contains("enrollmentBinding"))
+        assertFalse(pushPreferences.contains("token"))
+        assertFalse(c.snapshot().getValue("pushRegistered").jsonPrimitive.boolean)
+        c.revoke()
+        assertFalse(pushPreferences.contains("enrollmentBinding"))
+        assertFalse(pushPreferences.contains("token"))
+    }
+    @Test fun pushyOptOutBlocksWakeButKeepsManualCloudflareSyncOperational() = runBlocking {
+        val remote = Remote(); val c = paired(remote)
+        CampaignSyncPreferences(context).pushyEnabled = false
+        assertFalse(c.acceptWake(wake(remote)))
+        c.setAutoSync(setOf("hp")); remote.propose(); c.sync()
+        assertEquals(14, current().currentHp)
+        assertFalse(c.snapshot().getValue("pushEnabled").jsonPrimitive.boolean)
+    }
+    @Test fun optionalSdkFailureCannotBlockAuthenticatedCampaignCommit() = runBlocking {
+        val remote = Remote(); val c = paired(remote); c.setAutoSync(setOf("hp")); val command = remote.propose()
+        var providerCalls = 0
+        val failingProvider = CampaignConnectionClient(context, journal, campaign, vault, remote, { time },
+            requestPushToken = { _, _ -> providerCalls++; throw IllegalArgumentException("Provider unavailable") })
+        failingProvider.sync()
+        assertEquals(1, providerCalls)
+        assertEquals(14, current().currentHp)
+        assertEquals("VERIFIED", journal.connection().command(command)!!.state)
+        assertFalse(failingProvider.snapshot().getValue("pushRegistered").jsonPrimitive.boolean)
     }
     @Test fun standing_authorization_commits_once_and_independently_verifies_record_and_receipt() = runBlocking {
         val remote = Remote(); val c = paired(remote); c.setAutoSync(setOf("hp")); val id = remote.propose()
@@ -176,9 +208,7 @@ class CampaignConnectionTest {
         remote.offline=false; c.sync(); assertFalse(journal.connection().settings()!!.revokePending); assertNull(vault.credential(origin,campaignId))
     }
     private fun wake(remote: Remote, bearer: String = "q".repeat(43)): Map<String, String> {
-        val data = linkedMapOf("type" to CampaignWakeProtocol.TYPE, "version" to "1", "campaignId" to campaignId,
-            "credentialId" to deviceId, "grantId" to remote.grant.getValue("grantId").jsonPrimitive.content,
-            "grantRevision" to remote.grant.getValue("revision").jsonPrimitive.content,
+        val data = linkedMapOf("type" to CampaignWakeProtocol.TYPE, "version" to "2",
             "issuedAt" to time.toString(), "expiresAt" to (time + 30_000).toString(), "wakeId" to UUID.randomUUID().toString())
         val mac = javax.crypto.Mac.getInstance("HmacSHA256").apply {
             init(SecretKeySpec(OwnerSyncProtocol.hash(bearer).toByteArray(Charsets.UTF_8), "HmacSHA256"))
@@ -192,7 +222,7 @@ class CampaignConnectionTest {
         assertFalse(client(remote).acceptWake(signed))
         assertFalse(c.acceptWake(wake(remote) + ("campaignId" to "foreign-campaign")))
         assertFalse(c.acceptWake(wake(remote) + ("signature" to "A".repeat(43))))
-        assertFalse(c.acceptWake(wake(remote) + ("payload" to "no gameplay in FCM")))
+        assertFalse(c.acceptWake(wake(remote) + ("payload" to "no gameplay in push")))
         val stale = wake(remote); time += 30_001
         assertFalse(c.acceptWake(stale))
         val oldCredential = wake(remote)
@@ -210,7 +240,7 @@ class CampaignConnectionTest {
         try {
             withTimeout(5_000) { entered.await() }
             // The foreground method holds the execution mutex while waiting for transport.
-            // A valid wake must still be authenticated locally before the FCM callback budget.
+            // A valid wake must still be authenticated locally before the receiver callback budget.
             assertTrue(withTimeout(1_000) { client(remote).acceptWake(signed) })
             assertFalse(withTimeout(1_000) { client(remote).acceptWake(signed) })
             assertEquals(17, current().currentHp)
@@ -240,6 +270,68 @@ class CampaignConnectionTest {
         assertEquals(originalGrant, remote.grant)
         CampaignSyncPreferences(context).paused = false
     }
+    private suspend fun queueIndependentHpPages(remote: Remote, client: CampaignConnectionClient, count: Int): List<String> {
+        val profiles = (0 until count).map { "fixture-paged-$it" }
+        for (id in profiles) CampaignRecordsRepository(campaign).saveProfile(
+            CharacterProfile(id=id,name=id,currentHp=17,maximumHp=29,temporaryHp=4,level=9),source="Isolated paging fixture")
+        client.sync()
+        remote.pendingLimit = 1
+        remote.pendingReads = 0
+        return profiles.map { remote.propose(it) }
+    }
+    @Test fun collapsedWakeDrainsByteBoundedAutomaticPagesInOneSync() = runBlocking {
+        val remote = Remote(); val c = paired(remote); c.setAutoSync(setOf("hp"))
+        val commands = queueIndependentHpPages(remote,c,3)
+        val snapshot = c.foreground()
+        assertEquals(3,remote.pendingReads)
+        assertEquals(3,remote.decisions.size)
+        assertTrue(commands.all { journal.connection().command(it)?.state == "VERIFIED" })
+        assertFalse(snapshot.getValue("syncContinuationRequired").jsonPrimitive.boolean)
+        assertFalse(snapshot.getValue("serverPendingUnfetched").jsonPrimitive.boolean)
+    }
+    @Test fun boundedAutomaticDrainRequestsDurableWorkerContinuationThenCompletesNextPass() = runBlocking {
+        val remote = Remote(); val c = paired(remote); c.setAutoSync(setOf("hp"))
+        val commands = queueIndependentHpPages(remote,c,5)
+        val first = c.foreground()
+        assertEquals(4,remote.pendingReads)
+        assertEquals(4,remote.decisions.size)
+        assertTrue(first.getValue("syncContinuationRequired").jsonPrimitive.boolean)
+        assertTrue(first.getValue("serverPendingUnfetched").jsonPrimitive.boolean)
+        assertEquals("Pending delivery · more queued transactions",first.getValue("status").jsonPrimitive.content)
+        // The actual journal/server decisions are retained; the next recovery fetches only the remaining page.
+        val recovered = client(remote).foreground()
+        assertEquals(5,remote.decisions.size)
+        assertTrue(commands.all { journal.connection().command(it)?.state == "VERIFIED" })
+        assertFalse(recovered.getValue("syncContinuationRequired").jsonPrimitive.boolean)
+        assertFalse(recovered.getValue("serverPendingUnfetched").jsonPrimitive.boolean)
+    }
+    @Test fun manualFirstPageWithMorePendingStopsWithoutAnAutomaticRetryLoop() = runBlocking {
+        val remote = Remote(); val c = paired(remote)
+        val commands = queueIndependentHpPages(remote,c,2)
+        val snapshot = c.foreground()
+        assertEquals(1,remote.pendingReads)
+        assertTrue(remote.decisions.isEmpty())
+        assertEquals("PENDING_APPROVAL",journal.connection().command(commands.first())?.state)
+        assertNull(journal.connection().command(commands.last()))
+        assertFalse(snapshot.getValue("syncContinuationRequired").jsonPrimitive.boolean)
+        assertTrue(snapshot.getValue("serverPendingUnfetched").jsonPrimitive.boolean)
+        assertEquals("Pending approval · additional queued transactions",snapshot.getValue("status").jsonPrimitive.content)
+    }
+    @Test fun pauseBetweenAutomaticPagesPreventsNextFetchAndPreservesRemainingCommands() = runBlocking {
+        val remote = Remote(); val c = paired(remote); c.setAutoSync(setOf("hp"))
+        val commands = queueIndependentHpPages(remote,c,2)
+        remote.afterRecordRead = { CampaignSyncPreferences(context).paused = true }
+        assertTrue(runCatching { c.foreground() }.isFailure)
+        assertEquals(1,remote.pendingReads)
+        assertEquals(1,remote.decisions.size)
+        assertEquals("VERIFIED",journal.connection().command(commands.first())?.state)
+        assertNull(journal.connection().command(commands.last()))
+        remote.afterRecordRead = null
+        CampaignSyncPreferences(context).paused = false
+        client(remote).foreground()
+        assertTrue(commands.all { journal.connection().command(it)?.state == "VERIFIED" })
+        assertEquals(2,remote.decisions.size)
+    }
     private inner class Remote: OwnerConnectionTransport {
         var grant=buildJsonObject { put("grantId","fixture-grant");put("revision",1);put("readScopes",CampaignConnectionProtocol.scopeArray(CampaignConnectionProtocol.categories));put("writeScopes",CampaignConnectionProtocol.scopeArray(CampaignConnectionProtocol.categories));put("autoSyncScopes",JsonArray(emptyList()));put("expiresAt",time+1_000_000) }
         val records=linkedMapOf<Pair<String,String>,JsonObject>()
@@ -248,11 +340,14 @@ class CampaignConnectionTest {
         val grantCommands=mutableMapOf<String,String>();val grantRequests=mutableListOf<String>()
         var loseDecision=false;var loseGrant=false;var offline=false;var lastDecision:String?=null;var receiptReads=0;var recordReads=0
         var blockPending: Pair<CompletableDeferred<Unit>,CompletableDeferred<Unit>>? = null
-        fun propose():String {
-            val id=UUID.randomUUID().toString();val row=records.getValue("character-profile" to profileId)
+        var pendingLimit = Int.MAX_VALUE
+        var pendingReads = 0
+        var afterRecordRead: (() -> Unit)? = null
+        fun propose(targetProfileId: String = profileId):String {
+            val id=UUID.randomUUID().toString();val row=records.getValue("character-profile" to targetProfileId)
             val fields=row.getValue("fields").jsonObject
             val body=buildJsonObject { put("commandId",id);put("campaignId",campaignId);put("grantRevision",grant.getValue("revision"));put("source","Explicit resolved fixture damage")
-                put("operations",buildJsonArray { add(buildJsonObject {put("type","adjust_hp");put("recordId",profileId);put("kind","character-profile");put("expectedRevision",row.getValue("revision"));put("fields",buildJsonObject {put("delta",-3)});put("scope","hp");put("currentFields",fields);put("proposedFields",JsonObject(fields+("currentHp" to JsonPrimitive(14))+("revision" to JsonPrimitive(row.getValue("revision").jsonPrimitive.long+1))));put("sideEffects",JsonArray(emptyList()))}) })
+                put("operations",buildJsonArray { add(buildJsonObject {put("type","adjust_hp");put("recordId",targetProfileId);put("kind","character-profile");put("expectedRevision",row.getValue("revision"));put("fields",buildJsonObject {put("delta",-3)});put("scope","hp");put("currentFields",fields);put("proposedFields",JsonObject(fields+("currentHp" to JsonPrimitive(14))+("revision" to JsonPrimitive(row.getValue("revision").jsonPrimitive.long+1))));put("sideEffects",JsonArray(emptyList()))}) })
                 put("status",if ("hp" in CampaignConnectionProtocol.parseScopes(grant.getValue("autoSyncScopes"))) "PENDING_DELIVERY" else "PENDING_APPROVAL");put("createdAt",time) }
             commands[id]=JsonObject(body+("fingerprint" to JsonPrimitive(CampaignConnectionProtocol.fingerprint(campaignId,body))))
             return id
@@ -274,7 +369,9 @@ class CampaignConnectionTest {
                 }
                 path.endsWith("/pending") -> {
                     blockPending?.let { (entered, release) -> entered.complete(Unit); release.await() }
-                    answer("commands" to JsonArray(commands.filterKeys{it !in decisions}.values.toList()))
+                    pendingReads++
+                    val waiting = commands.filterKeys{it !in decisions}.values.toList()
+                    answer("commands" to JsonArray(waiting.take(pendingLimit)),"hasMore" to JsonPrimitive(waiting.size > pendingLimit))
                 }
                 path.endsWith("/records") -> {
                     val rows=b!!.getValue("records").jsonArray.map {it.jsonObject}
@@ -284,7 +381,7 @@ class CampaignConnectionTest {
                     answer("published" to b.getValue("records"),"publishedAt" to JsonPrimitive(time))
                 }
                 path.contains("/publications/") -> {val rows=publications.getValue(path.substringAfterLast('/')).map { row -> records.getValue(row.getValue("kind").jsonPrimitive.content to row.getValue("recordId").jsonPrimitive.content) }; answer("records" to JsonArray(rows))}
-                path.contains("/records/") -> {recordReads++;val kind=path.substringAfter("/records/").substringBefore('/');val id=java.net.URLDecoder.decode(path.substringAfterLast('/'),"UTF-8");records[kind to id]?.let { answer("records" to JsonArray(listOf(it))) } ?: OwnerSyncResponse(404,buildJsonObject {put("mode",CampaignConnectionProtocol.MODE);put("error",buildJsonObject{put("code","RECORD_NOT_PUBLISHED")})})}
+                path.contains("/records/") -> {recordReads++;val kind=path.substringAfter("/records/").substringBefore('/');val id=java.net.URLDecoder.decode(path.substringAfterLast('/'),"UTF-8");(records[kind to id]?.let { answer("records" to JsonArray(listOf(it))) } ?: OwnerSyncResponse(404,buildJsonObject {put("mode",CampaignConnectionProtocol.MODE);put("error",buildJsonObject{put("code","RECORD_NOT_PUBLISHED")})})).also { afterRecordRead?.invoke() }}
                 path.endsWith("/decisions") -> {
                     lastDecision=body;val id=b!!.getValue("commandId").jsonPrimitive.content
                     val receipt=decisions.getOrPut(id) { b.getValue("records").jsonArray.forEach { val r=it.jsonObject;records[r.getValue("kind").jsonPrimitive.content to r.getValue("recordId").jsonPrimitive.content]=r }

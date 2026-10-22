@@ -33,6 +33,19 @@ class CampaignSyncNotificationsTest {
         assertEquals("DISCONNECTED", campaignSyncStatus(buildJsonObject { put("connected", true) }, false, 1000).state)
         assertNull(campaignSyncStatus(buildJsonObject { put("connected", true); put("lastSyncAt", 100_000L) }, false, 1000).verifiedAt)
     }
+    @Test fun byte_bounded_server_backlog_never_displays_synced_or_an_invented_exact_count() {
+        val snapshot = buildJsonObject {
+            put("connected", true); put("status", "Pending delivery · more queued transactions")
+            put("lastSyncAt", 1_000L); put("serverPendingUnfetched", true)
+        }
+        val status = campaignSyncStatus(snapshot, false, 2_000L)
+        assertEquals("PENDING_MORE", status.state)
+        assertEquals("Pending more", status.label())
+        CampaignSyncNotifications.update(context, snapshot)
+        val retained = Json.parseToJsonElement(CampaignSyncPreferences(context).savedStatus).jsonObject
+        assertTrue(retained.getValue("serverPendingUnfetched").jsonPrimitive.boolean)
+        assertEquals("PENDING_MORE", campaignSyncStatus(retained, false, 2_000L).state)
+    }
     @Test fun notification_is_opt_in_and_retains_only_transport_metadata() {
         val manager = context.getSystemService(NotificationManager::class.java)
         val snapshot = buildJsonObject {
