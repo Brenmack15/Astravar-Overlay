@@ -1,44 +1,56 @@
-# Astravar 2.3 — fast campaign synchronization
+# Astravar 2.3.2 — Cloudflare synchronization and optional Pushy wake
 
-Continues code36 at `045bfaed33393675c8d8d621bf260636deb04dd8` on an isolated development branch. Package, original owner signing configuration, campaign Room5, weapon stores and accepted rules remain intact. Version defaults are2.3.0/code37. This document describes implemented behavior, not physical-device acceptance.
+Continues the recovered 2.3.1/code38 source at `e00359f6c9f6ad6ecb116937fbe8471536237615` on `feat/astravar-2.3-ultra-fast-sync`. The version defaults are 2.3.2/code39. The permanent package `com.yazsras.astravar`, original owner signing configuration, campaign Room 5, weapon stores, artwork and accepted rules remain intact. This document states implementation and acceptance boundaries; it is not evidence of physical-device verification.
 
-## Delivery and authority
+## Cloudflare-only operation
 
-The private queue accepts an authorized typed transaction. Optional Firebase Cloud Messaging sends only an authenticated wake hint containing transport identities, a grant revision, a nonce and a short expiry. No character fields, gameplay command, source prose or bearer token travels through FCM. Android verifies the sender, HMAC, exact enrollment, expiry and replay identity before scheduling work. It then fetches the original command through the existing authenticated connection. Room commits and immutable receipts remain the authority; enqueue and FCM acceptance are not saved gameplay.
+Cloudflare Workers and D1 remain the authenticated campaign service. The server durably accepts an authorized typed transaction; Android fetches it through the existing paired connection, validates scopes and revisions, commits it through Room, and returns its immutable receipt. Independent saved-revision readback remains the acceptance authority. A queued command or provider send acknowledgement is not a saved gameplay change.
 
-Tokens are encrypted at rest using Android Keystore locally and context-bound AES-GCM in D1. Registration requires an authenticated device and the existing exact campaign grant. Rotation re-registers without expanding scopes. Revocation removes server registration; no data reaches the disposable fictional bridge.
+Foreground and app-open recovery, explicit manual Sync Now, network-constrained periodic WorkManager recovery, notification controls and offline retry work without Pushy credentials, registration or delivery. Periodic work has a 15-minute minimum interval and may run later under Android scheduling restrictions. No rapid screen-off polling or permanent foreground service is introduced.
 
-Unique network-constrained coroutine WorkManager jobs coalesce wakes, retain bounded retry/backoff and recover with the original journal/command identity. The periodic fallback remains15minutes, subject to OS deferral. App-open recovery remains. No permanent `dataSync` foreground service or rapid screen-off polling is added. Automatic Pause gates push handling, workers, active UI/overlay synchronization, requests and transaction commits while retaining credentials and queued work. Explicit manual Sync Now remains available.
+Automatic Pause gates push handling, workers, active UI/overlay synchronization, requests and transaction commits while retaining credentials and queued work. Explicit manual Sync Now remains available. The quiet, opt-in **Astravar Background Sync** notification reports a verified device timestamp, Syncing, Pending, Offline, Paused or Conflict and uses immutable app-owned action PendingIntents. Notification permission does not grant background execution or keep a process alive.
 
-The opt-in, quiet **Astravar Background Sync** notification reports a verified device timestamp, Syncing, Pending, Offline, Paused or Conflict. Its actions use immutable app-owned PendingIntents. Notification denial or a blocked channel selects normal-priority wake registration; urgent delivery is reserved for visible notifications. A notification does not keep a process alive.
+Wake drain identity uses a persisted increasing sequence, so same-millisecond signals and a backward clock correction cannot suppress later recovery. A sync drains up to four bounded pending pages while independently verified receipts show forward progress. A progressing backlog retains its wake generation and uses bounded retry/backoff. A page blocked entirely on manual approval stops without spinning and reports pending work accurately. The server pending contract has no cursor: an entirely blocked first page can defer automatic commands behind it until those approvals or conflicts are resolved.
+
+## Optional Pushy wake
+
+The **Use Pushy wake notifications** control is off by default and requires an enrolled campaign connection. Android uses the pinned official `me.pushy:sdk:1.0.129` SDK, disables its FCM fallback and push-payload logging, and retains TLS hostname verification. Firebase application configuration, Messaging dependencies, initialization and sender authorization are no longer release requirements. Existing Google Cloud and Firebase resources are not deleted or modified.
+
+Registration authenticates the paired device and its exact campaign grant and declares `provider:"pushy"`. Astravar encrypts its token copy with Android Keystore. The Pushy SDK stores its own installation token and authentication key unencrypted in app-private SharedPreferences; the Android application sandbox and disabled backup/transfer protect that SDK state. No campaign data is passed to the SDK. The D1 token copy uses context-bound AES-GCM. The ciphertext envelope binds the Pushy provider; legacy FCM registrations are ineligible for Pushy sends. Rotation, unpairing and revocation preserve the existing grant and registration boundaries.
+
+Notifications are data-only authenticated wake hints. Version 2 contains only `type`, `version`, `issuedAt`, `expiresAt`, `wakeId` and `signature`. No campaign, character, grant or credential IDs, gameplay values, command bodies, source prose or bearer credentials are sent to Pushy in the notification payload. Android validates the exact payload shape, HMAC, expiry, current enrollment and durable replay identity before scheduling unique network-constrained work. Actual commands still travel through authenticated Cloudflare requests.
+
+The existing owner-private backend uses private `PUSHY_API_KEY` and `ASTRAVAR_PUSH_KEY_B64` configuration. Missing provider configuration disables push sending without disabling campaign sync. The API key is used only on the backend; it must not enter Android resources, public source, CI logs or downloadable release files. The sender targets the fixed HTTPS Pushy API, sends only a short-lived wake and coalesces undelivered bursts. Delivery failure cannot remove or roll back a durably queued command. Preserve the existing Site audience, secrets, standing grants and additive D1 migration history.
+
+The official Trial offering is free forever for up to 100 devices and requires no credit card. This implementation does not authorize a Pro subscription, billing activation or account upgrades. Creating the provider app and authorizing its private API credential are separate owner account actions when no authorized provider session is available. Neither action blocks a Cloudflare-only APK.
+
+## Background delivery limits
+
+Pushy's MQTT connection can be delayed by Doze, App Standby, Android's Cached Apps Freezer, battery restrictions and Samsung process management. A notification control or socket does not bypass those restrictions. The app does not request special exact-alarm access or battery-optimization exemption and does not start Pushy's optional permanent foreground service. Its delivery therefore remains best-effort; recovery through foreground/manual sync and scheduled work is retained.
+
+Emulator tests with an injected authenticated wake can verify native validation, screen-off state, WorkManager scheduling, Pause/Resume, battery-saver/Doze gating and Room persistence. They do not establish provider delivery, unrestricted Samsung background execution or a real screen-off delivery latency.
 
 ## Compact reads and atomic acquisition
 
 Active-session reads use one authorization and a bounded indexed query. Retained Notion dossiers are excluded from routine session views; provenance, canonical revisions, unknowns and freshness remain explicit. No lossy text compression becomes authority.
 
-An `acquire_item` operation may include `placement:{holderProfileId,expectedHolderRevision,state}` where state is `Carried` or `Equipped`. The holder must already be a same-campaign character profile, including an established companion profile. A companion-state identifier alone does not create or imply a profile. Item and placement are created atomically at revision1, return in the same immutable receipt and retain the same physical item identity on replay. Server queue/receipt triggers and native Room checks reject stale holder dependencies. Existing acquisitions without placement retain their contract.
+An `acquire_item` operation may include `placement:{holderProfileId,expectedHolderRevision,state}` where state is `Carried` or `Equipped`. The holder must already be a same-campaign character profile, including an established companion profile. A companion-state identifier alone does not create or imply a profile. Item and placement are created atomically at revision 1, return in the same immutable receipt and retain the same physical item identity on replay. Server queue/receipt triggers and native Room checks reject stale holder dependencies. Existing acquisitions without placement retain their contract.
 
-## Production configuration
+## Release and acceptance
 
-Use an owner-approved Firebase Spark project with billing disconnected. FCM is no-cost; Analytics, Firestore, Functions and paid plans are unnecessary. Register Android package `com.yazsras.astravar`. Build-time public client identifiers are `ASTRAVAR_FIREBASE_APP_ID`, `ASTRAVAR_FIREBASE_PROJECT_ID`, `ASTRAVAR_FIREBASE_SENDER_ID` and `ASTRAVAR_FIREBASE_API_KEY`. Empty identifiers leave push visibly unconfigured; they must never be replaced with fabricated values.
+The Cloudflare-only release requires source/backend/Android regressions, preserved historical schemas and stores, original artwork, the permanent package, an increasing version code, 16 KB alignment, and an APK verified against the historical owner certificate. A disposable CI signer exercises optimized packaging but cannot update the owner's installation. Install the verified owner-signed APK as an update; do not uninstall Astravar or clear application storage.
 
-The existing owner-private Site requires `FCM_PROJECT_ID`, secret `FCM_SERVICE_ACCOUNT_JSON` and secret `ASTRAVAR_PUSH_KEY_B64` (32 random bytes). Use the Cloud Messaging HTTPv1 sender with its documented OAuth scope and minimum required IAM role. Keep private keys and owner signing recovery material outside GitHub, Android resources, public artifacts and CI. Preserve existing Site secrets, audience and standing grants. Apply additive D1 migrations0004 through0006 in order. Do not enable production push until native controls and private configuration are ready.
+Optional Pushy acceptance additionally requires authorized provider configuration and an installed updated Galaxy app. Use a legitimate authorized transaction while the app is backgrounded, then verify the durable queue, actual provider delivery, Room commit, immutable receipt and independent saved-revision readback. Repeat screen-off, Doze/battery restrictions, reconnect and Pause/Resume, and verify the existing Eek-profile acquire-and-assign operation atomically. Never invent gameplay or mutate production records merely to exercise a failure.
 
-FCM uses Firebase installation identifiers for routing. Firebase's privacy documentation explains deletion/retention. The app disables Firebase auto-initialization and analytics collection and initializes messaging only for an enrolled connection. User consent and provider account authorization remain owner actions.
-
-## Measurement and acceptance
-
-Backend timing covers request handling, queue acceptance and FCM send acceptance. Device diagnostics cover accepted push arrival, WorkManager start and Room commit. Warm fixture/read benchmarks are engineering evidence only. Cross-clock stage comparisons require clock-offset checks, and real p50/p95/p99 require repeated actual-device samples, including screen-off, Doze and battery-saver cases. No universal sub-second delivery is promised.
-
-Full acceptance requires a legitimate authorized transaction while the updated Galaxy app is backgrounded: durable queue, authenticated FCM wake, Room commit without a fresh approval within standing scopes, immutable receipt and independent saved-revision readback. Repeat screen-off, Pause/Resume and existing Eek-profile acquire-and-assign. Emulator fixtures do not establish real FCM or Galaxy acceptance. If Firebase/account access or installation is pending, report that state and do not call the upgrade complete.
+Record backend request/queue/send-acceptance timings separately from device wake/worker/Room/receipt timings. Cross-clock stage comparisons require clock-offset checks. Real p50/p95/p99 and reliability claims require repeated actual-device observations. Report missing provider or physical-phone evidence as a specific optional-delivery limit, without blocking or misrepresenting the Cloudflare-only release. No guaranteed instantaneous delivery is claimed.
 
 ## Official references
 
-- https://firebase.google.com/pricing
-- https://firebase.google.com/docs/projects/billing/firebase-pricing-plans
-- https://firebase.google.com/support/privacy
-- https://firebase.google.com/docs/cloud-messaging/send/v1-api
-- https://firebase.google.com/docs/cloud-messaging/android-message-priority
-- https://developer.android.com/develop/background-work/background-tasks/persistent/getting-started/define-work
-- https://developer.android.com/about/versions/16/behavior-changes-all
-- https://developer.android.com/about/versions/17/behavior-changes-all
+- [Pushy pricing and free Trial](https://pushy.me/pricing)
+- [Android SDK installation](https://pushy.me/docs/android/get-sdk)
+- [Android SDK APIs](https://pushy.me/docs/sdk/android)
+- [Server send API](https://pushy.me/docs/api/send-notifications)
+- [Doze delivery restrictions](https://support.pushy.me/hc/en-us/articles/360043423332-How-can-I-send-notifications-to-Android-devices-in-Doze-power-saving-mode)
+- [Cached Apps Freezer restrictions](https://support.pushy.me/hc/en-us/articles/44515682336653-How-can-I-receive-notifications-in-the-background-on-devices-with-the-Cached-Apps-Freezer-enabled)
+- [Android persistent-work scheduling](https://developer.android.com/develop/background-work/background-tasks/persistent/getting-started/define-work)
+- [Android Doze and App Standby](https://developer.android.com/training/monitoring-device-state/doze-standby)
