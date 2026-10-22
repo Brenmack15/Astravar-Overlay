@@ -145,6 +145,7 @@ class CampaignNativeHttpsTest {
         }
         return result
     }
+    // MCP tool errors encode a string code; HTTP transport errors use a different envelope.
     private fun mcpErrorCode(response: JsonObject): String? = runCatching {
         Json.parseToJsonElement(response.getValue("content").jsonArray.single().jsonObject.getValue("text").jsonPrimitive.content)
             .jsonObject.getValue("error").jsonPrimitive.content
