@@ -1,6 +1,8 @@
 package com.yazsras.astravar.data
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Base64
@@ -229,22 +231,56 @@ class CampaignNativeHttpsTest {
         val preferences = CampaignSyncPreferences(context)
         val pausedBefore = preferences.paused
         val screenWasOn = device.isScreenOn
-        preferences.paused = false
-        manager.cancelUniqueWork(CampaignConnectionSyncJob.WAKE).result.get(10, TimeUnit.SECONDS)
-        manager.cancelUniqueWork(CampaignConnectionSyncJob.PERIODIC).result.get(10, TimeUnit.SECONDS)
-        val previousWork = manager.getWorkInfosForUniqueWork(CampaignConnectionSyncJob.WAKE).get(10, TimeUnit.SECONDS).map { it.id }.toSet()
-        val connection = client.snapshot()
-        assertTrue("The fixture must retain standing continuity authorization", connection.getValue("localAutoSyncScopes").jsonArray.any { it.jsonPrimitive.content == "continuity" })
-        val grant = connection.getValue("grant").jsonObject
-        val credential = requireNotNull(OwnerSyncCredentialVault(context).credential(origin, campaign))
+        val connectivity = context.getSystemService(ConnectivityManager::class.java)
         val id = UUID.randomUUID().toString()
         val checkpointId = "campaign-native-screen-off-checkpoint"
-        val transaction = transactionBody(id, listOf(operation("save_checkpoint", "checkpoint", checkpointId, 0, buildJsonObject {
-            put("title", "Confirmed fictional screen-off worker acceptance"); put("scene", "Isolated fixture workshop")
-            put("lastConfirmedAction", "Recorded only this explicitly authorized fictional transport test")
-        })))
         val started = SystemClock.elapsedRealtime()
+        var observedFailure: Throwable? = null
+        var validatedBeforeWake = buildJsonObject {}
+        fun networkEvidence(): JsonObject {
+            val active = connectivity.activeNetwork
+            val capabilities = active?.let(connectivity::getNetworkCapabilities)
+            return buildJsonObject {
+                put("deviceAt", System.currentTimeMillis()); put("activeNetworkPresent", active != null)
+                put("internet", capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true)
+                put("validated", capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true)
+                put("notMetered", capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true)
+                put("wifi", capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true)
+                put("cellular", capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true)
+                put("ethernet", capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true)
+                put("vpn", capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true)
+            }
+        }
+        fun workEvidence(name: String): JsonArray = runCatching {
+            JsonArray(manager.getWorkInfosForUniqueWork(name).get(5, TimeUnit.SECONDS).takeLast(10).map { info ->
+                buildJsonObject {
+                    put("id", info.id.toString()); put("state", info.state.name); put("runAttemptCount", info.runAttemptCount)
+                    put("tags", JsonArray(info.tags.sorted().map(::JsonPrimitive)))
+                }
+            })
+        }.getOrElse { failure -> JsonArray(listOf(buildJsonObject { put("inspectionFailure", failure.javaClass.simpleName) })) }
         try {
+            preferences.paused = false
+            manager.cancelUniqueWork(CampaignConnectionSyncJob.WAKE).result.get(10, TimeUnit.SECONDS)
+            manager.cancelUniqueWork(CampaignConnectionSyncJob.PERIODIC).result.get(10, TimeUnit.SECONDS)
+            val previousWork = manager.getWorkInfosForUniqueWork(CampaignConnectionSyncJob.WAKE).get(10, TimeUnit.SECONDS).map { it.id }.toSet()
+            val connection = client.snapshot()
+            assertTrue("The fixture must retain standing continuity authorization", connection.getValue("localAutoSyncScopes").jsonArray.any { it.jsonPrimitive.content == "continuity" })
+            val grant = connection.getValue("grant").jsonObject
+            val credential = requireNotNull(OwnerSyncCredentialVault(context).credential(origin, campaign))
+            val transaction = transactionBody(id, listOf(operation("save_checkpoint", "checkpoint", checkpointId, 0, buildJsonObject {
+                put("title", "Confirmed fictional screen-off worker acceptance"); put("scene", "Isolated fixture workshop")
+                put("lastConfirmedAction", "Recorded only this explicitly authorized fictional transport test")
+            })))
+            // The production CONNECTED constraint on API 26+ requires a genuinely validated
+            // Internet network. The fixture must provide it; no constraint override is used.
+            val validationDeadline = SystemClock.elapsedRealtime() + 30_000
+            validatedBeforeWake = networkEvidence()
+            while ((!validatedBeforeWake.getValue("internet").jsonPrimitive.boolean || !validatedBeforeWake.getValue("validated").jsonPrimitive.boolean) && SystemClock.elapsedRealtime() < validationDeadline) {
+                delay(250); validatedBeforeWake = networkEvidence()
+            }
+            assertTrue("The emulator must supply actual INTERNET+VALIDATED capabilities before the production worker runs: $validatedBeforeWake",
+                validatedBeforeWake.getValue("internet").jsonPrimitive.boolean && validatedBeforeWake.getValue("validated").jsonPrimitive.boolean)
             device.sleep()
             assertFalse("The command must be queued while the emulator screen is off", device.isScreenOn)
             val queued = mcp("submit_campaign_transaction", transaction)
@@ -302,10 +338,32 @@ class CampaignNativeHttpsTest {
             })
             return buildJsonObject {
                 put("screenOff", true); put("injectedAuthenticatedWake", true); put("actualFcmDelivery", false)
+                put("validatedNetworkBeforeWake", validatedBeforeWake.getValue("validated")); put("networkBeforeWake", validatedBeforeWake)
                 put("actualWorkManagerHttpsRoomCommit", true); put("workerSucceeded", true); put("receiptAndIndependentReadback", true)
                 put("durationMs", SystemClock.elapsedRealtime() - started); put("recordCount", 1)
             }
+        } catch (failure: Throwable) {
+            observedFailure = failure
+            throw failure
         } finally {
+            // Preserve genuine scheduler/network observations before cancellation changes them.
+            // No bearer, FCM token, wake signature, command payload, IP address or SSID is retained.
+            runCatching {
+                val diagnostic = buildJsonObject {
+                    put("syntheticOnly", true); put("beforeWorkerCancellation", true); put("failed", observedFailure != null)
+                    put("failureType", observedFailure?.javaClass?.simpleName ?: "")
+                    put("elapsedMs", SystemClock.elapsedRealtime() - started); put("deviceAt", System.currentTimeMillis())
+                    put("screenOn", device.isScreenOn); put("automaticSyncPaused", preferences.paused)
+                    put("networkBeforeWake", validatedBeforeWake)
+                    put("networkNow", runCatching { networkEvidence() }.getOrElse { failure -> buildJsonObject { put("inspectionFailure", failure.javaClass.simpleName) } })
+                    put("wakeWork", workEvidence(CampaignConnectionSyncJob.WAKE)); put("periodicWork", workEvidence(CampaignConnectionSyncJob.PERIODIC))
+                    val timings = CampaignPushStore(context)
+                    put("lastPushReceivedAt", timings.lastReceivedAt); put("lastWorkStartedAt", timings.lastWorkStartedAt)
+                    put("lastRoomCommittedAt", timings.lastRoomCommittedAt); put("syncTimings", timings.timings())
+                }
+                File(context.getExternalFilesDir(null), "native-screen-off-worker-diagnostics.json").writeText(diagnostic.toString())
+                InstrumentationRegistry.getInstrumentation().sendStatus(0, Bundle().apply { putString("stream", "\nSCREEN_OFF_WORKER_DIAGNOSTICS: $diagnostic\n") })
+            }
             try {
                 manager.cancelUniqueWork(CampaignConnectionSyncJob.WAKE).result.get(10, TimeUnit.SECONDS)
                 manager.cancelUniqueWork(CampaignConnectionSyncJob.PERIODIC).result.get(10, TimeUnit.SECONDS)
