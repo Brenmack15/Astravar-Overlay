@@ -24,6 +24,8 @@ cleanup() {
     # emulator. Device commands are allowed only after this fresh AVD is proven.
     if [[ "$astravar_verified_emulator" == 1 ]]; then
       timeout 10s adb -s "$astravar_serial" shell dumpsys connectivity >"$astravar_output/connectivity-final.txt" 2>&1 || true
+      timeout 10s adb -s "$astravar_serial" logcat -d >"$astravar_output/logcat-final.txt" 2>&1 || true
+      timeout 10s adb -s "$astravar_serial" shell dumpsys window windows >"$astravar_output/windows-final.txt" 2>&1 || true
       timeout 10s adb -s "$astravar_serial" pull "/sdcard/Android/data/$astravar_product/files/." "$astravar_output/emulator-evidence" >/dev/null 2>&1 || true
       timeout 8s adb -s "$astravar_serial" emu kill >/dev/null 2>&1 || true
     fi
