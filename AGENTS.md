@@ -1,5 +1,13 @@
 # Working on Astravar Overlay
 
+## Astravar 2.3 authorization (21 October 2026)
+
+The owner supplied CODEX_WORK_DIRECTIVE.md authorizes an isolated 2.3 branch from code36, compact indexed player-known reads, network-constrained WorkManager recovery, global automatic Pause and quiet opt-in notification controls, plus atomic acquire-and-assign to verified same-campaign profiles. Preserve the permanent package, original owner signing key, all stores/accepted mechanics, existing Site/plugin identity and standing grants. No billing activation, main merge, force-push, destructive migration, public signing material or invented phone acceptance. Account/provider consent and actual owner installation remain owner actions. Push is best-effort; immutable Android receipts and independent readback remain authority. Read docs/ULTRA_FAST_SYNC_V23.md for implementation and acceptance boundaries.
+
+## Astravar 2.3.2 provider replacement authorization (22 October 2026)
+
+The owner formally discontinued Firebase integration and authorized recovering Code 38, removing Firebase dependencies/configuration/release blockers, publishing reviewed source after security checks, and preparing the existing-owner-signed 2.3.2/code39 update. Keep existing Google Cloud and Firebase resources untouched. Finish the Cloudflare-only release first; Pushy is an optional wake mechanism and its account setup must not block installation. Push notifications must contain no campaign data. Keep provider credentials private, use only authorized free services, preserve Cloudflare/D1 transactions and receipts and the Android Room stores, and retain foreground synchronization, manual Sync Now, notification controls, offline recovery and battery-conscious scheduled work. No automatic special-permission requests, permanent foreground service or guaranteed instantaneous delivery. Distinguish synthetic/emulator checks from physical Galaxy S26 evidence.
+
 Read docs/ASTRAVAR_RULES.md and docs/DECISIONS.md before changing mechanics. Keep the shared pure Kotlin engine authoritative for both native surfaces. Run `./gradlew :rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug` for changes affecting accounting or UI. Use the controlled `overlay-target` app for overlay interaction tests.
 
 Never claim physical Samsung/D&D Beyond coverage from an emulator test. Do not include campaign PDFs, personal exports, secrets, keystores, or signing recovery files in source control. Do not force push, merge main, publish a release, or rotate the release key without the owner's approval. Use feature branches. Unresolved campaign mechanics must stay visibly configurable.

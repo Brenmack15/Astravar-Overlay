@@ -218,3 +218,31 @@ CREATE TRIGGER bridge_campaign_publication_immutable_update BEFORE UPDATE ON bri
 CREATE TRIGGER bridge_campaign_publication_immutable_delete BEFORE DELETE ON bridge_campaign_publications BEGIN SELECT RAISE(ABORT,'IMMUTABLE_PUBLICATION'); END;
 CREATE TRIGGER bridge_campaign_grant_event_immutable_update BEFORE UPDATE ON bridge_campaign_grant_events BEGIN SELECT RAISE(ABORT,'IMMUTABLE_GRANT_EVENT'); END;
 CREATE TRIGGER bridge_campaign_grant_event_immutable_delete BEFORE DELETE ON bridge_campaign_grant_events BEGIN SELECT RAISE(ABORT,'IMMUTABLE_GRANT_EVENT'); END;
+CREATE TABLE IF NOT EXISTS bridge_campaign_push_tokens(owner_id TEXT NOT NULL,campaign_id TEXT NOT NULL,grant_id TEXT NOT NULL,credential_id TEXT NOT NULL,token_hash TEXT NOT NULL,token_iv TEXT NOT NULL,token_ciphertext TEXT NOT NULL,notifications_enabled INTEGER NOT NULL DEFAULT 0,updated_at INTEGER NOT NULL,last_push_at INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(owner_id,campaign_id,credential_id));
+CREATE INDEX IF NOT EXISTS bridge_campaign_push_grant ON bridge_campaign_push_tokens(grant_id,campaign_id);
+
+--> statement-breakpoint
+CREATE TRIGGER IF NOT EXISTS bridge_campaign_push_credential_revoke AFTER UPDATE OF revoked ON bridge_credentials WHEN NEW.revoked=1 BEGIN DELETE FROM bridge_campaign_push_tokens WHERE credential_id=NEW.id AND owner_id=NEW.owner_id; END;
+--> statement-breakpoint
+CREATE TRIGGER IF NOT EXISTS bridge_campaign_push_grant_revoke AFTER UPDATE OF revoked ON bridge_campaign_grants WHEN NEW.revoked=1 BEGIN DELETE FROM bridge_campaign_push_tokens WHERE grant_id=NEW.id AND owner_id=NEW.owner_id; END;
+--> statement-breakpoint
+CREATE TRIGGER IF NOT EXISTS bridge_campaign_push_credential_delete AFTER DELETE ON bridge_credentials BEGIN DELETE FROM bridge_campaign_push_tokens WHERE credential_id=OLD.id AND owner_id=OLD.owner_id; END;
+--> statement-breakpoint
+CREATE TRIGGER IF NOT EXISTS bridge_campaign_push_grant_delete AFTER DELETE ON bridge_campaign_grants BEGIN DELETE FROM bridge_campaign_push_tokens WHERE grant_id=OLD.id AND owner_id=OLD.owner_id; END;
+
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS bridge_campaign_session_checkpoint ON bridge_campaign_records(owner_id,campaign_id,grant_id,kind,COALESCE(json_extract(fields_json,'$.updatedAt'),0) DESC,record_id);
+
+CREATE TRIGGER bridge_campaign_acquisition_holder_queue BEFORE INSERT ON bridge_campaign_commands BEGIN
+ SELECT CASE WHEN EXISTS(SELECT 1 FROM json_each(NEW.command_json,'$.operations') n LEFT JOIN bridge_campaign_records r ON r.owner_id=NEW.owner_id AND r.campaign_id=NEW.campaign_id AND r.grant_id=NEW.grant_id AND r.kind='character-profile' AND r.record_id=json_extract(n.value,'$.fields.placement.holderProfileId') WHERE json_extract(n.value,'$.type')='acquire_item' AND json_type(n.value,'$.fields.placement') IS NOT NULL AND (r.record_id IS NULL OR r.revision<>json_extract(n.value,'$.fields.placement.expectedHolderRevision'))) THEN RAISE(ABORT,'HOLDER_REVISION_CONFLICT') END;
+END;
+CREATE TRIGGER bridge_campaign_acquisition_holder_receipt BEFORE INSERT ON bridge_campaign_receipts WHEN json_extract(NEW.receipt_json,'$.status')='APPLIED' BEGIN
+ SELECT CASE WHEN EXISTS(SELECT 1 FROM json_each((SELECT command_json FROM bridge_campaign_commands WHERE owner_id=NEW.owner_id AND campaign_id=NEW.campaign_id AND command_id=NEW.command_id),'$.operations') n LEFT JOIN bridge_campaign_records r ON r.owner_id=NEW.owner_id AND r.campaign_id=NEW.campaign_id AND r.grant_id=NEW.grant_id AND r.kind='character-profile' AND r.record_id=json_extract(n.value,'$.fields.placement.holderProfileId') WHERE json_extract(n.value,'$.type')='acquire_item' AND json_type(n.value,'$.fields.placement') IS NOT NULL AND (r.record_id IS NULL OR r.revision<>json_extract(n.value,'$.fields.placement.expectedHolderRevision'))) THEN RAISE(ABORT,'HOLDER_REVISION_CONFLICT') END;
+END;
+
+CREATE INDEX bridge_campaign_placement_holder ON bridge_campaign_records(owner_id,campaign_id,grant_id,kind,json_extract(fields_json,'$.holderProfileId'),record_id);
+--> statement-breakpoint
+CREATE INDEX bridge_campaign_property_item ON bridge_campaign_records(owner_id,campaign_id,grant_id,kind,json_extract(fields_json,'$.itemId'),record_id);
+
+--> statement-breakpoint
+CREATE INDEX bridge_campaign_companion_resource ON bridge_campaign_records(owner_id,campaign_id,grant_id,kind,json_extract(fields_json,'$.companionId'),record_id);

@@ -98,3 +98,139 @@ test('V2 individually oversized expanded commands are rejected before durable en
 test('V2 partial sheet content preserves hidden counters and normalizes deterministic nested Kotlin defaults',async t=>{const f=await setup(t);const old={conditions:'',resources:[{name:'Slots',current:2,maximum:3,notes:''}],senses:'Old senses',movement:[]};await f.publish([envelope('party-sheet',profile,{profileId:profile,campaignId:campaign,contentJson:canonical(old)})]);await f.enable(['character']);const {command:c}=await f.submit([op('set_record','party-sheet',profile,{contentJson:JSON.stringify({senses:'Verified senses',movement:[{type:'Walk'}]})})]);const actual={profileId:profile,campaignId:campaign,revision:2,source:'Native typed sheet source',updatedAt:123,contentJson:canonical({...old,senses:'Verified senses',movement:[{type:'Walk',feet:null,notes:''}]})};await f.sync.decide(f.principal,campaign,{commandId:c.commandId,fingerprint:c.fingerprint,status:'APPLIED',localReceiptId:uuid(),records:[{recordId:profile,kind:'party-sheet',revision:2,fields:actual}]});const saved=JSON.parse((await f.sync.read(connector,campaign,{kinds:['party-sheet']})).records[0].fields.contentJson);assert.equal(saved.resources[0].current,2);assert.equal(saved.senses,'Verified senses');assert.deepEqual(saved.movement[0],{type:'Walk',feet:null,notes:''});});
 
 test('V2 superseded grant revisions retain immutable history without consuming the active delivery quota',async t=>{const f=await setup(t);await f.publish([profileRecord()]);await f.enable(['hp']);for(let i=0;i<100;i++)await f.submit([op('adjust_hp','character-profile',profile,{delta:-1})]);await fails(f.submit([op('adjust_hp','character-profile',profile,{delta:-1})]),'PENDING_LIMIT');await f.enable([]);await f.enable(['hp']);const {command:c}=await f.submit([op('adjust_hp','character-profile',profile,{delta:-1})]);const active=await f.sync.pending(f.principal,campaign);assert.equal(active.commands.length,1);assert.equal(active.commands[0].commandId,c.commandId);const retained=await f.sync.s('SELECT COUNT(*) AS count FROM bridge_campaign_commands WHERE owner_id=? AND campaign_id=?',ownerId,campaign).first();assert.equal(retained.count,101);const old=await f.sync.s('SELECT COUNT(*) AS count FROM bridge_campaign_commands WHERE owner_id=? AND campaign_id=? AND grant_revision=2',ownerId,campaign).first();assert.equal(old.count,100);assert.equal((await f.sync.read(connector,campaign,{kinds:['character-profile']})).records[0].fields.currentHp,24);});
+
+test('V2 fast active-session uses one scoped query after authorization, keeps caps and latest checkpoint',async t=>{
+ const f=await setup(t),items=[];
+ for(let i=0;i<11;i++)items.push(envelope('character-profile',`fixture-char-${String(i).padStart(2,'0')}`,{id:`fixture-char-${String(i).padStart(2,'0')}`,name:'Known person '+i}));
+ for(let i=0;i<6;i++)items.push(envelope('wallet',`fixture-wallet-${i}`,{id:`fixture-wallet-${i}`,name:'Wallet '+i,holderProfileId:null,copper:0,silver:0,gold:0,campaignId:campaign}));
+ for(let i=0;i<3;i++){const row=envelope('checkpoint',`checkpoint-${i}`,{id:`checkpoint-${i}`,title:'Checkpoint '+i,scene:'Known',campaignId:campaign});row.fields.updatedAt=100+i;items.push(row);}
+ await f.publish(items);
+ const initial=f.sync.s.bind(f.sync);let calls=0;
+ f.sync.s=(sql,...args)=>{calls++;return initial(sql,...args);};
+ const result=await f.sync.session(connector,campaign);
+ assert.equal(calls,2,'one grant lookup and one bounded data query');
+ assert.equal(result.records.filter(r=>r.kind==='character-profile').length,8);
+ assert.equal(result.records.filter(r=>r.kind==='wallet').length,4);
+ assert.equal(result.records.filter(r=>r.kind==='checkpoint').length,1);
+ assert.equal(result.records.find(r=>r.kind==='checkpoint').recordId,'checkpoint-2');
+ assert.equal(result.checkpointSelection,'LATEST_SAVED_UPDATED_AT');
+ assert.equal(result.bounded,true);
+ assert.deepEqual(result.unresolved,[]);
+ assert.ok(result.records.every(x=>x.source==='Resolved fictional evidence'));
+});
+
+test('V2 fast session hides non-granted kinds and avoids unscoped queries',async t=>{
+ const f=await setup(t,{readScopes:['currency'],writeScopes:['currency']});
+ await f.publish([walletRecord()]);
+ const snapshot=await f.sync.session(connector,campaign);
+ assert.deepEqual(snapshot.records.map(x=>x.kind),['wallet']);
+ assert.deepEqual(snapshot.unresolved,[]);
+ const grant=await f.sync.configureGrant(f.principal,campaign,{commandId:uuid(),expectedRevision:1,autoSyncScopes:[],readScopes:[],writeScopes:[]});
+ assert.equal(grant.grant.revision,2);
+ const empty=await f.sync.session(connector,campaign);
+ assert.deepEqual(empty.records,[]);
+ assert.deepEqual(empty.unresolved,[]);
+});
+
+test('V2 one acquisition atomically assigns a verified companion profile and returns item plus placement in one receipt',async t=>{
+ const f=await setup(t),holder='fixture-owl-profile';
+ await f.publish([envelope('character-profile',holder,{id:holder,name:'Fictional owl'}),envelope('companion-state',holder,{companionId:holder,name:'Fictional owl',condition:'Known fixture',notes:''})]);await f.enable(['inventory']);
+ const operation=op('acquire_item','item','fixture-owl-lens',{title:'Confirmed fictional lens',quantity:1,evidenceStatus:'Confirmed',placement:{holderProfileId:holder,expectedHolderRevision:1,state:'Equipped'}},0);
+ const {command:c}=await f.submit([operation]);assert.equal(c.operations.length,1);assert.equal(c.operations[0].proposedFields.owner,'Fictional owl');assert.equal(c.operations[0].sideEffects.length,1);
+ assert.equal((await f.sync.read(connector,campaign,{kinds:['item']})).records.length,0);
+ const body=decision(c),saved=await f.sync.decide(f.principal,campaign,body);assert.deepEqual(await f.sync.decide(f.principal,campaign,body),saved);
+ const readback=(await f.sync.read(connector,campaign,{kinds:['item','item-placement'],recordId:'fixture-owl-lens'})).records;
+ assert.equal(readback.length,2);assert.deepEqual(readback.map(x=>[x.kind,x.revision]).sort(),[['item',1],['item-placement',1]]);
+ assert.equal(readback.find(x=>x.kind==='item-placement').fields.holderProfileId,holder);assert.equal(readback.find(x=>x.kind==='item').fields.location,'Actor:'+holder);
+ assert.equal((await f.sync.getReceipt(connector,campaign,c.commandId)).receipt.records.length,2);
+ await fails(f.submit([operation]),'REVISION_CONFLICT');
+});
+
+test('V2 atomic acquisition rejects fabricated or stale holders, malformed placement and conflicting draft ownership',async t=>{
+ const f=await setup(t);await f.publish([profileRecord()]);await f.enable(['inventory']);
+ const draft={title:'Fictional tool',evidenceStatus:'Confirmed',quantity:1},placement={holderProfileId:profile,expectedHolderRevision:1};
+ const acquire=fields=>f.submit([op('acquire_item','item','fixture-acquisition-check',fields,0)]);
+ await fails(acquire({...draft,placement:{...placement,holderProfileId:'invented-eek'}}),'HOLDER_UNKNOWN');
+ await fails(acquire({...draft,placement:{...placement,expectedHolderRevision:2}}),'HOLDER_REVISION_CONFLICT');
+ await fails(acquire({...draft,placement:{...placement,state:'Installed'}}),'INVALID_PLACEMENT_STATE');
+ await fails(acquire({...draft,placement:{...placement,containerItemId:'unverified-bag'}}),'INVALID_REQUEST');
+ await fails(acquire({...draft,owner:'Someone else',placement}),'ACQUISITION_PLACEMENT_MISMATCH');
+ await fails(acquire({...draft,quantity:0,placement}),'ITEM_UNAVAILABLE');
+ await fails(acquire({...draft,archived:true,placement}),'ITEM_UNAVAILABLE');
+ const expiredAt=f.now()+300001;f.setTime(expiredAt);await fails(acquire({...draft,placement}),'DEVICE_SYNC_STALE');
+ assert.equal((await f.sync.pending(f.principal,campaign)).commands.length,0);
+});
+
+test('V2 acquisition requires its complete initial placement acknowledgement and stale holder cannot receive receipt',async t=>{
+ const f=await setup(t);await f.publish([profileRecord()]);await f.enable(['inventory']);
+ const {command:c}=await f.submit([op('acquire_item','item','fixture-acquired-once',{title:'Fictional tool',evidenceStatus:'Confirmed',quantity:1,placement:{holderProfileId:profile,expectedHolderRevision:1}},0)]);
+ const partial=decision(c);partial.records=partial.records.filter(x=>x.kind==='item');await fails(f.sync.decide(f.principal,campaign,partial),'LOCAL_COMMIT_REQUIRED');
+ await f.publish([{...profileRecord(),revision:2,fields:{...profileRecord().fields,revision:2,name:'Renamed fixture'}}]);
+ await fails(f.sync.decide(f.principal,campaign,decision(c)),'HOLDER_REVISION_CONFLICT');
+ await fails(f.sync.getReceipt(connector,campaign,c.commandId),'RECEIPT_NOT_READY');assert.equal((await f.sync.read(connector,campaign,{kinds:['item']})).records.length,0);
+});
+
+test('V2 acquisition never borrows a holder from a different campaign',async t=>{
+ const f=await setup(t);await f.enable(['inventory']);
+ // A record with the same verified owner but a different campaign cannot become a destination.
+ f.db.exec(`INSERT INTO bridge_campaign_records(owner_id,campaign_id,grant_id,kind,record_id,revision,fields_json,visibility_revision,published_at,last_device_sync_at) VALUES('${ownerId}','foreign-fixture','${f.token.campaignAccess.grantId}','character-profile','foreign-holder',1,'{"id":"foreign-holder","name":"Foreign"}',1,${f.now()},${f.now()})`);
+ await fails(f.submit([op('acquire_item','item','fixture-cross-campaign',{title:'Fictional tool',evidenceStatus:'Confirmed',placement:{holderProfileId:'foreign-holder',expectedHolderRevision:1}},0)]),'HOLDER_UNKNOWN');
+});
+
+test('V2 SQLite acquisition guards serialize holder revision checks with queue and receipt insertion',async t=>{
+ const f=await setup(t);await f.publish([profileRecord()]);await f.enable(['inventory']);
+ const {command:c}=await f.submit([op('acquire_item','item','fixture-holder-cas',{title:'Fictional tool',evidenceStatus:'Confirmed',quantity:1,placement:{holderProfileId:profile,expectedHolderRevision:1}},0)]);
+ await f.publish([{...profileRecord(),revision:2,fields:{...profileRecord().fields,revision:2}}]);
+ const grant=await f.sync.authorize(f.principal,campaign);
+ // Direct database insert bypasses the JS precheck, reproducing a concurrent holder change between validation and insert.
+ await assert.rejects(f.sync.s('INSERT INTO bridge_campaign_receipts(owner_id,campaign_id,command_id,grant_id,request_fingerprint,receipt_json,records_json,created_at) VALUES(?,?,?,?,?,?,?,?)',ownerId,campaign,c.commandId,grant.id,'fixture',canonical({status:'APPLIED'}),'[]',f.now()).run(),/HOLDER_REVISION_CONFLICT/);
+ const next=uuid();await assert.rejects(f.sync.s('INSERT INTO bridge_campaign_commands(owner_id,campaign_id,command_id,grant_id,grant_revision,request_fingerprint,fingerprint,command_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)',ownerId,campaign,next,grant.id,grant.revision,'fixture','fixture',canonical({...c,commandId:next}),f.now()).run(),/HOLDER_REVISION_CONFLICT/);
+ assert.equal((await f.sync.authorize(f.principal,campaign)).mirror_generation,grant.mirror_generation);
+ await fails(f.sync.getReceipt(connector,campaign,c.commandId),'RECEIPT_NOT_READY');
+});
+
+test('V2 holder inventory read uses explicit placement, original identities and bounded pagination',async t=>{
+ const f=await setup(t),item=(rid,title)=>({...itemRecord(),recordId:rid,fields:{...itemRecord().fields,id:rid,title}});
+ const placed=(rid,holder)=>envelope('item-placement',rid,{itemId:rid,holderProfileId:holder,containerItemId:null,installedProjectId:null,state:'Carried'});
+ await f.publish([item('held-a','Player item'),item('held-b','Companion item'),item('legacy-unplaced','Ownership text is not placement'),placed('held-a',profile),placed('held-b','fixture-eek'),envelope('item-details','held-a',{itemId:'held-a',weightGrams:25,notes:'Confirmed weight'}),envelope('item-property','held-a-property',{id:'held-a-property',itemId:'held-a',label:'Shape',value:'Round',evidenceStatus:'Confirmed'})]);
+ const seen=[],prepare=f.db.prepare.bind(f.db);
+ f.db.prepare=sql=>({bind:(...values)=>{seen.push({sql,values});return prepare(sql).bind(...values);}});
+ const first=await f.sync.inventoryByHolder(connector,campaign,{holderProfileId:profile,limit:2});
+ assert.equal(first.view,'INVENTORY_BY_HOLDER_V1');assert.equal(first.records.length,2);assert.ok(first.nextCursor);
+ assert.equal(seen.length,2,'one authorization and one bounded joined inventory query');
+ const query=seen.find(x=>x.sql.includes('WITH held AS'));
+ const plan=f.db.db.prepare('EXPLAIN QUERY PLAN '+query.sql).all(...query.values).map(x=>x.detail).join('\n');
+ assert.match(plan,/bridge_campaign_placement_holder/,'explicit holder lookup uses expression index');
+ assert.match(plan,/bridge_campaign_property_item/,'item-property identity lookup uses expression index');
+ const second=await f.sync.inventoryByHolder(connector,campaign,{holderProfileId:profile,after:first.nextCursor,limit:2});
+ const all=[...first.records,...second.records];assert.equal(second.nextCursor,null);
+ assert.deepEqual(all.map(r=>r.kind+'|'+r.recordId),['item|held-a','item-details|held-a','item-placement|held-a','item-property|held-a-property']);
+ assert.equal(all.some(r=>r.recordId==='held-b'||r.recordId==='legacy-unplaced'),false);
+ const companion=await f.sync.inventoryByHolder(connector,campaign,{holderProfileId:'fixture-eek',equipmentOnly:true});
+ assert.deepEqual(companion.records.map(r=>r.recordId),['held-b']);
+ assert.equal((await f.sync.inventoryByHolder(connector,campaign,{holderProfileId:'fabricated-holder'})).records.length,0);
+ const pages=[];let cursor='';do{const page=await f.sync.read(connector,campaign,{kinds:['item','item-details','item-placement','item-property'],after:cursor,limit:2});pages.push(...page.records);cursor=page.nextCursor;}while(cursor);assert.equal(pages.length,7);assert.equal(new Set(pages.map(r=>r.kind+'|'+r.recordId)).size,7,'prefix-related kinds paginate without omissions or replay');
+ await fails(f.sync.inventoryByHolder(connector,campaign,{holderProfileId:profile,limit:101}),'INVALID_INTEGER');
+});
+
+test('V2 holder-filtered MCP reads remain optional and enforce inventory grants',async t=>{
+ const f=await setup(t);await f.publish([itemRecord(),envelope('item-placement','fixture-item',{itemId:'fixture-item',holderProfileId:profile,containerItemId:null,installedProjectId:null,state:'Equipped'})]);
+ for(const name of ['get_inventory','get_equipment']){
+  const request=new Request('https://fixture-owner.example/mcp',{method:'POST',headers:{'Content-Type':'application/json','oai-authenticated-user-id':ownerId},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:{campaignId:campaign,holderProfileId:profile,limit:5}}})});
+  const result=await (await handleWorker(request,{DB:f.db,OWNER_SITE_USER_ID:ownerId})).json();
+  assert.equal(result.result.isError,false);assert.equal(result.result.structuredContent.holderProfileId,profile);assert.ok(result.result.structuredContent.records.length);
+ }
+ const limited=await setup(t,{readScopes:['hp'],writeScopes:['hp']});
+ await fails(limited.sync.inventoryByHolder(connector,campaign,{holderProfileId:profile}),'READ_SCOPE_DENIED');
+});
+
+test('V2 compact resource view preserves unknowns and sources while omitting unrelated sheet text',async t=>{
+ const f=await setup(t),resources=[{name:'Second-level slots',current:null,maximum:3,notes:'Unverified remaining count'}];
+ await f.publish([envelope('party-sheet',profile,{profileId:profile,campaignId:campaign,contentJson:canonical({resources,conditions:'Poisoned',capabilities:[{name:'Unrelated lengthy dossier',description:'Heavy narrative'.repeat(100)}]})}),envelope('companion-resource','eek-counter',{id:'eek-counter',companionId:'fixture-eek',name:'Ghostwing',current:2,maximum:3})]);
+ const result=await f.sync.resourceCounters(connector,campaign,{profileId:profile});
+ assert.equal(result.view,'RESOURCE_COUNTERS_V1');assert.equal(result.records.length,1);assert.deepEqual(JSON.parse(result.records[0].fields.contentJson),{resources});assert.equal(result.records[0].fields.source,'Resolved fictional evidence');assert.equal(result.records[0].revision,1);
+ assert.equal(JSON.stringify(result).includes('Heavy narrative'),false);assert.equal(JSON.stringify(result).includes('Poisoned'),false);
+ assert.equal((await f.sync.resourceCounters(connector,campaign,{profileId:'fixture-eek'})).records[0].fields.current,2);
+ await f.publish(Array.from({length:4},(_,n)=>envelope('companion-resource','eek-extra-'+n,{id:'eek-extra-'+n,companionId:'fixture-eek',name:'Counter '+n,current:null,maximum:null})));let after='',all=[];do{const page=await f.sync.resourceCounters(connector,campaign,{profileId:'fixture-eek',limit:2,after});all.push(...page.records);after=page.nextCursor;}while(after);assert.equal(all.length,5,'bounded resource branches must apply cursor before their LIMIT');assert.equal(new Set(all.map(r=>r.recordId)).size,5);
+ const characterOnly=await setup(t,{readScopes:['character'],writeScopes:['character']});await fails(characterOnly.sync.resourceCounters(connector,campaign,{profileId:profile}),'READ_SCOPE_DENIED');
+});

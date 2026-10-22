@@ -17,7 +17,7 @@ async function readBody(request) {
 /** Outer host must separately enforce its authenticated Site/service gateway.
  * ownerPrincipal must originate from verified host identity, never request JSON/header supplied by a device.
  */
-export async function handleOwnerApi(request,bridge,{ownerPrincipal=null,liveHp=null,campaignBridge=null}={}) {
+export async function handleOwnerApi(request,bridge,{ownerPrincipal=null,liveHp=null,campaignBridge=null,campaignPush=null}={}) {
  try {
   const url=new URL(request.url),path=url.pathname,method=request.method;
   // No browser-origin bypass: owner routes require a verified host principal and same-origin fetch.
@@ -53,7 +53,9 @@ export async function handleOwnerApi(request,bridge,{ownerPrincipal=null,liveHp=
    const [,campaign,action]=v2,authorization=request.headers.get('authorization')||'';
    if(!authorization.startsWith('Bearer '))throw new BridgeError(401,'AUTHENTICATION_REQUIRED');
    const principal=await bridge.authenticate(request.headers.get('X-Astravar-Credential')||'',authorization.slice(7),{forSelfRevocation:method==='POST'&&action==='devices/revoke'});let value;
-   if(method==='GET'&&action==='grant')value=await campaignBridge.getGrant(principal,campaign);
+   if(method==='POST'&&action==='push-token'){if(!campaignPush)throw new BridgeError(503,'PUSH_NOT_CONFIGURED');value=await campaignPush.register(campaignBridge,principal,campaign,await readBody(request));}
+   else if(method==='DELETE'&&action==='push-token'){if(!campaignPush)throw new BridgeError(503,'PUSH_NOT_CONFIGURED');value=await campaignPush.unregister(campaignBridge,principal,campaign);}
+   else if(method==='GET'&&action==='grant')value=await campaignBridge.getGrant(principal,campaign);
    else if(method==='POST'&&action==='grant')value=await campaignBridge.configureGrant(principal,campaign,await readBody(request));
    else if(method==='POST'&&action==='records')value=await campaignBridge.publish(principal,campaign,await readBody(request));
    else if(method==='GET'&&action==='records')value=await campaignBridge.read(principal,campaign,{kinds:url.searchParams.has('kind')?[url.searchParams.get('kind')]:[],recordId:url.searchParams.get('recordId'),after:url.searchParams.get('after')??'',limit:Number(url.searchParams.get('limit')??25)});

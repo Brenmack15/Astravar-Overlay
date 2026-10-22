@@ -13,10 +13,11 @@ class OwnerConnectionSyncJob : JobService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var running: Job? = null
     override fun onStartJob(params: JobParameters): Boolean {
+        if (CampaignSyncPreferences(applicationContext).paused) return false
         running = scope.launch {
             val client = OwnerConnectionClient(applicationContext)
             var retry = false
-            try { client.sync() }
+            try { client.automaticSync() }
             catch (e: CancellationException) { throw e }
             catch (e: OwnerSyncFailure) {
                 retry = e.code in setOf("REMOTE_UNAVAILABLE", "QUOTA_REACHED")
@@ -28,11 +29,12 @@ class OwnerConnectionSyncJob : JobService() {
         }
         return true
     }
-    override fun onStopJob(params: JobParameters): Boolean { running?.cancel(); return true }
+    override fun onStopJob(params: JobParameters): Boolean { running?.cancel(); return !CampaignSyncPreferences(applicationContext).paused }
     override fun onDestroy() { scope.cancel(); super.onDestroy() }
     companion object {
         private const val ID = 0x415354
         fun schedule(context: Context) {
+            if (CampaignSyncPreferences(context).paused) return
             val scheduler = context.getSystemService(JobScheduler::class.java)
             scheduler.schedule(JobInfo.Builder(ID, ComponentName(context, OwnerConnectionSyncJob::class.java))
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setPeriodic(15 * 60 * 1000L)

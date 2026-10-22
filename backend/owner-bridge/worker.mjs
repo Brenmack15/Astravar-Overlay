@@ -2,6 +2,7 @@
  * proxy: Sites must verify/replace all oai-authenticated-* identity headers.
  */
 import { CampaignBridge } from './campaign.mjs';
+import { CampaignPushTransport } from './campaign-push.mjs';
 import { LiveHpBridge } from './live-hp.mjs';
 import { OwnerBridge, MODE } from './core.mjs';
 import { handleOwnerApi } from './http.mjs';
@@ -34,7 +35,7 @@ document.getElementById('devices').addEventListener('click',async()=>{const outp
       'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'` } });
 }
 
-export async function handleWorker(request, env) {
+async function handleWorkerRequest(request, env, context) {
   const url = new URL(request.url);
   if (url.protocol !== 'https:') return json({ mode: MODE, error: { code: 'HTTPS_REQUIRED' } }, 400);
   // Setup reveals only the requesting visitor's own Sites-verified identifier.
@@ -48,7 +49,15 @@ export async function handleWorker(request, env) {
   const configured = Boolean(env?.DB && typeof ownerId === 'string' && ownerId.trim());
   const bridge = configured ? new OwnerBridge(env.DB, { ownerId }) : null;
   const liveHp = configured ? new LiveHpBridge(env.DB,{ownerId}) : null;
-  const campaignBridge=configured?new CampaignBridge(env.DB,{ownerId}):null;
+  // Pushy configuration is optional: missing credentials never interrupt normal
+  // device sync, command persistence, or the existing owner connection.
+  const campaignPush=configured?new CampaignPushTransport(env.DB,{ownerId,apiKey:env.PUSHY_API_KEY,
+    encryptionKeyBase64:env.ASTRAVAR_PUSH_KEY_B64,observe:metric=>observeSync(env,metric)}):null;
+  const campaignBridge=configured?new CampaignBridge(env.DB,{ownerId,onCommandQueued:info=>{
+    observeSync(env,{component:'campaign_sync',stage:'queue_accepted',at:Date.now(),commandId:info.commandId});
+    if(!campaignPush?.configured||!context?.waitUntil)return;
+    context.waitUntil(campaignPush.notify(info).catch(()=>false));
+  }}):null;
   // Tool schemas contain no private data and are needed for plugin provisioning.
   // Actual tools/call still requires the configured owner and verified identity.
   if (url.pathname === '/mcp') return handleMcp(request, bridge, { ownerId, allowPublicDiscovery: true,liveHp,campaignBridge });
@@ -57,8 +66,28 @@ export async function handleWorker(request, env) {
   const ownerPrincipal = isOwner ? { ownerId, role: 'owner', credentialId: 'sites-owner', scopes: [] } : null;
   if (url.pathname.startsWith('/owner/bootstrap')) return handleBootstrap(request, env);
   if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/owner')) return isOwner ? ownerPage() : json({ mode: MODE, error: { code: 'OWNER_AUTHENTICATION_REQUIRED' } }, 401);
-  if ((url.pathname.startsWith('/v1/')||url.pathname.startsWith('/v2/'))) return handleOwnerApi(request, bridge, { ownerPrincipal,liveHp,campaignBridge });
+  if ((url.pathname.startsWith('/v1/')||url.pathname.startsWith('/v2/'))) return handleOwnerApi(request, bridge, { ownerPrincipal,liveHp,campaignBridge,campaignPush });
   return json({ mode: MODE, error: { code: 'NOT_FOUND' } }, 404);
+}
+
+/** Opt-in operational timings contain no token, source text or campaign fields. */
+function observeSync(env,metric){
+ if(env?.ASTRAVAR_SYNC_METRICS!=='1')return;
+ try{console.info(JSON.stringify({astravarSyncMetric:1,...metric}));}catch{/* observability cannot affect gameplay */}
+}
+export async function handleWorker(request,env,context){
+ const started=performance.now(),requestId=crypto.randomUUID(),path=new URL(request.url).pathname;
+ const route=path==='/mcp'?'mcp':path.startsWith('/v2/campaigns/')?'campaign_v2':path.startsWith('/v1/hp/')?'hp_v1':'owner_other';
+ observeSync(env,{component:'campaign_sync',stage:'request_received',requestId,route,method:request.method,at:Date.now()});
+ let response;
+ try{
+  response=await handleWorkerRequest(request,env,context);
+  const headers=new Headers(response.headers);
+  headers.set('Server-Timing','astravar;dur='+Math.max(0,performance.now()-started).toFixed(3));
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+ }finally{
+  observeSync(env,{component:'campaign_sync',stage:'request_completed',requestId,route,at:Date.now(),status:response?.status??500,durationMilliseconds:performance.now()-started});
+ }
 }
 
 export default { fetch: handleWorker };

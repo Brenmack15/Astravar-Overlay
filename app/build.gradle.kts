@@ -13,8 +13,8 @@ android {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(36)
-        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("2.2.0")
+        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(39)
+        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("2.3.2")
     }
     signingConfigs {
         create("owner") {
@@ -71,10 +71,14 @@ dependencies {
     implementation(project(":rules"))
     implementation(platform("androidx.compose:compose-bom:2025.12.01"))
     implementation("androidx.activity:activity-compose:1.12.2")
+    // Pin Fragment to the existing Activity Result-compatible runtime.
+    implementation("androidx.fragment:fragment:1.8.9")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.core:core-ktx:1.17.0")
+    implementation("androidx.work:work-runtime-ktx:2.11.0")
+    implementation("me.pushy:sdk:1.0.129")
     implementation("androidx.room:room-runtime:2.8.4")
     implementation("androidx.room:room-ktx:2.8.4")
     ksp("androidx.room:room-compiler:2.8.4")

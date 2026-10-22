@@ -10,6 +10,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.yazsras.astravar.data.OwnerConnectionClient
+import com.yazsras.astravar.data.CampaignSyncPreferences
 import com.yazsras.astravar.data.OwnerSyncFailure
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -63,13 +64,13 @@ import java.io.ByteArrayOutputStream
     LaunchedEffect(client) {
         try {
             snapshot = client.snapshot()
-            if (snapshot["connected"]?.jsonPrimitive?.booleanOrNull == true) operation { client.refresh() }
+            if (!CampaignSyncPreferences(context).paused && snapshot["connected"]?.jsonPrimitive?.booleanOrNull == true) operation { client.refresh() }
         } catch (e: CancellationException) { throw e }
         catch (_: Exception) { message = "Saved connection could not be read. No records were sent."; failed = true }
     }
     val lifecycleOwner = LocalLifecycleOwner.current
     val refreshOnResume by rememberUpdatedState(newValue = {
-        if (snapshot["connected"]?.jsonPrimitive?.booleanOrNull == true) operation { client.refresh() }
+        if (!CampaignSyncPreferences(context).paused && snapshot["connected"]?.jsonPrimitive?.booleanOrNull == true) operation { client.refresh() }
     })
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) refreshOnResume() }

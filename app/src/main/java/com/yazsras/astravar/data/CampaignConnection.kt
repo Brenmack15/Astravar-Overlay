@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Base64
 import androidx.room.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
@@ -80,11 +82,23 @@ class CampaignConnectionClient internal constructor(private val context: Context
     private val transport: OwnerConnectionTransport, private val now: () -> Long = System::currentTimeMillis,
     private val afterLocalCommit: suspend () -> Unit = {},
     private val bootstrap: OwnerConnectionBootstrap = OwnerConnectionBootstrap(context),
-    private val weaponDb: AstravarDb? = null) {
+    private val weaponDb: AstravarDb? = null,
+    // Fixture clients use their injected transport without initializing a production
+    // Pushy installation, even when running a release build.
+    private val requestPushToken: ((Context, String) -> Unit)? = null,
+    private val disableMessaging: (Context) -> Unit = {}) {
     constructor(context: Context) : this(context.applicationContext, CampaignConnectionDb.open(context), CampaignLedgerDb.open(context),
-        OwnerSyncCredentialVault(context), OwnerConnectionHttpsTransport(), weaponDb = AstravarDb.open(context))
+        OwnerSyncCredentialVault(context), OwnerConnectionHttpsTransport(), weaponDb = AstravarDb.open(context),
+        requestPushToken = CampaignPushy::requestToken, disableMessaging = CampaignPushy::disable)
     private val dao = db.connection()
     private val domain = CampaignSyncDomain(campaignDb, weaponDb)
+    private val pushStore = CampaignPushStore(context)
+    private var automaticOperation = false
+    private var syncContinuationRequired = false
+    private fun requireAutomaticAllowed() {
+        if (automaticOperation && CampaignSyncPreferences(context).paused) throw OwnerSyncFailure("AUTOMATIC_SYNC_PAUSED")
+    }
+    private suspend fun notifySync() { CampaignSyncNotifications.update(context, snapshotUnlocked()) }
     companion object { private val lock = Mutex() }
     private suspend fun setting() = dao.settings() ?: CampaignConnectionSettings()
     private fun scopes(json: String) = CampaignConnectionProtocol.parseScopes(Json.parseToJsonElement(json))
@@ -112,10 +126,12 @@ class CampaignConnectionClient internal constructor(private val context: Context
             ?: "local-campaign"
     }
     private suspend fun request(value: CampaignConnectionSettings, path: String, body: String? = null,
-        authenticated: Boolean = true): JsonObject {
+        authenticated: Boolean = true, delete: Boolean = false): JsonObject {
+        requireAutomaticAllowed()
         OwnerSyncProtocol.origin(value.origin); OwnerSyncProtocol.id(value.campaignId)
-        val result = transport.request(value.origin, path, if (authenticated) credential(value) else null,
-            vault.serviceAccess(value.origin, value.campaignId), body)
+        val auth = if (authenticated) credential(value) else null
+        val result = if (delete) transport.delete(value.origin, path, auth, vault.serviceAccess(value.origin, value.campaignId))
+            else transport.request(value.origin, path, auth, vault.serviceAccess(value.origin, value.campaignId), body)
         if (result.status !in 200..299) {
             val code = (result.json["error"] as? JsonObject)?.get("code")?.jsonPrimitive?.content
             val expectedMode = if (path.startsWith("/v2/")) CampaignConnectionProtocol.MODE else OwnerConnectionProtocol.MODE
@@ -123,6 +139,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
             if (authenticated && result.status == 401 && code == "CREDENTIAL_REVOKED_OR_EXPIRED" &&
                 result.json["mode"]?.jsonPrimitive?.content == CampaignConnectionProtocol.MODE) {
                 vault.forget(value.origin, value.campaignId)
+                pushStore.clearRegistration(); disableMessaging(context); CampaignConnectionSyncJob.cancel(context)
                 dao.settings(setting().copy(localAutoSyncJson = "[]", status = "Authentication expired"))
             }
             throw OwnerSyncFailure(code?.takeIf { it.matches(Regex("[A-Z0-9_]{1,80}")) } ?: when (result.status) {
@@ -170,6 +187,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
                 "Revoke the existing campaign connection before pairing another device."
             }
         }
+        pushStore.clearRegistration()
         val value = CampaignConnectionSettings(origin = OwnerSyncProtocol.origin(origin), campaignId = campaignFor(profileId),
             profileId = profileId, deviceName = deviceName, requestedReadJson = CampaignConnectionProtocol.scopeArray(readScopes).toString(),
             requestedWriteJson = CampaignConnectionProtocol.scopeArray(writeScopes).toString())
@@ -290,6 +308,14 @@ class CampaignConnectionClient internal constructor(private val context: Context
             put("deviceName", value.deviceName); put("accountLabel", value.accountLabel)
             put("status", if (value.deviceId.isNotBlank() && !value.revokePending && (secret == null || secret.expiresAt <= now() || runCatching { checkedGrant(value, g) }.isFailure)) "Authentication expired" else value.status)
             put("lastError", value.lastError); put("lastSyncAt", value.lastSyncAt); put("lastDeviceSyncAt", value.lastDeviceSyncAt)
+            put("syncContinuationRequired", syncContinuationRequired)
+            put("serverPendingUnfetched", value.status in setOf("Pending delivery · more queued transactions", "Pending approval · additional queued transactions"))
+            put("automaticSyncPaused", CampaignSyncPreferences(context).paused)
+            put("pushConfigured", CampaignPushy.configured); put("pushEnabled", CampaignSyncPreferences(context).pushyEnabled)
+            put("pushRegistered", CampaignSyncPreferences(context).pushyEnabled && pushStore.registration.isNotEmpty())
+            put("lastPushReceivedAt", pushStore.lastReceivedAt); put("lastWorkStartedAt", pushStore.lastWorkStartedAt)
+            put("lastRoomCommittedAt", pushStore.lastRoomCommittedAt)
+            put("syncTimings", pushStore.timings())
             put("revokePending", value.revokePending); put("grant", g); put("grantPending", value.grantBody != null); put("localAutoSyncScopes", Json.parseToJsonElement(value.localAutoSyncJson))
             put("localReadScopes", CampaignConnectionProtocol.scopeArray(activeRead(value))); put("localWriteScopes", CampaignConnectionProtocol.scopeArray(activeWrite(value)))
             put("profiles", buildJsonArray { campaignDb.recordsDao().allCharacterProfiles().filter { it.id != OwnerConnectionProtocol.PROFILE }.forEach {
@@ -313,16 +339,104 @@ class CampaignConnectionClient internal constructor(private val context: Context
     }
     private fun belongs(command: CampaignConnectionCommand, value: CampaignConnectionSettings) =
         command.origin == value.origin && command.campaignId == value.campaignId && command.deviceId == value.deviceId
-    suspend fun foreground(): JsonObject = lock.withLock {
-        val value = setting(); if (value.deviceId.isBlank()) return@withLock snapshotUnlocked()
-        try { syncUnlocked() } catch (e: CancellationException) { throw e } catch (e: Exception) { failure(e); throw e }
+    /** Every automatic caller shares this pause gate, including Activity/overlay and OS recovery. */
+    suspend fun foreground(manual: Boolean = false): JsonObject = lock.withLock {
+        val value = setting()
+        if (value.deviceId.isBlank()) return@withLock snapshotUnlocked().also { CampaignSyncNotifications.update(context, it) }
+        if (!manual && CampaignSyncPreferences(context).paused) {
+            CampaignConnectionSyncJob.cancel(context)
+            return@withLock snapshotUnlocked().also { CampaignSyncNotifications.update(context, it) }
+        }
+        automaticOperation = !manual
+        try {
+            CampaignConnectionSyncJob.schedule(context)
+            syncUnlocked()
+        } catch (e: CancellationException) {
+            withContext(NonCancellable) { failure(OwnerSyncFailure("SYNC_INTERRUPTED")) }; throw e
+        } catch (e: Exception) { failure(e); throw e }
+        finally { automaticOperation = false; withContext(NonCancellable) { notifySync() } }
         snapshotUnlocked()
     }
-    suspend fun sync(): JsonObject = foreground()
+    suspend fun sync(): JsonObject = foreground(manual = true)
+    /** Token refresh never expands grants; registration requires current, authenticated enrollment. */
+    private suspend fun registerPush(value: CampaignConnectionSettings) {
+        try { registerPushOptional(value) }
+        catch (e: CancellationException) { throw e }
+        catch (e: OwnerSyncFailure) {
+            if (e.code in setOf("CREDENTIAL_REVOKED_OR_EXPIRED", "AUTHENTICATION_REQUIRED", "CAMPAIGN_NOT_AUTHORIZED", "CAMPAIGN_GRANT_EXPIRED", "AUTOMATIC_SYNC_PAUSED")) throw e
+        } catch (_: Exception) {
+            // Provider SDK, optional response or local token failures cannot stop journal recovery.
+        }
+    }
+    private suspend fun registerPushOptional(value: CampaignConnectionSettings) {
+
+        requireAutomaticAllowed()
+        val requestToken = requestPushToken ?: return
+        if (!CampaignSyncPreferences(context).pushyEnabled) {
+            disableMessaging(context)
+            if (pushStore.registration.isNotEmpty()) {
+                try { request(value, base(value) + "/push-token", delete = true); pushStore.clearRegistration() }
+                catch (e: CancellationException) { throw e } catch (_: Exception) { }
+            }
+            return
+        }
+        if (value.revokePending || value.deviceId.isBlank()) return
+        val g = checkedGrant(value, grant(value)); val secret = credential(value)
+        val binding = pushBinding(value, g, secret)
+        pushStore.bindEnrollment(binding, minOf(secret.expiresAt, g.getValue("expiresAt").jsonPrimitive.long))
+        // Registration is asynchronous and consent-bound; provider setup never blocks journal sync.
+        requestToken(context, binding)
+        val token = pushStore.token() ?: return
+        val visible = CampaignSyncNotifications.canShow(context)
+        val fingerprint = OwnerSyncProtocol.hash(listOf(value.origin, value.campaignId, value.deviceId,
+            g.getValue("grantId").jsonPrimitive.content, g.getValue("revision").toString(), OwnerSyncProtocol.hash(token), visible.toString()).joinToString("\n"))
+        if (pushStore.registration == fingerprint) return
+        try {
+            val result = request(value, base(value) + "/push-token", buildJsonObject {
+                put("provider", "pushy"); put("token", token); put("notificationsEnabled", visible)
+            }.toString())
+            require(result["pushRegistered"]?.jsonPrimitive?.boolean == true)
+            pushStore.registration = fingerprint
+        } catch (e: CancellationException) { throw e }
+        catch (e: OwnerSyncFailure) {
+            if (e.code in setOf("CREDENTIAL_REVOKED_OR_EXPIRED", "AUTHENTICATION_REQUIRED", "CAMPAIGN_NOT_AUTHORIZED", "CAMPAIGN_GRANT_EXPIRED", "AUTOMATIC_SYNC_PAUSED")) throw e
+            // Push is an optional wake channel; journal and 15-minute recovery remain authoritative.
+            pushStore.registration = ""
+        } catch (_: java.io.IOException) { pushStore.registration = "" }
+    }
+    private fun pushBinding(value: CampaignConnectionSettings, grant: JsonObject, secret: OwnerSyncCredential) =
+        OwnerSyncProtocol.hash(listOf(value.origin, value.campaignId, value.deviceId, grant.getValue("grantId").jsonPrimitive.content,
+            OwnerSyncProtocol.hash(secret.bearer)).joinToString("\n"))
+    /** Read-only snapshot; persistence still requires the store's current enrollment binding CAS. */
+    suspend fun currentPushBinding(): String? = runCatching {
+        val value = setting()
+        require(value.deviceId.isNotBlank() && !value.revokePending)
+        pushBinding(value, checkedGrant(value, grant(value)), credential(value))
+    }.getOrNull()
+    suspend fun hasPushEnrollment(): Boolean = runCatching {
+        val value = setting()
+        require(value.deviceId.isNotBlank() && !value.revokePending)
+        credential(value); checkedGrant(value, grant(value)); true
+    }.getOrDefault(false)
+    // Validation intentionally does not wait behind network synchronization. A stale wake can
+    // only schedule a fresh authenticated fetch; the command pipeline rechecks the live grant.
+    suspend fun acceptWake(data: Map<String, String>): Boolean {
+        if (CampaignSyncPreferences(context).paused || !CampaignSyncPreferences(context).pushyEnabled) return false
+        val value = setting()
+        if (value.deviceId.isBlank() || value.revokePending) return false
+        val verified = runCatching {
+            val secret = credential(value); checkedGrant(value, grant(value))
+            CampaignWakeProtocol.verified(data, OwnerSyncProtocol.hash(secret.bearer), now())
+        }.getOrDefault(false)
+        if (!verified || CampaignSyncPreferences(context).paused || !CampaignSyncPreferences(context).pushyEnabled || !pushStore.claimWake(data.getValue("wakeId"), data.getValue("expiresAt").toLong(), now())) return false
+        pushStore.recordStage("push_received", now(), data.getValue("wakeId"))
+        return true
+    }
     private suspend fun failure(error: Exception) {
         val value = setting()
         val code = (error as? OwnerSyncFailure)?.code ?: "CONNECTION_UNVERIFIED"
         val status = when {
+            CampaignSyncPreferences(context).paused -> "Paused"
             value.revokePending -> "Server revocation pending"
             code.contains("EXPIRED") || code in setOf("AUTHENTICATION_REQUIRED", "CREDENTIAL_REVOKED_OR_EXPIRED") -> "Authentication expired"
             code.contains("CONFLICT") -> "Conflict requires review"
@@ -331,27 +445,52 @@ class CampaignConnectionClient internal constructor(private val context: Context
         dao.settings(value.copy(status = status, lastError = code))
     }
     private suspend fun syncUnlocked() {
+        requireAutomaticAllowed()
+        syncContinuationRequired = false
         var value = setting(); credential(value)
         if (value.revokePending) { revokeUnlocked(value); return }
-        dao.settings(value.copy(status = "Syncing", lastError = ""))
+        dao.settings(value.copy(status = "Syncing", lastError = "")); notifySync()
         flushGrant(setting()); value = setting()
         val g = checkedGrant(value, request(value, base(value) + "/grant"))
         dao.settings(value.copy(grantJson = g.toString())); value = setting()
+        registerPush(value)
         // Durable commit recovery precedes any unrelated publication.
         for (c in dao.commands().filter { belongs(it, value) && it.state == "APPLYING" }) finishLocal(value, c, recoverOnly = true)
         for (c in dao.commands().filter { belongs(it, value) && it.state in setOf("APPLIED_PENDING", "REJECTED_PENDING", "CONFLICT_PENDING") }) flushDecision(value, c)
-        val pending = request(value, base(value) + "/pending")
-        for (raw in pending.getValue("commands").jsonArray) ingest(value, raw.jsonObject)
-        value = setting()
-        for (c in dao.commands().filter { belongs(it, value) && it.state == "PENDING_DELIVERY" }) {
-            if (authorized(value, c)) { dao.update(c.copy(state = "APPLYING", message = "Authorized transaction committing")); finishLocal(value, requireNotNull(dao.command(c.commandId))) }
-            else dao.update(c.copy(state = "PENDING_APPROVAL", message = "Manual approval required by the current grant"))
+        var approvalBlocksQueue = false
+        // /pending is byte-bounded. A collapsed wake burst must drain subsequent pages,
+        // but an unapproved first page must never become a network/CPU retry loop.
+        for (page in 0 until 4) {
+            val pending = request(value, base(value) + "/pending")
+            val hasMore = pending["hasMore"]?.let {
+                require(it is JsonPrimitive && !it.isString && it.booleanOrNull != null) { "Invalid pending pagination metadata." }
+                it.jsonPrimitive.boolean
+            } ?: false
+            val rows = pending.getValue("commands").jsonArray.map { it.jsonObject }
+            val pageIds = rows.map { CampaignConnectionProtocol.commandId(it.getValue("commandId").jsonPrimitive.content) }
+            val previouslyConfirmed = pageIds.filter { dao.command(it)?.receiptJson != null }.toSet()
+            for (raw in rows) ingest(value, raw)
+            value = setting()
+            for (c in dao.commands().filter { belongs(it, value) && it.state == "PENDING_DELIVERY" }) {
+                if (authorized(value, c)) { dao.update(c.copy(state = "APPLYING", message = "Authorized transaction committing")); finishLocal(value, requireNotNull(dao.command(c.commandId))) }
+                else dao.update(c.copy(state = "PENDING_APPROVAL", message = "Manual approval required by the current grant"))
+            }
+            for (c in dao.commands().filter { belongs(it, value) && it.state in setOf("APPLIED_PENDING", "REJECTED_PENDING", "CONFLICT_PENDING") }) flushDecision(value, c)
+            if (!hasMore) break
+            val progressed = pageIds.any { it !in previouslyConfirmed && dao.command(it)?.receiptJson != null }
+            if (!progressed) { approvalBlocksQueue = true; break }
+            if (page == 3) syncContinuationRequired = true
         }
-        for (c in dao.commands().filter { belongs(it, value) && it.state in setOf("APPLIED_PENDING", "REJECTED_PENDING", "CONFLICT_PENDING") }) flushDecision(value, c)
         publish(value)
         val conflict = dao.commands().any { belongs(it, value) && it.state in setOf("CONFLICT", "DECISION_CONFLICT") }
         val queued = dao.commands().any { belongs(it, value) && it.state in setOf("APPLIED_PENDING", "APPLYING", "REJECTED_PENDING") }
-        dao.settings(setting().copy(status = when { conflict -> "Conflict requires review"; queued -> "Pending delivery"; else -> "Connected" }, lastSyncAt = now(), lastError = ""))
+        dao.settings(setting().copy(status = when {
+            syncContinuationRequired -> "Pending delivery · more queued transactions"
+            conflict -> "Conflict requires review"
+            approvalBlocksQueue -> "Pending approval · additional queued transactions"
+            queued -> "Pending delivery"
+            else -> "Connected"
+        }, lastSyncAt = now(), lastError = ""))
     }
     private fun parsed(command: CampaignConnectionCommand): JsonObject = Json.parseToJsonElement(command.body).jsonObject.also {
         require(it.getValue("commandId").jsonPrimitive.content == command.commandId)
@@ -471,6 +610,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         }
     }
     private suspend fun finishLocal(value: CampaignConnectionSettings, command: CampaignConnectionCommand, manual: Boolean = false, recoverOnly: Boolean = false) {
+        requireAutomaticAllowed()
         require(command.state == "APPLYING"); parsed(command)
         val localId = CampaignConnectionProtocol.localCommand(value.origin, value.campaignId, command.commandId)
         val existing = campaignDb.recordsDao().receipt(CampaignSyncDomain.receiptId(localId))
@@ -483,6 +623,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         }
         val receipt = try {
             existing ?: campaignDb.withTransaction {
+                requireAutomaticAllowed()
                 verifyBaseline(value, command)
                 val candidate = domain.apply(value.campaignId, localId, parsed(command).getValue("source").jsonPrimitive.content, operations(command))
                 val outputs = visible(value, verifiedLocalOutcome(value, command, candidate))
@@ -490,6 +631,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
                 require(decisionBody(command, "APPLIED", candidate.commandId, outputs).toByteArray(Charsets.UTF_8).size <= OwnerSyncProtocol.MAX_BODY_BYTES) {
                     "The atomic result exceeds the authenticated transport limit. No local records were changed."
                 }
+                requireAutomaticAllowed()
                 candidate
             }
         } catch (e: CancellationException) { throw e } catch (_: IllegalArgumentException) {
@@ -498,6 +640,8 @@ class CampaignConnectionClient internal constructor(private val context: Context
             dao.update(command.copy(state = "CONFLICT_PENDING", decisionBody = decisionBody(command, "CONFLICT", null, emptyList()), message = "Local records changed · no partial transaction applied")); return
         }
         val output = visible(value, verifiedLocalOutcome(value, command, receipt))
+        pushStore.lastRoomCommittedAt = now()
+        pushStore.recordStage("room_committed", now(), command.commandId)
         afterLocalCommit()
         dao.update(command.copy(state = "APPLIED_PENDING", decisionBody = decisionBody(command, "APPLIED", receipt.commandId, output), message = "Saved locally · independent server receipt/readback pending"))
     }
@@ -540,6 +684,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
             }
         }
         val status = decision.getValue("status").jsonPrimitive.content
+        pushStore.recordStage("receipt_verified", now(), command.commandId)
         dao.update(command.copy(state = if (status == "APPLIED") "VERIFIED" else status, receiptJson = OwnerSyncProtocol.canonical(result),
             message = if (status == "APPLIED") "Committed records and immutable receipt independently verified" else if (status == "REJECTED") "Rejection independently verified" else "Conflict independently verified · records retained"))
     }
@@ -645,9 +790,17 @@ class CampaignConnectionClient internal constructor(private val context: Context
         snapshotUnlocked()
     }
     private suspend fun revokeUnlocked(value: CampaignConnectionSettings) {
+        // Invalidate queued SDK callbacks before any suspension or remote request. The shared
+        // store lock makes token deletion and callback persistence mutually exclusive.
+        pushStore.forgetToken(); disableMessaging(context)
+        // Best-effort explicit removal precedes credential destruction. Server revocation also
+        // deletes registrations atomically if the optional push route is temporarily unavailable.
+        try { request(value, base(value) + "/push-token", delete = true) }
+        catch (e: CancellationException) { throw e } catch (_: Exception) { }
         val result = request(value, base(value) + "/devices/revoke", "{}")
         require(result["revoked"]?.jsonPrimitive?.boolean == true && result["credentialId"]?.jsonPrimitive?.content == value.deviceId)
         vault.forget(value.origin, value.campaignId)
+        pushStore.forgetToken(); disableMessaging(context)
         dao.settings(value.copy(deviceId = "", revokePending = false, localAutoSyncJson = "[]", grantJson = "{}", status = "Disconnected · server revocation confirmed"))
         CampaignConnectionSyncJob.cancel(context)
     }

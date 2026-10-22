@@ -23,6 +23,9 @@ cleanup() {
     # A failed launch or port collision must never target another connected
     # emulator. Device commands are allowed only after this fresh AVD is proven.
     if [[ "$astravar_verified_emulator" == 1 ]]; then
+      timeout 10s adb -s "$astravar_serial" shell dumpsys connectivity >"$astravar_output/connectivity-final.txt" 2>&1 || true
+      timeout 10s adb -s "$astravar_serial" logcat -d >"$astravar_output/logcat-final.txt" 2>&1 || true
+      timeout 10s adb -s "$astravar_serial" shell dumpsys window windows >"$astravar_output/windows-final.txt" 2>&1 || true
       timeout 10s adb -s "$astravar_serial" pull "/sdcard/Android/data/$astravar_product/files/." "$astravar_output/emulator-evidence" >/dev/null 2>&1 || true
       timeout 8s adb -s "$astravar_serial" emu kill >/dev/null 2>&1 || true
     fi
@@ -75,7 +78,10 @@ export ANDROID_USER_HOME="$astravar_private/android-user"
 mkdir -p "$ANDROID_AVD_HOME" "$ANDROID_USER_HOME"
 printf 'no\n' | timeout -k 5s 40s avdmanager create avd --force -n AstravarHpCI -p "$ANDROID_AVD_HOME/AstravarHpCI.avd" \
   -k 'system-images;android-36;google_apis;x86_64' --device pixel_6
-"$ANDROID_HOME/emulator/emulator" -avd AstravarHpCI -port 5584 -accel on -dns-server 127.0.0.1 \
+# Keep the emulator's normal upstream DNS so Android can genuinely validate network
+# connectivity for WorkManager's CONNECTED constraint. Only the two HTTPS fixture
+# names are overridden in the owned guest hosts file below; production TLS is unchanged.
+"$ANDROID_HOME/emulator/emulator" -avd AstravarHpCI -port 5584 -accel on \
   -no-window -no-audio -no-snapshot -no-boot-anim -writable-system -gpu swiftshader_indirect >"$astravar_output/emulator.log" 2>&1 &
 astravar_emulator_pid=$!
 kill -0 "$astravar_emulator_pid"
@@ -145,12 +151,18 @@ timeout 45s adb -s "$astravar_serial" install "$ASTRAVAR_BASELINE_DEBUG_APK"
 timeout 45s adb -s "$astravar_serial" install app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 run_test() {
   local astravar_test=$1 astravar_log=$2 astravar_timeout=${3:-240}
-  [[ "$astravar_timeout" =~ ^[1-9][0-9]*$ ]]
-  timeout -k 5s "${astravar_timeout}s" adb -s "$astravar_serial" shell am instrument -w -r -e class "$astravar_test" \
-    "$astravar_product.test/androidx.test.runner.AndroidJUnitRunner" | tee "$astravar_output/$astravar_log"
-  grep -q '^OK (1 test' "$astravar_output/$astravar_log"
-  ! grep -q 'FAILURES\|INSTRUMENTATION_FAILED\|Process crashed' "$astravar_output/$astravar_log"
+  [[ "$astravar_timeout" =~ ^[1-9][0-9]*$ ]] || return 1
+  # Explicit status checks are essential: errexit is disabled throughout functions
+  # invoked by an if-condition, as the independent evidence collector does below.
+  if ! timeout -k 5s "${astravar_timeout}s" adb -s "$astravar_serial" shell am instrument -w -r -e class "$astravar_test" \
+    "$astravar_product.test/androidx.test.runner.AndroidJUnitRunner" | tee "$astravar_output/$astravar_log"; then
+    return 1
+  fi
+  grep -q '^OK (1 test' "$astravar_output/$astravar_log" || return 1
+  if grep -q 'FAILURES\|INSTRUMENTATION_FAILED\|Process crashed' "$astravar_output/$astravar_log"; then return 1; fi
+  return 0
 }
+timeout 10s adb -s "$astravar_serial" shell dumpsys connectivity >"$astravar_output/connectivity-before-tests.txt"
 run_test com.yazsras.astravar.data.LiveHpBaselineSeedTest baseline-seed.txt
 timeout 10s adb -s "$astravar_serial" shell am force-stop "$astravar_product"
 snapshot() {
@@ -165,8 +177,8 @@ snapshot "$astravar_output/update-after.sha256"
 diff -u "$astravar_output/update-before.sha256" "$astravar_output/update-after.sha256" >"$astravar_output/update-store-diff.txt"
 adb -s "$astravar_serial" shell dumpsys package "$astravar_product" >"$astravar_output/updated-package.txt"
 grep -q "versionCode=${ASTRAVAR_VERSION_CODE} " "$astravar_output/updated-package.txt"
-# The isolated .example DNS cannot provide Android network time. After proving
-# fresh AVD ownership again, align only this guest clock before any credentials.
+# After proving fresh AVD ownership again, explicitly align only this guest clock
+# to the CI host after update preservation is verified and before any credentials.
 # A two-second lead covers second-resolution setting/ADB latency without changing
 # the production ten-minute challenge, expiry or nonce checks.
 kill -0 "$astravar_emulator_pid"
@@ -210,23 +222,51 @@ start_server
 run_test 'com.yazsras.astravar.data.LiveHpNativeHttpsTest#bRestartRetryAndValidatedBackupRestore' native-hp-restart-restore.txt
 timeout 10s adb -s "$astravar_serial" shell am force-stop "$astravar_product"
 run_test 'com.yazsras.astravar.data.LiveHpNativeHttpsTest#cSimultaneousLocalEditAndAuthorizationRevocation' native-hp-negative.txt
+# Preserve failure evidence from independent suites instead of allowing one new
+# fixture assertion to hide power controls, notification actions or clipboard checks.
+# The baseline and ordered legacy HP recovery prerequisites above remain fail-fast.
+astravar_independent_failures=0
+: >"$astravar_output/independent-tests.tsv"
+run_independent_test() {
+  local astravar_test=$1 astravar_log=$2
+  if run_test "$@"; then
+    printf 'PASS\t%s\t%s\n' "$astravar_test" "$astravar_log" >>"$astravar_output/independent-tests.tsv"
+  else
+    printf 'FAIL\t%s\t%s\n' "$astravar_test" "$astravar_log" >>"$astravar_output/independent-tests.tsv"
+    astravar_independent_failures=$((astravar_independent_failures + 1))
+  fi
+  return 0
+}
 # Production campaign HTTPS transport, explicit grant, Auto-Sync and immutable readback.
-run_test 'com.yazsras.astravar.data.CampaignNativeHttpsTest#authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts' native-campaign-https.txt 360
+run_independent_test 'com.yazsras.astravar.data.CampaignNativeHttpsTest#authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts' native-campaign-https.txt 360
 # Real native Room/domain transactions in a separately named synthetic database.
-run_test 'com.yazsras.astravar.data.CampaignSyncNativeTest#nativeCommittedHpSlotAndCheckpointSurviveDatabaseReopen' native-campaign-hp-slot-checkpoint.txt
-run_test 'com.yazsras.astravar.data.CampaignSyncNativeTest#nativeAtomicPurchaseRollbackAndRetryPreserveSinglePhysicalIdentity' native-campaign-purchase-move.txt
-run_test 'com.yazsras.astravar.data.CampaignSyncNativeTest#nativeCompanionAndStageChangesKeepIndependentResourcesAndLaterWork' native-campaign-companion-stage.txt
+run_independent_test 'com.yazsras.astravar.data.CampaignSyncNativeTest#nativeCommittedHpSlotAndCheckpointSurviveDatabaseReopen' native-campaign-hp-slot-checkpoint.txt
+run_independent_test 'com.yazsras.astravar.data.CampaignSyncNativeTest#nativeAtomicPurchaseRollbackAndRetryPreserveSinglePhysicalIdentity' native-campaign-purchase-move.txt
+run_independent_test 'com.yazsras.astravar.data.CampaignSyncNativeTest#nativeCompanionAndStageChangesKeepIndependentResourcesAndLaterWork' native-campaign-companion-stage.txt
+# Native 2.3 wake authentication, encrypted token storage, durable duplicate rejection,
+# real WorkManager pause controls and ordinary quiet notification. These fixtures do
+# not simulate Pushy transport delivery or establish Galaxy/Doze latency.
+run_independent_test 'com.yazsras.astravar.data.CampaignWakeNativeTest#nativeWakeAuthenticationAndReplayRemainStrictWithScreenOff' native-campaign-wake-auth-screen-off.txt
+run_independent_test 'com.yazsras.astravar.data.CampaignWakeNativeTest#nativePauseBlocksAutomaticWorkAndRetainsManualChoice' native-campaign-pause-manual.txt
+run_independent_test 'com.yazsras.astravar.data.CampaignWakeNativeTest#nativeInjectedWakeSchedulingRespectsBatterySaverDozeAndPause' native-campaign-power-state-scheduling.txt
+run_independent_test 'com.yazsras.astravar.data.CampaignWakeNativeTest#nativeQuietNotificationHasImmutableActionsAndPausedScreenshot' native-campaign-notification.txt
 # Production Compose component, native clipboard, keyboard and font-scale checks.
-run_test 'com.yazsras.astravar.ui.PairingCodeClipboardTest#tap_copies_exact_displayed_code_and_announces_feedback' native-pairing-code-copy.txt
-run_test 'com.yazsras.astravar.ui.PairingCodeClipboardTest#keyboard_activation_and_large_text_preserve_the_exact_code' native-pairing-code-keyboard.txt
+run_independent_test 'com.yazsras.astravar.ui.PairingCodeClipboardTest#tap_copies_exact_displayed_code_and_announces_feedback' native-pairing-code-copy.txt
+run_independent_test 'com.yazsras.astravar.ui.PairingCodeClipboardTest#keyboard_activation_and_large_text_preserve_the_exact_code' native-pairing-code-keyboard.txt
+if (( astravar_independent_failures > 0 )); then
+  printf 'Independent native test failures: %s; see independent-tests.tsv and individual logs.\n' "$astravar_independent_failures" >&2
+  exit 1
+fi
+timeout 10s adb -s "$astravar_serial" pull "/sdcard/Android/data/$astravar_product/files/campaign-power-state-scheduling.json" "$astravar_output/campaign-power-state-scheduling.json" >/dev/null
 git rev-parse HEAD >"$astravar_output/SOURCE_COMMIT.txt"
 python3 - "$astravar_output" <<'PY'
 import json,math,os,pathlib,statistics,sys
-p=pathlib.Path(sys.argv[1]); (p/'SCOPE.json').write_text(json.dumps({'fictionalOnly':True,'emulatorApi':36,
+p=pathlib.Path(sys.argv[1]); power=json.loads((p/'campaign-power-state-scheduling.json').read_text())
+(p/'SCOPE.json').write_text(json.dumps({'fictionalOnly':True,'emulatorApi':36,
  'nativeHttps':True,'nativeAndroidKeyStore':True,'productionComposeApprovalAndRejection':True,
  'forceStopRestart':True,'separateDatabaseValidatedBackupRestore':True,'sameDebugKeyUpdate':'published35 to candidate'+os.environ['ASTRAVAR_VERSION_CODE'],
- 'actualOwnerSigningIdentityTestedInCi':False,'realChatGptHostInvocation':False,'physicalGalaxy':False,'nativeClipboardExactCopy':True,'nativeKeyboardActivation':True,'nativeLargeFontScale':2,'nativeCampaignRoomDomainTransactions':True,'campaignRoomPersistenceAfterCloseReopen':True,'campaignHttps':True,'campaignHostedMcpAcceptance':False,
- 'isolatedGatewaySimulatesSitesIdentity':True,'noProductionTlsChanges':True,'temporaryEmulatorHosts':True},indent=2)+'\n')
+ 'actualOwnerSigningIdentityTestedInCi':False,'realChatGptHostInvocation':False,'physicalGalaxy':False,'nativeClipboardExactCopy':True,'nativeKeyboardActivation':True,'nativeLargeFontScale':2,'nativeCampaignRoomDomainTransactions':True,'campaignRoomPersistenceAfterCloseReopen':True,'campaignHttps':True,'campaignHostedMcpAcceptance':False,'nativeWakeAuthentication':True,'nativeEncryptedPushToken':True,'nativeDuplicateWakeDurability':True,'nativeWorkManagerPause':True,'nativeQuietNotification':True,'actualPushyDelivery':False,'actualDozeWakeLatency':False,'nativePowerStateScheduling':power,
+ 'isolatedGatewaySimulatesSitesIdentity':True,'noProductionTlsChanges':True,'temporaryEmulatorHosts':True,'normalResolverForOsValidation':True,'networkValidationForced':False},indent=2)+'\n')
 rows=[]
 for line in (p/'gateway.log').read_text().splitlines():
     try:

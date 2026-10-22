@@ -3,7 +3,7 @@ name: Astravar owner connection verification
 # Both verify the exact pushed source; the original owner-signed APK is checked separately.
 on:
   push:
-    branches: ['feat/astravar-2.1-player-first']
+    branches: ['feat/astravar-2.1-player-first', 'feat/astravar-2.3-ultra-fast-sync']
     paths:
       - 'backend/owner-bridge/**'
       - 'app/**'
@@ -25,8 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 65
     env:
-      ASTRAVAR_VERSION_CODE: '36'
-      ASTRAVAR_VERSION_NAME: '2.2.0'
+      ASTRAVAR_VERSION_CODE: '39'
+      ASTRAVAR_VERSION_NAME: '2.3.2'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -52,6 +52,7 @@ jobs:
           export PATH="$ANDROID_HOME/cmdline-tools/19.0/bin:$ANDROID_HOME/platform-tools:$PATH"
           printf 'y\n%.0s' {1..100} | timeout -k 5s 60s sdkmanager --licenses >/dev/null
           timeout -k 10s 360s sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
+          python3 scripts/normalize-android-platform.py
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
       - name: Preserve source, artwork and historical schema invariants
@@ -75,8 +76,8 @@ jobs:
           trap 'rm -f "$ASTRAVAR_KEYSTORE"' EXIT
           bash ./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease
           mkdir -p validation/owner-connection
-          cp app/build/outputs/apk/release/app-release.apk validation/owner-connection/Astravar-2.2-CI-ONLY-code36.apk
-          python3 scripts/inspect_release_apk.py validation/owner-connection/Astravar-2.2-CI-ONLY-code36.apk --package com.yazsras.astravar --version-name 2.2.0 --version-code 36 --output validation/owner-connection/ci-apk-metadata.json
+          cp app/build/outputs/apk/release/app-release.apk validation/owner-connection/Astravar-2.3-CI-ONLY-code39.apk
+          python3 scripts/inspect_release_apk.py validation/owner-connection/Astravar-2.3-CI-ONLY-code39.apk --package com.yazsras.astravar --version-name 2.3.2 --version-code 39 --output validation/owner-connection/ci-apk-metadata.json
           git rev-parse HEAD > validation/owner-connection/SOURCE_COMMIT.txt
           sha256sum validation/owner-connection/*.apk > validation/owner-connection/SHA256SUMS.txt
           printf '%s\n' 'CI TEST ONLY. Disposable signer; not an owner-signed update. These unit and Compose checks do not establish deployed HTTPS, physical device approval, MCP discovery, install/update or backup/restore acceptance.' > validation/owner-connection/VERIFICATION_LIMITS.txt

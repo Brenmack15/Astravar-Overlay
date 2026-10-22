@@ -14,6 +14,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.yazsras.astravar.data.LiveHpConnectionClient
+import com.yazsras.astravar.data.CampaignSyncPreferences
 import com.yazsras.astravar.data.OwnerSyncFailure
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -67,17 +68,17 @@ import java.io.ByteArrayOutputStream
         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(verified.toString())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
     LaunchedEffect(client) {
-        try { snapshot = client.snapshot(); if (snapshot["connected"]?.jsonPrimitive?.booleanOrNull == true) operation { client.refresh() } }
+        try { snapshot = client.snapshot(); if (!CampaignSyncPreferences(context).paused && snapshot["connected"]?.jsonPrimitive?.booleanOrNull == true) operation { client.foreground() } }
         catch (e: CancellationException) { throw e }
         catch (_: Exception) { error = true; message = "Saved HP connection could not be read. No character was created or changed." }
     }
     val currentSnapshot by rememberUpdatedState(snapshot)
     val currentDiagnostics by rememberUpdatedState(diagnostics)
     val poll by rememberUpdatedState(newValue = {
-        if (!currentDiagnostics) {
+        if (!currentDiagnostics && !CampaignSyncPreferences(context).paused) {
             val connected = currentSnapshot["connected"]?.jsonPrimitive?.booleanOrNull == true
             val code = (currentSnapshot["pairing"] as? JsonObject)?.hpText("userCode").orEmpty()
-            if (connected) operation { client.sync() }
+            if (connected) operation { client.foreground() }
             else if (code.isNotBlank()) operation { client.finishPairing() }
         }
     })

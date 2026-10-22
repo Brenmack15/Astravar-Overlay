@@ -2,6 +2,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -11,6 +12,19 @@
         <activity android:name=".MainActivity" android:exported="true" android:resizeableActivity="true" android:windowSoftInputMode="adjustResize">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity>
+        <!-- Optional Pushy socket transport. No exact-alarm or permanent foreground service permission. -->
+        <receiver android:name=".data.AstravarPushyReceiver" android:exported="false">
+            <intent-filter><action android:name="pushy.me" /></intent-filter>
+        </receiver>
+        <receiver android:name="me.pushy.sdk.receivers.PushyBootReceiver" android:exported="false" android:enabled="false">
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
+        </receiver>
+        <receiver android:name="me.pushy.sdk.receivers.PushyUpdateReceiver" android:exported="false" android:enabled="false">
+            <intent-filter><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter>
+        </receiver>
+        <service android:name="me.pushy.sdk.services.PushySocketService" android:exported="false" android:stopWithTask="false" />
+        <service android:name="me.pushy.sdk.services.PushyJobService" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" android:stopWithTask="false" />
+        <receiver android:name=".data.CampaignSyncActionReceiver" android:exported="false" />
         <service android:name=".data.CampaignConnectionSyncJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false" />
         <service android:name=".data.LiveHpConnectionSyncJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false" />
         <service android:name=".data.OwnerConnectionSyncJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false" />

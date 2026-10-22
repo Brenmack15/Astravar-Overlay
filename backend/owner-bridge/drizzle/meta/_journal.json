@@ -29,6 +29,27 @@
       "when": 1792627300000,
       "tag": "0003_campaign_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792627400000,
+      "tag": "0004_fast_push",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792627500000,
+      "tag": "0005_atomic_acquisition",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792627600000,
+      "tag": "0006_holder_reads",
+      "breakpoints": true
     }
   ]
 }

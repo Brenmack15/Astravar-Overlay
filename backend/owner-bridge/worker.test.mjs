@@ -95,7 +95,7 @@ test('Sites artifact migration layout initializes the hosted-style database befo
     const { stdout } = await execute(process.execPath, [fileURLToPath(new URL('./build-worker.mjs', import.meta.url)), directory]);
     assert.equal(JSON.parse(stdout).migration, join(directory, '.openai/drizzle/0000_owner_bridge.sql'));
     const migrationRoot = join(directory, '.openai/drizzle');
-    for (const file of ['0000_owner_bridge.sql', '0001_bootstrap_downloads.sql', 'meta/_journal.json', 'meta/0000_snapshot.json', 'meta/0001_snapshot.json', '0002_live_hp.sql', 'meta/0002_snapshot.json', '0003_campaign_sync.sql', 'meta/0003_snapshot.json']) {
+    for (const file of ['0000_owner_bridge.sql', '0001_bootstrap_downloads.sql', 'meta/_journal.json', 'meta/0000_snapshot.json', 'meta/0001_snapshot.json', '0002_live_hp.sql', 'meta/0002_snapshot.json', '0003_campaign_sync.sql', 'meta/0003_snapshot.json', '0004_fast_push.sql', 'meta/0004_snapshot.json', '0005_atomic_acquisition.sql', 'meta/0005_snapshot.json', '0006_holder_reads.sql', 'meta/0006_snapshot.json']) {
       assert.equal(await readFile(join(migrationRoot, file), 'utf8'), await readFile(new URL('./drizzle/' + file, import.meta.url), 'utf8'));
     }
     await assert.rejects(readFile(join(directory, 'drizzle/0000_owner_bridge.sql')), { code: 'ENOENT' });
@@ -106,7 +106,7 @@ test('Sites artifact migration layout initializes the hosted-style database befo
         await db.prepare(statement).bind().run();
       }
     }
-    assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name LIKE 'bridge_%'").bind().first()).count, 18);
+    assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name LIKE 'bridge_%'").bind().first()).count, 19);
     const bundled = await import(pathToFileURL(join(directory, 'server/index.js')));
     const response = await bundled.default.fetch(ownerRequest('/mcp', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -118,4 +118,19 @@ test('Sites artifact migration layout initializes the hosted-style database befo
     assert.equal(result.isError, false);
     assert.deepEqual(result.structuredContent.proposals, []);
   } finally { db.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+
+test('opt-in Worker timings expose duration only and redact private URL identifiers and request bodies',async()=>{
+ const events=[],original=console.info;
+ console.info=value=>events.push(JSON.parse(value));
+ try{
+  const response=await handleWorker(new Request('https://fixture-owner.example/v2/campaigns/private-campaign-id/push-token',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token:'secret-device-token',source:'private-source'})}),{ASTRAVAR_SYNC_METRICS:'1'});
+  assert.equal(response.status,503);
+  assert.match(response.headers.get('Server-Timing'),/^astravar;dur=[0-9.]+$/);
+  assert.deepEqual(events.map(x=>x.stage),['request_received','request_completed']);
+  assert.equal(events[0].requestId,events[1].requestId);
+  assert.equal(events[1].durationMilliseconds>=0,true);
+  for(const forbidden of ['private-campaign-id','secret-device-token','private-source'])assert.equal(JSON.stringify(events).includes(forbidden),false);
+ }finally{console.info=original;}
 });

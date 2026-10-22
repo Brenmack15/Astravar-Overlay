@@ -6,7 +6,7 @@
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/1.json": "8f92801eb01d6ed7d6ff4c5508e9fc4131146fbbcf9a9f8aad92e2596536ec30",
     "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/2.json": "50a395a8b87a7a119312af1b1edba8246f68aed77be8900baa29a5caff964361",
     "app/schemas/com.yazsras.astravar.data.SandboxSyncDb/1.json": "23de63787037f830e1295ba7cd7efbc7d62cf18e3ba836c4e511bec8fd6cef03",
-    "app/src/main/AndroidManifest.xml": "b66418063c763cc2f4c0775987af3af650a5b56dec51c3a65acdae4832feab67",
+    "app/src/main/AndroidManifest.xml": "b9438dec1584b67306d62cc0eca0c000fabaa7def2d8df159c9048e880c596fd",
     "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": "f7eefb74ebec642b318ab67053605ec5ede36dd02b38a2ae0c85819178821251",
     "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": "18e19a4abe551da58a02314124ef229420e8abe49f4ff5371552fae1fe800f6f",
     "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": "7e5b92d763929c131ddef1f8ee5f08bad520233939f51234feace666b45c77c3",
@@ -14,7 +14,7 @@
     "app/src/main/java/com/yazsras/astravar/data/SandboxSync.kt": "25f71e8aac585b24f83975796e9a4a7aa01b7c6a8c6f94607544bdf8775f5cf9",
     "app/src/main/java/com/yazsras/astravar/data/Store.kt": "17c00ac0996007b028b99af360205c59f0694b258e7184b267067ffa038ed3be",
     "app/src/main/java/com/yazsras/astravar/overlay/ArcaneSurface.kt": "e73af0007da85e7807f1e8d3245347eb6256d507c17b67bbb4dd456285669cbb",
-    "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": "60c2f1874d21a60f4bc6dd8490a6a295cbe75786601d438283fc9e53df79ef3e",
+    "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": "1dfe224ca7091a85675ce66a2a5bcafced89215a6e6bfe151797347a483e8713",
     "app/src/main/res/drawable-nodpi/astravar_armor_front.png": "25d225393ba934260690d184a5993805add290bdfdb76e05bcb7ff8486b355b3",
     "app/src/main/res/drawable-nodpi/astravar_cutout.webp": "580c7e31c3cab1ebfef5b5b449b660c45d3b055ff88c876f8f12876115cce7c4",
     "app/src/main/res/drawable-nodpi/astravar_reference.jpg": "c60543080b52334ec9e8637f6509c1a146e7f284d39d15a2d9c696a48e6df3dd",
@@ -385,6 +385,49 @@
         "reviewed_sha256": "aa977e9b193e4985cf842ca75160ec7004529d9bc293258be87e02337a8dc0df",
         "compatibility_review_baseline": "cf99a9f3e62f8e15a32a94fcf97cec9ae23fca9f",
         "reason": "Preserve original schema4 import receipts and byte-exact recovery snapshots across additive Room5 migration by recognizing the legacy state hash only when every new EP/PP value is unknown. Independently bind stored backup and fresh review to the same current records; known zero/nonzero denominations and later state changes continue to block rollback. Retain a schema5 mapped import as schema5 so verified EP/PP are not downgraded. Original source payloads, hashes, receipts, backup bodies, immutable schemas and owner signing configuration are unchanged."
+      }
+    }
+  },
+  "authorized_fast_sync_source_changes": {
+    "authorization": "Owner CODEX_WORK_DIRECTIVE.md, 21 October 2026",
+    "verified_source_baseline": "045bfaed33393675c8d8d621bf260636deb04dd8",
+    "scope": "Owner-authorized Astravar2.3 delivery: explicit automatic pause, signed wake hints, WorkManager recovery, optional quiet notification and atomic acquisition. Preserve all historical Room schemas, art, combat rules and original signing identity.",
+    "files": {
+      "app/src/main/AndroidManifest.xml": {
+        "previous_pinned_sha256": "b66418063c763cc2f4c0775987af3af650a5b56dec51c3a65acdae4832feab67",
+        "reviewed_sha256": "e7b394da965e1c1d0e11909017a82c7bd7739a7cfa434b4f4298e98a296d3c59",
+        "reason": "Owner-authorized Astravar2.3 delivery: explicit automatic pause, signed wake hints, WorkManager recovery, optional quiet notification and atomic acquisition. Preserve all historical Room schemas, art, combat rules and original signing identity."
+      },
+      "app/src/main/java/com/yazsras/astravar/overlay/OverlayService.kt": {
+        "previous_pinned_sha256": "60c2f1874d21a60f4bc6dd8490a6a295cbe75786601d438283fc9e53df79ef3e",
+        "reviewed_sha256": "1dfe224ca7091a85675ce66a2a5bcafced89215a6e6bfe151797347a483e8713",
+        "reason": "Owner-authorized Astravar2.3 delivery: explicit automatic pause, signed wake hints, WorkManager recovery, optional quiet notification and atomic acquisition. Preserve all historical Room schemas, art, combat rules and original signing identity."
+      }
+    },
+    "exact_overlay_replacements": [
+      {
+        "before": "    private var hidden=false\n",
+        "after": "    @Volatile private var hidden=false\n"
+      },
+      {
+        "before": "        // The existing visible foreground session keeps delivery active while the player uses ChatGPT.\n",
+        "after": "        // Only the visible play session polls. Hidden/screen-off delivery uses push and OS work.\n"
+      },
+      {
+        "before": "                    try { campaign.foreground() }\n",
+        "after": "                    try { if (!CampaignSyncPreferences(applicationContext).paused && !hidden &&\n                        !getSystemService(KeyguardManager::class.java).isKeyguardLocked) campaign.foreground() }\n"
+      }
+    ]
+  },
+  "authorized_pushy_source_changes": {
+    "authorization": "Owner ASTRAVAR2.3.2 replace Firebase with Pushy directive,22October2026",
+    "verified_source_baseline": "e00359f6c9f6ad6ecb116937fbe8471536237615",
+    "scope": "Replace only retired Firebase metadata/service with nonexported optional Pushy receiver/socket/job components and disabled boot/update receivers. Add normal WAKE_LOCK; preserve existing package, overlay special-use service, HTTPS-only/backup policy, campaign services, artwork, Room schemas, and original signing block. No exact alarm or battery exemption permission.",
+    "files": {
+      "app/src/main/AndroidManifest.xml": {
+        "previous_pinned_sha256": "e7b394da965e1c1d0e11909017a82c7bd7739a7cfa434b4f4298e98a296d3c59",
+        "reviewed_sha256": "b9438dec1584b67306d62cc0eca0c000fabaa7def2d8df159c9048e880c596fd",
+        "reason": "Owner-authorized optional provider replacement; separate default-off consent enables Pushy components only after authenticated registration. No campaign storage/schema or combat changes."
       }
     }
   }

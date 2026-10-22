@@ -32,7 +32,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
         .joinToString("") { "%02x".format(it.toInt() and 255) } }.sorted().joinToString("\n").ifBlank { "Unavailable" }
 }.getOrDefault("Unavailable")
 
-@Composable fun AstravarScreen(app: AstravarApp,startOverlay: ()->Unit,grantOverlay: ()->Unit,stopOverlay: ()->Unit) {
+@Composable fun AstravarScreen(app: AstravarApp,startOverlay: ()->Unit,grantOverlay: ()->Unit,stopOverlay: ()->Unit, ownerConnectionRequest: Long = 0L) {
     val s by app.repository.state.collectAsState()
     val error by app.repository.error.collectAsState()
     val history by app.repository.history.collectAsState()
@@ -43,6 +43,9 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     var configSection by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("Settings") }
     var campaignPage by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
     var tool by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
+    LaunchedEffect(ownerConnectionRequest) {
+        if (ownerConnectionRequest > 0) { tab = "Config"; configSection = "Settings"; tool = "Owner connection" }
+    }
     var elementPicker by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf(false)}
     val screenStates=androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     val snackbar=remember {SnackbarHostState()}

@@ -1,4 +1,8 @@
-# Astravar 2.2
+# Astravar 2.3.2 development candidate
+
+The isolated `feat/astravar-2.3-ultra-fast-sync` branch preserves the recovered Code 38 improvements without merging or changing PR #5. Version 2.3.2/code39 retains the permanent package and owner signing identity, compact indexed session reads, atomic acquire-and-assign, network-constrained WorkManager recovery and quiet opt-in pause/sync controls. Cloudflare remains the campaign synchronization service; foreground recovery, manual Sync Now and scheduled background recovery work without a push provider. Optional Pushy wake notifications replace Firebase. Pushy setup and delivery are separate acceptance checks and do not block the Cloudflare-only update. See [implementation and acceptance boundaries](docs/ULTRA_FAST_SYNC_V23.md).
+
+The sections below retain the inherited2.2 feature and recovery documentation.
 
 Native Android tabletop companion by Yazsras Studios, continuing the verified
 Astravar 2.0 source. Development branch: `feat/astravar-2.1-player-first`.

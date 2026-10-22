@@ -1,0 +1,37 @@
+{
+  "evidence": "LOCAL_NODE_SQLITE_FICTIONAL_FIXTURES_ONLY",
+  "baseline": "045bfaed33393675c8d8d621bf260636deb04dd8",
+  "recordsInDatabase": 1800,
+  "samplesPerVersion": 100,
+  "warmupCalls": 10,
+  "hostedHttpsMeasured": false,
+  "androidCommitMeasured": false,
+  "physicalPhoneMeasured": false,
+  "identicalProjectedRecords": true,
+  "before": {
+    "timings": {
+      "count": 100,
+      "p50Milliseconds": 1.382,
+      "p95Milliseconds": 2.235,
+      "p99Milliseconds": 3.907
+    },
+    "databaseQueriesPerCall": [
+      13
+    ],
+    "responseBytes": 9529,
+    "recordCount": 25
+  },
+  "after": {
+    "timings": {
+      "count": 100,
+      "p50Milliseconds": 0.317,
+      "p95Milliseconds": 0.638,
+      "p99Milliseconds": 0.928
+    },
+    "databaseQueriesPerCall": [
+      2
+    ],
+    "responseBytes": 9529,
+    "recordCount": 25
+  }
+}

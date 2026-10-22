@@ -17,7 +17,25 @@ if changed:
 sync_review = manifest.get('authorized_campaign_sync_source_changes', {})
 assert sync_review.get('verified_source_baseline') == 'abae4f49beec75d14a364be91f7d0fb4303524ad'
 for name, review in sync_review['files'].items():
-    assert review['reviewed_sha256'] == manifest['files'][name] and review['previous_pinned_sha256'] != review['reviewed_sha256']
+    fast = manifest.get('authorized_fast_sync_source_changes', {}).get('files', {}).get(name)
+    expected = fast['previous_pinned_sha256'] if fast else manifest['files'][name]
+    assert review['reviewed_sha256'] == expected and review['previous_pinned_sha256'] != review['reviewed_sha256']
+fast = manifest.get('authorized_fast_sync_source_changes', {})
+pushy = manifest.get('authorized_pushy_source_changes', {})
+if fast:
+    assert fast.get('verified_source_baseline') == '045bfaed33393675c8d8d621bf260636deb04dd8'
+    for name, review in fast['files'].items():
+        successor = pushy.get('files', {}).get(name)
+        expected = successor['previous_pinned_sha256'] if successor else manifest['files'][name]
+        assert review['reviewed_sha256'] == expected
+        assert review['previous_pinned_sha256'] != review['reviewed_sha256']
+if pushy:
+    assert pushy.get('verified_source_baseline') == 'e00359f6c9f6ad6ecb116937fbe8471536237615'
+    assert set(pushy['files']) == {'app/src/main/AndroidManifest.xml'}
+    for name, review in pushy['files'].items():
+        assert review['reviewed_sha256'] == manifest['files'][name]
+        assert review['previous_pinned_sha256'] == fast['files'][name]['reviewed_sha256']
+        assert review['previous_pinned_sha256'] != review['reviewed_sha256']
 
 reviewed = len(manifest.get('authorized_player_first_source_changes', {}).get('files', {}))
 print(f"Verified {len(manifest['files'])} pinned foundation files ({reviewed} reviewed 2.1 source changes) and unchanged owner signing block")

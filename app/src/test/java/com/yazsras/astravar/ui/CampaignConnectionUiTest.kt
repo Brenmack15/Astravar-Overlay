@@ -22,12 +22,28 @@ import org.robolectric.annotation.LooperMode
 class CampaignConnectionUiTest {
     @get:Rule val compose = createEmptyComposeRule()
     private fun show(view: CampaignConnectionView, auto: (Set<String>) -> Unit = {}, decision: (String, Boolean) -> Unit = { _, _ -> },
-        restrict: (Set<String>,Set<String>) -> Unit = { _, _ -> }): AutoCloseable {
+        restrict: (Set<String>,Set<String>) -> Unit = { _, _ -> }, pause: (Boolean) -> Unit = {}, sync: () -> Unit = {}): AutoCloseable {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         activity.get().setContent { AstravarTheme {
-            CampaignConnectionContent(view, { _, _, _, _, _ -> }, {}, {}, {}, auto, decision, {}, { _, _ -> }, {}, {}, restrict)
+            CampaignConnectionContent(view, { _, _, _, _, _ -> }, {}, sync, {}, auto, decision, {}, { _, _ -> }, {}, {}, restrict, pause)
         } }
         return AutoCloseable { activity.pause().stop().destroy() }
+    }
+
+    @Test fun pausing_delivery_does_not_revoke_standing_permissions_and_manual_sync_stays_available() {
+        var changedPause: Boolean? = null
+        var changedScopes: Set<String>? = null
+        var syncs = 0
+        show(CampaignConnectionView(connected = true, automaticSyncPaused = true, readScopes = setOf("hp"),
+            writeScopes = setOf("hp"), autoSyncScopes = setOf("hp")), auto = { changedScopes = it },
+            pause = { changedPause = it }, sync = { syncs++ }).use {
+            compose.onNodeWithTag("campaign-connection-status").assertTextEquals("Paused")
+            compose.onNodeWithText("Sync now").performScrollTo().assertIsEnabled().performClick()
+            assertEquals(1, syncs)
+            compose.onNodeWithTag("campaign-sync-pause").performScrollTo().assertIsOn().performClick()
+            assertEquals(false, changedPause)
+            assertNull(changedScopes)
+        }
     }
 
     @Test fun automatic_saves_require_both_category_selection_and_explicit_authorization() {
