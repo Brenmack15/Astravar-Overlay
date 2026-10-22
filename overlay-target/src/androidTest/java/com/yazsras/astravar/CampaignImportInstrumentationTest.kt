@@ -18,15 +18,20 @@ import androidx.test.uiautomator.Until
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
+import org.junit.FixMethodOrder
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.runners.MethodSorters
 import java.io.File
 import java.security.MessageDigest
 import java.util.regex.Pattern
 
-/** Disposable emulator only. Every document and source in this suite is explicitly fictional. */
+/** Disposable emulator only. Every document and source in this suite is explicitly fictional.
+ * The named stages share an ordered import/recovery lifecycle. The host harness additionally
+ * verifies copied database state between each import and its separately confirmed rollback. */
 @RunWith(AndroidJUnit4::class)
+@FixMethodOrder(MethodSorters.NAME_ASCENDING)
 class CampaignImportInstrumentationTest {
     @get:Rule val failureEvidence = NativeFailureEvidence()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -756,7 +761,7 @@ class CampaignImportInstrumentationTest {
         openTypedPartyTab("Equipment")
         captureMapped("equipment", "Party", "Fictional Mapped Lens", "Carried · quantity unknown")
         openTypedPartyTab("Currency")
-        captureMapped("currency", "Party", "Fictional Mapped Purse", "? cp · 2 sp · 7 gp")
+        captureMapped("currency", "Party", "Fictional Mapped Purse", "? cp · 2 sp · 7 gp · ? ep · ? pp")
         tap("‹ Party")
         tap("Fictional Mapped Owl")
         observeMappedOwlHeader()
