@@ -3,7 +3,7 @@ name: Astravar owner connection verification
 # Both verify the exact pushed source; the original owner-signed APK is checked separately.
 on:
   push:
-    branches: ['feat/astravar-2.1-player-first', 'feat/astravar-2.3-ultra-fast-sync']
+    branches: ['feat/astravar-2.1-player-first', 'feat/astravar-2.3-ultra-fast-sync', 'ci/astravar-2.3.2-final']
     paths:
       - 'backend/owner-bridge/**'
       - 'app/**'
@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ github.sha }}
+          ref: 4eba26fcd1b057eaecf54e2cd493c000625d95e0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
