@@ -1,7 +1,7 @@
 name: Bounded Android verification
 on:
   push:
-    branches: ['feat/astravar-android', 'feat/astravar-android/**', 'feat/astravar-inventory-mvp-v170', 'feat/astravar-2.0-integrated', 'feat/astravar-2.0-ui-rebuild']
+    branches: ['feat/astravar-android', 'feat/astravar-android/**', 'feat/astravar-inventory-mvp-v170', 'feat/astravar-2.0-integrated', 'feat/astravar-2.0-ui-rebuild', 'ci/astravar-2.3.2-final']
   pull_request:
   workflow_dispatch:
     inputs:
@@ -33,6 +33,8 @@ jobs:
       INVENTORY_BETA: ${{ github.head_ref == 'feat/astravar-inventory-mvp-v170' || github.ref_name == 'feat/astravar-inventory-mvp-v170' || github.head_ref == 'feat/astravar-2.0-integrated' || github.ref_name == 'feat/astravar-2.0-integrated' || github.head_ref == 'feat/astravar-2.0-ui-rebuild' || github.ref_name == 'feat/astravar-2.0-ui-rebuild' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 4eba26fcd1b057eaecf54e2cd493c000625d95e0
       - name: Select explicit overlay-only recheck
         env:
           PUSH_MESSAGE: ${{ github.event.head_commit.message }}
