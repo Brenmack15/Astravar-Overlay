@@ -25,8 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 65
     env:
-      ASTRAVAR_VERSION_CODE: '37'
-      ASTRAVAR_VERSION_NAME: '2.3.0'
+      ASTRAVAR_VERSION_CODE: '39'
+      ASTRAVAR_VERSION_NAME: '2.3.2'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -76,8 +76,8 @@ jobs:
           trap 'rm -f "$ASTRAVAR_KEYSTORE"' EXIT
           bash ./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease
           mkdir -p validation/owner-connection
-          cp app/build/outputs/apk/release/app-release.apk validation/owner-connection/Astravar-2.3-CI-ONLY-code37.apk
-          python3 scripts/inspect_release_apk.py validation/owner-connection/Astravar-2.3-CI-ONLY-code37.apk --package com.yazsras.astravar --version-name 2.3.0 --version-code 37 --output validation/owner-connection/ci-apk-metadata.json
+          cp app/build/outputs/apk/release/app-release.apk validation/owner-connection/Astravar-2.3-CI-ONLY-code39.apk
+          python3 scripts/inspect_release_apk.py validation/owner-connection/Astravar-2.3-CI-ONLY-code39.apk --package com.yazsras.astravar --version-name 2.3.2 --version-code 39 --output validation/owner-connection/ci-apk-metadata.json
           git rev-parse HEAD > validation/owner-connection/SOURCE_COMMIT.txt
           sha256sum validation/owner-connection/*.apk > validation/owner-connection/SHA256SUMS.txt
           printf '%s\n' 'CI TEST ONLY. Disposable signer; not an owner-signed update. These unit and Compose checks do not establish deployed HTTPS, physical device approval, MCP discovery, install/update or backup/restore acceptance.' > validation/owner-connection/VERIFICATION_LIMITS.txt
