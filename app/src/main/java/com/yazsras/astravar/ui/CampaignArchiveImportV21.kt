@@ -136,7 +136,7 @@ internal class CampaignOpenDocumentContractV21 : ActivityResultContracts.OpenDoc
                 color = RebuildPalette.Muted)
             PlayerButton(onClick = {
                 if (!busy) {
-                    busy = true; failure = false; conflictAudit = null
+                    busy = true; failure = false; conflictAudit = null; status = ""
                     scope.launch {
                         try {
                             val result = withContext(Dispatchers.IO) {
@@ -164,6 +164,8 @@ internal class CampaignOpenDocumentContractV21 : ActivityResultContracts.OpenDoc
                     style = MaterialTheme.typography.bodyMedium)
                 Text("${result.blockedCount} integrity problems · ${result.reviewCount} decisions · ${result.noticeCount} notices",
                     style = MaterialTheme.typography.bodyMedium)
+                Text("Snapshot of saved records when this check ran. Run verification again after edits, imports or sync.",
+                    color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
                 if (result.activeImportCount == 0) Text("There are no active imports to verify yet. Choose a campaign archive above for a new import preview.", color = RebuildPalette.Muted)
                 for (level in CampaignConflictLevel.entries) {
                     val findings = result.findings.filter { it.level == level }
@@ -237,7 +239,7 @@ internal class CampaignOpenDocumentContractV21 : ActivityResultContracts.OpenDoc
             PlayerButton(enabled = !busy && !alreadyImported && candidate.valid && verifiedBackupHash == candidate.fingerprint && consent,
                 onClick = {
                     if (!busy && consent && verifiedBackupHash == candidate.fingerprint) {
-                        busy = true; failure = false; consent = false
+                        busy = true; failure = false; consent = false; conflictAudit = null
                         scope.launch {
                             try {
                                 val receipt = importer.commit(candidate, confirmed = true)
@@ -274,7 +276,7 @@ internal class CampaignOpenDocumentContractV21 : ActivityResultContracts.OpenDoc
         PlayerSheet("Review rollback", onDismiss = { if (!busy) { rollbackReview = null; rollbackConsent = false } }, actions = {
             PlayerButton(enabled = !busy && rollbackConsent, onClick = {
                 if (!busy && rollbackConsent) {
-                    busy = true; failure = false; rollbackConsent = false
+                    busy = true; failure = false; rollbackConsent = false; conflictAudit = null
                     scope.launch {
                         try {
                             val result = importer.rollback(receipt.packageHash, confirmed = true)

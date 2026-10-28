@@ -49,6 +49,8 @@ data class CampaignConflictAudit(
 /** Bounds the phone UI and copied report even when a damaged archive has many errors. */
 internal class CampaignConflictAuditBuilder(private val findingLimit: Int = 150) {
     private val allKeys = mutableSetOf<String>()
+
+    init { require(findingLimit >= 0) }
     private val shown = mutableListOf<CampaignConflictFinding>()
     private var blocked = 0
     private var review = 0
@@ -57,14 +59,21 @@ internal class CampaignConflictAuditBuilder(private val findingLimit: Int = 150)
     fun add(level: CampaignConflictLevel, area: String, title: String, evidence: String, nextStep: String) {
         val boundedTitle = title.take(160)
         val boundedEvidence = evidence.take(400)
-        val key = listOf(level.name, area, boundedTitle, boundedEvidence).joinToString("\u0000")
+        // Hash full evidence before shortening it so distinct long identities stay distinct.
+        val key = campaignHash(listOf(level.name, area, title, evidence).joinToString("\u0000"))
         if (!allKeys.add(key)) return
         when (level) {
             CampaignConflictLevel.BLOCKED -> blocked++
             CampaignConflictLevel.REVIEW -> review++
             CampaignConflictLevel.NOTICE -> notices++
         }
-        if (shown.size < findingLimit) shown += CampaignConflictFinding(level, area, boundedTitle, boundedEvidence, nextStep)
+        val finding = CampaignConflictFinding(level, area.take(80), boundedTitle, boundedEvidence, nextStep.take(400))
+        if (shown.size < findingLimit) shown += finding
+        else {
+            // Notices encountered first must never crowd a later integrity failure out of the UI.
+            val lowestPriority = shown.indices.maxByOrNull { shown[it].level.ordinal }
+            if (lowestPriority != null && level.ordinal < shown[lowestPriority].level.ordinal) shown[lowestPriority] = finding
+        }
     }
 
     fun build(state: LedgerExport, activeImports: Int, verifiedImports: Int) = CampaignConflictAudit(
@@ -139,18 +148,42 @@ internal fun checkLocalCampaignConflicts(state: LedgerExport, report: CampaignCo
 internal class CampaignConflictVerifier(private val db: CampaignLedgerDb) {
     private val dao = db.archiveDao()
 
-    suspend fun auditConflicts(): CampaignConflictAudit {
+    suspend fun auditConflicts(): CampaignConflictAudit = db.withTransaction {
+        // Keep rows, retained sources and streamed backups in one consistent local snapshot.
         // Copy only the local rows needed for comparison; do not retain all archived source files/backups.
-        val state = db.withTransaction {
-            CampaignBackup(db).snapshot(includeArchive = false).copy(archive = CampaignArchiveState(
-                references = dao.allReferences(), relations = dao.allRelations(), receipts = dao.allReceipts()))
-        }
+        val state = CampaignBackup(db).snapshot(includeArchive = false).copy(archive = CampaignArchiveState(
+            references = dao.allReferences(), relations = dao.allRelations(), receipts = dao.allReceipts()))
         val report = CampaignConflictAuditBuilder()
         checkLocalCampaignConflicts(state, report)
         val receipts = state.archive.receipts
-        val rolledBack = receipts.filter { it.packageHash.startsWith("rollback:") }
-            .map { it.packageHash.removePrefix("rollback:") }.toSet()
-        val active = receipts.filter { it.state == "APPLIED" && it.packageHash !in rolledBack }
+        val originals = receipts.filterNot { it.packageHash.startsWith("rollback:") }.associateBy { it.packageHash }
+        val rolledBack = mutableSetOf<String>()
+        receipts.forEach { receipt ->
+            if (receipt.packageHash.startsWith("rollback:")) {
+                val hash = receipt.packageHash.removePrefix("rollback:")
+                val original = originals[hash]
+                if (receipt.state != "ROLLED_BACK" || original == null || original.state != "APPLIED" ||
+                    receipt.campaignId != original.campaignId || receipt.recordCount != original.recordCount ||
+                    receipt.relationCount != original.relationCount) report.add(
+                    CampaignConflictLevel.BLOCKED, "Saved imports", "Rollback receipt identity is inconsistent",
+                    "Receipt ${receipt.packageHash} does not describe a matching applied import.",
+                    "Preserve both receipts and verify the original import and recovery evidence.")
+                else try {
+                    // A state label alone cannot establish that an import was safely recovered.
+                    val backup = requireNotNull(dao.backupMetadata(hash)) { "The retained recovery backup is missing." }
+                    check(receipt.readbackSha256 == backup.sourceStateSha256) { "The rollback readback does not match its pre-import state identity." }
+                    checkBackupBytes(backup)
+                    rolledBack += hash
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { report.add(
+                    CampaignConflictLevel.BLOCKED, "Saved imports", "Rollback recovery evidence failed integrity verification",
+                    "Receipt ${receipt.packageHash}: ${e.message ?: "The recovery evidence could not be verified."}",
+                    "Preserve current data and both receipts; verify the original recovery backup before excluding this import.") }
+            } else if (receipt.state != "APPLIED") report.add(CampaignConflictLevel.BLOCKED, "Saved imports", "Unrecognized import receipt state",
+                "Package ${receipt.packageHash} has saved state ${receipt.state}.",
+                "Preserve the receipt and original source; do not assume that the import was applied or rolled back.")
+        }
+        val active = originals.values.filter { it.state == "APPLIED" && it.packageHash !in rolledBack }
         var verified = 0
 
         active.forEach { receipt ->
@@ -169,9 +202,11 @@ internal class CampaignConflictVerifier(private val db: CampaignLedgerDb) {
                         "Stored bytes do not match the receipt's SHA-256.", "Restore verified evidence before attempting a new import.")
                     else -> {
                         val archive = campaignJson.decodeFromString<CampaignArchivePayload>(source.payloadJson)
-                        if (archive.campaignId != receipt.campaignId || archive.records.size != receipt.recordCount) finding(
+                        val sourceRelationCount = archive.records.sumOf { it.relationIds.distinct().size }
+                        if (archive.campaignId != receipt.campaignId || archive.records.size != receipt.recordCount ||
+                            sourceRelationCount != receipt.relationCount) finding(
                             CampaignConflictLevel.BLOCKED, "Receipt does not describe its source",
-                            "The campaign identity or source record count differs from the receipt.", "Check the original receipt and source archive.")
+                            "The campaign identity, source record count or relationship count differs from the receipt.", "Check the original receipt and source archive.")
                         compareSavedSource(archive, hash, state).forEach { error -> finding(
                             CampaignConflictLevel.REVIEW, "Imported record differs from saved state", error,
                             "Compare its original source with the local revision; never overwrite later confirmed edits automatically.") }
@@ -194,7 +229,7 @@ internal class CampaignConflictVerifier(private val db: CampaignLedgerDb) {
                 e.message ?: "Stored import evidence could not be decoded.", "Preserve the original records and review the source and receipt.") }
             if (passed) verified++
         }
-        return report.build(state, active.size, verified)
+        report.build(state, active.size, verified)
     }
 
     private fun compareSavedSource(source: CampaignArchivePayload, hash: String, state: LedgerExport): List<String> {

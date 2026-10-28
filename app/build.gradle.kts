@@ -13,8 +13,8 @@ android {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(39)
-        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("2.3.2")
+        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(40)
+        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("2.3.3")
     }
     signingConfigs {
         create("owner") {

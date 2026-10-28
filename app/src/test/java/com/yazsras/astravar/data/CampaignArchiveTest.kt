@@ -463,4 +463,92 @@ class CampaignArchiveTest {
         assertEquals(receipt, db.archiveDao().receipt(receipt.packageHash))
     }
 
+    @Test fun compactAuditKeepsSevereFindingsAndCountsDistinctLongEvidence() {
+        val builder = CampaignConflictAuditBuilder(findingLimit = 2)
+        val sharedPrefix = "Fictional long identity ".repeat(30)
+        builder.add(CampaignConflictLevel.NOTICE, "Source notes", "Same bounded title", sharedPrefix + "a", "Review source")
+        builder.add(CampaignConflictLevel.NOTICE, "Source notes", "Same bounded title", sharedPrefix + "b", "Review source")
+        builder.add(CampaignConflictLevel.NOTICE, "Source notes", "Same bounded title", sharedPrefix + "b", "Review source")
+        builder.add(CampaignConflictLevel.REVIEW, "Currency", "Fictional wallet ambiguity", "Two distinct purse IDs", "Keep both")
+        builder.add(CampaignConflictLevel.BLOCKED, "Saved imports", "Fictional missing backup", "No retained recovery bytes", "Preserve data")
+        val report = builder.build(LedgerExport(exportedAt = 0, items = emptyList(), events = emptyList()), 0, 0)
+        assertEquals(2, report.noticeCount)
+        assertEquals(1, report.reviewCount)
+        assertEquals(1, report.blockedCount)
+        assertEquals(2, report.omittedCount)
+        assertEquals(listOf(CampaignConflictLevel.BLOCKED, CampaignConflictLevel.REVIEW), report.findings.map { it.level })
+        assertTrue(report.shareableSummary().contains("Fictional missing backup"))
+    }
+
+    @Test fun oneTapAuditChecksReceiptRelationshipCountsWithoutRewritingEvidence() = runBlocking {
+        val receipt = import(payload(records = listOf(reference("fictional-from", relations = listOf("fictional-to")), reference("fictional-to"))))
+        db.openHelper.writableDatabase.execSQL("UPDATE campaign_import_receipts SET relationCount=99 WHERE packageHash=?", arrayOf(receipt.packageHash))
+        val before = CampaignBackup(db).snapshot()
+        val report = CampaignConflictVerifier(db).auditConflicts()
+        assertEquals(1, report.activeImportCount)
+        assertEquals(0, report.verifiedImportCount)
+        assertTrue(report.findings.any { it.level == CampaignConflictLevel.BLOCKED && it.title == "Receipt does not describe its source" })
+        assertEquals(before, CampaignBackup(db).snapshot())
+    }
+
+    @Test fun malformedRollbackCannotHideAnActiveImportFromOneTapAudit() = runBlocking {
+        val receipt = import()
+        db.archiveDao().insert(receipt.copy(packageHash = "rollback:${receipt.packageHash}", state = "APPLIED"))
+        db.openHelper.writableDatabase.execSQL("DELETE FROM campaign_archive_sources WHERE packageHash=?", arrayOf(receipt.packageHash))
+        val before = CampaignBackup(db).snapshot()
+        val report = CampaignConflictVerifier(db).auditConflicts()
+        assertEquals(1, report.activeImportCount)
+        assertEquals(0, report.verifiedImportCount)
+        assertTrue(report.findings.any { it.title == "Rollback receipt identity is inconsistent" })
+        assertTrue(report.findings.any { it.title == "Original import source is missing" })
+        assertEquals(before, CampaignBackup(db).snapshot())
+    }
+
+    @Test fun validRollbackExcludesOnlyItsOriginalImportFromOneTapAudit() = runBlocking {
+        import(payload(records = listOf(reference("fictional-first"))))
+        val second = import(payload(records = listOf(reference("fictional-second"))))
+        repo.archive.rollback(second.packageHash, confirmed = true)
+        val before = CampaignBackup(db).snapshot()
+        val report = CampaignConflictVerifier(db).auditConflicts()
+        assertEquals(1, report.activeImportCount)
+        assertEquals(1, report.verifiedImportCount)
+        assertEquals(0, report.blockedCount)
+        assertEquals(before, CampaignBackup(db).snapshot())
+    }
+
+    @Test fun corruptedRecoveryBytesBlockOneTapVerificationWithoutAttemptingRecovery() = runBlocking {
+        val receipt = import()
+        db.openHelper.writableDatabase.execSQL("UPDATE campaign_import_backups SET snapshotJson=snapshotJson || 'x' WHERE packageHash=?", arrayOf(receipt.packageHash))
+        val before = CampaignBackup(db).snapshot()
+        val report = CampaignConflictVerifier(db).auditConflicts()
+        assertEquals(0, report.verifiedImportCount)
+        assertTrue(report.findings.any { it.level == CampaignConflictLevel.BLOCKED && it.title == "Recovery backup integrity failed" })
+        assertEquals(before, CampaignBackup(db).snapshot())
+    }
+
+    @Test fun rollbackStateLabelCannotHideImportWithoutMatchingRecoveryReadback() = runBlocking {
+        val receipt = import()
+        db.archiveDao().insert(receipt.copy(packageHash = "rollback:${receipt.packageHash}", state = "ROLLED_BACK"))
+        val before = CampaignBackup(db).snapshot()
+        val report = CampaignConflictVerifier(db).auditConflicts()
+        assertEquals(1, report.activeImportCount)
+        assertEquals(1, report.verifiedImportCount)
+        assertTrue(report.findings.any { it.level == CampaignConflictLevel.BLOCKED &&
+            it.title == "Rollback recovery evidence failed integrity verification" && it.evidence.contains("readback") })
+        assertEquals(before, CampaignBackup(db).snapshot())
+    }
+
+    @Test fun corruptedRollbackBackupRemainsVisibleInsteadOfExcludingItsImport() = runBlocking {
+        val receipt = import()
+        repo.archive.rollback(receipt.packageHash, confirmed = true)
+        db.openHelper.writableDatabase.execSQL("UPDATE campaign_import_backups SET snapshotJson=snapshotJson || 'x' WHERE packageHash=?", arrayOf(receipt.packageHash))
+        val before = CampaignBackup(db).snapshot()
+        val report = CampaignConflictVerifier(db).auditConflicts()
+        assertEquals(1, report.activeImportCount)
+        assertEquals(0, report.verifiedImportCount)
+        assertTrue(report.findings.any { it.level == CampaignConflictLevel.BLOCKED &&
+            it.title == "Rollback recovery evidence failed integrity verification" })
+        assertEquals(before, CampaignBackup(db).snapshot())
+    }
+
 }
