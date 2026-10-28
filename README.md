@@ -35,6 +35,11 @@ Campaign retains inventory, inventions, relationships and player-known facts,
 with versioned checkpoints and merge-only reviewed backups. Config includes
 an eleven-prompt searchable ChatGPT toolkit, device/build/package/certificate
 diagnostics, backup tools and authenticated connection readiness.
+Campaign Import also has a **Verify all saved conflicts** read-only audit for
+source and backup integrity, relationship gaps, duplicate identities, wallets
+and independent import readback. It groups unresolved findings and can copy a
+bounded diagnostic for voluntary ChatGPT review; it never overwrites campaign
+history or changes connection permissions. See [conflict verification](docs/CONFLICT_VERIFICATION.md).
 
 ## Preservation and authority
 

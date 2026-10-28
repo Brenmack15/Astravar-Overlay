@@ -401,4 +401,66 @@ class CampaignArchiveTest {
         assertTrue(repo.archive.verify(first.packageHash).valid)
     }
 
+    @Test fun oneTapConflictAuditVerifiesSavedImportWithoutChangingCampaignData() = runBlocking {
+        import(payload(mapped = mapped()))
+        val before = CampaignBackup(db).snapshot()
+        val result = CampaignConflictVerifier(db).auditConflicts()
+        assertEquals(1, result.activeImportCount)
+        assertEquals(1, result.verifiedImportCount)
+        assertEquals(0, result.blockedCount)
+        assertEquals(0, result.reviewCount)
+        assertTrue(result.noBlockingConflicts)
+        assertTrue(result.noticeCount >= 1) // Original unknown source detail remains visible.
+        assertFalse(result.shareableSummary().contains(reference().body))
+        assertFalse(result.shareableSummary().contains("3 gold"))
+        assertEquals(before, CampaignBackup(db).snapshot())
+    }
+
+    @Test fun oneTapAuditIdentifiesUnresolvedRelationsAndCorruptedReferenceHashes() = runBlocking {
+        val item = reference("fictional-origin", relations = listOf("fictional-unknown"))
+        import(payload(records = listOf(item)))
+        val first = CampaignConflictVerifier(db).auditConflicts()
+        assertEquals(0, first.blockedCount)
+        assertTrue(first.reviewCount > 0)
+        assertTrue(first.findings.any { it.area == "Relationships" && it.evidence.contains("fictional-unknown") })
+
+        db.openHelper.writableDatabase.execSQL("UPDATE campaign_references SET body=? WHERE externalId=?",
+            arrayOf("Fictional local alteration without its content hash", item.externalId))
+        val before = CampaignBackup(db).snapshot()
+        val damaged = CampaignConflictVerifier(db).auditConflicts()
+        assertTrue(damaged.blockedCount > 0)
+        assertTrue(damaged.findings.any { it.area == "Source integrity" })
+        assertEquals(0, damaged.verifiedImportCount)
+        assertEquals(before, CampaignBackup(db).snapshot())
+    }
+
+    @Test fun oneTapAuditFlagsAmbiguousItemAndWalletIdentitiesWithoutCombiningThem() = runBlocking {
+        val data = mapped()
+        val firstItem = data.items.single()
+        db.ledgerDao().insertItem(firstItem)
+        db.ledgerDao().insertItem(firstItem.copy(id = "fictional-other-object", notionPageId = "https://notion.so/Page-11111111-1111-1111-1111-111111111111"))
+        db.recordsDao().put(data.records.characterProfiles.single())
+        val firstWallet = data.records.wallets.single()
+        db.partyDao().put(firstWallet)
+        db.partyDao().put(firstWallet.copy(id = "fictional-other-wallet", name = "Fictional separate purse"))
+        val snapshot = CampaignBackup(db).snapshot()
+        val report = CampaignConflictVerifier(db).auditConflicts()
+        assertTrue(report.findings.any { it.area == "Inventory identity" && it.level == CampaignConflictLevel.REVIEW })
+        assertTrue(report.findings.any { it.area == "Currency" && it.level == CampaignConflictLevel.REVIEW })
+        assertEquals(snapshot, CampaignBackup(db).snapshot())
+        assertEquals(2, db.ledgerDao().allItems().size)
+        assertEquals(2, db.partyDao().allWallets().size)
+    }
+
+    @Test fun oneTapAuditDetectsMissingImportEvidenceWithoutReplayingOrRepairingIt() = runBlocking {
+        val receipt = import()
+        db.openHelper.writableDatabase.execSQL("DELETE FROM campaign_archive_sources WHERE packageHash=?", arrayOf(receipt.packageHash))
+        val before = CampaignBackup(db).snapshot()
+        val report = CampaignConflictVerifier(db).auditConflicts()
+        assertEquals(0, report.verifiedImportCount)
+        assertTrue(report.findings.any { it.level == CampaignConflictLevel.BLOCKED && it.title.contains("source is missing") })
+        assertEquals(before, CampaignBackup(db).snapshot())
+        assertEquals(receipt, db.archiveDao().receipt(receipt.packageHash))
+    }
+
 }
