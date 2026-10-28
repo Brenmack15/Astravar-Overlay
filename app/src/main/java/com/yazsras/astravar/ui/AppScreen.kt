@@ -153,7 +153,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                         }
                         else -> Column(Modifier.fillMaxSize()) {
                             V2SectionTabs(listOf("Settings", "ChatGPT"), configSection) { configSection = it }
-                            if (configSection == "ChatGPT") ChatGptPromptsPage()
+                            if (configSection == "ChatGPT") ChatGptPromptsPage(app.campaignLedger.prompts)
                             else RebuildConfigHub {tool=it}
                         }
                     }
@@ -171,7 +171,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                         "Rules & profile" -> RulesPage(current,actions,if(prefs.mode in listOf(Ability.ARCANE,Ability.SPELL)) emptyList() else prefs.elements)
                         "Resources & recovery" -> ResourcesPage(current,history,actions)
                         "Spell reservoir" -> CoresPage(current,actions)
-                        "ChatGPT toolkit" -> ChatGptPromptsPage()
+                        "ChatGPT Prompts", "ChatGPT toolkit" -> ChatGptPromptsPage(app.campaignLedger.prompts)
                         "Spell library" -> PayloadsPage(current,actions,app.preferences,prefs.selectedPayloads)
                         "Roll history" -> CombatHistoryPage(current)
                         "Overlay & appearance" -> SettingsPage(app,current,actions,startOverlay,grantOverlay,stopOverlay)

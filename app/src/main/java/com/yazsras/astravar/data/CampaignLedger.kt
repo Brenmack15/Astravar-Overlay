@@ -124,19 +124,21 @@ interface LedgerDao {
     CraftExecution::class, CraftConsumption::class, PartySheetRecord::class, ItemPlacement::class,
     PartyWallet::class, CampaignCheckpoint::class, ExternalRecordReference::class,
     CampaignReferenceRecord::class, CampaignReferenceRelation::class, CampaignImportReceipt::class,
-    CampaignImportBackup::class, CampaignArchiveSource::class], version = 5, exportSchema = true)
+    CampaignImportBackup::class, CampaignArchiveSource::class,
+    ChatGptPrompt::class, ChatGptPromptCatalogState::class], version = 6, exportSchema = true)
 @TypeConverters(PartyConverters::class)
 abstract class CampaignLedgerDb : RoomDatabase() {
     abstract fun ledgerDao(): LedgerDao
     abstract fun recordsDao(): CampaignRecordsDao
     abstract fun partyDao(): PartyRecordsDao
     abstract fun archiveDao(): CampaignArchiveDao
+    abstract fun promptDao(): ChatGptPromptDao
 
     companion object {
         fun open(context: Context): CampaignLedgerDb = Room.databaseBuilder(
             context.applicationContext, CampaignLedgerDb::class.java, "astravar-campaign-ledger.db"
         ).enableMultiInstanceInvalidation()
-            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4, CAMPAIGN_MIGRATION_4_5).build() // NEVER fallbackToDestructiveMigration()
+            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4, CAMPAIGN_MIGRATION_4_5, CAMPAIGN_MIGRATION_5_6).build() // NEVER fallbackToDestructiveMigration()
     }
 }
 
@@ -145,6 +147,7 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
     val records = CampaignRecordsRepository(db)
     val party = PartyRecordsRepository(db)
     val archive = CampaignArchiveRepository(db)
+    val prompts = ChatGptPromptRepository(db)
     val items: Flow<List<LedgerItem>> = dao.observeItems()
     fun eventsForItem(itemId: String): Flow<List<LedgerEvent>> = dao.eventsForItem(itemId)
 

@@ -9,7 +9,9 @@ import sqlite3
 ARCHIVE_TABLES = {"campaign_references", "campaign_reference_relations", "campaign_import_receipts",
                   "campaign_import_backups", "campaign_archive_sources"}
 MARKER = "ASTRAVAR_FICTIONAL_NATIVE_IMPORT_V1"
-SUPPORTED_ROOM_SCHEMAS = (4, 5)
+SUPPORTED_ROOM_SCHEMAS = (4, 5, 6)
+# Prompt settings add Room tables without changing the campaign backup protocol.
+SUPPORTED_MAPPED_EXPORT_SCHEMAS = (4, 5)
 
 
 def sha(value):
@@ -142,7 +144,7 @@ def verify_mapped(database, manifest, fixture, *, rolled_back=False, synthetic_d
     assert source["sourceRootUrl"].startswith("https://example.invalid/")
     assert all(row["sourceUrl"].startswith("https://example.invalid/") and row["visibility"] == "player" for row in source["records"])
     mapped = source["mapped"]
-    assert mapped["format"] == "astravar-campaign-items" and mapped["schema"] in SUPPORTED_ROOM_SCHEMAS
+    assert mapped["format"] == "astravar-campaign-items" and mapped["schema"] in SUPPORTED_MAPPED_EXPORT_SCHEMAS, "Unsupported mapped campaign export schema"
     assert set(mapped["records"]) == set(MAPPED_TABLES)
     groups = {"ledger_items": mapped["items"], "ledger_events": mapped["events"]}
     groups.update({table: mapped["records"][label] for label, table in MAPPED_TABLES.items()})
@@ -172,7 +174,7 @@ def verify_mapped(database, manifest, fixture, *, rolled_back=False, synthetic_d
                     assert key not in actual, "Typed row survived rollback: " + table
                     continue
                 expected_row = dict(row)
-                if table == "party_wallets" and room_schema == 5 and mapped["schema"] == 4:
+                if table == "party_wallets" and room_schema >= 5 and mapped["schema"] == 4:
                     # Schema4 has no EP/PP values. Its additive schema5 migration
                     # must preserve both as unknown SQL NULL, never inferred zero.
                     assert row.get("electrum") is None and row.get("platinum") is None, "Legacy schema4 wallet cannot establish electrum or platinum, including zero"

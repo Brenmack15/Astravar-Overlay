@@ -13,6 +13,7 @@ IMMUTABLE_SCHEMAS = {
     "com.yazsras.astravar.data.CampaignLedgerDb/2.json": "50a395a8b87a7a119312af1b1edba8246f68aed77be8900baa29a5caff964361",
     "com.yazsras.astravar.data.CampaignLedgerDb/3.json": "d030a6759b35784528732ff331ed20b27cb3c41561db0b7031d839b962f49901",
     "com.yazsras.astravar.data.CampaignLedgerDb/4.json": "076ebbba19127c09137b7095d84cc89bc9fb64c25ab74951677b9d2537cd3c5f",
+    "com.yazsras.astravar.data.CampaignLedgerDb/5.json": "055d82545e23397ef2a785aceb6856534b3d1b50ad918cd4e74e2ef87abf7349",
     "com.yazsras.astravar.data.SandboxSyncDb/1.json": "23de63787037f830e1295ba7cd7efbc7d62cf18e3ba836c4e511bec8fd6cef03",
 }
 for name, digest in IMMUTABLE_SCHEMAS.items():
@@ -45,6 +46,17 @@ for table, entity in before.items():
         assert new_fields[name].get("affinity") == "INTEGER" and not new_fields[name].get("notNull", False)
         assert "defaultValue" not in new_fields[name], "Unknown balances must not be initialized to zero"
 
+# Prompt settings are additive app-wide rows; all campaign entity definitions stay byte-for-byte equal.
+prompt_schema = json.loads((ROOT / "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/6.json").read_text())["database"]
+assert prompt_schema["version"] == 6
+prompt_tables = {entity["tableName"]: entity for entity in prompt_schema["entities"]}
+assert prompt_tables.keys() - after.keys() == {"chatgpt_prompts", "prompt_catalog_state"}
+assert after.keys() <= prompt_tables.keys()
+for table, entity in after.items():
+    assert entity == prompt_tables[table], f"Existing campaign schema changed during prompt upgrade: {table}"
+fields = {field["columnName"] for field in prompt_tables["chatgpt_prompts"]["fields"]}
+assert fields == {"id", "name", "description", "content", "category", "createdAt", "updatedAt", "revision"}
+
 tracked = subprocess.check_output(["git", "-C", str(ROOT), "ls-files", "-z"], text=True).split("\0")
 for name in filter(None, tracked):
     assert not re.search(r"\.(?:jks|keystore|p12|apk|aab|pdf|mht|zip)$", name, re.I), f"Private/distribution artifact in source: {name}"
@@ -56,4 +68,4 @@ for suffix in (".v2uidebug", ".v2statdebug"):
     assert f'applicationIdSuffix = "{suffix}"' in gradle
 manifest = (ROOT / "app/src/main/AndroidManifest.xml").read_text()
 assert 'android:allowBackup="false"' in manifest and 'android:usesCleartextTraffic="false"' in manifest
-print("Verified seven immutable historical schemas, additive nullable EP/PP wallet migration, package boundaries and private-artifact exclusion")
+print("Verified eight immutable historical schemas, additive wallet and prompt migrations, unchanged campaign tables, package boundaries and private-artifact exclusion")

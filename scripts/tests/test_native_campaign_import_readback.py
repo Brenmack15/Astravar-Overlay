@@ -13,6 +13,14 @@ readback = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(readback)
 
 
+def seed_prompt_settings(db):
+    """Independent preexisting app settings must survive campaign import/recovery."""
+    db.execute("INSERT INTO chatgpt_prompts VALUES(?,?,?,?,?,?,?,?)", (
+        "fictional-prompt", "Fictional editable prompt", "Fictional purpose",
+        "Fictional current owner wording {context}", "Fictional", 1, 2, 3))
+    db.execute("INSERT INTO prompt_catalog_state VALUES(?,?,?)", ("fictional-catalog-v1", 1, 11))
+
+
 class IndependentNativeCampaignReadbackTest(unittest.TestCase):
     room_schema = 4
 
@@ -32,6 +40,12 @@ class IndependentNativeCampaignReadbackTest(unittest.TestCase):
         CREATE TABLE campaign_import_receipts(packageHash TEXT PRIMARY KEY,state TEXT,recordCount INTEGER,relationCount INTEGER,readbackSha256 TEXT);
         CREATE TABLE campaign_import_backups(packageHash TEXT PRIMARY KEY,snapshotJson TEXT,snapshotSha256 TEXT,sourceStateSha256 TEXT);
         CREATE TABLE campaign_archive_sources(packageHash TEXT PRIMARY KEY,payloadJson TEXT);''')
+        if self.room_schema >= 6:
+            db.executescript('''CREATE TABLE chatgpt_prompts(id TEXT NOT NULL PRIMARY KEY,name TEXT NOT NULL,
+                description TEXT NOT NULL,content TEXT NOT NULL,category TEXT NOT NULL,
+                createdAt INTEGER NOT NULL,updatedAt INTEGER NOT NULL,revision INTEGER NOT NULL);
+                CREATE TABLE prompt_catalog_state(id TEXT NOT NULL PRIMARY KEY,initializedAt INTEGER NOT NULL,recordCount INTEGER NOT NULL);''')
+            seed_prompt_settings(db)
         db.commit(); db.close()
         readback.run(self.args("snapshot"))
         records=[]
@@ -84,7 +98,7 @@ class IndependentNativeCampaignReadbackTest(unittest.TestCase):
         with self.assertRaises(KeyError):readback.run(self.args("rolled-back"))
 
     def test_wrong_or_unsupported_room_version_is_rejected(self):
-        for version in (3, 6, 5 if self.room_schema == 4 else 4):
+        for version in (3, 7, 5 if self.room_schema == 4 else 4):
             with self.subTest(version=version):
                 self.mutate(f"PRAGMA user_version={version}")
                 with self.assertRaisesRegex(ValueError, "Expected additive campaign Room schema"):
@@ -101,6 +115,24 @@ class IndependentNativeCampaignReadbackTest(unittest.TestCase):
 
 class IndependentSchema5NativeCampaignReadbackTest(IndependentNativeCampaignReadbackTest):
     room_schema = 5
+
+
+class IndependentSchema6NativeCampaignReadbackTest(IndependentNativeCampaignReadbackTest):
+    room_schema = 6
+
+    def test_prompt_edits_and_initialization_marker_are_not_ignored_by_readback(self):
+        self.assertTrue(readback.run(self.args("applied"))["preexisting_rows_unchanged"])
+        for statement in ("UPDATE chatgpt_prompts SET content='unexpected replacement'",
+                          "DELETE FROM prompt_catalog_state"):
+            with self.subTest(statement=statement):
+                with sqlite3.connect(self.path) as db:
+                    db.execute(statement)
+                with self.assertRaisesRegex(AssertionError, "preexisting campaign row changed"):
+                    readback.run(self.args("applied"))
+                with sqlite3.connect(self.path) as db:
+                    db.execute("DELETE FROM chatgpt_prompts")
+                    db.execute("DELETE FROM prompt_catalog_state")
+                    seed_prompt_settings(db)
 
 
 class IndependentMappedNativeReadbackTest(unittest.TestCase):
@@ -127,6 +159,8 @@ class IndependentMappedNativeReadbackTest(unittest.TestCase):
             self.insert(db, "ledger_items", original)
             self.insert(db, "campaign_import_backups", dict(packageHash="b" * 64, snapshotJson="{}", snapshotSha256=readback.sha("{}"),
                         sourceStateSha256="fictional-earlier-state", createdAt=1))
+            if self.room_schema >= 6:
+                seed_prompt_settings(db)
         args = argparse.Namespace(action="snapshot", database=self.database, manifest=self.manifest, synthetic_demo=True, expected_room_schema=self.room_schema)
         readback.run(args)
         self.groups = {"ledger_items": self.source["mapped"]["items"], "ledger_events": self.source["mapped"]["events"]}
@@ -217,6 +251,17 @@ class IndependentMappedNativeReadbackTest(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.verify(rolled_back=True)
 
+    def test_room6_does_not_imply_campaign_export_schema6(self):
+        envelope = json.loads(self.fixture.read_text())
+        source = json.loads(envelope["payload"])
+        source["mapped"]["schema"] = 6
+        envelope["payload"] = json.dumps(source, ensure_ascii=False)
+        envelope["payloadSha256"] = readback.sha(envelope["payload"])
+        invalid = self.root / "unsupported-export-schema6.json"
+        invalid.write_text(json.dumps(envelope))
+        with self.assertRaisesRegex(AssertionError, "Unsupported mapped campaign export schema"):
+            readback.verify_mapped(self.database, self.manifest, invalid, synthetic_demo=True)
+
 
 class IndependentMappedSchema5NativeReadbackTest(IndependentMappedNativeReadbackTest):
     room_schema = 5
@@ -258,6 +303,20 @@ class IndependentMappedSchema5NativeReadbackTest(IndependentMappedNativeReadback
 
     def test_unsupported_mapped_room_schema_is_rejected(self):
         with sqlite3.connect(self.database) as db:
-            db.execute("PRAGMA user_version=6")
+            db.execute("PRAGMA user_version=7")
         with self.assertRaisesRegex(AssertionError, "Unsupported campaign Room schema"):
+            self.verify()
+
+
+class IndependentMappedSchema6NativeReadbackTest(IndependentMappedSchema5NativeReadbackTest):
+    room_schema = 6
+
+    def test_preexisting_prompt_wording_and_marker_are_part_of_complete_baseline(self):
+        baseline = json.loads(self.manifest.read_text())["allTables"]
+        self.assertEqual(1, baseline["chatgpt_prompts"]["count"])
+        self.assertEqual(1, baseline["prompt_catalog_state"]["count"])
+        self.assertTrue(self.verify()["preexisting_rows_and_archive_evidence_unchanged"])
+        with sqlite3.connect(self.database) as db:
+            db.execute("UPDATE chatgpt_prompts SET content='unexpected replacement'")
+        with self.assertRaisesRegex(AssertionError, "preexisting typed row or immutable archive"):
             self.verify()

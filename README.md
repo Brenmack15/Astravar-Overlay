@@ -1,4 +1,8 @@
-# Astravar 2.3.2 development candidate
+# Astravar 2.4.0 development candidate
+
+`feat/astravar-dynamic-prompts` adds persistent **ChatGPT Prompts** management under Config: create, read, edit, confirmed delete, search/category filtering and reusable variables. All eleven original handoffs migrate once with their stable identities and wording preserved; edits and deletions persist across restarts. Room 5→6 adds only prompt settings tables. The permanent owner update is 2.4.0/code41 and retains `com.yazsras.astravar` and its original signing identity. See [architecture, migration and prompt management](docs/DYNAMIC_CHATGPT_PROMPTS.md).
+
+The following describes the inherited 2.3.2 base and campaign connection behavior.
 
 The isolated `feat/astravar-2.3-ultra-fast-sync` branch preserves the recovered Code 38 improvements without merging or changing PR #5. Version 2.3.2/code39 retains the permanent package and owner signing identity, compact indexed session reads, atomic acquire-and-assign, network-constrained WorkManager recovery and quiet opt-in pause/sync controls. Cloudflare remains the campaign synchronization service; foreground recovery, manual Sync Now and scheduled background recovery work without a push provider. Optional Pushy wake notifications replace Firebase. Pushy setup and delivery are separate acceptance checks and do not block the Cloudflare-only update. See [implementation and acceptance boundaries](docs/ULTRA_FAST_SYNC_V23.md).
 
@@ -33,7 +37,7 @@ balances without conversion.
 
 Campaign retains inventory, inventions, relationships and player-known facts,
 with versioned checkpoints and merge-only reviewed backups. Config includes
-an eleven-prompt searchable ChatGPT toolkit, device/build/package/certificate
+an editable ChatGPT prompt library seeded with the eleven original handoffs, device/build/package/certificate
 diagnostics, backup tools and authenticated connection readiness.
 Campaign Import also has a **Verify all saved conflicts** read-only audit for
 source and backup integrity, relationship gaps, duplicate identities, wallets
@@ -54,7 +58,7 @@ Advanced elements retain accepted upgrade gates.
 No real character values, level-ups, speculative upgrades or private review
 sheets are seeded. Original approved artwork and launcher portrait are preserved.
 
-Campaign Room migrates additively 1→2→3→4→5. Existing weapon Room migrations and
+Campaign Room migrates additively 1→2→3→4→5→6. Existing weapon Room migrations and
 historical backup compatibility remain intact. The same inventory database
 owns items, placements, crafting, audits and receipts. Real Notion records are
 not automatically imported or declared canonical.

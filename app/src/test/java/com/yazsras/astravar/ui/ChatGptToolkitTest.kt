@@ -4,11 +4,18 @@ import android.content.ClipboardManager
 import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ApplicationProvider
+import androidx.room.Room
+import com.yazsras.astravar.data.*
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
+import org.junit.After
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -24,11 +31,41 @@ import org.robolectric.annotation.LooperMode
 @LooperMode(LooperMode.Mode.PAUSED)
 class ChatGptToolkitTest {
     @get:Rule val compose = createEmptyComposeRule()
+    private lateinit var database: CampaignLedgerDb
+    private lateinit var repository: ChatGptPromptRepository
+
+    @Before fun initializeStoredCatalogue() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        database = Room.inMemoryDatabaseBuilder(context, CampaignLedgerDb::class.java).allowMainThreadQueries().build()
+        repository = CampaignLedgerRepository(database).prompts
+        repository.initialize(loadChatGptPromptSeeds(context))
+    }
+
+    @After fun closeDatabase() { database.close() }
+
+    private fun awaitReady() {
+        compose.waitUntil(10_000) {
+            runCatching { compose.onNodeWithText("Add Prompt").assertIsEnabled() }.isSuccess
+        }
+    }
+
+    private fun copiedText(): String {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        return (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+            .primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
+    }
 
     @Test fun searchFindsRecoveryInstructionsAndCopyKeepsTheCompleteEvergreenPrompt() {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
-            activity.get().setContent { AstravarTheme { ChatGptPromptsPage() } }
+            activity.get().setContent {
+                AstravarTheme {
+                    Surface(color = RebuildPalette.Canvas, contentColor = MaterialTheme.colorScheme.onBackground) {
+                        ChatGptPromptsPage(repository)
+                    }
+                }
+            }
+            awaitReady()
             compose.onNodeWithText("Find a prompt").performTextInput("last resolved event")
             val campaignTitle = hasText("Continue a campaign in a new chat") and !hasSetTextAction()
             compose.onNode(campaignTitle).assertExists()
@@ -36,8 +73,8 @@ class ChatGptToolkitTest {
             compose.onNode(hasText("Read prompt") and hasAnySibling(campaignTitle)).performScrollTo().performClick()
             compose.onNodeWithText("Act as DM for my established solo campaign.", substring = true).assertExists()
             compose.onNode(hasText("Copy handoff prompt") and hasAnySibling(campaignTitle)).performScrollTo().performClick()
-            val context = ApplicationProvider.getApplicationContext<Context>()
-            val text = (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).primaryClip!!.getItemAt(0).text.toString()
+            compose.waitUntil(10_000) { copiedText().contains("through the connected authorized integration when available") }
+            val text = copiedText()
             assertTrue(text.contains("through the connected authorized integration when available"))
             assertTrue(text.contains("Never invent actions, rolls, HP, currency"))
             assertFalse(text.contains("28c890"))
@@ -69,14 +106,21 @@ class ChatGptToolkitTest {
         )
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
-            activity.get().setContent { AstravarTheme { ChatGptPromptsPage() } }
+            activity.get().setContent {
+                AstravarTheme {
+                    Surface(color = RebuildPalette.Canvas, contentColor = MaterialTheme.colorScheme.onBackground) {
+                        ChatGptPromptsPage(repository)
+                    }
+                }
+            }
+            awaitReady()
             for ((query, title, required) in workflows) {
                 compose.onNodeWithText("Find a prompt").performScrollTo().performTextReplacement(query)
                 val cardTitle = hasText(title) and !hasSetTextAction()
                 compose.onNode(cardTitle).assertExists()
                 compose.onNode(hasText("Copy handoff prompt") and hasAnySibling(cardTitle)).performScrollTo().performClick()
-                val copied = (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-                    .primaryClip!!.getItemAt(0).text.toString()
+                compose.waitUntil(10_000) { required.all { copiedText().contains(it) } }
+                val copied = copiedText()
                 required.forEach { guard -> assertTrue("$title must retain: $guard", copied.contains(guard)) }
                 assertFalse("Reusable prompts must not pin a prior build", copied.contains("28c890"))
                 assertFalse("Reusable prompts must not pin a session UUID", Regex("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}").containsMatchIn(copied))
