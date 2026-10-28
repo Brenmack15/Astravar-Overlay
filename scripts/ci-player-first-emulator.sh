@@ -182,7 +182,7 @@ copy_campaign_database() {
   test -s "$astravar_directory/astravar-campaign-ledger.db"
 }
 astravar_campaign_schema=${ASTRAVAR_EXPECTED_CAMPAIGN_SCHEMA:-4}
-[[ "$astravar_campaign_schema" == 4 || "$astravar_campaign_schema" == 5 ]]
+[[ "$astravar_campaign_schema" == 4 || "$astravar_campaign_schema" == 5 || "$astravar_campaign_schema" == 6 ]]
 copy_campaign_database validation/campaign-before
 python3 scripts/native-campaign-import-readback.py snapshot --database validation/campaign-before/astravar-campaign-ledger.db --manifest validation/campaign-before.json --expected-room-schema "$astravar_campaign_schema" --synthetic-demo >validation/campaign-baseline-result.json
 ASTRAVAR_NATIVE_CLASS_TIMEOUT=720 run_class CampaignImportInstrumentationTest#aDocumentPickerPreviewConfirmationAndLibrary 1 validation/native-campaign-import.txt

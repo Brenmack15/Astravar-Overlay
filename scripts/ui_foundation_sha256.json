@@ -8,7 +8,7 @@
     "app/schemas/com.yazsras.astravar.data.SandboxSyncDb/1.json": "23de63787037f830e1295ba7cd7efbc7d62cf18e3ba836c4e511bec8fd6cef03",
     "app/src/main/AndroidManifest.xml": "b9438dec1584b67306d62cc0eca0c000fabaa7def2d8df159c9048e880c596fd",
     "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": "f7eefb74ebec642b318ab67053605ec5ede36dd02b38a2ae0c85819178821251",
-    "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": "18e19a4abe551da58a02314124ef229420e8abe49f4ff5371552fae1fe800f6f",
+    "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": "4508292bc1910e269340be58d0fcb83cef3a3dd32af02fc6464424fd433e0fa2",
     "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": "7e5b92d763929c131ddef1f8ee5f08bad520233939f51234feace666b45c77c3",
     "app/src/main/java/com/yazsras/astravar/data/HistoryStorage.kt": "c7968f73293f5d8f46fa148be3fbbb74352565e914ef3b1762f88800104dbb62",
     "app/src/main/java/com/yazsras/astravar/data/SandboxSync.kt": "25f71e8aac585b24f83975796e9a4a7aa01b7c6a8c6f94607544bdf8775f5cf9",
@@ -428,6 +428,36 @@
         "previous_pinned_sha256": "e7b394da965e1c1d0e11909017a82c7bd7739a7cfa434b4f4298e98a296d3c59",
         "reviewed_sha256": "b9438dec1584b67306d62cc0eca0c000fabaa7def2d8df159c9048e880c596fd",
         "reason": "Owner-authorized optional provider replacement; separate default-off consent enables Pushy components only after authenticated registration. No campaign storage/schema or combat changes."
+      }
+    }
+  },
+  "authorized_dynamic_prompt_changes": {
+    "verified_source_baseline": "bc7fe027cf9670b2df9663cd8d8c02ab2a9afb0c",
+    "authorization": "Owner dynamic ChatGPT prompt CRUD directive; additive persistence, original prompt migration, and native management UI.",
+    "source_catalog_sha256": "2f999c3736330dcd398e0a1a22f1b93f8ea704a3d1e748e20a118de7ecd401b0",
+    "files": {
+      "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": {
+        "previous_pinned_sha256": "18e19a4abe551da58a02314124ef229420e8abe49f4ff5371552fae1fe800f6f",
+        "reviewed_sha256": "4508292bc1910e269340be58d0fcb83cef3a3dd32af02fc6464424fd433e0fa2",
+        "reason": "Room5-to6 adds prompt records/catalog marker and repository access only; exact reverse proof preserves all inventory behavior.",
+        "exact_replacements": [
+          {
+            "before": "    CampaignImportBackup::class, CampaignArchiveSource::class], version = 5, exportSchema = true)\n",
+            "after": "    CampaignImportBackup::class, CampaignArchiveSource::class,\n    ChatGptPrompt::class, ChatGptPromptCatalogState::class], version = 6, exportSchema = true)\n"
+          },
+          {
+            "before": "",
+            "after": "    abstract fun promptDao(): ChatGptPromptDao\n"
+          },
+          {
+            "before": "            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4, CAMPAIGN_MIGRATION_4_5).build() // NEVER fallbackToDestructiveMigration()\n",
+            "after": "            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4, CAMPAIGN_MIGRATION_4_5, CAMPAIGN_MIGRATION_5_6).build() // NEVER fallbackToDestructiveMigration()\n"
+          },
+          {
+            "before": "",
+            "after": "    val prompts = ChatGptPromptRepository(db)\n"
+          }
+        ]
       }
     }
   }

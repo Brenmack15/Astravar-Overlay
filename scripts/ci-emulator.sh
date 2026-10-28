@@ -90,7 +90,7 @@ verify_mapped() {
 import json,runpy,sys
 from pathlib import Path
 helper=runpy.run_path('scripts/native-campaign-import-readback.py')
-result=helper['verify_mapped'](Path(sys.argv[1]),Path(sys.argv[2]),Path(sys.argv[3]),rolled_back=sys.argv[4]=='rollback',synthetic_demo=True,expected_room_schema=5)
+result=helper['verify_mapped'](Path(sys.argv[1]),Path(sys.argv[2]),Path(sys.argv[3]),rolled_back=sys.argv[4]=='rollback',synthetic_demo=True,expected_room_schema=6)
 Path(sys.argv[5]).write_text(json.dumps(result,indent=2)+'\n')
 print(json.dumps(result))
 ASTRAVAR_MAPPED_READBACK
@@ -111,18 +111,18 @@ diff -u validation/update-before.sha256 validation/update-after.sha256 >validati
 run_stage UpdatePreservationInstrumentationTest 1 420 native-update-readback.txt
 stop_product
 copy_campaign_database validation/campaign-before
-python3 scripts/native-campaign-import-readback.py snapshot --database validation/campaign-before/astravar-campaign-ledger.db --manifest validation/campaign-before.json --expected-room-schema 5 --synthetic-demo >validation/campaign-baseline-result.json
+python3 scripts/native-campaign-import-readback.py snapshot --database validation/campaign-before/astravar-campaign-ledger.db --manifest validation/campaign-before.json --expected-room-schema 6 --synthetic-demo >validation/campaign-baseline-result.json
 run_stage CampaignImportInstrumentationTest#aDocumentPickerPreviewConfirmationAndLibrary 1 720 native-campaign-import.txt
 stop_product
 copy_campaign_database validation/campaign-applied
 timeout 30s adb -s "$astravar_serial" pull /sdcard/Android/data/com.yazsras.astravar.target/files/native-campaign-fixture.json validation/native-campaign-fixture.json >/dev/null
 timeout 30s adb -s "$astravar_serial" pull /sdcard/Download/astravar-native-preimport-backup.json validation/native-campaign-preimport-backup.json >/dev/null
-python3 scripts/native-campaign-import-readback.py applied --database validation/campaign-applied/astravar-campaign-ledger.db --manifest validation/campaign-before.json --fixture validation/native-campaign-fixture.json --backup-document validation/native-campaign-preimport-backup.json --expected-room-schema 5 --synthetic-demo >validation/campaign-applied-result.json
+python3 scripts/native-campaign-import-readback.py applied --database validation/campaign-applied/astravar-campaign-ledger.db --manifest validation/campaign-before.json --fixture validation/native-campaign-fixture.json --backup-document validation/native-campaign-preimport-backup.json --expected-room-schema 6 --synthetic-demo >validation/campaign-applied-result.json
 run_stage CampaignImportInstrumentationTest#bGuardedRollbackRestoresVerifiedSnapshot 1 240 native-campaign-rollback.txt
 stop_product
 copy_campaign_database validation/campaign-rolled-back
-python3 scripts/native-campaign-import-readback.py rolled-back --database validation/campaign-rolled-back/astravar-campaign-ledger.db --manifest validation/campaign-before.json --fixture validation/native-campaign-fixture.json --expected-room-schema 5 --synthetic-demo >validation/campaign-rollback-result.json
-python3 scripts/native-campaign-import-readback.py snapshot --database validation/campaign-rolled-back/astravar-campaign-ledger.db --manifest validation/campaign-mapped-before.json --expected-room-schema 5 --synthetic-demo >validation/campaign-mapped-baseline-result.json
+python3 scripts/native-campaign-import-readback.py rolled-back --database validation/campaign-rolled-back/astravar-campaign-ledger.db --manifest validation/campaign-before.json --fixture validation/native-campaign-fixture.json --expected-room-schema 6 --synthetic-demo >validation/campaign-rollback-result.json
+python3 scripts/native-campaign-import-readback.py snapshot --database validation/campaign-rolled-back/astravar-campaign-ledger.db --manifest validation/campaign-mapped-before.json --expected-room-schema 6 --synthetic-demo >validation/campaign-mapped-baseline-result.json
 run_stage CampaignImportInstrumentationTest#cMappedCampaignRecordsReachPlayerViews 1 420 native-mapped-campaign-ui.txt
 stop_product
 copy_campaign_database validation/campaign-mapped

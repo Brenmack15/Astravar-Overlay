@@ -83,9 +83,9 @@ class CampaignCurrencyV22Test {
         val receipt=CommandReceipt("legacy-expense",campaignHash(campaignJson.encodeToString(command.copy(commandId=""))),"CURRENCY","fictional-wallet",2,100,outcomeJson="""{"original":"exact legacy outcome"}""")
         old.execSQL("INSERT INTO command_receipts VALUES(?,?,?,?,?,?,?,?)",arrayOf<Any?>(receipt.commandId,receipt.fingerprint,receipt.kind,receipt.recordId,receipt.resultingRevision,receipt.createdAt,receipt.outputId,receipt.outcomeJson))
         old.version=4;old.close()
-        val migrated=Room.databaseBuilder(context,CampaignLedgerDb::class.java,name).addMigrations(CAMPAIGN_MIGRATION_4_5).allowMainThreadQueries().build()
+        val migrated=Room.databaseBuilder(context,CampaignLedgerDb::class.java,name).addMigrations(CAMPAIGN_MIGRATION_4_5, CAMPAIGN_MIGRATION_5_6).allowMainThreadQueries().build()
         try {
-            assertEquals(5,migrated.openHelper.writableDatabase.version)
+            assertEquals(6,migrated.openHelper.writableDatabase.version)
             val wallet=migrated.partyDao().allWallets().single()
             assertNull(wallet.copper);assertEquals(2L,wallet.silver);assertEquals(3L,wallet.gold);assertNull(wallet.electrum);assertNull(wallet.platinum);assertEquals(2L,wallet.revision)
             assertEquals(receipt,migrated.recordsDao().receipt("legacy-expense"))

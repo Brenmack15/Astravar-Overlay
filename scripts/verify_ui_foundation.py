@@ -15,10 +15,12 @@ if hashlib.sha256(owner.encode()).hexdigest() != manifest['owner_signing_block_s
 if changed:
     raise SystemExit('Verified foundation changed: ' + ', '.join(changed))
 sync_review = manifest.get('authorized_campaign_sync_source_changes', {})
+prompts = manifest.get('authorized_dynamic_prompt_changes', {})
 assert sync_review.get('verified_source_baseline') == 'abae4f49beec75d14a364be91f7d0fb4303524ad'
 for name, review in sync_review['files'].items():
     fast = manifest.get('authorized_fast_sync_source_changes', {}).get('files', {}).get(name)
-    expected = fast['previous_pinned_sha256'] if fast else manifest['files'][name]
+    prompt_review = prompts.get('files', {}).get(name)
+    expected = fast['previous_pinned_sha256'] if fast else prompt_review['previous_pinned_sha256'] if prompt_review else manifest['files'][name]
     assert review['reviewed_sha256'] == expected and review['previous_pinned_sha256'] != review['reviewed_sha256']
 fast = manifest.get('authorized_fast_sync_source_changes', {})
 pushy = manifest.get('authorized_pushy_source_changes', {})
@@ -36,6 +38,18 @@ if pushy:
         assert review['reviewed_sha256'] == manifest['files'][name]
         assert review['previous_pinned_sha256'] == fast['files'][name]['reviewed_sha256']
         assert review['previous_pinned_sha256'] != review['reviewed_sha256']
+
+if prompts:
+    assert prompts['verified_source_baseline'] == 'bc7fe027cf9670b2df9663cd8d8c02ab2a9afb0c'
+    assert set(prompts['files']) == {'app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt'}
+    for name, review in prompts['files'].items():
+        assert review['reviewed_sha256'] == manifest['files'][name]
+        restored = (root / name).read_text()
+        for replacement in review['exact_replacements']:
+            assert restored.count(replacement['after']) == 1, 'Exact prompt integration changed'
+            restored = restored.replace(replacement['after'], replacement['before'], 1)
+        assert hashlib.sha256(restored.encode()).hexdigest() == review['previous_pinned_sha256'], 'Inventory changed beyond prompt integration'
+    assert hashlib.sha256((root / 'app/src/main/assets/astravar_chatgpt_prompts.json').read_bytes()).hexdigest() == prompts['source_catalog_sha256'], 'Original prompt seed wording changed'
 
 reviewed = len(manifest.get('authorized_player_first_source_changes', {}).get('files', {}))
 print(f"Verified {len(manifest['files'])} pinned foundation files ({reviewed} reviewed 2.1 source changes) and unchanged owner signing block")

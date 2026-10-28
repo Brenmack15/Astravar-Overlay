@@ -102,7 +102,7 @@ val rebuildDestinations = listOf("Armor", "Combat", "Party", "Campaign", "Config
         PlayerEntry("Rules & profile", "Accepted configuration & upgrades", "Weapon", { open("Rules & profile") })
         PlayerEntry("Resources & recovery", "Confirmed game time & resources", "Core", { open("Resources & recovery") })
         PlayerEntry("Roll history", "Saved rolls & exact dice", "History", { open("Roll history") })
-        PlayerEntry("ChatGPT toolkit", "Reusable handoffs, recovery and sync instructions", "More", { open("ChatGPT toolkit") })
+        PlayerEntry("ChatGPT Prompts", "Create, edit and organize reusable handoffs", "More", { open("ChatGPT Prompts") })
         SectionCaption("App & data")
         PlayerEntry("Overlay & appearance", "Floating controls & app preferences", "Settings", { open("Overlay & appearance") })
         PlayerEntry("Campaign backup", "Items, projects, connections & companion", "History", { open("Campaign backup") })

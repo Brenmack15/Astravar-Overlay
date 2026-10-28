@@ -88,8 +88,8 @@ class CampaignArchiveSchemaCompatibilityTest {
         }
         old.execSQL("CREATE TABLE room_master_table (id INTEGER PRIMARY KEY, identity_hash TEXT)")
         old.execSQL("INSERT INTO room_master_table VALUES(42,?)",arrayOf(schema.getString("identityHash")));old.version=4;old.close();db.close()
-        db=Room.databaseBuilder(context,CampaignLedgerDb::class.java,name).addMigrations(CAMPAIGN_MIGRATION_4_5).allowMainThreadQueries().build()
-        repo=CampaignLedgerRepository(db);assertEquals(5,db.openHelper.writableDatabase.version)
+        db=Room.databaseBuilder(context,CampaignLedgerDb::class.java,name).addMigrations(CAMPAIGN_MIGRATION_4_5, CAMPAIGN_MIGRATION_5_6).allowMainThreadQueries().build()
+        repo=CampaignLedgerRepository(db);assertEquals(6,db.openHelper.writableDatabase.version)
     }
     private suspend fun rejects(action:suspend()->Unit) {var failed=false;try{action()}catch(_:IllegalStateException){failed=true};assertTrue("Recovery must preserve changed campaign records",failed)}
 
