@@ -2,6 +2,8 @@ package com.yazsras.astravar.ui
 
 import android.content.Context
 import android.content.Intent
+import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -19,7 +21,11 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.data.CampaignArchivePreview
+import com.yazsras.astravar.data.CampaignConflictAudit
+import com.yazsras.astravar.data.CampaignConflictLevel
+import com.yazsras.astravar.data.CampaignConflictVerifier
 import com.yazsras.astravar.data.CampaignImportReceipt
+import com.yazsras.astravar.data.CampaignLedgerDb
 import com.yazsras.astravar.data.CampaignLedgerRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +55,7 @@ internal class CampaignOpenDocumentContractV21 : ActivityResultContracts.OpenDoc
     var rollbackReview by remember { mutableStateOf<CampaignImportReceipt?>(null) }
     var rollbackConsent by remember { mutableStateOf(false) }
     var receiptLimit by rememberSaveable { mutableIntStateOf(20) }
+    var conflictAudit by remember { mutableStateOf<CampaignConflictAudit?>(null) }
 
     LaunchedEffect(Unit) {
         if (hadPreview && preview == null) {
@@ -123,6 +130,73 @@ internal class CampaignOpenDocumentContractV21 : ActivityResultContracts.OpenDoc
         if (status.isNotBlank()) Text(status, color = if (failure) MaterialTheme.colorScheme.error else RebuildPalette.Ice,
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
 
+        PlayerCard {
+            Text("Conflict verification", style = MaterialTheme.typography.titleLarge)
+            Text("Check saved source hashes, relationships, inventory identities, wallet identities, import receipts and recovery backups in one pass. Exact matches are verified automatically; competing facts stay available for review.",
+                color = RebuildPalette.Muted)
+            PlayerButton(onClick = {
+                if (!busy) {
+                    busy = true; failure = false; conflictAudit = null; status = ""
+                    scope.launch {
+                        try {
+                            val result = withContext(Dispatchers.IO) {
+                                val database = CampaignLedgerDb.open(context)
+                                try { CampaignConflictVerifier(database).auditConflicts() }
+                                finally { database.close() }
+                            }
+                            conflictAudit = result
+                            status = "Conflict check complete: ${result.blockedCount} integrity problems, ${result.reviewCount} decisions, ${result.noticeCount} notices."
+                        } catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { failure = true; status = "Conflict verification failed: ${e.message ?: "Local records could not be checked."}" }
+                        finally { busy = false }
+                    }
+                }
+            }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Verify all saved conflicts") }
+            Text("Read-only. No campaign values, currency, equipment or sync grants are changed.", color = RebuildPalette.Ice,
+                style = MaterialTheme.typography.bodySmall)
+        }
+        conflictAudit?.let { result ->
+            PlayerCard {
+                Text(if (result.noBlockingConflicts) "No blocking conflicts detected" else "Verification needs attention",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = if (result.blockedCount > 0) MaterialTheme.colorScheme.error else RebuildPalette.Ice)
+                Text("${result.referenceCount} sources · ${result.relationCount} links · ${result.itemCount} items · ${result.walletCount} wallets · ${result.verifiedImportCount}/${result.activeImportCount} saved imports verified",
+                    style = MaterialTheme.typography.bodyMedium)
+                Text("${result.blockedCount} integrity problems · ${result.reviewCount} decisions · ${result.noticeCount} notices",
+                    style = MaterialTheme.typography.bodyMedium)
+                Text("Snapshot of saved records when this check ran. Run verification again after edits, imports or sync.",
+                    color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                if (result.activeImportCount == 0) Text("There are no active imports to verify yet. Choose a campaign archive above for a new import preview.", color = RebuildPalette.Muted)
+                for (level in CampaignConflictLevel.entries) {
+                    val findings = result.findings.filter { it.level == level }
+                    val count = when (level) {
+                        CampaignConflictLevel.BLOCKED -> result.blockedCount
+                        CampaignConflictLevel.REVIEW -> result.reviewCount
+                        CampaignConflictLevel.NOTICE -> result.noticeCount
+                    }
+                    if (count > 0) PlayerDisclosure("${when (level) {
+                        CampaignConflictLevel.BLOCKED -> "Integrity problems"
+                        CampaignConflictLevel.REVIEW -> "Decisions needed"
+                        CampaignConflictLevel.NOTICE -> "Source notices"
+                    }} ($count)", initiallyOpen = level != CampaignConflictLevel.NOTICE) {
+                        findings.forEach { finding ->
+                            Text("${finding.area} · ${finding.title}", style = MaterialTheme.typography.titleSmall)
+                            Text(finding.evidence, color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                            Text("Next: ${finding.nextStep}", color = RebuildPalette.Ice, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                if (result.omittedCount > 0) Text("${result.omittedCount} additional findings are omitted from this compact report. Original records remain unchanged.", color = RebuildPalette.Muted)
+                PlayerOutlinedButton(onClick = {
+                    (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                        .setPrimaryClip(ClipData.newPlainText("Astravar conflict verification", result.shareableSummary()))
+                    status = "Conflict summary copied. It omits structured record bodies and balances but may contain private names, source IDs and original issue notes. Share only where you trust."
+                }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Copy diagnostic summary for ChatGPT") }
+                Text("This local result does not establish live ChatGPT sync or approve import, rollback, or source-of-truth changes.",
+                    color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
         Text("Import receipts", style = MaterialTheme.typography.titleLarge)
         Text("Receipts persist locally. Verify a saved import or review a guarded rollback using its exact pre-import backup.", color = RebuildPalette.Muted)
         if (receipts.isEmpty()) Text("No campaign archives have been imported on this device.", color = RebuildPalette.Muted)
@@ -165,7 +239,7 @@ internal class CampaignOpenDocumentContractV21 : ActivityResultContracts.OpenDoc
             PlayerButton(enabled = !busy && !alreadyImported && candidate.valid && verifiedBackupHash == candidate.fingerprint && consent,
                 onClick = {
                     if (!busy && consent && verifiedBackupHash == candidate.fingerprint) {
-                        busy = true; failure = false; consent = false
+                        busy = true; failure = false; consent = false; conflictAudit = null
                         scope.launch {
                             try {
                                 val receipt = importer.commit(candidate, confirmed = true)
@@ -173,6 +247,7 @@ internal class CampaignOpenDocumentContractV21 : ActivityResultContracts.OpenDoc
                                 require(result.valid) { "Import receipt was saved, but independent readback needs review: ${result.summary} ${result.errors.joinToString("; ")}" }
                                 status = "Import saved. Independent database readback passed."
                                 preview = null; hadPreview = false; verifiedBackupHash = null
+                                conflictAudit = null
                             } catch (e: CancellationException) { throw e }
                             catch (e: Exception) { failure = true; verifiedBackupHash = null; status = "Import needs review: ${e.message ?: "Check the saved import receipts before retrying."}" }
                             finally { busy = false }
@@ -201,12 +276,13 @@ internal class CampaignOpenDocumentContractV21 : ActivityResultContracts.OpenDoc
         PlayerSheet("Review rollback", onDismiss = { if (!busy) { rollbackReview = null; rollbackConsent = false } }, actions = {
             PlayerButton(enabled = !busy && rollbackConsent, onClick = {
                 if (!busy && rollbackConsent) {
-                    busy = true; failure = false; rollbackConsent = false
+                    busy = true; failure = false; rollbackConsent = false; conflictAudit = null
                     scope.launch {
                         try {
                             val result = importer.rollback(receipt.packageHash, confirmed = true)
                             status = result.summary
                             rollbackReview = null
+                            conflictAudit = null
                         } catch (e: CancellationException) { throw e }
                         catch (e: Exception) { failure = true; status = "Rollback blocked: ${e.message ?: "Review changes made after importing."}" }
                         finally { busy = false }
