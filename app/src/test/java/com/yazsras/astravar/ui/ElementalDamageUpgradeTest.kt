@@ -8,7 +8,6 @@ import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import com.yazsras.astravar.rules.Profile
 import com.yazsras.astravar.rules.DamageType
 import org.junit.Assert.*
@@ -24,7 +23,7 @@ import org.robolectric.annotation.LooperMode
 @Config(sdk=[35],qualifiers="w400dp-h1000dp")
 @LooperMode(LooperMode.Mode.PAUSED)
 class ElementalDamageUpgradeTest {
-    @get:Rule val compose=createEmptyComposeRule()
+    @get:Rule val compose=createAstravarComposeRule()
 
     @Test fun elementalSliderHasUnitStopsAndAllTenLabelsWithIndependentLivePreview() {
         val profile=mutableStateOf(Profile(baseDamageDiceCount=3))

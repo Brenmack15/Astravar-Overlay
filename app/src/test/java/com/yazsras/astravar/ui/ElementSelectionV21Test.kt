@@ -3,7 +3,6 @@ package com.yazsras.astravar.ui
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import com.yazsras.astravar.rules.*
 import org.junit.Assert.*
 import org.junit.Rule
@@ -18,7 +17,7 @@ import org.robolectric.annotation.LooperMode
 @Config(sdk = [35], qualifiers = "w400dp-h860dp")
 @LooperMode(LooperMode.Mode.PAUSED)
 class ElementSelectionV21Test {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     private val profile = Profile(character = "Synthetic element review", level = 10,
         confirmed = setOf(Upgrade.ADVANCED_ELEMENTS, Upgrade.DUAL_RESONANCE))
     private val pair = listOf(DamageType.FIRE, DamageType.COLD)

@@ -4,7 +4,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.text.AnnotatedString
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -30,7 +29,7 @@ import org.robolectric.annotation.LooperMode
 @LooperMode(LooperMode.Mode.PAUSED)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class CharacterOverviewV2Test {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     private var previousRequestedSize: String? = null
 
     @Before fun respectRequestedDialogSize() {

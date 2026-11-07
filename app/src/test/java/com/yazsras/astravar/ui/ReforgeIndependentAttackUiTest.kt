@@ -6,7 +6,6 @@ import androidx.compose.ui.test.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.SaveableStateRegistry
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import com.yazsras.astravar.rules.reforge.*
 import org.junit.Assert.*
 import org.junit.Rule
@@ -21,7 +20,7 @@ import org.robolectric.annotation.LooperMode
 @RunWith(RobolectricTestRunner::class) @Config(sdk = [35], qualifiers = "w400dp-h1000dp")
 @LooperMode(LooperMode.Mode.PAUSED) @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ReforgeIndependentAttackUiTest {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     @Test fun fixedCompanionBonusCanBeCorrectedWithoutErasingDamageFlagsOrResources() {
         val damage = DamageComponent("confirmed-cold", "Cold strike", DamageKind.COLD, SecureDice.parse("2d6+3"), criticalDice = false, magical = true)
         val attack = AttackDefinition("confirmed-attack", "Fictional companion strike", proficient = false,

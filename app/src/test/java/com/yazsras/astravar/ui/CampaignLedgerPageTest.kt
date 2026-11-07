@@ -9,7 +9,6 @@ import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.text.AnnotatedString
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -35,7 +34,7 @@ import org.robolectric.annotation.LooperMode
 @LooperMode(LooperMode.Mode.PAUSED)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class CampaignLedgerPageTest {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     private var oldRequestedSize: String? = null
     @Before fun useRequestedDialogSize() {
         oldRequestedSize = System.getProperty("robolectric.windowManager.useRequestedSize")

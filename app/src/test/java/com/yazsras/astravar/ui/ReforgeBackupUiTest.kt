@@ -9,7 +9,6 @@ import androidx.activity.result.ActivityResultRegistryOwner
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.core.app.ActivityOptionsCompat
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -34,7 +33,7 @@ import java.io.File
 @LooperMode(LooperMode.Mode.PAUSED)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ReforgeBackupUiTest {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     private class Picker : ActivityResultRegistry(), ActivityResultRegistryOwner {
         var selected: Uri? = null
         override val activityResultRegistry: ActivityResultRegistry get() = this

@@ -3,7 +3,6 @@ package com.yazsras.astravar.ui
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.data.AstravarDb
@@ -23,7 +22,7 @@ import org.robolectric.annotation.LooperMode
 @Config(sdk = [35], qualifiers = "w400dp-h860dp")
 @LooperMode(LooperMode.Mode.PAUSED)
 class CorePickerRebuildTest {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
 
     private fun inspect(campaign: Campaign, check: (Repository) -> Unit) {
         val db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), AstravarDb::class.java).build()

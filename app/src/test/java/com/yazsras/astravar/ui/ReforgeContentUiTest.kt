@@ -8,7 +8,6 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.core.graphics.ColorUtils
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -31,7 +30,7 @@ import org.robolectric.annotation.LooperMode
 @LooperMode(LooperMode.Mode.PAUSED)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ReforgeContentUiTest {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     private var oldRequestedSize: String? = null
     @Before fun useRequestedDialogSize() {
         oldRequestedSize = System.getProperty("robolectric.windowManager.useRequestedSize")

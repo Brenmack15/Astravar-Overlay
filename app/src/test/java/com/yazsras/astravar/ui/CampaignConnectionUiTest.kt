@@ -3,7 +3,6 @@ package com.yazsras.astravar.ui
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Rule
@@ -20,7 +19,7 @@ import org.robolectric.annotation.LooperMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @LooperMode(LooperMode.Mode.PAUSED)
 class CampaignConnectionUiTest {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     private fun show(view: CampaignConnectionView, auto: (Set<String>) -> Unit = {}, decision: (String, Boolean) -> Unit = { _, _ -> },
         restrict: (Set<String>,Set<String>) -> Unit = { _, _ -> }, pause: (Boolean) -> Unit = {}, sync: () -> Unit = {}): AutoCloseable {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()

@@ -9,7 +9,6 @@ import androidx.activity.compose.setContent
 import androidx.room.MultiInstanceInvalidationService
 import androidx.compose.runtime.*
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.AstravarApp
 import com.yazsras.astravar.savePresentationCapture
@@ -33,7 +32,7 @@ import org.robolectric.annotation.LooperMode
 @LooperMode(LooperMode.Mode.PAUSED)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class NavigationV2Test {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
 
     private fun capture(name: String, activity: ComponentActivity) {
         if (System.getProperty("astravar.screenshots") == null) return

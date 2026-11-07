@@ -6,7 +6,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import com.yazsras.astravar.rules.*
 import org.junit.Assert.*
 import org.junit.Rule
@@ -21,7 +20,7 @@ import org.robolectric.annotation.LooperMode
 @Config(sdk=[35],qualifiers="w400dp-h1200dp")
 @LooperMode(LooperMode.Mode.PAUSED)
 class HistoryPresentationTest {
-    @get:Rule val compose=createEmptyComposeRule()
+    @get:Rule val compose=createAstravarComposeRule()
     @Test(timeout=60000) fun twentyLargeRollsOpenNewestFirstAndFullDetailsRequireAnOverlay() {
         val seed=Campaign(onboarded=true,attuned=true,installedId="core",profile=Profile(baseDamageDiceCount=10),cores=listOf(Core("core","Core")))
         val shots=(1..100).map {i->

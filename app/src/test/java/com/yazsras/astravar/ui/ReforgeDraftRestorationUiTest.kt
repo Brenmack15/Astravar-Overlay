@@ -6,7 +6,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import com.yazsras.astravar.rules.reforge.*
 import kotlinx.serialization.builtins.*
 import org.junit.Assert.*
@@ -22,7 +21,7 @@ import org.robolectric.annotation.LooperMode
 @RunWith(RobolectricTestRunner::class) @Config(sdk = [35], qualifiers = "w400dp-h1000dp")
 @LooperMode(LooperMode.Mode.PAUSED) @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ReforgeDraftRestorationUiTest {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     @Test fun compoundTrainingAndLargeEffectEditsSurviveFullCompositionRestoration() {
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         var registry = SaveableStateRegistry(null) { true }

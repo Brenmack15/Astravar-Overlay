@@ -8,7 +8,6 @@ import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ApplicationProvider
 import androidx.room.MultiInstanceInvalidationService
 import com.yazsras.astravar.data.*
@@ -35,7 +34,7 @@ import org.robolectric.annotation.LooperMode
 @LooperMode(LooperMode.Mode.PAUSED)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class CampaignConflictAuditUiTest {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     private val context get() = ApplicationProvider.getApplicationContext<Context>()
     private val databaseName = "astravar-campaign-ledger.db"
     private lateinit var invalidationService: ServiceController<MultiInstanceInvalidationService>

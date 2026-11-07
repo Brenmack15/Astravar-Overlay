@@ -9,7 +9,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.data.*
@@ -29,7 +28,7 @@ import org.robolectric.annotation.LooperMode
 @Config(sdk = [35], qualifiers = "w400dp-h860dp")
 @LooperMode(LooperMode.Mode.PAUSED)
 class CombatProfileV21Test {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
 
     private inner class Fixture : AutoCloseable {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()

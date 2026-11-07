@@ -3,7 +3,6 @@ package com.yazsras.astravar.ui
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import com.yazsras.astravar.data.ReforgeRollRecord
 import com.yazsras.astravar.rules.reforge.*
 import org.junit.Assert.*
@@ -21,7 +20,7 @@ import org.robolectric.annotation.LooperMode
 @LooperMode(LooperMode.Mode.PAUSED)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ReforgeDiceOutcomeUiTest {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     private fun character(charged: Boolean): ReforgeCharacter {
         val effect = EffectDefinition("cold-rider", "Cold rider", RuleSource("test", "Synthetic", Acceptance.ACCEPTED_HOMEBREW),
             EffectPayload.DamageBonus(DamageComponent("cold", "Cold", DamageKind.COLD, DiceFormula(listOf(DiceTerm(1, 6))))),

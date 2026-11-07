@@ -22,7 +22,6 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.Insets
@@ -58,7 +57,7 @@ import java.util.concurrent.atomic.AtomicInteger
 @LooperMode(LooperMode.Mode.PAUSED)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class CampaignVisualAcceptanceTest {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     private var oldRequestedSize: String? = null
     private val source = "Synthetic UI acceptance fixture · not campaign data"
     private val longItemName = "Mithral focusing assembly with a deliberately long synthetic inventory name"

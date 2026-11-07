@@ -3,7 +3,6 @@ package com.yazsras.astravar.ui
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Before
@@ -22,7 +21,7 @@ import kotlinx.serialization.json.*
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @LooperMode(LooperMode.Mode.PAUSED)
 class OwnerSyncConfigTest {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     private var previousDialogSizing: String? = null
     @Before fun honorNativeDialogWindowSize() {
         previousDialogSizing = System.getProperty("robolectric.windowManager.useRequestedSize")
