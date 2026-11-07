@@ -107,6 +107,7 @@ class CampaignArchiveUiV21Test {
             compose.onNodeWithText("notion-relation · unresolved reference: synthetic-ui-campaign::synthetic-missing").performScrollTo().assertExists()
             compose.onNodeWithText("Synthetic proposed blueprint").performScrollTo().performClick()
             compose.onNodeWithText("Proposed only; no inventory output.").performScrollTo().assertExists()
+            compose.onNodeWithText("Sources & record details").performScrollTo().performClick()
             compose.onNodeWithText("Source revision\nsynthetic-revision-2").performScrollTo().assertExists()
             runBlocking {
                 assertTrue(repo.archive.verify(receipt.packageHash).valid)

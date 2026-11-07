@@ -13,6 +13,14 @@ class ReforgeEvidenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual({}, evidence.summarize_results(Path(tmp)))
 
+    def test_filter_matching_zero_cases_is_not_a_passing_suite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "app/build/test-results/testDebugUnitTest"
+            output.mkdir(parents=True)
+            (output / "TEST-unmatched.xml").write_text('<testsuite tests="0"/>')
+            self.assertEqual("not-run", evidence.summarize_results(root)["app:testDebugUnitTest"]["status"])
+
     def test_failed_and_skipped_cases_remain_distinct(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

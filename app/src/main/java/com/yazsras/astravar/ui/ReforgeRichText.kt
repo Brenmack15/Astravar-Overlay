@@ -31,17 +31,19 @@ import kotlinx.coroutines.withContext
 @Composable fun ReforgeRichText(text: String, modifier: Modifier = Modifier, onRecordLink: ((String) -> Unit)? = null) {
     val blocks = if (text.length <= 24_000) remember(text) { RecordPresentation.blocks(text) }
         else {
-            val loaded by produceState<List<RecordPresentation.Block>?>(initialValue = null, key1 = text) {
-                value = withContext(Dispatchers.Default) { RecordPresentation.blocks(text) }
+            val loaded by produceState<Pair<String, List<RecordPresentation.Block>>?>(initialValue = null, key1 = text) {
+                value = text to withContext(Dispatchers.Default) { RecordPresentation.blocks(text) }
             }
-            if (loaded == null) { LinearProgressIndicator(Modifier.fillMaxWidth()); return }
-            loaded.orEmpty()
+            // produceState retains its previous value across key changes. A
+            // result belongs to its source and must never display for another.
+            if (loaded?.first != text) { LinearProgressIndicator(modifier.fillMaxWidth()); return }
+            loaded?.second.orEmpty()
         }
     var visibleBlocks by remember(text) { mutableIntStateOf(80) }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         blocks.take(visibleBlocks).forEach { block ->
             when (block) {
-                is RecordPresentation.Block.Heading -> ReforgeInline(block.text,
+                is RecordPresentation.Block.Heading -> ReforgeBoundedInline(block.text,
                     style = when (block.level) { 1 -> MaterialTheme.typography.headlineSmall; 2 -> MaterialTheme.typography.titleLarge; else -> MaterialTheme.typography.titleMedium },
                     modifier = Modifier.padding(top = 8.dp).semantics { heading() }, onRecordLink = onRecordLink)
                 is RecordPresentation.Block.Paragraph -> ReforgeBoundedInline(block.text, onRecordLink = onRecordLink)
@@ -66,7 +68,7 @@ import kotlinx.coroutines.withContext
                     block.rows.take(visibleRows).forEachIndexed { index, row ->
                         Row(Modifier.background(if (index == 0) RebuildPalette.Active else Color.Transparent)) {
                             row.forEach { cell -> Box(Modifier.width(156.dp).padding(10.dp)) {
-                                ReforgeInline(cell, style = if (index == 0) MaterialTheme.typography.labelLarge else MaterialTheme.typography.bodyMedium, onRecordLink = onRecordLink)
+                                ReforgeBoundedInline(cell, style = if (index == 0) MaterialTheme.typography.labelLarge else MaterialTheme.typography.bodyMedium, onRecordLink = onRecordLink)
                             } }
                         }
                         HorizontalDivider(color = RebuildPalette.Active)
@@ -116,7 +118,7 @@ import kotlinx.coroutines.withContext
                             withLink(LinkAnnotation.Clickable(target,
                                 styles = TextLinkStyles(style = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)),
                                 linkInteractionListener = {
-                                    if (target.startsWith("astravar:")) onRecordLink?.invoke(java.net.URI(target).path.substringAfter('/').substringAfter('/'))
+                                    if (target.startsWith("astravar:", ignoreCase = true)) onRecordLink?.invoke(java.net.URI(target).path.substringAfter('/').substringAfter('/'))
                                     else runCatching { uriHandler.openUri(target) }
                                 })) { append(label) }
                         } else append(label)

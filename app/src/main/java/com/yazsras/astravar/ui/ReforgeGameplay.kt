@@ -206,7 +206,7 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
         Toggle("Requires attunement", attune) { attune = it; reviewed = false }
         Text("Mechanical effects", style = MaterialTheme.typography.titleMedium)
         effects.forEachIndexed { index, effect ->
-            Text("${index + 1}. ${effect.name} · ${reforgeEffectSummary(effect)}", style = MaterialTheme.typography.bodySmall)
+            Text("${index + 1}. ${effect.name} · ${reforgeEffectSummary(effect)}${if (attune && !effect.requiresAttunement) " · available without attunement" else ""}", style = MaterialTheme.typography.bodySmall)
             PlayerTextButton(onClick = { effects = effects - effect; reviewed = false }) { Text("Remove effect") }
         }
         PlayerDisclosure("Add a structured effect") {
@@ -244,7 +244,7 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
                     }
                     val conditions = if (effectType == "Damage dice") listOf(EffectCondition(ConditionKind.SUCCESSFUL_HIT)) + if (once) listOf(EffectCondition(ConditionKind.ONCE_PER_TURN)) else emptyList() else emptyList()
                     effects = effects + EffectDefinition(id, effectName.trim().ifBlank { effectType }, RuleSource("user:$id", name.ifBlank { "User-entered equipment" }, Acceptance.ACCEPTED_HOMEBREW),
-                        payload, conditions, requiresAttunement = attune,
+                        payload, conditions, requiresAttunement = true,
                         chargeResourceId = if (effectType == "Damage dice") resourceId else null,
                         chargeCost = if (effectType == "Damage dice" && resourceId != null) optionalInt(chargeCost, "Charge cost", 1, 1000) ?: error("Enter charge cost") else 0)
                     reviewed = false; amount = ""; effectName = ""; error = ""

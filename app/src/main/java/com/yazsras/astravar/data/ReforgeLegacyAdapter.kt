@@ -37,6 +37,7 @@ suspend fun ReforgeRepository.readLegacyPreview(legacy: CampaignLedgerRepository
         add("This is a reviewed local copy. Original campaign records and their synchronization remain separate.")
         add("Recorded AC and maximum HP are copied as baselines. Review whether equipment already contributed before adding automatic effects.")
         add("Item descriptions, spellcasting notes and proposed inventions do not activate mechanical effects.")
+        add("Saving-throw and skill training, movement, senses, spells, feature uses, resources and attacks are not converted by this baseline copy. Review Training and configure these mechanics before relying on calculated rolls. The complete original sheet remains preserved.")
         if (profile.level == null) add("The original level is unknown. Confirm the level before adopting this copy; the draft starts at level 1.")
         if (profile.name.isBlank()) add("The original name is blank. Enter a name before saving this character.")
         if (abilities.any { it.magicModifier != 0 }) add("Legacy manual magical modifiers remain in the original records and advanced source snapshot. Translate them into reviewed structured effects before relying on this sheet.")

@@ -69,4 +69,31 @@ class ReforgeAdversarialTest {
         assertFalse(p.effectStatuses.any { it.active })
         assertThrows(IllegalArgumentException::class.java) { GameplayRules.equip(c, "donor", ItemState.WORN) }
     }
+
+    @Test fun itemSpellModifiersRequireHeldAndAttunedStateAndReverseWithTheirExplanation() {
+        val source = RuleSource("qa-focus-source", "QA accepted focus", Acceptance.ACCEPTED_HOMEBREW)
+        val attack = EffectDefinition("qa-focus-attack", "QA focus attack", source,
+            EffectPayload.Number(NumericTarget.SPELL_ATTACK, NumberOperation.ADD, 1))
+        val dc = EffectDefinition("qa-focus-dc", "QA focus DC", source,
+            EffectPayload.Number(NumericTarget.SPELL_DC, NumberOperation.ADD, 2))
+        val c = character().copy(level = 9,
+            baseAbilities = character().baseAbilities + (Stat.INT to 18),
+            itemDefinitions = listOf(ItemDefinition("focus", "QA focus", listOf(attack, dc), requiresAttunement = true)),
+            items = listOf(ItemInstance("owned-focus", "focus", ItemState.HELD)))
+        val unattuned = CharacterCalculator.calculate(c)
+        assertEquals(8, unattuned.spellAttack.value)
+        assertEquals(16, unattuned.spellSaveDc.value)
+        val equipped = GameplayRules.attune(c, "owned-focus", true)
+        val active = CharacterCalculator.calculate(equipped)
+        assertEquals(9, active.spellAttack.value)
+        assertEquals(18, active.spellSaveDc.value)
+        assertTrue(active.spellAttack.explanation.any { it.sourceId == source.id && it.label == attack.name && it.applied })
+        val removed = GameplayRules.equip(equipped, "owned-focus", ItemState.CARRIED)
+        val inactive = CharacterCalculator.calculate(removed)
+        assertEquals(8, inactive.spellAttack.value)
+        assertEquals(16, inactive.spellSaveDc.value)
+        assertFalse(inactive.spellAttack.explanation.any { it.sourceId == source.id && it.label == attack.name && it.applied })
+        assertEquals(c.baseAbilities, removed.baseAbilities)
+        assertEquals(c.currentHp, removed.currentHp)
+    }
 }

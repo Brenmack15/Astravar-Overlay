@@ -86,7 +86,8 @@ class ReforgeCharacterUiTest {
     }
 
     @Test fun emptySheetDoesNotInventCharacterOrResources() = withSheet(seed = false) { repository ->
-        compose.onNodeWithText("Create character").assertExists()
+        compose.waitUntil(10000) { compose.onAllNodesWithText("Create character").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Create character").assertIsDisplayed()
         compose.waitForIdle()
         assertTrue(runBlocking { repository.observeAll().first() }.isEmpty())
     }
@@ -114,7 +115,7 @@ class ReforgeCharacterUiTest {
     @Test fun openingDiceDoesNotRollAndOnlyExplicitSavedRollPersists() = withSheet { repository ->
         compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("reforge-STR").performClick()
-        compose.onNodeWithText("Roll check").performScrollTo().performClick()
+        compose.onNodeWithText("Roll check").assertIsDisplayed().performClick()
         compose.onNodeWithTag("reforge-roll-now").assertExists()
         assertTrue(runBlocking { repository.rollHistory("synthetic-player").first() }.isEmpty())
         compose.onNodeWithTag("reforge-roll-now").performClick()
@@ -137,7 +138,7 @@ class ReforgeCharacterUiTest {
         compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Character setup").performScrollTo().performClick()
         compose.onNodeWithText("Name", substring = false).performTextReplacement("Renamed synthetic artificer")
-        compose.onNodeWithText("Save character").performScrollTo().performClick()
+        compose.onNodeWithText("Save character").assertIsDisplayed().performClick()
         compose.waitUntil(10000) { runBlocking { repository.get("synthetic-player") }!!.revision == 3L }
         val after = runBlocking { repository.get("synthetic-player") }!!.character
         assertEquals("Renamed synthetic artificer", after.name)

@@ -40,7 +40,8 @@ def summarize_results(root: Path) -> dict:
     for group in groups.values():
         group["passed"] = group["tests"] - group["failures"] - group["errors"] - group["skipped"]
         group["seconds"] = round(group["seconds"], 3)
-        group["status"] = "failed" if group["failures"] or group["errors"] else "passed"
+        group["status"] = ("not-run" if not group["tests"] else
+                           "failed" if group["failures"] or group["errors"] else "passed")
     return groups
 
 
@@ -71,6 +72,7 @@ def main():
         "dirty_worktree": bool(git("status", "--porcelain")),
         "source_input_sha256": source_digest,
         "source_inputs": source_inputs,
+        "source_association": "Reports and artifacts are indexed as found. This script does not execute tests or certify that a dirty working tree matches their build inputs.",
         "tests": summarize_results(root),
         "artifacts": [{"path": str(p.relative_to(root)), "bytes": p.stat().st_size,
                        "sha256": hashlib.sha256(p.read_bytes()).hexdigest()} for p in sorted(paths)],

@@ -67,7 +67,7 @@ import java.util.UUID
             label = request.label, formula = SecureDice.format(roll.formula) + if (damage.isNotEmpty()) " · damage ${damage.joinToString(" + ") { SecureDice.format(it.second.formula) }}" else "",
             components = components, manual = roll.manual, ownership = ownership), next)
     }
-    PlayerSheet(request.label, onDismiss) {
+    PlayerSheet(request.label, onDismiss, dirty = result != null) {
         if (result == null) {
             if (request.attackId == null) Field("Dice formula", expression, { expression = it }, enabled = request.formula == null)
             else Text("Uses your calculated attack bonus and active equipment damage. The DM determines the hit.", color = RebuildPalette.Muted)

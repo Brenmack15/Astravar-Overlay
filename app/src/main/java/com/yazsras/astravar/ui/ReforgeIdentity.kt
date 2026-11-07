@@ -19,6 +19,8 @@ import com.yazsras.astravar.rules.reforge.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 @Composable internal fun ReforgeIdentitySection(character: ReforgeCharacter, onEdit: () -> Unit,
     onNotes: () -> Unit, onAdvance: () -> Unit) {
@@ -80,7 +82,8 @@ import java.util.UUID
     else ArcaneIcon("Emblem", Modifier.size(56.dp), RebuildPalette.Ice)
 }
 
-@Composable internal fun ReforgeIdentityEditor(character: ReforgeCharacter, onDismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit) {
+@Composable internal fun ReforgeIdentityEditor(latestCharacter: ReforgeCharacter, onDismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit) {
+    val character = requireNotNull(rememberReforgeSnapshot(latestCharacter))
     var species by rememberSaveable { mutableStateOf(character.species) }
     var className by rememberSaveable { mutableStateOf(character.className) }
     var subclass by rememberSaveable { mutableStateOf(character.subclass) }
@@ -88,8 +91,11 @@ import java.util.UUID
     var languages by rememberSaveable { mutableStateOf(character.languages.joinToString(", ")) }
     var tools by rememberSaveable { mutableStateOf(character.toolProficiencies.joinToString(", ")) }
     var portrait by rememberSaveable { mutableStateOf(character.portraitRef) }
-    var features by remember { mutableStateOf(character.features) }
-    var editingFeature by remember { mutableStateOf<CharacterFeature?>(null) }
+    val featureDraft = rememberUiDraftText(remember(character.id) { Json.encodeToString(character.features) })
+    val parsedFeatures = remember(featureDraft.value) { runCatching { Json.decodeFromString<List<CharacterFeature>>(requireNotNull(featureDraft.value)) }.getOrNull() }
+    val features = parsedFeatures.orEmpty()
+    var editingFeatureId by rememberSaveable { mutableStateOf<String?>(null) }
+    val editingFeature = features.firstOrNull { it.id == editingFeatureId }
     var featureName by rememberSaveable { mutableStateOf("") }
     var featureText by rememberSaveable { mutableStateOf("") }
     var featureKind by rememberSaveable { mutableStateOf(FeatureKind.FEAT.name) }
@@ -107,7 +113,7 @@ import java.util.UUID
         portrait != character.portraitRef || features != character.features
     PlayerSheet("Identity & features", onDismiss, dirty = changed || featureOpen, actions = {
         PlayerButton(onClick = { onSave(character.copy(species = species.trim(), className = className.trim(), subclass = subclass.trim(),
-            background = background.trim(), languages = split(languages), toolProficiencies = split(tools), portraitRef = portrait, features = features)) }, enabled = !featureOpen) { Text("Save identity") }
+            background = background.trim(), languages = split(languages), toolProficiencies = split(tools), portraitRef = portrait, features = features)) }, enabled = !featureOpen && featureDraft.canSave && parsedFeatures != null) { Text("Save identity") }
     }) {
         Field("Species", species, { species = it.take(200) })
         Field("Class", className, { className = it.take(200) })
@@ -119,11 +125,11 @@ import java.util.UUID
         if (portrait != null) PlayerTextButton(onClick = { portrait = null }) { Text("Remove portrait") }
         Text("Class labels and feature descriptions do not activate mechanical bonuses. Add reviewed effects to equipment or configure training separately.", color = RebuildPalette.Muted)
         features.forEach { feature -> PlayerEntry(feature.name, feature.kind.name.lowercase(), "Emblem", {
-            editingFeature = feature; featureName = feature.name; featureText = feature.description; featureKind = feature.kind.name
+            editingFeatureId = feature.id; featureName = feature.name; featureText = feature.description; featureKind = feature.kind.name
             accepted = feature.source.acceptance in setOf(Acceptance.OFFICIAL, Acceptance.ACCEPTED_HOMEBREW); featureOpen = true
         }) }
         if (!featureOpen) PlayerOutlinedButton(onClick = {
-            editingFeature = null; featureName = ""; featureText = ""; featureKind = FeatureKind.FEAT.name; accepted = false; featureOpen = true
+            editingFeatureId = null; featureName = ""; featureText = ""; featureKind = FeatureKind.FEAT.name; accepted = false; featureOpen = true
         }) { Text("Add feature or feat") }
         if (featureOpen) PlayerCard {
             Field("Feature name", featureName, { featureName = it.take(200) })
@@ -137,17 +143,19 @@ import java.util.UUID
                         name = featureName.trim(), description = featureText, kind = FeatureKind.valueOf(featureKind),
                         source = editingFeature?.source?.takeIf { accepted && it.acceptance == Acceptance.OFFICIAL }
                             ?: RuleSource("local:$id", "Player feature review", if (accepted) Acceptance.ACCEPTED_HOMEBREW else Acceptance.UNVERIFIED))
-                    features = features.filterNot { it.id == id } + feature; featureOpen = false
+                    featureDraft.value = Json.encodeToString(features.filterNot { it.id == id } + feature); featureOpen = false
                 }
             }) { Text("Keep feature") }
-            if (editingFeature != null) PlayerTextButton(onClick = { features = features.filterNot { it.id == editingFeature?.id }; featureOpen = false }) { Text("Remove from this sheet") }
+            if (editingFeature != null) PlayerTextButton(onClick = { featureDraft.value = Json.encodeToString(features.filterNot { it.id == editingFeatureId }); featureOpen = false }) { Text("Remove from this sheet") }
             PlayerTextButton(onClick = { featureOpen = false }) { Text("Cancel feature edit") }
         }
+        if (!featureDraft.canSave || parsedFeatures == null) Text(featureDraft.error ?: "Feature draft could not be recovered. Reopen this character before saving.", color = MaterialTheme.colorScheme.error)
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
     }
 }
 
-@Composable internal fun ReforgeAdvancementDialog(character: ReforgeCharacter, onDismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit) {
+@Composable internal fun ReforgeAdvancementDialog(latestCharacter: ReforgeCharacter, onDismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit) {
+    val character = requireNotNull(rememberReforgeSnapshot(latestCharacter))
     var hitDieGain by rememberSaveable { mutableStateOf("") }
     var stat by rememberSaveable { mutableStateOf(Stat.INT.name) }
     var increase by rememberSaveable { mutableStateOf("0") }

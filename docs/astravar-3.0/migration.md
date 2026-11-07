@@ -15,6 +15,8 @@ The Reforge database has four tables:
 
 A whole character is the transaction boundary. Its nested effect, spell, item-definition and owned-instance contracts are typed and versioned; the JSON payload is an authoritative local aggregate rather than a manually maintained display summary. This initial schema does not normalize each nested effect into a Room table. Queryable per-character rows and separately indexed audit/roll tables keep current workflows simple without rewriting established stores. Large cross-character mechanical queries would justify additional additive indexed tables later.
 
+The active actor is remembered in a separate asynchronous `astravar-reforge-preferences` DataStore file. It contains only the preferred profile ID and does not alter character mechanics or existing preference files. A valid explicit choice wins; otherwise the existing `local-player` profile is preferred before companions. This device navigation preference is intentionally outside gameplay backups.
+
 `ReforgeSavedCharacter.saveState` says **Saved on this device · not synchronized**. Existing Cloudflare campaign scopes, records, immutable receipts and pending queues describe the original campaign domain. They do not grant a new Reforge synchronization scope. This build neither uploads Reforge state nor claims that the ChatGPT mirror is its authoritative store.
 
 ## Reviewed adoption

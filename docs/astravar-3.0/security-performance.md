@@ -35,7 +35,17 @@ Rich-text rendering must use typed native elements and validated links. It must
 not execute imported HTML/JavaScript or infer active mechanics from narrative
 text. Original imported content, provenance and stable record identities must
 remain available for recovery. Imported malformed markup and unsafe links need
-actual parser tests; those results will be recorded after integration.
+actual parser tests. Eight parser cases and native profile/internal-link cases
+passed in the focused run. The native NPC case also compares the exact stored
+original content and audit count before and after presentation. New-store
+backup, stale-command, atomic roll, offline reopen and recovery-draft cases
+passed; broader historical migration/synchronization verification is pending.
+
+Actual native captures exposed black headings against custom navy surfaces. This
+was corrected in the shared reading-color provider and explicit sheet surface
+colors; a measured text-layout contrast regression was added. Corrected-source
+captures and the new test still require their final run. This is an example of
+a defect found by raster review despite successful semantic UI assertions.
 
 ## Performance limits of current evidence
 

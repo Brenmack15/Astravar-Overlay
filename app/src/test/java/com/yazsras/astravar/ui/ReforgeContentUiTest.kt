@@ -2,8 +2,14 @@ package com.yazsras.astravar.ui
 
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.core.graphics.ColorUtils
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.data.*
@@ -44,6 +50,19 @@ class ReforgeContentUiTest {
             } }
             compose.onNodeWithText("Open profile").performTouchInput { click(center) }
             compose.runOnIdle { assertEquals("test-profile", selected) }
+        } finally { activity.pause().stop().destroy() }
+    }
+    @Test fun defaultReadingTextHasAccessibleContrastInsideCustomNavyCard() {
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { AstravarTheme { PlayerCard { Text("Reading contrast") } } }
+            val node = compose.onNodeWithText("Reading contrast").fetchSemanticsNode()
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.runOnIdle {
+                assertTrue(node.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(layouts) == true)
+                val contrast = ColorUtils.calculateContrast(layouts.single().layoutInput.style.color.toArgb(), RebuildPalette.Elevated.toArgb())
+                assertTrue("Default reading text must meet WCAG AA contrast; measured $contrast", contrast >= 4.5)
+            }
         } finally { activity.pause().stop().destroy() }
     }
     @Test fun importedNpcOpensAsStructuredReadableProfileAndRetainsExactStoredContent() {

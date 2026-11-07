@@ -29,6 +29,7 @@ import com.yazsras.astravar.data.*
 import com.yazsras.astravar.rules.reforge.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.map
 
 /** A local-first playable sheet. Legacy campaign adoption is reviewed and never changes its source. */
 @Composable fun ReforgeCharacterSheet(repository: CampaignLedgerRepository, localRepository: ReforgeRepository? = null, initialSection: String = "Sheet") {
@@ -36,9 +37,12 @@ import kotlinx.coroutines.launch
     val preferences = remember(context) { Preferences(context) }
     val preferencesState by preferences.flow.collectAsState(initial = OverlayPrefs())
     val local = remember(localRepository, context) { localRepository ?: ReforgeRepository.open(context) }
-    val all by remember(local) { local.observeAll() }.collectAsState(initial = emptyList())
+    val profilesState by remember(local) { local.observeAll().map { true to it } }.collectAsState(initial = false to emptyList<ReforgeSavedCharacter>())
+    val all = profilesState.second
+    val actorPreferences = remember(context) { ReforgePreferences.open(context) }
+    val actorSelection by remember(actorPreferences) { actorPreferences.activeProfileId.map { true to it } }.collectAsState(initial = false to null)
     val legacyProfiles by repository.records.characterProfiles.collectAsState(initial = emptyList())
-    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedId by remember { mutableStateOf<String?>(null) }
     var section by rememberSaveable(initialSection) { mutableStateOf(initialSection) }
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
     var inspecting by rememberSaveable { mutableStateOf<String?>(null) }
@@ -55,10 +59,19 @@ import kotlinx.coroutines.launch
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     val expandedText = LocalDensity.current.fontScale >= 1.5f
-    val saved = all.firstOrNull { it.character.id == selectedId } ?: all.firstOrNull()
+    val chosenId = ReforgePreferences.chooseProfile(selectedId ?: actorSelection.second, all.map { it.character.id })
+    val saved = all.firstOrNull { it.character.id == chosenId }
     val character = saved?.character
     val projection = character?.let { remember(it) { CharacterCalculator.calculate(it) } }
-    LaunchedEffect(saved?.character?.id) { if (saved != null) selectedId = saved.character.id }
+    LaunchedEffect(actorSelection) { if (actorSelection.first && selectedId == actorSelection.second) selectedId = null }
+    fun selectProfile(id: String) {
+        selectedId = id
+        scope.launch {
+            try { actorPreferences.selectProfile(id) }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { error = "The character is saved, but the last-opened profile could not be remembered." }
+        }
+    }
     fun action(label: String, work: suspend () -> Unit) {
         if (busy) return
         busy = true; error = ""; status = "Saving…"
@@ -80,7 +93,12 @@ import kotlinx.coroutines.launch
         inspecting = null
         rollRequest = ReforgeRollRequest(label, DiceFormula(listOf(DiceTerm(1, 20)), modifier), kind, key, characterRevision = saved?.revision)
     }
-    Page(resetKey = "$selectedId:$section") {
+    Page(resetKey = "$chosenId:$section") {
+        if (!profilesState.first || !actorSelection.first) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+            Text("Opening your saved character…", color = RebuildPalette.Muted)
+            return@Page
+        }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("reforge-error"))
         if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.labelMedium, color = RebuildPalette.Ice, modifier = Modifier.testTag("reforge-save-status"))
@@ -104,6 +122,11 @@ import kotlinx.coroutines.launch
                 Text(character.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                 Text("Level ${character.level} · Proficiency +${projection.proficiencyBonus}", color = RebuildPalette.Ice)
                 Text(saved!!.saveState, color = RebuildPalette.Muted, style = MaterialTheme.typography.labelSmall)
+                if (saved.origin.sourceProfileId != null) {
+                    Text("Source copy · rolls use only configured training and effects. Review Training, attacks, spells, resources and movement before play.",
+                        color = RebuildPalette.GoldBright, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.testTag("reforge-setup-review"))
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     PlayerOutlinedButton(onClick = { dialog = "Characters" }) { Text("Switch character") }
                     PlayerTextButton(onClick = { dialog = "Setup" }) { Text("Character setup") }
@@ -177,6 +200,19 @@ import kotlinx.coroutines.launch
                     }
                 }
                 "Combat" -> {
+                    PlayerCard {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Turn economy", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                            PlayerTextButton(onClick = { dialog = "Turn" }) { Text("Configure") }
+                        }
+                        Text(if (character.turn.tracking) "Action · ${if (character.turn.actionAvailable) "available" else "spent"}\nBonus Action · ${if (character.turn.bonusActionAvailable) "available" else "spent"}\nReaction · ${if (character.turn.reactionAvailable) "available" else "spent"}" else "Tracking off · saved availability retained", color = RebuildPalette.Ice)
+                        Text("Attacks ${character.turn.attacksUsed} / ${character.turn.attacksPerAction} · Spell slot this turn ${if (character.turn.spellSlotSpent) "spent" else "not spent"}", color = RebuildPalette.Muted)
+                        if (character.turn.tracking) {
+                            PlayerTextButton(enabled = character.turn.actionAvailable, onClick = { change("Recorded Action used", character.copy(turn = character.turn.copy(actionAvailable = false, attacksUsed = character.turn.attacksPerAction)), false) }) { Text("Mark Action used") }
+                            PlayerTextButton(enabled = character.turn.bonusActionAvailable, onClick = { change("Recorded Bonus Action used", character.copy(turn = character.turn.copy(bonusActionAvailable = false)), false) }) { Text("Mark Bonus Action used") }
+                            PlayerTextButton(enabled = character.turn.reactionAvailable, onClick = { change("Recorded Reaction used", character.copy(turn = character.turn.copy(reactionAvailable = false)), false) }) { Text("Mark Reaction used") }
+                        }
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         PlayerButton(onClick = { dialog = "HP" }, modifier = Modifier.weight(1f)) { Text("Damage / healing") }
                         PlayerOutlinedButton(onClick = { dialog = "Conditions" }, modifier = Modifier.weight(1f)) { Text("Conditions") }
@@ -295,20 +331,23 @@ import kotlinx.coroutines.launch
             }
         }
     }
-    if (dialog == "Create") ReforgeCharacterEditor(null, { dialog = null }) { next -> action("Character saved on this device") { local.create(next); selectedId = next.id; dialog = null } }
-    if (dialog == "Adopt") adopting?.let { preview -> PlayerSheet("Review campaign profile", { dialog = null }) {
+    if (dialog == "Create") ReforgeCharacterEditor(null, { dialog = null }) { next -> action("Character saved on this device") { local.create(next); selectProfile(next.id); dialog = null } }
+    if (dialog == "Adopt") adopting?.let { preview ->
+        var mechanicsReviewed by rememberSaveable(preview.legacyFingerprint) { mutableStateOf(false) }
+        PlayerSheet("Review campaign profile", { dialog = null }) {
         Text(preview.character.name, style = MaterialTheme.typography.headlineSmall)
         Text("This creates a separate playable sheet. Your campaign profile, inventory history and existing synchronization stay intact.", color = RebuildPalette.Muted)
         preview.warnings.forEach { Text(it, color = RebuildPalette.GoldBright) }
         Stat.entries.forEach { Text("${it.name} · ${preview.character.baseAbilities[it] ?: "Unknown"}") }
         Text("Level ${preview.character.level} · HP ${preview.character.currentHp ?: "?"} / ${preview.character.baseMaxHp ?: "?"}")
-        PlayerButton(onClick = { dialog = "AdoptEdit" }) { Text("Review baselines & create sheet") }
+        Toggle("I will review training, actions and current resources before relying on this sheet", mechanicsReviewed) { mechanicsReviewed = it }
+        PlayerButton(onClick = { dialog = "AdoptEdit" }, enabled = mechanicsReviewed) { Text("Review baselines & create sheet") }
     } }
     if (dialog == "AdoptEdit") adopting?.let { preview -> ReforgeCharacterEditor(preview.character, { dialog = null }) { reviewed ->
-        action("Reviewed sheet saved on this device") { local.adopt(repository, preview, reviewed); selectedId = reviewed.id; dialog = null; adopting = null }
+        action("Reviewed sheet saved on this device") { local.adopt(repository, preview, reviewed); selectProfile(reviewed.id); dialog = null; adopting = null }
     } }
     if (dialog == "Characters") PlayerSheet("Characters & companions", { dialog = null }) {
-        all.forEach { profile -> PlayerEntry(profile.character.name, "Local playable sheet", "Emblem", { selectedId = profile.character.id; dialog = null }) }
+        all.forEach { profile -> PlayerEntry(profile.character.name, "Local playable sheet", "Emblem", { selectProfile(profile.character.id); dialog = null }) }
         legacyProfiles.filter { profile -> all.none { it.character.id == profile.id } }.forEach { profile -> PlayerEntry(profile.name.ifBlank { "Unnamed profile" }, "Review saved campaign profile", "History", {
             action("Profile ready for review") { adopting = local.readLegacyPreview(repository, profile.id); dialog = "Adopt" }
         }) }
@@ -325,6 +364,7 @@ import kotlinx.coroutines.launch
             "Attack" -> ReforgeAttackEditor(character, { dialog = null }, onSave = { change("Add attack", it) })
             "Spell" -> ReforgeSpellEditor(character, { dialog = null }, onSave = { change("Add spell", it) })
             "Resource" -> ReforgeResourceEditor(character, { dialog = null }, onSave = { change("Add resource", it) })
+            "Turn" -> ReforgeTurnDialog(character, { dialog = null }) { change("Configure turn economy", it) }
             "HP" -> ReforgeHpDialog(character, projection, { dialog = null }) { label, next -> change(label, next) }
             "Slots" -> ReforgeSlotDialog(character, projection, { dialog = null }) { change("Record current spell slots", it) }
             "Conditions" -> ReforgeConditionDialog(character, { dialog = null }) { change("Change conditions", it) }

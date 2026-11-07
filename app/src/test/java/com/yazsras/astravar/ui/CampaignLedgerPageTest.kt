@@ -95,7 +95,8 @@ class CampaignLedgerPageTest {
             compose.onNodeWithText("Add Item").performClick()
             compose.onNodeWithText("Item name").performScrollTo().performTextInput("Restored synthetic item")
             compose.onNodeWithText("Quantity").performScrollTo().performTextInput("3")
-            compose.onNodeWithText("Source / checkpoint").performScrollTo().performTextInput("Synthetic saved UI state")
+            compose.onNodeWithText("Sources & advanced details").performScrollTo().performClick()
+            compose.onNodeWithText("Source / checkpoint (optional)").performScrollTo().performTextInput("Synthetic saved UI state")
             var saved: Map<String, List<Any?>> = emptyMap()
             compose.runOnIdle { saved = registry.performSave(); visible.value = false }
             compose.waitForIdle()
@@ -111,7 +112,7 @@ class CampaignLedgerPageTest {
             compose.onNodeWithText("Quantity").assert(
                 SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("3"))
             )
-            compose.onNodeWithText("Source / checkpoint").assert(
+            compose.onNodeWithText("Source / checkpoint (optional)").assert(
                 SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("Synthetic saved UI state"))
             )
             runBlocking { assertTrue(db.ledgerDao().allItems().isEmpty()); assertTrue(db.ledgerDao().allEvents().isEmpty()) }

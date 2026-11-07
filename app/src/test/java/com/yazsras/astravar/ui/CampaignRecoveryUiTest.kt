@@ -51,7 +51,8 @@ class CampaignRecoveryUiTest {
             mount()
             compose.onNodeWithText("Add Item").performClick()
             compose.onNodeWithText("Item name").performScrollTo().performTextInput("Synthetic crash-retry lens")
-            compose.onNodeWithText("Source / checkpoint").performScrollTo().performTextInput("Synthetic confirmed acquisition")
+            compose.onNodeWithText("Sources & advanced details").performScrollTo().performClick()
+            compose.onNodeWithText("Source / checkpoint (optional)").performScrollTo().performTextInput("Synthetic confirmed acquisition")
             val beforeCommit = precommitActivityState(activity)
             compose.onNodeWithText("Save new item").performClick()
             compose.waitUntil(10_000) { runBlocking { db.ledgerDao().allItems().size == 1 } }
@@ -63,7 +64,7 @@ class CampaignRecoveryUiTest {
             mount()
             compose.waitForIdle()
             compose.onNodeWithText("Item name").performScrollTo().assertTextContains("Synthetic crash-retry lens")
-            compose.onNodeWithText("Source / checkpoint").performScrollTo().assertTextContains("Synthetic confirmed acquisition")
+            compose.onNodeWithText("Source / checkpoint (optional)").performScrollTo().assertTextContains("Synthetic confirmed acquisition")
             compose.onNodeWithText("Save new item").assertIsEnabled().performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithText("Save new item").fetchSemanticsNodes().isEmpty() }
             runBlocking {

@@ -14,11 +14,32 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
+internal data class ReforgeNotesLoadDecision(val text: String, val conflict: Boolean, val discardDuplicate: Boolean)
+
+/** A restored editor is newer than its own last persisted draft; competing writers require review. */
+internal fun reforgeNotesLoadDecision(canonical: String, revision: Long, editorText: String, editorRevision: Long,
+    restored: Boolean, knownDraftUpdatedAt: Long?, draft: ReforgeNoteDraft?): ReforgeNotesLoadDecision {
+    val duplicate = draft?.text == canonical
+    if (restored) {
+        val staleEditor = editorRevision != revision && editorText != canonical
+        val competingDraft = draft != null && !duplicate &&
+            (draft.expectedRevision != revision || (draft.updatedAt != knownDraftUpdatedAt && draft.text != editorText))
+        return ReforgeNotesLoadDecision(editorText, staleEditor || competingDraft, duplicate)
+    }
+    return when {
+        draft == null || duplicate -> ReforgeNotesLoadDecision(canonical, false, duplicate)
+        draft.expectedRevision == revision -> ReforgeNotesLoadDecision(draft.text, false, false)
+        else -> ReforgeNotesLoadDecision(canonical, true, false)
+    }
+}
+
 /** One sequential writer, expected revisions, durable recovery text, and an explicit conflict review. */
 @Composable internal fun ReforgeNotesEditor(saved: ReforgeSavedCharacter, repository: ReforgeRepository, onDismiss: () -> Unit) {
     var base by remember(saved.character.id) { mutableStateOf(saved) }
     var text by rememberSaveable(saved.character.id) { mutableStateOf(saved.character.notes) }
     var textRevision by rememberSaveable(saved.character.id) { mutableLongStateOf(saved.revision) }
+    var initializedBefore by rememberSaveable(saved.character.id) { mutableStateOf(false) }
+    var knownDraftStamp by rememberSaveable(saved.character.id) { mutableLongStateOf(-1L) }
     var undo by rememberSaveable(saved.character.id) { mutableStateOf<String?>(null) }
     var draft by remember { mutableStateOf<ReforgeNoteDraft?>(null) }
     var loaded by remember { mutableStateOf(false) }
@@ -32,18 +53,17 @@ import kotlinx.coroutines.launch
             base = repository.get(saved.character.id) ?: error("Character is no longer available.")
             val found = repository.readNoteDraft(saved.character.id)
             draft = found
-            when {
-                found == null -> {
-                    conflict = textRevision != base.revision && text != base.character.notes
-                    status = if (conflict) "Recovered text needs review" else "Saved on this device"
-                }
-                found.text == base.character.notes -> {
-                    repository.discardNoteDraft(found.profileId, found.expectedRevision, found.updatedAt)
-                    draft = null; text = base.character.notes; textRevision = base.revision; status = "Saved on this device"
-                }
-                found.expectedRevision == base.revision -> { text = found.text; status = "Recovered your local draft" }
-                else -> { conflict = true; status = "Recovery text needs review" }
+            val decision = reforgeNotesLoadDecision(base.character.notes, base.revision, text, textRevision,
+                initializedBefore, knownDraftStamp.takeIf { it >= 0 }, found)
+            text = decision.text; conflict = decision.conflict
+            if (decision.discardDuplicate && found != null) {
+                repository.discardNoteDraft(found.profileId, found.expectedRevision, found.updatedAt)
+                draft = null
             }
+            knownDraftStamp = draft?.updatedAt ?: -1L
+            if (!conflict) textRevision = base.revision
+            initializedBefore = true
+            status = when { conflict -> "Recovery text needs review"; text != base.character.notes -> "Recovered your editor text"; else -> "Saved on this device" }
             loaded = true
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = e.message ?: "Notes could not be loaded." }
@@ -55,7 +75,7 @@ import kotlinx.coroutines.launch
             if (proposed == base.character.notes) {
                 draft?.takeIf { it.expectedRevision == base.revision }?.let { recovery ->
                     repository.discardNoteDraft(recovery.profileId, recovery.expectedRevision, recovery.updatedAt)
-                    draft = null
+                    draft = null; knownDraftStamp = -1L
                 }
                 textRevision = base.revision; status = "Saved on this device"
                 return@collect
@@ -63,13 +83,14 @@ import kotlinx.coroutines.launch
             try {
                 status = "Saving recovery text…"; error = ""
                 draft = repository.saveNoteDraft(base.character.id, base.revision, proposed, draft?.updatedAt)
+                knownDraftStamp = draft?.updatedAt ?: -1L
                 delay(500)
                 if (proposed != text) return@collect
                 val recovery = draft
                 val next = repository.save(base.character.id, base.revision, base.character.copy(notes = proposed), "Autosave character notes")
                 base = next; textRevision = next.revision
                 if (recovery != null) repository.discardNoteDraft(recovery.profileId, recovery.expectedRevision, recovery.updatedAt)
-                draft = null; status = "Saved on this device · revision ${next.revision}"
+                draft = null; knownDraftStamp = -1L; status = "Saved on this device · revision ${next.revision}"
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
                 error = e.message ?: "Notes were not saved. Recovery text is retained."
@@ -99,15 +120,34 @@ import kotlinx.coroutines.launch
                         check(latest.revision == base.revision) { "Saved notes changed again. Close and reopen to compare the latest revision. Recovery text was retained." }
                         val recovery = draft
                         if (recovery != null) {
-                            draft = repository.reviewNoteDraft(base.character.id, recovery.updatedAt, latest.revision)
-                            text = recovery.text
+                            draft = repository.reviewNoteDraft(base.character.id, recovery.updatedAt, latest.revision, recovery.text)
+                            text = recovery.text; knownDraftStamp = draft?.updatedAt ?: -1L
                         }
                         base = latest; textRevision = latest.revision; error = ""; conflict = false; status = "Reviewed edit ready to save"
                     } catch (e: CancellationException) { throw e }
                     catch (e: Exception) { error = e.message ?: "Recovery text is retained." }
                 }
             }) { Text("Use recovery as reviewed edit") }
-            PlayerTextButton(onClick = onDismiss) { Text("Keep both and close") }
+            if (draft != null && text != draft?.text) {
+                PlayerDisclosure("Restored editor text", initiallyOpen = true) { ReforgeRichText(text) }
+                PlayerOutlinedButton(onClick = {
+                    val chosenText = text
+                    scope.launch {
+                        try {
+                            val latest = repository.get(base.character.id) ?: error("Character is unavailable.")
+                            check(latest.revision == base.revision) { "Saved notes changed again. Reopen to compare the latest revision." }
+                            val recovery = draft
+                            if (recovery != null) draft = repository.reviewNoteDraft(base.character.id, recovery.updatedAt, latest.revision, chosenText)
+                            knownDraftStamp = draft?.updatedAt ?: -1L
+                            text = chosenText; textRevision = latest.revision; base = latest
+                            error = ""; conflict = false
+                        } catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { error = e.message ?: "Both texts need review." }
+                    }
+                }) { Text("Use restored editor text") }
+            }
+            val guardedClose = LocalPlayerDismiss.current
+            PlayerTextButton(onClick = guardedClose) { Text("Close notes") }
         } else if (preview) ReforgeRichText(text.ifBlank { "Start writing your notes." })
         else {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {

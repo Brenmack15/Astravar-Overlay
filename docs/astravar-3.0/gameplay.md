@@ -11,7 +11,7 @@ The new Character destination opens a playable local-first sheet. Existing campa
 - HP actions preserve unknown values. Damage/healing and explicit current-value reconciliation are separate. Permanent-score or equipment changes preserve outstanding lost HP; name-only setup edits preserve the recorded Constitution baseline.
 - Spells retain their user-owned source version, preparation, casting time, components, range, duration, concentration, ritual status, slot requirements and resource costs. Casting previews cost and concentration replacement; only confirmation consumes known available resources. Preparation uses the central engine's limits.
 - Current spell slots are recorded distinctly from calculated capacity. Generic resources retain separate maximum/current/recharge/recovery values. Rest preview requires confirmation of actual eligible elapsed campaign time. Known values recover according to the engine; unknown resources remain unknown.
-- Conditions, exhaustion level, concentration and next-turn actions are explicit. Source provenance and revision history sit behind optional disclosures.
+- Conditions, exhaustion level, concentration and next-turn actions are explicit. Compact turn controls expose Action, Bonus Action, Reaction and attacks remaining; enabling tracking or editing the attack allowance preserves spent state. Only My next turn resets availability. Source provenance and revision history sit behind optional disclosures.
 - Attacks, spells and resources have stable-ID editing, rather than an add-only setup path.
 
 ## Practical gaps
@@ -22,4 +22,4 @@ There is no general later-adjudication queue. The UI therefore withholds unresol
 
 ## Verification ownership
 
-`ReforgeDiceOutcomeUiTest` covers charged hit decisions and action spending for no-cost unresolved attacks. `ReforgeCharacterUiTest` covers clean opening without invented records, equipment preview/confirmation preserving damage, explicit-only roll persistence, and the previously identified equipped/name-only HP regression. Execution results belong in the integrated verification report; test existence is not a passing result.
+`ReforgeDiceOutcomeUiTest` covers charged hit decisions, action spending for no-cost unresolved attacks, and preservation of spent state when enabling turn tracking. `ReforgeCharacterUiTest` covers clean opening without invented records, equipment preview/confirmation preserving damage, explicit-only roll persistence, and the previously identified equipped/name-only HP regression. Execution results belong in the integrated verification report; test existence is not a passing result.

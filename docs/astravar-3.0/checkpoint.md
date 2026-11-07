@@ -51,3 +51,15 @@ Updated: 2026-11-07. Status: native implementation complete for initial coordina
 - Baseline Python139 and current Python146 passed. Existing authenticated bridge backend134 tests passed. Historical schemas, artwork, signing block and reversible source review gates passed.
 - Pending final small safeguards: persist selected actor across cold launch, turn-budget controls, guard closing unsaved generated dice, and ensure newly authored attunement effects remain gated regardless of editor ordering.
 - Full native suite/lint/build, exact-source signed candidate, packaged manifest/signature comparison, permissible native UI evidence and software-emulator feasibility remain next.
+
+## Hardening checkpoint
+
+- Initial implementation is durably published at `60584828ebdcb772111770b90665f96e627dcc7b`; draft PR #9 targets the unmerged dynamic-prompts baseline, preserving the existing PR chain.
+- Native focused run executed 43 Android tests: 41 passed; two failures were invalid test scrolling of fixed footers and were corrected without dropping assertions.
+- Actual native rendering exposed a dark heading contrast defect. Theme/content-color correction and a measured native contrast regression are implemented; corrected native character pixels were inspected.
+- Independent review found and corrected a notes-recreation race and insufficient disclosure of unconverted source mechanics. Added pure selection and actual parcelled-activity restoration coverage; retained explicit recovery/revision conflict review.
+- Added persistent actor selection, turn-budget controls, guarded dice dismissal and effect-attunement ordering safeguards.
+- All 163 current rules tests passed, including a separate equipment-derived spell modifier/reversal test. Python suite now contains 147 passing tests. Full debug/release native tests, both lints and APK assembly remain in progress.
+- Software-only AOSP 35 emulator was installed and attempted. Its system server crashed during boot before Astravar launched; this does not establish an application failure or a successful update test. Further actual update evidence, if obtained, belongs in verification/release reports.
+- Original owner key and actual code41 APK have both been independently verified against the full pinned certificate. Optimized owner code42 assembly and final packaged verification are pending.
+- See known-limitations.md for concrete follow-on milestones, especially source-mechanics reconciliation, new-state authenticated sync, full class catalogs, companion forms and physical Samsung acceptance.

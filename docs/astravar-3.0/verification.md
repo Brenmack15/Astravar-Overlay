@@ -28,6 +28,8 @@ that source. `main` is not the usable application baseline.
 | Authenticated bridge backend suite | 134 tests passed, zero failures/skips, Node 24.22.1, 2.277 seconds |
 | First coherent Reforge rules suite | 159 tests passed, zero failures/errors/skips, 4.207 seconds of JUnit suite time |
 | First Reforge Android compilation | Identified and corrected nullable cross-module/saver and dialog-call errors; focused rerun in progress |
+| Coherent focused native run | 43 Android tests executed: 41 passed, two test harness scroll failures; 139.359 seconds of JUnit suite time, 7m 3s Gradle wall time |
+| Same-fixture baseline native captures | Two baseline-only capture tests passed; 11.414 seconds suite time, 1m 13s Gradle wall time; application source remains commit 852bbd4 |
 | Physical Galaxy S26 | No attached device; Android version, installation and phone behavior unverified |
 | Accelerated emulator | `/dev/kvm` unavailable in this runtime |
 | Owner signing | Original private key recovered outside source; private/public match and exact historical certificate verified; final signed APK inspection pending |
@@ -62,6 +64,26 @@ byte alongside the eight previously protected schemas.
 
 ## Required final acceptance
 
-The A–L acceptance cases from the owner directive will be mapped to executed test
-classes and remaining gaps here after integration. An implemented domain model
-alone does not satisfy a native workflow or offline-restart acceptance case.
+An implemented domain model alone does not satisfy a native workflow or
+offline-restart acceptance case. The focused run established the following
+coverage; final integrated debug/release results remain pending.
+
+| Owner case | Executed evidence and limit |
+| --- | --- |
+| A — automatic abilities | `ReforgeAcceptanceTest` reverses the accepted synthetic STR/CON equipment fixture and checks permanent INT; duplicate effects and unaccepted claims tested. Pure rules suite passed. |
+| B — HP preservation | Rules tests cover 66→75 capacity, retained damage, unequip/re-equip clamp overhang, unknown HP and healing. Native equipment preview/confirmation passed; native name-only setup test needs its inappropriate scroll action corrected. |
+| C — damage effects | Rules tests cover qualifying attacks, typed extra dice, critical eligibility, mixed magical resistance rounding, immunity, hit/attempt charge costs, stale previews and unequip. |
+| D — attunement | Rules tests cover inactive unattuned benefits, limits, composite exceptions, donor suppression and cyclic composite rejection. |
+| E — spells | Rules tests cover legacy Artificer slots, attack/DC, preparation, costs, concentration replacement, eligible rest recovery and sourced spell modifiers. No commercial spell catalogue or automatic spell-effect adjudication is implied. |
+| F — conditions | Rules tests cover versioned standard conditions, immunity suppression, exhaustion, explicit duration/rest expiry and reversible projections. |
+| G — migration | Historical nine schemas remain exact; original-store adoption/backup tests passed. Full historical Room migration suite remains pending. No actual phone database was accessed. |
+| H — rich text | Eight parser cases plus native profile/link cases passed, preserving exact original content while hiding raw mentions/technical identifiers. Actual capture review found a contrast defect; corrected-source recapture is required. |
+| I — offline | Disk close/reopen test with actual equip and explicitly initiated SecureRandom roll passed. Unknown/zero, exact faces, revisions, resources and notes drafts persisted. Native process-manager restart remains separate evidence. |
+| J — synchronization | 134 backend protocol tests passed. New local-store duplicate/stale/conflicting command tests passed. Full Android connection regression suite remains pending; new Reforge sheet records remain explicitly local-only. |
+| K — overlay | Native merged package-manager manifest test passed; final actual APK manifest inspection remains required. |
+| L — in-place update | Actual predecessor package/code 41/certificate verified. Final owner-signed code 42 APK and safe package-manager update test remain pending. No physical installation claimed. |
+
+The first broad run was interrupted after compilation when independent review
+found two further correctness defects (restored notes during debounce and
+incomplete legacy adoption disclosure). Its partial execution is not counted as
+a passing regression suite. The final run must begin after those source fixes.

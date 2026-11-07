@@ -1,6 +1,10 @@
 package com.yazsras.astravar.ui
 
 import android.os.Looper
+import android.os.Bundle
+import android.os.Parcel
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.text.AnnotatedString
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
@@ -63,4 +67,36 @@ class ReforgeNotesUiTest {
             compose.onNodeWithText("Older recovery").assertExists()
         } finally { controller.pause().stop().destroy(); db.close() }
     }
+    @Test fun recreationDuringDebounceKeepsNewerEditorTextThanDiskDraft() {
+        val db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), ReforgeDb::class.java).build()
+        val repo = ReforgeRepository(db)
+        val original = runBlocking { repo.create(ReforgeCharacter("restore-notes-ui", "Fictional actor")) }
+        var controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        fun mount() { controller.get().setContent { AstravarTheme { ReforgeNotesEditor(original, repo) {} } } }
+        try {
+            mount()
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("Write your notes") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Write your notes").performTextInput("A")
+            compose.waitUntil(10_000) { runBlocking { repo.readNoteDraft(original.character.id)?.text == "A" } }
+            compose.onNodeWithText("Write your notes").performTextReplacement("B")
+            assertEquals("A", runBlocking { repo.readNoteDraft(original.character.id)?.text })
+            val state = Bundle()
+            controller.pause().saveInstanceState(state).resume()
+            val writer = Parcel.obtain()
+            val bytes = try { state.writeToParcel(writer, 0); writer.marshall() } finally { writer.recycle() }
+            val reader = Parcel.obtain()
+            val restored = try {
+                reader.unmarshall(bytes, 0, bytes.size); reader.setDataPosition(0)
+                Bundle.CREATOR.createFromParcel(reader).also { it.classLoader = ComponentActivity::class.java.classLoader }
+            } finally { reader.recycle() }
+            controller.pause().stop().destroy()
+            controller = Robolectric.buildActivity(ComponentActivity::class.java).create(restored).start().resume().visible()
+            mount()
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("Write your notes") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Write your notes").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("B")))
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+            compose.waitUntil(10_000) { runBlocking { repo.get(original.character.id)?.character?.notes == "B" } }
+        } finally { controller.pause().stop().destroy(); db.close() }
+    }
+
 }

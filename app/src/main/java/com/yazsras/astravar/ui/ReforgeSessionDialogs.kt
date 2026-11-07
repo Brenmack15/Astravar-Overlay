@@ -189,3 +189,22 @@ import com.yazsras.astravar.rules.reforge.*
         Text("Nothing is consumed until you confirm. The current saved revision is checked again before the result is persisted.", color = RebuildPalette.Muted)
     }
 }
+
+@Composable internal fun ReforgeTurnDialog(latestCharacter: ReforgeCharacter, onDismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit) {
+    val character = requireNotNull(rememberReforgeSnapshot(latestCharacter))
+    var tracking by rememberSaveable { mutableStateOf(character.turn.tracking) }
+    var attacks by rememberSaveable { mutableStateOf(character.turn.attacksPerAction.toString()) }
+    var error by remember { mutableStateOf("") }
+    PlayerSheet("Turn economy", onDismiss, dirty = tracking != character.turn.tracking || attacks != character.turn.attacksPerAction.toString(),
+        actions = { PlayerButton(onClick = {
+            try {
+                val count = optionalInt(attacks, "Attacks per Action", 1, 10) ?: error("Enter attacks per Action")
+                onSave(character.copy(turn = character.turn.copy(tracking = tracking, attacksPerAction = count)))
+            } catch (e: Exception) { error = e.message ?: "Check turn configuration" }
+        }) { Text("Save turn settings") } }) {
+        Toggle("Track Actions, Bonus Actions and Reactions", tracking) { tracking = it }
+        Field("Accepted attacks per Attack action", attacks, { attacks = it })
+        Text("Enabling tracking or editing this allowance preserves all spent Actions, attacks and slot use. Only confirming My next turn resets this turn's availability.", color = RebuildPalette.Muted)
+        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+    }
+}

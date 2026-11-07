@@ -69,4 +69,28 @@ class ReforgeDiceOutcomeUiTest {
             }
         } finally { controller.pause().stop().destroy(); System.clearProperty("robolectric.windowManager.useRequestedSize") }
     }
+    @Test fun enablingTurnTrackingDoesNotResetAlreadySpentActionsOrSlotUse() {
+        val original = character(false).copy(turn = TurnEconomy(tracking = false, actionAvailable = false,
+            bonusActionAvailable = false, reactionAvailable = false, attacksUsed = 1, attacksPerAction = 1, spellSlotSpent = true))
+        var saved: ReforgeCharacter? = null
+        System.setProperty("robolectric.windowManager.useRequestedSize", "true")
+        val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            controller.get().setContent { AstravarTheme { ReforgeTurnDialog(original, {}) { saved = it } } }
+            compose.onNode(isToggleable()).performClick()
+            compose.onNodeWithText("Accepted attacks per Attack action").performTextReplacement("2")
+            compose.onNodeWithText("Save turn settings").assertIsDisplayed().performClick()
+            compose.runOnIdle {
+                val turn = requireNotNull(saved).turn
+                assertTrue(turn.tracking)
+                assertFalse(turn.actionAvailable)
+                assertFalse(turn.bonusActionAvailable)
+                assertFalse(turn.reactionAvailable)
+                assertTrue(turn.spellSlotSpent)
+                assertEquals(1, turn.attacksUsed)
+                assertEquals(2, turn.attacksPerAction)
+            }
+        } finally { controller.pause().stop().destroy(); System.clearProperty("robolectric.windowManager.useRequestedSize") }
+    }
+
 }

@@ -143,13 +143,15 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
         after
     }
     /** Called only after the user reviews recovery text against current notes; it never applies that text itself. */
-    suspend fun reviewNoteDraft(profileId: String, expectedDraftUpdatedAt: Long, expectedCurrentRevision: Long): ReforgeNoteDraft = db.withTransaction {
+    suspend fun reviewNoteDraft(profileId: String, expectedDraftUpdatedAt: Long, expectedCurrentRevision: Long,
+        reviewedText: String? = null): ReforgeNoteDraft = db.withTransaction {
         checkId(profileId)
         val character = dao.character(profileId) ?: error("The character is no longer available.")
         check(character.revision == expectedCurrentRevision) { "Character changed during review. Review the latest notes again." }
         val before = dao.draft(profileId) ?: error("The recovery draft is no longer available.")
         check(before.updatedAt == expectedDraftUpdatedAt) { "Recovery draft changed during review. Review the latest draft again." }
-        val after = before.copy(expectedRevision = expectedCurrentRevision, updatedAt = maxOf(clock(), Math.addExact(before.updatedAt, 1)))
+        require(reviewedText == null || reviewedText.length <= 100_000) { "Reviewed notes are too long." }
+        val after = before.copy(expectedRevision = expectedCurrentRevision, text = reviewedText ?: before.text, updatedAt = maxOf(clock(), Math.addExact(before.updatedAt, 1)))
         dao.update(after)
         after
     }

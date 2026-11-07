@@ -133,7 +133,7 @@ val LocalPlayerDismiss = staticCompositionLocalOf<() -> Unit> { {} }
         CompositionLocalProvider(LocalPlayerDismiss provides close) {
             Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(12.dp), contentAlignment = Alignment.Center) {
                 Surface(Modifier.widthIn(max = 600.dp).fillMaxWidth(), shape = RoundedCornerShape(24.dp),
-                    color = RebuildPalette.Panel, tonalElevation = 0.dp) {
+                    color = RebuildPalette.Panel, contentColor = MaterialTheme.colorScheme.onSurface, tonalElevation = 0.dp) {
                     Column(Modifier.heightIn(max = (LocalConfiguration.current.screenHeightDp * .88f).dp)) {
                         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp),
                             verticalAlignment = Alignment.CenterVertically) {

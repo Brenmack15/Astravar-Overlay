@@ -13,7 +13,7 @@ Reforge is a major native Android change. It preserves the permanent release pac
 - `rules-engine.md`: typed effects, calculations and gameplay contracts.
 - `migration.md`: existing-store preservation and explicit reviewed local adoption.
 - `verification.md`, `security-performance.md`, `release.md`: executed evidence and remaining gates.
-- `CHANGELOG.md`, `checkpoint.md`: delivered changes and exact continuation.
+- `CHANGELOG.md`, `known-limitations.md`, `checkpoint.md`: delivered changes, remaining milestones and exact continuation.
 - `evidence/`: permissible UI evidence, with its source and limitations identified.
 
 ## Acceptance and authority

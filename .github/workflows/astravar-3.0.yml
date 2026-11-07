@@ -13,7 +13,7 @@ jobs:
   verify:
     if: github.head_ref == 'feat/astravar-3.0-reforge' || github.ref_name == 'feat/astravar-3.0-reforge'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -51,7 +51,7 @@ jobs:
           python3 scripts/verify_branding.py
           python3 scripts/verify_particle_resources.py
       - name: Rules, Room, native Compose, lint and debug APK
-        timeout-minutes: 42
+        timeout-minutes: 75
         run: |
           bash gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug -PastravarScreenshots="$GITHUB_WORKSPACE/validation/reforge-screenshots"
       - name: Inspect actual QA package
