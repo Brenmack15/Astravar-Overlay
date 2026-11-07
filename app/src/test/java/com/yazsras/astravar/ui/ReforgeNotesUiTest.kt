@@ -37,7 +37,7 @@ class ReforgeNotesUiTest {
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             controller.get().setContent { AstravarTheme { ReforgeNotesEditor(original, repo) {} } }
-            compose.waitUntil(10_000) { compose.onAllNodesWithText("Write your notes").fetchSemanticsNodes().isNotEmpty() }
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("Write your notes") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Write your notes").performScrollTo().performTextInput("## Field notes\nA player-owned discovery.")
             compose.waitForIdle()
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
@@ -45,6 +45,8 @@ class ReforgeNotesUiTest {
             val saved = runBlocking { requireNotNull(repo.get(original.character.id)) }
             assertEquals(original.revision + 1, saved.revision)
             assertNull(saved.character.currentHp)
+            // Canonical save and guarded draft cleanup finish in separate transactions.
+            compose.waitUntil(10_000) { runBlocking { repo.readNoteDraft(original.character.id) == null } }
             assertNull(runBlocking { repo.readNoteDraft(original.character.id) })
             compose.onNodeWithText("Preview").performClick()
             compose.onNodeWithText("Field notes").performScrollTo().assertExists()
