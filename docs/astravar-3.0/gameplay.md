@@ -12,7 +12,7 @@ The new Character destination opens a playable local-first sheet. Existing campa
 - Spells retain their user-owned source version, preparation, casting time, components, range, duration, concentration, ritual status, slot requirements and resource costs. Casting previews cost and concentration replacement; only confirmation consumes known available resources. Preparation uses the central engine's limits.
 - Current spell slots are recorded distinctly from calculated capacity. Generic resources retain separate maximum/current/recharge/recovery values. Rest preview requires confirmation of actual eligible elapsed campaign time. Known values recover according to the engine; unknown resources remain unknown.
 - Conditions, exhaustion level, concentration and next-turn actions are explicit. Compact turn controls expose Action, Bonus Action, Reaction and attacks remaining; enabling tracking or editing the attack allowance preserves spent state. Only My next turn resets availability. Source provenance and revision history sit behind optional disclosures.
-- Attacks, spells and resources have stable-ID editing, rather than an add-only setup path.
+- Attacks, spells and resources have stable-ID editing. Independent companion attack bonuses are editable without adding proficiency twice; changing attack text preserves accepted magical/critical flags. Small enum choices survive recreation, and compound training/effect/condition drafts reuse bounded file-backed saved-state recovery with a failed-recovery save guard.
 
 ## Practical gaps
 

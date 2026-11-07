@@ -43,7 +43,7 @@ Impact is gameplay/data impact; effort is relative implementation size. P0 block
 | 31 | P1 / versioning | Device client reports newer Android than current compile/target SDK36 (`app/build.gradle.kts`) | Medium / official SDK availability | Verify actual device/toolchain separately; do not infer installed OS from app metadata |
 | 32 | P1 / rich media | No safe embedded network image loader is configured | Medium / permissions + cache | Renderer uses explicit image links; native remote image embed remains open |
 | 33 | P1 / editing | Historical companion, currency and checkpoint source forms still require a resolved-event attribution (`PartyTypedSheetV2.kt`, `PartyWalletV2.kt`, `CampaignCheckpointsV21.kt`) | Medium / shared audit contract | Preserved for existing transaction safeguards; optional automatic provenance is still needed in these source editors |
-| 34 | P1 / accessibility | Actual native captures exposed black default text on custom navy containers: NPC title, ability dialog heading and skill labels (`Common.kt`, `PlayerDesign.kt`) | Small / shared theme | Root reading color and explicit sheet content colors implemented; rendered text-layout contrast regression added, QA recapture pending |
+| 34 | P1 / accessibility | Actual native captures exposed black default text on custom navy containers: NPC title, ability dialog heading and skill labels (`Common.kt`, `PlayerDesign.kt`) | Small / shared theme | Root reading color and explicit sheet content colors implemented; actual native character/NPC/ability recaptures confirm readable headings, and the rendered text-layout contrast regression passes |
 
 ## Preserved strengths
 

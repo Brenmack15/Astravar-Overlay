@@ -9,13 +9,16 @@ import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.data.*
 import com.yazsras.astravar.rules.reforge.SecureDice
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
 /** The existing companion sheet remains a source record; playable mechanics require explicit review. */
 @Composable internal fun ReforgeCompanionAttackReviewButton(repository: CampaignLedgerRepository, profileId: String) {
     val context = LocalContext.current.applicationContext
-    val local = remember(context) { ReforgeRepository.open(context) }
-    val saved by remember(local, profileId) { local.observe(profileId) }.collectAsState(initial = null)
+    // Reading the preserved source sheet needs no playable-store connection.
+    // Open that store only when the player explicitly starts a review.
+    var local by remember(context) { mutableStateOf<ReforgeRepository?>(null) }
+    val saved by remember(local, profileId) { local?.observe(profileId) ?: flowOf<ReforgeSavedCharacter?>(null) }.collectAsState(initial = null)
     var review by remember(profileId) { mutableStateOf<ReforgeCompanionActionReview?>(null) }
     var expectedRevision by remember(profileId) { mutableStateOf<Long?>(null) }
     var selected by remember(profileId) { mutableStateOf<Set<String>>(emptySet()) }
@@ -27,9 +30,10 @@ import kotlinx.coroutines.launch
         busy = true; message = "Reading saved source…"
         scope.launch {
             try {
-                val preview = local.readLegacyPreview(repository, profileId)
+                val store = local ?: ReforgeRepository.open(context).also { local = it }
+                val preview = store.readLegacyPreview(repository, profileId)
                 review = reviewCompanionActions(preview)
-                expectedRevision = local.get(profileId)?.revision; selected = emptySet(); reviewed = false; message = ""
+                expectedRevision = store.get(profileId)?.revision; selected = emptySet(); reviewed = false; message = ""
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { message = e.message ?: "Source could not be read." }
             finally { busy = false }
@@ -44,7 +48,7 @@ import kotlinx.coroutines.launch
                     busy = true
                     scope.launch {
                         try {
-                            local.commitCompanionActions(repository, current, selected, requireNotNull(expectedRevision))
+                            requireNotNull(local).commitCompanionActions(repository, current, selected, requireNotNull(expectedRevision))
                             review = null; message = "Attacks saved on this device. Select this companion from Character → Switch to roll."
                         } catch (e: CancellationException) { throw e }
                         catch (e: Exception) { message = e.message ?: "Attacks were not saved." }

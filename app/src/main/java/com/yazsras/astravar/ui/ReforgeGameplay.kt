@@ -9,6 +9,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.rules.reforge.*
 import java.util.UUID
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.SetSerializer
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 
 internal val reforgeSkills = linkedMapOf(
     "Acrobatics" to Stat.DEX, "Animal Handling" to Stat.WIS, "Arcana" to Stat.INT,
@@ -122,10 +126,13 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
 
 @Composable internal fun ReforgeTrainingEditor(latestCharacter: ReforgeCharacter, onDismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit) {
     val character = requireNotNull(rememberReforgeSnapshot(latestCharacter))
-    var training by remember { mutableStateOf(character.skills) }
-    var saves by remember { mutableStateOf(character.saveProficiencies) }
+    val trainingDraft = rememberReforgeDraft(character.skills, MapSerializer(String.serializer(), SkillTraining.serializer()))
+    val savesDraft = rememberReforgeDraft(character.saveProficiencies, SetSerializer(Stat.serializer()))
+    var training by trainingDraft
+    var saves by savesDraft
     PlayerSheet("Proficiencies & Expertise", onDismiss, dirty = training != character.skills || saves != character.saveProficiencies,
-        actions = { PlayerButton(onClick = { onSave(character.copy(skills = training, saveProficiencies = saves)) }) { Text("Save training") } }) {
+        actions = { PlayerButton(enabled = trainingDraft.canSave && savesDraft.canSave, onClick = { onSave(character.copy(skills = training, saveProficiencies = saves)) }) { Text("Save training") } }) {
+        ReforgeDraftRecovery(trainingDraft, savesDraft)
         Text("Saving throws", style = MaterialTheme.typography.titleMedium)
         Stat.entries.forEach { stat -> Toggle(stat.name, stat in saves) { saves = if (it) saves + stat else saves - stat } }
         Text("Skills", style = MaterialTheme.typography.titleMedium)
@@ -160,30 +167,31 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
     var slot by rememberSaveable { mutableStateOf(originalDefinition?.equipmentSlot ?: "") }
     var quantity by rememberSaveable { mutableStateOf(original?.quantity?.toString() ?: "1") }
     var favorite by rememberSaveable { mutableStateOf(original?.favorite ?: false) }
-    var state by remember { mutableStateOf(original?.state ?: ItemState.CARRIED) }
-    var target by remember { mutableStateOf(NumericTarget.ABILITY) }
-    var operation by remember { mutableStateOf(NumberOperation.SET) }
-    var ability by remember { mutableStateOf(Stat.STR) }
+    var state by rememberSaveable { mutableStateOf(original?.state ?: ItemState.CARRIED) }
+    var target by rememberSaveable { mutableStateOf(NumericTarget.ABILITY) }
+    var operation by rememberSaveable { mutableStateOf(NumberOperation.SET) }
+    var ability by rememberSaveable { mutableStateOf(Stat.STR) }
     var amount by rememberSaveable { mutableStateOf("") }
     var effectName by rememberSaveable { mutableStateOf("") }
-    var effects by remember { mutableStateOf(originalDefinition?.effects ?: listOf()) }
+    val effectsDraft = rememberReforgeDraft(originalDefinition?.effects ?: emptyList(), ListSerializer(EffectDefinition.serializer()))
+    var effects by effectsDraft
     var reviewed by rememberSaveable { mutableStateOf(false) }
     var effectType by rememberSaveable { mutableStateOf("Statistic") }
-    var damageKind by remember { mutableStateOf(DamageKind.COLD) }
+    var damageKind by rememberSaveable { mutableStateOf(DamageKind.COLD) }
     var damageDice by rememberSaveable { mutableStateOf("1d6") }
-    var defense by remember { mutableStateOf(DefenseKind.RESISTANCE) }
-    var edge by remember { mutableStateOf(RollEdge.ADVANTAGE) }
-    var rollKind by remember { mutableStateOf(RollKind.ABILITY_CHECK) }
+    var defense by rememberSaveable { mutableStateOf(DefenseKind.RESISTANCE) }
+    var edge by rememberSaveable { mutableStateOf(RollEdge.ADVANTAGE) }
+    var rollKind by rememberSaveable { mutableStateOf(RollKind.ABILITY_CHECK) }
     var qualifier by rememberSaveable { mutableStateOf<String?>(null) }
     var resourceId by rememberSaveable { mutableStateOf<String?>(null) }
     var chargeCost by rememberSaveable { mutableStateOf("1") }
     var once by rememberSaveable { mutableStateOf(false) }
     var critical by rememberSaveable { mutableStateOf(true) }
     var error by remember { mutableStateOf("") }
-    val definitionId = remember { originalDefinition?.id ?: UUID.randomUUID().toString() }
-    val instanceId = remember { original?.id ?: UUID.randomUUID().toString() }
+    val definitionId = rememberSaveable { originalDefinition?.id ?: UUID.randomUUID().toString() }
+    val instanceId = rememberSaveable { original?.id ?: UUID.randomUUID().toString() }
     PlayerSheet(if (original == null) "Add equipment" else "Edit equipment", onDismiss, dirty = true, actions = {
-        PlayerButton(enabled = name.isNotBlank() && reviewed, onClick = {
+        PlayerButton(enabled = name.isNotBlank() && reviewed && effectsDraft.canSave, onClick = {
             try {
                 val definition = (originalDefinition ?: ItemDefinition(definitionId, name)).copy(name = name.trim(), effects = effects,
                     requiresAttunement = attune, equipmentSlot = slot.trim().ifBlank { null }, description = description)
@@ -195,6 +203,7 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
             } catch (e: Exception) { error = e.message ?: "Check item" }
         }) { Text("Save reviewed item") }
     }) {
+        ReforgeDraftRecovery(effectsDraft)
         Field("Item name", name, { name = it; reviewed = false })
         Field("Description", description, { description = it }, single = false)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -261,11 +270,14 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
     val character = requireNotNull(rememberReforgeSnapshot(latestCharacter))
     val original = remember { character.attacks.firstOrNull { it.id == existingAttackId } }
     var name by rememberSaveable { mutableStateOf(original?.name ?: "") }
-    var ability by remember { mutableStateOf(original?.ability ?: Stat.STR) }
+    var ability by rememberSaveable { mutableStateOf(original?.ability ?: Stat.STR) }
     var formula by rememberSaveable { mutableStateOf(original?.damage?.firstOrNull()?.formula?.let(SecureDice::format) ?: "") }
-    var kind by remember { mutableStateOf(original?.damage?.firstOrNull()?.type ?: DamageKind.BLUDGEONING) }
+    var kind by rememberSaveable { mutableStateOf(original?.damage?.firstOrNull()?.type ?: DamageKind.BLUDGEONING) }
     var range by rememberSaveable { mutableStateOf(original?.range ?: "5 ft.") }
     var proficient by rememberSaveable { mutableStateOf(original?.proficient ?: true) }
+    var independent by rememberSaveable { mutableStateOf(original?.fixedAttackBonus != null) }
+    var fixedBonus by rememberSaveable { mutableStateOf(original?.fixedAttackBonus?.toString().orEmpty()) }
+    var timing by rememberSaveable { mutableStateOf(original?.actionType ?: "Action") }
     var addAbility by rememberSaveable { mutableStateOf(original?.addAbilityToDamage ?: true) }
     var error by remember { mutableStateOf("") }
     PlayerSheet(if (original == null) "Add attack" else "Edit attack", onDismiss, dirty = name.isNotBlank(), actions = {
@@ -273,18 +285,28 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
             try {
                 val id = original?.id ?: UUID.randomUUID().toString()
                 val dice = SecureDice.parse(formula)
+                val component = (original?.damage?.firstOrNull() ?: DamageComponent("$id:base", name.trim(), kind, dice))
+                    .copy(label = name.trim(), type = kind, formula = dice)
                 val attack = (original ?: AttackDefinition(id, name.trim())).copy(name = name.trim(), ability = ability, proficient = proficient,
-                    damage = listOf(DamageComponent(original?.damage?.firstOrNull()?.id ?: "$id:base", name.trim(), kind, dice)) + (original?.damage?.drop(1) ?: emptyList()),
-                    addAbilityToDamage = addAbility, range = range)
+                    fixedAttackBonus = if (independent) optionalInt(fixedBonus, "Independent attack bonus", -1000, 1000) ?: error("Enter the independent attack bonus") else null,
+                    damage = listOf(component) + (original?.damage?.drop(1) ?: emptyList()),
+                    addAbilityToDamage = addAbility, range = range, actionType = timing)
                 onSave(character.copy(attacks = character.attacks.filterNot { it.id == attack.id } + attack))
             } catch (e: Exception) { error = e.message ?: "Check attack" }
         }) { Text("Save attack") }
     }) {
         Field("Name", name, { name = it })
-        Choices("Attack ability", Stat.entries, ability) { ability = it }
+        Toggle("Use independent attack bonus", independent) { independent = it }
+        if (independent) {
+            Field("Independent attack bonus", fixedBonus, { fixedBonus = it })
+            Text("This is the complete to-hit bonus. Ability and proficiency are not added again.", color = RebuildPalette.Muted)
+        } else {
+            Choices("Attack ability", Stat.entries, ability) { ability = it }
+            Toggle("Proficient", proficient) { proficient = it }
+        }
         Field("Base damage dice (for example 1d8)", formula, { formula = it })
         Choices("Damage type", DamageKind.entries, kind) { kind = it }
-        Toggle("Proficient", proficient) { proficient = it }
+        Choices("Action type", (listOf("Action", "Bonus Action", "Reaction") + listOfNotNull(original?.actionType)).distinct(), timing) { timing = it }
         Toggle("Add ability modifier to damage", addAbility) { addAbility = it }
         Field("Range", range, { range = it })
         Text("Critical hits double eligible dice. Damage bonuses are resolved through active structured effects.", color = RebuildPalette.Muted)
@@ -297,7 +319,7 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
     val original = remember { character.spells.firstOrNull { it.id == existingSpellId } }
     var name by rememberSaveable { mutableStateOf(original?.name ?: "") }
     var level by rememberSaveable { mutableStateOf(original?.level?.toString() ?: "") }
-    var preparation by remember { mutableStateOf(original?.preparation ?: SpellPreparation.KNOWN) }
+    var preparation by rememberSaveable { mutableStateOf(original?.preparation ?: SpellPreparation.KNOWN) }
     var concentration by rememberSaveable { mutableStateOf(original?.concentration ?: false) }
     var description by rememberSaveable { mutableStateOf(original?.description ?: "") }
     var components by rememberSaveable { mutableStateOf(original?.components ?: "") }
@@ -343,7 +365,7 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
     var name by rememberSaveable { mutableStateOf(original?.name ?: "") }
     var maximum by rememberSaveable { mutableStateOf(original?.maximum?.toString() ?: "") }
     var current by rememberSaveable { mutableStateOf(original?.current?.toString() ?: "") }
-    var recharge by remember { mutableStateOf(original?.recharge ?: Recharge.NONE) }
+    var recharge by rememberSaveable { mutableStateOf(original?.recharge ?: Recharge.NONE) }
     var recovery by rememberSaveable { mutableStateOf(original?.recoveryAmount?.toString() ?: "") }
     var dieSides by rememberSaveable { mutableStateOf(original?.dieSides?.toString() ?: "") }
     var error by remember { mutableStateOf("") }

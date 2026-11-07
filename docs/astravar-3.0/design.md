@@ -59,6 +59,8 @@ Dialogs respect safe drawing and IME insets; content scrolls while actions remai
 
 The theme explicitly provides the on-surface reading color for custom navy containers, and shared sheets declare their content color. Native captures caught the previous black default text on those surfaces; a rendered text-layout contrast assertion now requires at least 4.5:1 for ordinary reading text. Native link annotations retain link interaction rather than using offset-only click handling. Documents parse large sources off the main thread, associate each result with its source, and expose bounded sections and text expansion while retaining the complete original content.
 
+At 360 dp and doubled font scale, the full Character and Inventory labels require three navigation rows. Tests preserve their requested font size, single-line complete labels, 48 dp touch targets and selected-state behavior. Font size and labels are not reduced to fit the previous two-row arrangement.
+
 New `ReforgeContentUiTest` exercises the actual native profile and compact editor with synthetic records. It captures `reforge-npc-profile` and `reforge-compact-ability-editor` through the established native-window helper when screenshots are enabled. `RecordPresentationTest` verifies safe conversion, source preservation, malformed markup, supported Markdown blocks and link schemes. Existing navigation/editor tests are updated to the changed product requirements rather than retaining obsolete mandatory-citation assertions.
 
 Measured physical-device accessibility, TalkBack navigation, real Galaxy insets, performance traces and large-font end-to-end gameplay must be reported separately from Robolectric drawing. No such result is inferred from this specification.

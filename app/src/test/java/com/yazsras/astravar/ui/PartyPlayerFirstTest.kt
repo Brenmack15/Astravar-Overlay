@@ -327,7 +327,8 @@ class PartyPlayerFirstTest {
                 }
             }
             compose.onNodeWithText("Eek").performScrollTo().performClick()
-            compose.onNodeWithText("Eek's specialized companion tools").performScrollTo().performClick()
+            compose.onNode(hasText("Eek's specialized companion tools") and hasClickAction())
+                .performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
             compose.onNodeWithText("Condition unknown").performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("Resources").performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("Equipment & upgrades").performScrollTo().assertIsDisplayed()

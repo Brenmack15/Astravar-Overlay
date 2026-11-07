@@ -83,7 +83,8 @@ import com.yazsras.astravar.rules.reforge.*
 
 @Composable internal fun ReforgeConditionDialog(latestCharacter: ReforgeCharacter, onDismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit) {
     val character = requireNotNull(rememberReforgeSnapshot(latestCharacter))
-    var next by remember { mutableStateOf(character) }
+    val conditionDraft = rememberReforgeDraft(character, ReforgeCharacter.serializer())
+    var next by conditionDraft
     var exhaustion by rememberSaveable { mutableStateOf(character.exhaustionLevel.toString()) }
     var custom by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
@@ -91,10 +92,11 @@ import com.yazsras.astravar.rules.reforge.*
         try { next = GameplayRules.setCondition(next, condition, enabled); error = "" }
         catch (e: Exception) { error = e.message ?: "Condition unavailable" }
     }
-    PlayerSheet("Conditions", onDismiss, dirty = next != character, actions = { PlayerButton(onClick = {
+    PlayerSheet("Conditions", onDismiss, dirty = next != character, actions = { PlayerButton(enabled = conditionDraft.canSave, onClick = {
         try { onSave(next.copy(exhaustionLevel = optionalInt(exhaustion, "Exhaustion level", 0, 6) ?: 0)) }
         catch (e: Exception) { error = e.message ?: "Check exhaustion" }
     }) { Text("Apply conditions") } }) {
+        ReforgeDraftRecovery(conditionDraft)
         Text("Active conditions affect applicable checks and casting. Incapacitating conditions end concentration.", color = RebuildPalette.Muted)
         (listOf("blinded", "charmed", "deafened", "frightened", "grappled", "incapacitated", "invisible", "paralyzed", "petrified", "poisoned", "prone", "restrained", "stunned", "unconscious") + next.conditions).distinct().forEach { condition ->
             Toggle(condition.replaceFirstChar { it.uppercase() }, condition in next.conditions) { toggle(condition, it) }
@@ -108,7 +110,7 @@ import com.yazsras.astravar.rules.reforge.*
 
 @Composable internal fun ReforgeRestDialog(latestCharacter: ReforgeCharacter, onDismiss: () -> Unit, onPreview: (String, ReforgeCharacter) -> Unit) {
     val character = requireNotNull(rememberReforgeSnapshot(latestCharacter))
-    var kind by remember { mutableStateOf(Recharge.SHORT_REST) }
+    var kind by rememberSaveable { mutableStateOf(Recharge.SHORT_REST) }
     var hours by rememberSaveable { mutableStateOf("1") }
     var confirmed by rememberSaveable { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
@@ -166,7 +168,7 @@ import com.yazsras.astravar.rules.reforge.*
     onDismiss: () -> Unit, onPreview: (CastPreview) -> Unit) {
     val character = requireNotNull(rememberReforgeSnapshot(latestCharacter))
     val projection = remember(character) { CharacterCalculator.calculate(character) }
-    var slot by remember { mutableStateOf<Int?>(if (spell.level > 0 && spell.slotRequired) spell.level else null) }
+    var slot by rememberSaveable { mutableStateOf<Int?>(if (spell.level > 0 && spell.slotRequired) spell.level else null) }
     var replace by rememberSaveable { mutableStateOf(false) }
     var ritual by rememberSaveable { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }

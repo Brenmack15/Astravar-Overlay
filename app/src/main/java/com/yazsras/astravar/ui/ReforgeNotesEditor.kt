@@ -47,6 +47,7 @@ internal fun reforgeNotesLoadDecision(canonical: String, revision: Long, editorT
     var preview by rememberSaveable { mutableStateOf(false) }
     var status by remember { mutableStateOf("Loading notes…") }
     var error by remember { mutableStateOf("") }
+    var reviewing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(repository, saved.character.id) {
         try {
@@ -101,6 +102,24 @@ internal fun reforgeNotesLoadDecision(canonical: String, revision: Long, editorT
         }
     }
     fun edit(value: String) { if (value.length <= 100_000) { undo = text; text = value } }
+    fun reviewSelectedText(chosenText: String) {
+        if (reviewing) return
+        reviewing = true
+        scope.launch {
+            try {
+                val latest = repository.get(base.character.id) ?: error("Character is unavailable.")
+                check(latest.revision == base.revision) { "Saved notes changed again. Reopen to compare the latest revision. Recovery text was retained." }
+                val recovery = draft
+                draft = if (recovery != null) repository.reviewNoteDraft(base.character.id, recovery.updatedAt, latest.revision, chosenText)
+                    else repository.saveNoteDraft(base.character.id, latest.revision, chosenText)
+                knownDraftStamp = draft?.updatedAt ?: -1L
+                text = chosenText; textRevision = latest.revision; base = latest
+                error = ""; conflict = false; status = "Reviewed edit ready to save"
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = e.message ?: "Recovery text was retained." }
+            finally { reviewing = false }
+        }
+    }
     PlayerSheet("Character notes", onDismiss, dirty = loaded && text != base.character.notes, actions = {
         PlayerTextButton(onClick = { preview = !preview }) { Text(if (preview) "Write" else "Preview") }
         PlayerTextButton(enabled = undo != null && !conflict, onClick = { val current = text; text = undo ?: text; undo = current }) { Text("Undo") }
@@ -112,39 +131,11 @@ internal fun reforgeNotesLoadDecision(canonical: String, revision: Long, editorT
             Text("The character changed after this draft began. Review both texts before choosing a new edit.", color = RebuildPalette.GoldBright)
             PlayerDisclosure("Currently saved notes", initiallyOpen = true) { ReforgeRichText(base.character.notes.ifBlank { "No saved notes." }) }
             PlayerDisclosure("Recovery text", initiallyOpen = true) { ReforgeRichText(draft?.text ?: text) }
-            PlayerButton(onClick = {
-                scope.launch {
-                    try {
-                        val latest = repository.get(base.character.id) ?: error("Character is unavailable.")
-                        // Refresh the comparison first if another edit occurred while reviewing.
-                        check(latest.revision == base.revision) { "Saved notes changed again. Close and reopen to compare the latest revision. Recovery text was retained." }
-                        val recovery = draft
-                        if (recovery != null) {
-                            draft = repository.reviewNoteDraft(base.character.id, recovery.updatedAt, latest.revision, recovery.text)
-                            text = recovery.text; knownDraftStamp = draft?.updatedAt ?: -1L
-                        }
-                        base = latest; textRevision = latest.revision; error = ""; conflict = false; status = "Reviewed edit ready to save"
-                    } catch (e: CancellationException) { throw e }
-                    catch (e: Exception) { error = e.message ?: "Recovery text is retained." }
-                }
-            }) { Text("Use recovery as reviewed edit") }
-            if (draft != null && text != draft?.text) {
+            PlayerButton(enabled = !reviewing, onClick = { reviewSelectedText(draft?.text ?: text) }) { Text("Use recovery as reviewed edit") }
+            PlayerOutlinedButton(enabled = !reviewing, onClick = { reviewSelectedText(base.character.notes) }) { Text("Keep saved notes") }
+            if (draft != null && text != draft?.text && text != base.character.notes) {
                 PlayerDisclosure("Restored editor text", initiallyOpen = true) { ReforgeRichText(text) }
-                PlayerOutlinedButton(onClick = {
-                    val chosenText = text
-                    scope.launch {
-                        try {
-                            val latest = repository.get(base.character.id) ?: error("Character is unavailable.")
-                            check(latest.revision == base.revision) { "Saved notes changed again. Reopen to compare the latest revision." }
-                            val recovery = draft
-                            if (recovery != null) draft = repository.reviewNoteDraft(base.character.id, recovery.updatedAt, latest.revision, chosenText)
-                            knownDraftStamp = draft?.updatedAt ?: -1L
-                            text = chosenText; textRevision = latest.revision; base = latest
-                            error = ""; conflict = false
-                        } catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { error = e.message ?: "Both texts need review." }
-                    }
-                }) { Text("Use restored editor text") }
+                PlayerOutlinedButton(enabled = !reviewing, onClick = { reviewSelectedText(text) }) { Text("Use restored editor text") }
             }
             val guardedClose = LocalPlayerDismiss.current
             PlayerTextButton(onClick = guardedClose) { Text("Close notes") }

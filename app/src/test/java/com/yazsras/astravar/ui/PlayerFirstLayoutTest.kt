@@ -52,12 +52,12 @@ class PlayerFirstLayoutTest {
         try {
             activity.get().setContent {
                 CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale = 2f)) {
-                    AstravarTheme { Column { RebuildPrimaryNavigation("Armor", selected::add) } }
+                    AstravarTheme { Column { RebuildPrimaryNavigation("Character", selected::add) } }
                 }
             }
-            for (name in listOf("Armor", "Combat", "Party", "Campaign", "Config"))
+            for (name in listOf("Character", "Combat", "Inventory", "Campaign", "More"))
                 compose.onNode(hasText(name) and hasClickAction()).assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
-            assertEquals(listOf("Armor", "Combat", "Party", "Campaign", "Config"), selected)
+            assertEquals(listOf("Character", "Combat", "Inventory", "Campaign", "More"), selected)
         } finally { activity.pause().stop().destroy() }
     }
 }

@@ -53,14 +53,18 @@ jobs:
       - name: Rules, Room, native Compose, lint and debug APK
         timeout-minutes: 75
         run: |
-          bash gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug -PastravarScreenshots="$GITHUB_WORKSPACE/validation/reforge-screenshots"
+          bash gradlew --no-daemon --console=plain --continue :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug -PastravarScreenshots="$GITHUB_WORKSPACE/validation/reforge-screenshots"
       - name: Inspect actual QA package
         run: |
           mkdir -p validation
           python3 scripts/reforge_inspect_apk.py app/build/outputs/apk/debug/app-debug.apk --sdk "$ANDROID_HOME" --output validation/reforge-debug-package.json
+          printf '%s\n' 'DEBUG QA ARTIFACT. This is not an owner-signed in-place update. No production release, signing rotation or physical phone installation occurred.' > validation/QA-ONLY.txt
+      - name: Index executed evidence even on failure
+        if: always()
+        run: |
+          mkdir -p validation
           python3 scripts/reforge_evidence.py --output validation/reforge-evidence.json
           git rev-parse HEAD > validation/SOURCE_COMMIT.txt
-          printf '%s\n' 'DEBUG QA ARTIFACT. This is not an owner-signed in-place update. No production release, signing rotation or physical phone installation occurred.' > validation/QA-ONLY.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

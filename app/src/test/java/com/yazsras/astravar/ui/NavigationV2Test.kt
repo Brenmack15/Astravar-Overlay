@@ -116,6 +116,7 @@ class NavigationV2Test {
             compose.onNodeWithText("Checkpoints").assertExists()
             compose.onNodeWithTag("navigation-More").performClick()
             compose.onNodeWithText("Companions").performScrollTo().performClick()
+            compose.onNodeWithText("Eek").performClick()
             compose.onNodeWithText("Eek's specialized companion tools").performScrollTo().assertExists()
             compose.runOnIdle { assertEquals(before, app.repository.state.value) }
             assertEquals(0, overlayStarts)

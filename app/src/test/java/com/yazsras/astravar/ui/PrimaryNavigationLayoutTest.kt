@@ -37,7 +37,9 @@ class PrimaryNavigationLayoutTest {
 
     @Test fun normalTextKeepsAllFiveReadableDestinationsInOneRow() = verifyNavigation(1f, 1)
 
-    @Test fun doubleTextKeepsCompleteSingleLineLabelsAndSelectedNavigationInTwoRows() = verifyNavigation(2f, 2)
+    // Character and Inventory require pairs at 360 dp with doubled text. Keep
+    // complete labels and the requested font size rather than squeezing a row.
+    @Test fun doubleTextKeepsCompleteSingleLineLabelsAndSelectedNavigationInThreeRows() = verifyNavigation(2f, 3)
 
     private fun verifyNavigation(fontScale: Float, expectedRows: Int) {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
@@ -46,13 +48,14 @@ class PrimaryNavigationLayoutTest {
             activity.get().setContent {
                 CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
                     AstravarTheme {
-                        var selected by remember { mutableStateOf("Armor") }
+                        var selected by remember { mutableStateOf("Character") }
                         Box(Modifier.width(360.dp)) {
                             RebuildPrimaryNavigation(selected) { selected = it; visited += it }
                         }
                     }
                 }
             }
+            compose.onNode(hasText("Character") and hasClickAction()).assertIsSelected()
             val controlBounds = rebuildDestinations.map { name ->
                 val text = compose.onNodeWithText(name, useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode()
                 val layouts = mutableListOf<TextLayoutResult>()
