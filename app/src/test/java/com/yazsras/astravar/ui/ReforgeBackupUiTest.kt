@@ -75,6 +75,11 @@ class ReforgeBackupUiTest {
             compose.waitUntil(15_000) { compose.onAllNodesWithText("Current data has a verified backup.").fetchSemanticsNodes().isNotEmpty() }
             val protectedBackup = decodeReforgeBackup(protectedFile.readText(Charsets.UTF_8))
             assertEquals(listOf("fictional-existing"), protectedBackup.characters.map { it.profileId })
+            // Byte verification can be visible while the refreshed merge preview is still busy.
+            // Wait for the actual guarded action, retaining all independent persistence assertions.
+            compose.waitUntil(15_000) {
+                compose.onAllNodes(hasTestTag("reforge-confirm-restore") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+            }
             compose.onNodeWithTag("reforge-confirm-restore").assertIsEnabled().performClick()
             compose.waitUntil(10_000) { runBlocking { repo.get(imported.character.id) != null } }
             assertEquals(imported, runBlocking { repo.get(imported.character.id) })
