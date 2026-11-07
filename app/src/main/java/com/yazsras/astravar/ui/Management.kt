@@ -455,8 +455,6 @@ private class WeaponBackupPageLifetime { var active = true }
     val prefs by app.preferences.flow.collectAsState(initial = com.yazsras.astravar.data.OverlayPrefs())
     val context = LocalContext.current
     var mode by rememberSaveable { mutableStateOf<String?>(null) }
-    var scale by rememberSaveable { mutableFloatStateOf(1f) }
-    var scaleBaseline by rememberSaveable { mutableFloatStateOf(1f) }
     val image = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) a.run("Artwork selected") {
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -464,34 +462,18 @@ private class WeaponBackupPageLifetime { var active = true }
         }
     }
     Page {
-        PlayerHeading("Overlay & appearance")
-        PlayerCard {
-            Text("Floating combat overlay", style = MaterialTheme.typography.titleLarge)
-            Action("Start overlay session", onClick = start)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PlayerOutlinedButton(onClick = grant, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Allow overlay") }
-                PlayerOutlinedButton(onClick = stop, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Stop session") }
-            }
-        }
-        PlayerEntry("Panel layout", "${"%.0f".format(prefs.scale * 100)}% scale · saved portrait and landscape positions", "Settings", {
-            scale = prefs.scale; scaleBaseline = prefs.scale; a.message = ""; mode = "layout"
-        })
+        PlayerHeading("Appearance & feedback")
+        Text("Astravar is a standalone character workspace.", color = RebuildPalette.Muted)
         PlayerEntry("Feedback & advanced controls", "Haptics ${if (prefs.haptics) "on" else "off"} · manual dice ${if (prefs.manualOverrides) "on" else "off"}", "Settings", { a.message = ""; mode = "feedback" })
         PlayerEntry("Artwork", if (prefs.image.isBlank()) "Included Astravar artwork" else "Personal image selected", "Weapon", { a.message = ""; mode = "artwork" })
         if (s.demo) PlayerEntry("Leave demo", "Begin an empty campaign after review", "More", { a.message = ""; mode = "demo" })
         if (a.message.isNotBlank()) Text(a.message, color = RebuildPalette.Ice)
     }
     mode?.let { currentMode ->
-        PlayerSheet(when (currentMode) { "layout" -> "Panel layout"; "feedback" -> "Feedback & advanced controls"; "artwork" -> "Artwork"; else -> "End demo?" },
-            onDismiss = { if (!a.busy) mode = null }, dirty = currentMode == "layout" && scale != scaleBaseline, showCancel = false,
+        PlayerSheet(when (currentMode) { "feedback" -> "Feedback & advanced controls"; "artwork" -> "Artwork"; else -> "End demo?" },
+            onDismiss = { if (!a.busy) mode = null }, dirty = false, showCancel = false,
             actions = {
                 val close = LocalPlayerDismiss.current
-                if (currentMode == "layout") {
-                    PlayerTextButton(onClick = close, enabled = !a.busy) { Text("Cancel") }
-                    PlayerButton(enabled = !a.busy && scale != scaleBaseline && prefs.scale == scaleBaseline, onClick = {
-                        a.run("Panel scale saved") { app.preferences.scale(scale); mode = null }
-                    }) { Text("Save scale") }
-                }
                 if (currentMode == "demo") {
                     PlayerTextButton(onClick = close, enabled = !a.busy) { Text("Cancel") }
                     PlayerButton(enabled = !a.busy, onClick = {
@@ -505,21 +487,6 @@ private class WeaponBackupPageLifetime { var active = true }
                 }
             }) {
             when (currentMode) {
-                "layout" -> {
-                    Text("Overlay scale: ${"%.0f".format(scale * 100)}%", style = MaterialTheme.typography.titleMedium)
-                    Slider(scale, onValueChange = { scale = it }, valueRange = .85f..1.3f, enabled = !a.busy,
-                        modifier = Modifier.heightIn(min = 48.dp).semantics {
-                            contentDescription = "Overlay scale"
-                            stateDescription = "${"%.0f".format(scale * 100)} percent"
-                        })
-                    if (prefs.scale != scaleBaseline) Text("Scale changed. Close and reopen to review it.", color = MaterialTheme.colorScheme.error)
-                    Text("Drag the collapsed crystal to reposition it. Portrait and landscape positions are saved separately.", color = RebuildPalette.Muted)
-                    PlayerOutlinedButton(enabled = !a.busy, onClick = {
-                        a.run("Positions reset; restart overlay to apply") {
-                            app.preferences.position(false, 0, 160); app.preferences.position(true, 0, 80)
-                        }
-                    }) { Text("Reset overlay positions") }
-                }
                 "feedback" -> {
                     Toggle("Haptic feedback", prefs.haptics, !a.busy) { value -> a.run("Feedback updated") { app.preferences.haptics(value) } }
                     Toggle("Advanced: manual roll override", prefs.manualOverrides, !a.busy) { value -> a.run("Manual override updated") { app.preferences.manualOverrides(value) } }
