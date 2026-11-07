@@ -31,6 +31,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.data.*
+import com.yazsras.astravar.BuildConfig
 import com.yazsras.astravar.savePresentationCapture
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -342,7 +343,16 @@ class CampaignVisualAcceptanceTest {
             compose.onNodeWithText("Spell reservoir").assertIsDisplayed()
             compose.onNodeWithText("Core management").assertDoesNotExist()
             capture("rebuild-config-400", fixture.activity.get())
-            compose.onNodeWithText("Fictional sync").performScrollTo().performClick()
+            if (BuildConfig.DEBUG) {
+                compose.onNodeWithText("Fictional sync").performScrollTo().performClick()
+            } else {
+                // The public diagnostic launcher is deliberately absent from release.
+                // Still exercise the injected-offline component and real Dialog below.
+                compose.onNodeWithText("Fictional sync").assertDoesNotExist()
+                fixture.render(destination = "More") {
+                    RebuildToolSheet("Fictional sync", {}) { SandboxSyncPage(sync) }
+                }
+            }
             settle { compose.onAllNodesWithText("Offline").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("1 pending · saved on this device").assertIsDisplayed()
             capture("rebuild-sync-offline", fixture.activity.get(), modal = true,

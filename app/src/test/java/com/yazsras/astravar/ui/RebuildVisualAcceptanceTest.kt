@@ -327,6 +327,7 @@ class RebuildVisualAcceptanceTest {
             compose.onNodeWithText("Roll attack").assertIsDisplayed().assertIsEnabled().assertHeightIsAtLeast(48.dp)
             listOf("Normal", "Advantage", "Disadvantage").forEach { compose.onNodeWithText(it).assertIsDisplayed().assertHeightIsAtLeast(48.dp) }
             compose.onNodeWithText("Latest result").assertIsDisplayed()
+            compose.onNodeWithText("Floating controls").assertDoesNotExist()
             capture("rebuild-combat-default", fixture.activity.get())
             compose.onAllNodesWithText("Change").onFirst().performClick()
             compose.onNodeWithText("Choose attack").assertIsDisplayed()
