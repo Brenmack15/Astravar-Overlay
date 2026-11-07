@@ -115,9 +115,10 @@ class CharacterOverviewV2Test {
                 compose.onAllNodes(hasContentDescription("Strength score 16", substring = true)).fetchSemanticsNodes().isNotEmpty()
             }
             compose.onNodeWithTag("ability-STR").performScrollTo().performClick()
-            compose.onNodeWithText("Raw ability score (blank = unknown)").performScrollTo().performTextClearance()
-            compose.onNodeWithText("Raw ability score (blank = unknown)").performTextInput("18")
-            compose.onNodeWithText("Separate magical modifier").assert(
+            compose.onNodeWithText("Ability score").performScrollTo().performTextClearance()
+            compose.onNodeWithText("Ability score").performTextInput("18")
+            compose.onNodeWithText("Advanced · recorded modifiers & sources").performScrollTo().performClick()
+            compose.onNodeWithText("Recorded modifier adjustment").performScrollTo().assert(
                 SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("2"))
             )
             compose.onNodeWithText("Save ability").performClick()

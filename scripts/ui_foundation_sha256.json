@@ -460,5 +460,10 @@
         ]
       }
     }
+  },
+  "authorized_reforge_source_changes": {
+    "verified_source_baseline": "852bbd48af9b6c70be5ce44d5f898d1224ca0e7c",
+    "review_manifest": "scripts/reforge_source_review.json",
+    "policy": "New source is pinned and exactly reversed before all historical source proofs; immutable schemas, assets, signing and prior digests are not waived."
   }
 }

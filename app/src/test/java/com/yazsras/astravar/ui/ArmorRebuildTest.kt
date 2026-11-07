@@ -94,12 +94,13 @@ class ArmorRebuildTest {
                 compose.onAllNodes(hasContentDescription("Dexterity score 14", substring = true)).fetchSemanticsNodes().isNotEmpty()
             }
             compose.onNodeWithTag("ability-DEX").performScrollTo().performClick()
-            compose.onNodeWithText("Raw ability score (blank = unknown)").performTextClearance()
-            compose.onNodeWithText("Raw ability score (blank = unknown)").performTextInput("18")
+            compose.onNodeWithText("Ability score").performTextClearance()
+            compose.onNodeWithText("Ability score").performTextInput("18")
             compose.onNodeWithText("Close").performClick()
             compose.onNodeWithText("Discard changes?").assertExists()
             compose.onNodeWithText("Keep editing").performClick()
-            compose.onNodeWithText("Separate magical modifier").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("2")))
+            compose.onNodeWithText("Advanced · recorded modifiers & sources").performClick()
+            compose.onNodeWithText("Recorded modifier adjustment").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("2")))
             compose.onNodeWithText("Cancel").performClick()
             compose.onNodeWithText("Discard").performClick()
             runBlocking {

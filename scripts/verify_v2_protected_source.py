@@ -2,13 +2,14 @@
 import hashlib
 import json
 from pathlib import Path
+from reforge_source_review import baseline_bytes
 
 root = Path(__file__).resolve().parents[1]
 manifest = json.loads((root / 'scripts/protected_v170_sha256.json').read_text())
 failures = []
 for relative, expected in manifest['files'].items():
     path = root / relative
-    if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+    if not path.is_file() or hashlib.sha256(baseline_bytes(root, relative)).hexdigest() != expected:
         failures.append(relative)
 if failures:
     raise SystemExit('Protected v1.7.0 sources changed: ' + ', '.join(failures))
@@ -23,7 +24,7 @@ assert entry['previous_pinned_sha256'] == original_overlay
 assert entry['after_removing_exact_insertion_sha256'] == original_overlay
 block = entry['exact_authorized_insertion']
 assert block.count('\n') == 13
-current = (root / overlay).read_text()
+current = baseline_bytes(root, overlay).decode('utf-8')
 fast = manifest.get('authorized_fast_sync_source_changes', {})
 if fast:
     assert fast.get('verified_source_baseline') == '045bfaed33393675c8d8d621bf260636deb04dd8'

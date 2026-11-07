@@ -72,7 +72,8 @@ class CampaignPagesV2Test {
             compose.onNodeWithText("Invention name").assertDoesNotExist()
             compose.onNodeWithText("Add Invention").performClick()
             compose.onNodeWithText("Invention name").performScrollTo().performTextInput("Fictional test blueprint")
-            compose.onNodeWithText("Save invention").assertIsNotEnabled()
+            compose.onNodeWithText("Save invention").assertIsEnabled()
+            compose.onNodeWithText("Sources (optional)").performScrollTo().performClick()
             compose.onNodeWithText("Source / resolved scene / checkpoint").performScrollTo().performTextInput("Synthetic resolved design notes")
             compose.onNodeWithText("Save invention").performClick()
             compose.waitUntil(10_000) { runBlocking { db.recordsDao().allProjects().size == 1 } }

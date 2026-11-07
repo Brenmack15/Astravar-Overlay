@@ -1,6 +1,6 @@
 # Reforge continuation checkpoint
 
-Updated: 2026-11-07. Status: implementation in progress; no completed release claim.
+Updated: 2026-11-07. Status: native implementation complete for initial coordinated waves; integrated verification in progress, no completed release claim.
 
 ## Baseline and branch
 
@@ -28,16 +28,26 @@ Updated: 2026-11-07. Status: implementation in progress; no completed release cl
 
 ## Restrictions and blockers
 
-- Owner signing material absent. Never substitute a test signer for the permanent owner release.
+- Original signing recovery archive recovered privately; PKCS12 private/public key match, RSA4096 and exact owner certificate independently verified. Actual prior code41 APK independently inspected; no key rotated. Final owner assembly/inspection remains pending, and signing material stays outside Git/CI.
 - No attached physical Galaxy S26. Client metadata is not a hardware verification.
 - No production data migration/cutover, merge, publication or installation authorized.
 - Owner-specific D&D Beyond editing/rest/leveling not tested without login and a disposable character; public live UI research is complete.
 
 ## Next integration steps
 
-1. Finish and review engine/store/UI contracts and compile together.
+1. Main and test Android compilation passed; complete native test execution, fix genuine failures and finalize the last reviewed UI state safeguards.
 2. Execute required Gradle rules + Android tests, lint and debug assembly; fix genuine failures.
 3. Verify offline save/reopen, guarded adoption/restore, real view navigation, safe content and retired manifest permissions.
 4. Capture and visually inspect actual native renderings, including small screens/large fonts.
 5. Review public diff for private data/secrets, preserve historical digest chain and frozen schemas.
 6. Publish a draft source PR and record exact final source/check evidence; deliver only a correctly described APK if available.
+
+## Wave 1–4 implementation checkpoint
+
+- Implemented typed pure rules engine, guarded local Room aggregate/history/roll/draft store, reviewed adoption and structured native sheet/combat/equipment/spell/resource flows.
+- Added identity/features, confirmed advancement, actual notes autosave, independent recovery draft review, SAF backup/restore, rich campaign/NPC presentation, global search and overlay retirement.
+- All 162 current rules tests passed, including 124 preserved tests, 31 direct acceptance cases, 5 independent adversarial cases and 2 advancement cases.
+- All current main and test Android Kotlin compilation passed. Real Robolectric UI/persistence tests are running; passing native workflows are not claimed until results arrive.
+- Baseline Python139 and current Python146 passed. Existing authenticated bridge backend134 tests passed. Historical schemas, artwork, signing block and reversible source review gates passed.
+- Pending final small safeguards: persist selected actor across cold launch, turn-budget controls, guard closing unsaved generated dice, and ensure newly authored attunement effects remain gated regardless of editor ordering.
+- Full native suite/lint/build, exact-source signed candidate, packaged manifest/signature comparison, permissible native UI evidence and software-emulator feasibility remain next.

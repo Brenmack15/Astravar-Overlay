@@ -180,7 +180,7 @@ class CampaignVisualAcceptanceTest {
         compose.mainClock.advanceTimeByFrame()
         shadowOf(Looper.getMainLooper()).idle()
         compose.waitForIdle()
-        val labelBounds = listOf("ASTRAVAR", "Armor", "Combat", "Campaign", "Config", "Add", "Add Item", "Add Invention").associateWith { label ->
+        val labelBounds = listOf("ASTRAVAR", "Character", "Combat", "Inventory", "Campaign", "More", "Add", "Add Item", "Add Invention").associateWith { label ->
             compose.onAllNodesWithText(label, useUnmergedTree = true).fetchSemanticsNodes().map { it.boundsInRoot }
         }
         val geometry = labelBounds.map { (label, bounds) -> "$label: ${bounds.joinToString()}" }
@@ -213,7 +213,7 @@ class CampaignVisualAcceptanceTest {
                 // Preserve the exact failing native draw too, so a pixel assertion never
                 // hides the diagnostic evidence needed to distinguish cache from layout.
                 savePresentationCapture(bitmap, name)
-                if (!modal) listOf("ASTRAVAR", "Armor", "Combat", "Campaign", "Config").forEach { label ->
+                if (!modal) listOf("ASTRAVAR", "Character", "Combat", "Inventory", "Campaign", "More").forEach { label ->
                     val bounds = requireNotNull(labelBounds.getValue(label).maxByOrNull { it.top }) { "Shell label missing from semantics: $label" }
                     var visibleInk = 0
                     val left = bounds.left.toInt().coerceIn(0, bitmap.width)
@@ -291,7 +291,7 @@ class CampaignVisualAcceptanceTest {
             settle { compose.onAllNodesWithText(connectionName).fetchSemanticsNodes().isNotEmpty() }
             primary("Add")
             textFullyVisible("ASTRAVAR", singleLine = true)
-            listOf("Armor", "Combat", "Campaign", "Config").forEach { textFullyVisible(it, singleLine = true) }
+            listOf("Character", "Combat", "Inventory", "Campaign", "More").forEach { textFullyVisible(it, singleLine = true) }
             compose.onNodeWithText("Returned the map").assertIsDisplayed()
             capture("rebuild-connections-400", fixture.activity.get())
             val before = runBlocking { fixture.db.recordsDao().allEntities() }
@@ -334,7 +334,7 @@ class CampaignVisualAcceptanceTest {
                 try { fixture.sync.retryPending(); fail("Injected offline transport must fail") } catch (_: IOException) {}
                 queued
             }
-            fixture.render(destination = "Config") {
+            fixture.render(destination = "More") {
                 var tool by remember { mutableStateOf<String?>(null) }
                 RebuildConfigHub { tool = it }
                 if (tool == "Fictional sync") RebuildToolSheet("Fictional sync", { tool = null }) { SandboxSyncPage(sync) }
@@ -402,7 +402,7 @@ class CampaignVisualAcceptanceTest {
             compose.onNodeWithText("Connection name").performScrollTo().performTextInput("Unsaved synthetic person")
             compose.onNodeWithText("Close").assertIsDisplayed()
             compose.onNodeWithText("Cancel").assertIsDisplayed()
-            compose.onNodeWithText("Save new connection").assertIsDisplayed().assertIsNotEnabled()
+            compose.onNodeWithText("Save new connection").assertIsDisplayed().assertIsEnabled()
             textFullyVisible("Save new connection")
             textFullyVisible("Cancel", singleLine = true)
             capture("rebuild-connection-editor-360-font130", fixture.activity.get(), modal = true)

@@ -160,7 +160,7 @@ class WeaponPresentationTest {
                 Box(Modifier.padding(padding)) {ControlRoomPage {}}
             }}}
             compose.onNodeWithText("Control room").assertIsDisplayed()
-            listOf("Weapon resources & recovery","Rules & upgrades","Overlay & appearance","Backup & restore","Help & diagnostics").forEach {
+            listOf("Weapon resources & recovery","Rules & upgrades","Appearance","Backup & restore","Help & diagnostics").forEach {
                 compose.onNodeWithText(it).performScrollTo().assertIsDisplayed()
             }
             compose.onNodeWithText("Control room").performScrollTo()

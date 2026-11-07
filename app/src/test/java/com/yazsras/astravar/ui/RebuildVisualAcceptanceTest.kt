@@ -119,7 +119,7 @@ class RebuildVisualAcceptanceTest {
             activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         }
 
-        fun render(fontScale: Float = 1f, destination: String = "Armor", content: @Composable Fixture.() -> Unit) {
+        fun render(fontScale: Float = 1f, destination: String = "More", content: @Composable Fixture.() -> Unit) {
             activity.get().setContent {
                 val density = LocalDensity.current
                 CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
@@ -239,26 +239,27 @@ class RebuildVisualAcceptanceTest {
             listOf("STR", "DEX", "CON", "INT", "WIS", "CHA").forEach { compose.onNodeWithTag("ability-$it").assertIsDisplayed() }
             compose.onNodeWithText("Active element").assertIsDisplayed()
             compose.onNodeWithText("Core systems").assertIsDisplayed()
-            compose.onNodeWithText("Raw ability score (blank = unknown)").assertDoesNotExist()
+            compose.onNodeWithText("Ability score").assertDoesNotExist()
             capture("rebuild-armor-400", fixture.activity.get())
             val before = runBlocking { fixture.ledgerDb.recordsDao().characterAbility("local-player", "DEX")!! }
             compose.onNodeWithTag("ability-DEX").performClick()
             compose.onNodeWithText("Edit Dexterity").assertIsDisplayed()
-            compose.onNodeWithText("Save ability").assertIsDisplayed().assertIsEnabled().assertHeightIsAtLeast(48.dp)
+            compose.onNodeWithText("Save ability").assertIsDisplayed().assertIsNotEnabled().assertHeightIsAtLeast(48.dp)
             compose.onNodeWithText("Cancel").assertIsDisplayed()
             capture("rebuild-ability-editor", fixture.activity.get(), modal = true)
-            compose.onNodeWithText("Raw ability score (blank = unknown)").performTextReplacement("16")
+            compose.onNodeWithText("Ability score").performTextReplacement("16")
             compose.onNodeWithText("Cancel").performClick()
             compose.onNodeWithText("Discard changes?").assertIsDisplayed()
             compose.onNodeWithText("Keep editing").performClick()
-            compose.onNodeWithText("Raw ability score (blank = unknown)").assertTextContains("16")
+            compose.onNodeWithText("Ability score").assertTextContains("16")
             compose.onNodeWithText("Cancel").performClick()
             compose.onNodeWithText("Discard").performClick()
             compose.onNodeWithText("Edit Dexterity").assertDoesNotExist()
             assertEquals(before, runBlocking { fixture.ledgerDb.recordsDao().characterAbility("local-player", "DEX") })
             compose.onNodeWithTag("ability-DEX").performClick()
-            compose.onNodeWithText("Raw ability score (blank = unknown)").performTextReplacement("18")
-            compose.onNodeWithText("Separate magical modifier").assertTextContains("2")
+            compose.onNodeWithText("Ability score").performTextReplacement("18")
+            compose.onNodeWithText("Advanced · recorded modifiers & sources").performClick()
+            compose.onNodeWithText("Recorded modifier adjustment").assertTextContains("2")
             compose.onNodeWithText("Save ability").performClick()
             settleUntil { runBlocking { fixture.ledgerDb.recordsDao().characterAbility("local-player", "DEX")?.score == 18 } }
             val saved = runBlocking { fixture.ledgerDb.recordsDao().characterAbility("local-player", "DEX")!! }

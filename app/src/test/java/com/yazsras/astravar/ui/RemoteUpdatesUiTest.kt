@@ -262,12 +262,12 @@ class RemoteUpdatesUiTest {
             f.render { Page { CharacterOverviewV2(f.records, profileId = profileId) } }
             compose.waitUntil(10_000) { compose.onAllNodes(hasContentDescription("Strength score 12", substring = true)).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("ability-STR").performScrollTo().performClick()
-            compose.onNodeWithText("Raw ability score (blank = unknown)").performTextReplacement("99")
+            compose.onNodeWithText("Ability score").performTextReplacement("99")
             compose.runOnIdle { profileId = RemoteStatProtocol.PROFILE_ID }
             compose.onNodeWithText("Edit Strength").assertDoesNotExist()
             compose.onNodeWithTag("ability-STR").assert(hasContentDescription("Strength score 14", substring = true))
             compose.onNodeWithTag("ability-STR").performClick()
-            compose.onNodeWithText("Raw ability score (blank = unknown)").assertTextContains("14")
+            compose.onNodeWithText("Ability score").assertTextContains("14")
             compose.onNodeWithText("Close").performClick()
             assertEquals(before, runBlocking { f.ledgerDb.recordsDao().allCharacterAbilities() })
         }

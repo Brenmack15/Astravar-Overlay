@@ -82,6 +82,7 @@ class CampaignRecoveryUiTest {
             mount()
             compose.onNodeWithText("Add Invention").performClick()
             compose.onNodeWithText("Invention name").performScrollTo().performTextInput("Synthetic crash-retry blueprint")
+            compose.onNodeWithText("Sources (optional)").performScrollTo().performClick()
             compose.onNodeWithText("Source / resolved scene / checkpoint").performScrollTo().performTextInput("Synthetic accepted design")
             val beforeCommit = precommitActivityState(activity)
             compose.onNodeWithText("Save invention").performClick()

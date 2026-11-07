@@ -61,7 +61,7 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
 }
 
 @Composable internal fun SourceField(value: String, change: (String) -> Unit, enabled: Boolean = true) {
-    Field("Source / resolved scene / checkpoint", value, change, single = false, enabled = enabled)
+    PlayerDisclosure("Sources (optional)") { Field("Source / resolved scene / checkpoint", value, change, single = false, enabled = enabled) }
 }
 
 @Composable fun InventionsPageV2(repository: CampaignLedgerRepository) {
@@ -189,7 +189,7 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
             }
             craftLabelsJson = Json.encodeToString(combined.map { use -> "${items.first { it.id == use.itemId }.title}: ${use.quantity}" })
             craftReviewJson = Json.encodeToString(CraftCommand(projectId = project.id, expectedProjectRevision = project.revision,
-                materials = combined, output = LedgerDraft(title = outputTitle, category = "Other", owner = "Unknown", itemState = "Unknown", quantity = count, description = outputDescription, source = source), source = source))
+                materials = combined, output = LedgerDraft(title = outputTitle, category = "Other", owner = "Unknown", itemState = "Unknown", quantity = count, description = outputDescription, source = source.ifBlank { "Confirmed craft recorded in Astravar" }), source = source.ifBlank { "Confirmed craft recorded in Astravar" }))
             mode = "review"
         } catch (e: Exception) { actions.message = "Cannot review craft: ${e.message ?: "Check the quantities and linked materials."}" }
     }
@@ -236,22 +236,22 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
         PlayerSheet(sheetTitle, onDismiss = { if (!actions.busy) { if (mode == "review") { craftReviewJson = null; mode = "craft" } else mode = "" } }, dirty = dirty && mode != "review", actions = {
             when(mode) {
                 "create", "edit" -> PlayerButton(onClick = {
-                    val before = editorProject; val provenance = source
+                    val before = editorProject; val provenance = source.ifBlank { "Local invention edit in Astravar" }
                     val model = before?.copy(title = title, description = description, status = status) ?: InventionProject(title = title, description = description, status = status, id = projectDraftId)
                     actions.run { val receipt = records.saveProject(model, before?.revision, provenance, projectCommandId); projectSnapshot = Json.encodeToString(model.copy(revision = receipt.resultingRevision, source = provenance, updatedAt = receipt.createdAt)); selectedId = model.id; mode = "detail"; "Invention saved · no resources consumed" }
-                }, enabled = !actions.busy && projectDraftValid && !stale && title.isNotBlank() && source.isNotBlank()) { Text(if (mode == "create") "Save invention" else "Save invention changes") }
+                }, enabled = !actions.busy && projectDraftValid && !stale && title.isNotBlank()) { Text(if (mode == "create") "Save invention" else "Save invention changes") }
                 "detail" -> PlayerButton(onClick = { selected?.let(::load); mode = "edit" }, enabled = !actions.busy) { Text("Edit invention") }
                 "stage" -> PlayerButton(onClick = {
-                    val project = selected ?: return@PlayerButton; val before = selectedStage; val provenance = source
+                    val project = selected ?: return@PlayerButton; val before = selectedStage; val provenance = source.ifBlank { "Local invention edit in Astravar" }
                     val model = before?.copy(title = stageTitle, notes = stageNotes, status = stageStatus) ?: ProjectStage(projectId = project.id, title = stageTitle, notes = stageNotes, status = stageStatus, sortOrder = stages.size)
                     actions.run { records.saveStage(model, before?.revision, provenance); mode = "detail"; "Stage saved" }
-                }, enabled = !actions.busy && projectDraftValid && stageDraftValid && stageTitle.isNotBlank() && source.isNotBlank()) { Text(if (selectedStage == null) "Add stage" else "Save stage") }
+                }, enabled = !actions.busy && projectDraftValid && stageDraftValid && stageTitle.isNotBlank()) { Text(if (selectedStage == null) "Add stage" else "Save stage") }
                 "material" -> PlayerButton(onClick = {
-                    val project = selected ?: return@PlayerButton; val before = selectedRequirement; val raw = materialQuantity.trim(); val provenance = source
+                    val project = selected ?: return@PlayerButton; val before = selectedRequirement; val raw = materialQuantity.trim(); val provenance = source.ifBlank { "Local invention edit in Astravar" }
                     val model = before?.copy(itemId = materialId, label = materialLabel, quantity = raw.toIntOrNull(), notes = materialNotes) ?: MaterialRequirement(projectId = project.id, itemId = materialId, label = materialLabel, quantity = raw.toIntOrNull(), notes = materialNotes)
                     actions.run { require(raw.isEmpty() || raw.toIntOrNull()?.let { it > 0 } == true) { "Material quantity must be positive or unknown." }; records.saveRequirement(model, before?.revision, provenance); mode = "detail"; "Requirement saved · nothing consumed" }
-                }, enabled = !actions.busy && projectDraftValid && requirementDraftValid && materialLabel.isNotBlank() && source.isNotBlank()) { Text(if (selectedRequirement == null) "Add material requirement" else "Save material requirement") }
-                "craft" -> PlayerButton(onClick = ::prepareCraft, enabled = !actions.busy && projectDraftValid && consumptionDraftValid && outputTitle.isNotBlank() && source.isNotBlank() && consumedSelections.isNotEmpty()) { Text("Review material consumption") }
+                }, enabled = !actions.busy && projectDraftValid && requirementDraftValid && materialLabel.isNotBlank()) { Text(if (selectedRequirement == null) "Add material requirement" else "Save material requirement") }
+                "craft" -> PlayerButton(onClick = ::prepareCraft, enabled = !actions.busy && projectDraftValid && consumptionDraftValid && outputTitle.isNotBlank() && consumedSelections.isNotEmpty()) { Text("Review material consumption") }
                 "review" -> {
                     PlayerTextButton(onClick = { craftReviewJson = null; mode = "craft" }, enabled = !actions.busy) { Text("Cancel") }
                     PlayerButton(onClick = {
@@ -268,7 +268,7 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
                     if (stale) Text("This design changed elsewhere. Your draft is preserved; close and reopen it to load the latest revision.", color = Frost)
                     Field("Invention name", title, { title = it }, enabled = !actions.busy)
                     Choices("Development status", listOf("Proposed", "Research", "Blueprint", "Prototype", "Construction", "Completed", "Paused"), status, enabled = !actions.busy) { status = it }
-                    Field("Blueprint / design / research notes", description, { description = it }, single = false, enabled = !actions.busy)
+                    ReforgeDocumentEditor("Blueprint / design / research notes", description, { description = it }, enabled = !actions.busy)
                     SourceField(source, { source = it }, enabled = !actions.busy)
                     Text("A design is separate from its physical output.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 }
@@ -284,8 +284,8 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
                     }
                     Text(project.status, color = Frost, style = MaterialTheme.typography.labelLarge)
                     ExpandableRecordSection("Concept & Blueprint", true) {
-                        Text(project.description.ifBlank { "No design notes recorded" }, color = if (project.description.isBlank()) Muted else MaterialTheme.colorScheme.onSurface)
-                        RecordValue("Source", project.source)
+                        ReforgeRichText(project.description.ifBlank { "No design notes recorded" })
+                        PlayerDisclosure("Sources & record details") { ReforgeRichText(project.source); Text("Record ${project.id} · revision ${project.revision}", style = MaterialTheme.typography.bodySmall, color = Muted) }
                     }
                     ExpandableRecordSection("Research & Construction") {
                         if (stages.isEmpty()) Text("No stages recorded", color = Muted)

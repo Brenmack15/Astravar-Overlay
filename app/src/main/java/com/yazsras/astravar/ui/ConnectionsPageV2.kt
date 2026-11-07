@@ -172,10 +172,10 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
         }
         PlayerSheet(title, onDismiss = { closeSheet() }, dirty = dirty, actions = {
             when(currentMode) {
-                "edit" -> PlayerButton(enabled = profileDraftSafe && !actions.busy && !stale && name.isNotBlank() && source.isNotBlank() && (baseline == null || profileDirty), onClick = {
+                "edit" -> PlayerButton(enabled = profileDraftSafe && !actions.busy && !stale && name.isNotBlank() && (baseline == null || profileDirty), onClick = {
                     check(profileDraftSafe) { "Reload the saved connection or reselect its image before saving." }
                     val before = baseline
-                    val src = source.trim()
+                    val src = source.trim().ifBlank { "Local connection edit in Astravar" }
                     val draft = (before ?: ConnectionEntity(name = name.trim(), id = draftId)).copy(name = name.trim(), kind = connectionStoredKind(kind), notes = notes, aliases = aliases, relationship = relationship, imageBase64 = image)
                     actions.run {
                         val receipt = records.saveEntity(draft, before?.revision, src)
@@ -184,19 +184,19 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                         "Connection saved locally."
                     }
                 }) { Text(if (selectedId == null) "Save new connection" else "Save connection changes") }
-                "fact" -> PlayerButton(enabled = !actions.busy && selectedId != null && entryDetail.isNotBlank() && entrySource.isNotBlank(), onClick = {
+                "fact" -> PlayerButton(enabled = !actions.busy && selectedId != null && entryDetail.isNotBlank(), onClick = {
                     val entry = ConnectionFact(entityId = selectedId!!, detail = entryDetail.trim(), category = entryKind, evidenceStatus = evidence, id = appendId)
-                    val src = entrySource.trim()
+                    val src = entrySource.trim().ifBlank { "Local campaign note in Astravar" }
                     actions.run { records.saveFact(entry, source = src); entryDetail = ""; entrySource = ""; mode = "detail"; "Information saved locally." }
                 }) { Text("Append relationship context") }
-                "milestone" -> PlayerButton(enabled = !actions.busy && selectedId != null && entryTitle.isNotBlank() && entrySource.isNotBlank(), onClick = {
+                "milestone" -> PlayerButton(enabled = !actions.busy && selectedId != null && entryTitle.isNotBlank(), onClick = {
                     val entry = ConnectionMilestone(entityId = selectedId!!, title = entryTitle.trim(), detail = entryDetail, id = appendId)
-                    val src = entrySource.trim()
+                    val src = entrySource.trim().ifBlank { "Local campaign note in Astravar" }
                     actions.run { records.saveMilestone(entry, source = src); entryTitle = ""; entryDetail = ""; entrySource = ""; mode = "detail"; "Milestone saved locally." }
                 }) { Text("Append milestone") }
-                "link" -> PlayerButton(enabled = !actions.busy && selectedId != null && targetId != null && entryTitle.isNotBlank() && entrySource.isNotBlank(), onClick = {
+                "link" -> PlayerButton(enabled = !actions.busy && selectedId != null && targetId != null && entryTitle.isNotBlank(), onClick = {
                     val entry = CampaignLink(fromType = "connection", fromId = selectedId!!, toType = if (linkType == "Inventory item") "item" else "project", toId = targetId!!, label = entryTitle.trim(), id = appendId)
-                    val src = entrySource.trim()
+                    val src = entrySource.trim().ifBlank { "Local campaign note in Astravar" }
                     actions.run { records.saveLink(entry, source = src); targetId = null; entryTitle = ""; entrySource = ""; mode = "detail"; "Record linked locally." }
                 }) { Text("Link existing record") }
             }
@@ -212,25 +212,28 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                     ConnectionField("Connection name", name, !actions.busy) { name = it }
                     ConnectionChoice("Connection type", listOf("Person", "Group", "Faction", "Being", "Other"), kind, !actions.busy) { kind = it }
                     ConnectionField("Aliases / other known names (optional)", aliases, !actions.busy) { aliases = it }
-                    ConnectionField("Description / appearance (optional)", notes, !actions.busy, false) { notes = it }
+                    ReforgeDocumentEditor("Overview & appearance", notes, { notes = it }, !actions.busy)
                     ConnectionField("Known relationship context (optional)", relationship, !actions.busy, false) { relationship = it }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         LedgerIcon(image, Modifier.size(56.dp), "Connection artwork preview")
                         PlayerTextButton(onClick = { imageTarget = "${selectedId.orEmpty()}:$editorGeneration"; imagePicker.launch("image/*") }, enabled = !actions.busy) { Text("Choose connection image") }
                     }
                     if (image != null) PlayerTextButton(onClick = { image = null }, enabled = !actions.busy) { Text("Remove connection image") }
-                    ConnectionField("Profile source / scene / checkpoint (required)", source, !actions.busy, false) { source = it }
+                    PlayerDisclosure("Advanced · sources") {
+                        ConnectionField("Profile source (optional)", source, !actions.busy, false) { source = it }
+                        Text("Local edits are recorded automatically; original content and prior sources stay in history.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
                 "fact" -> {
                     ConnectionChoice("Context category", listOf("Known information", "Agreements", "Promises", "Favors", "Conflicts", "Shared interests"), entryKind, !actions.busy) { entryKind = it }
                     ConnectionChoice("Context evidence", listOf("Unverified", "Confirmed", "Proposed", "Disputed"), evidence, !actions.busy) { evidence = it }
                     ConnectionField("Known context / agreement / promise", entryDetail, !actions.busy, false) { entryDetail = it }
-                    ConnectionField("Context source (required)", entrySource, !actions.busy, false) { entrySource = it }
+                    PlayerDisclosure("Source (optional)") { ConnectionField("Context source", entrySource, !actions.busy, false) { entrySource = it } }
                 }
                 "milestone" -> {
                     ConnectionField("Milestone title", entryTitle, !actions.busy) { entryTitle = it }
                     ConnectionField("What happened / significance", entryDetail, !actions.busy, false) { entryDetail = it }
-                    ConnectionField("Milestone source (required)", entrySource, !actions.busy, false) { entrySource = it }
+                    PlayerDisclosure("Source (optional)") { ConnectionField("Milestone source", entrySource, !actions.busy, false) { entrySource = it } }
                 }
                 "link" -> {
                     ConnectionChoice("Related record type", listOf("Inventory item", "Invention"), linkType, !actions.busy) { linkType = it; targetId = null }
@@ -238,7 +241,7 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                     if (targets.isEmpty()) Text("No ${if (linkType == "Inventory item") "items" else "inventions"} available to link.", color = RebuildPalette.Muted)
                     else ConnectionTargetChoice(targets, targetId, !actions.busy) { targetId = it }
                     ConnectionField("Relationship to this record", entryTitle, !actions.busy) { entryTitle = it }
-                    ConnectionField("Link source (required)", entrySource, !actions.busy, false) { entrySource = it }
+                    PlayerDisclosure("Source (optional)") { ConnectionField("Link source", entrySource, !actions.busy, false) { entrySource = it } }
                     Text("Links keep the existing identity and ownership.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
                 }
                 "history", "event" -> {
@@ -258,14 +261,14 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                     if (recordType == "item") items.firstOrNull { it.id == recordId }?.let { item ->
                         Text(item.title, style = MaterialTheme.typography.titleLarge)
                         Text("${item.category} · ${item.quantity?.toString() ?: "Quantity unknown"}", color = RebuildPalette.Ice)
-                        Text(item.description)
-                        if (item.knownProperties.isNotBlank()) Text(item.knownProperties)
+                        ReforgeRichText(item.description)
+                        if (item.knownProperties.isNotBlank()) ReforgeRichText(item.knownProperties)
                         Text("${item.owner} · ${item.itemState} · ${item.location}", color = RebuildPalette.Muted)
-                        Text("Source: ${item.source}", style = MaterialTheme.typography.bodySmall)
+                        PlayerDisclosure("Sources & record details") { ReforgeRichText(item.source) }
                     }
                     else projects.firstOrNull { it.id == recordId }?.let { project ->
                         Text(project.title, style = MaterialTheme.typography.titleLarge); Text(project.status, color = RebuildPalette.Ice)
-                        Text(project.description); Text("Source: ${project.source}", style = MaterialTheme.typography.bodySmall)
+                        ReforgeRichText(project.description); PlayerDisclosure("Sources & record details") { ReforgeRichText(project.source) }
                     }
                 }
                 else -> selected?.let { entity ->
@@ -277,25 +280,35 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                         }
                         PlayerTextButton(onClick = { edit(entity) }) { Text("Edit") }
                     }
-                    if (entity.relationship.isNotBlank()) Text(entity.relationship, style = MaterialTheme.typography.titleMedium)
-                    if (entity.notes.isNotBlank()) Text(entity.notes)
+                    val profile = remember(entity.notes) { RecordPresentation.npc(entity.notes) }
+                    ReforgeBadgeRow(listOfNotNull(profile.status.takeIf(String::isNotBlank), profile.era.takeIf(String::isNotBlank),
+                        profile.evidence.takeIf { it.isNotBlank() && it != "Confirmed" }))
+                    if (entity.relationship.isNotBlank()) ReforgeRichText(entity.relationship)
+                    if (profile.overview.isNotBlank()) {
+                        SectionCaption("Overview")
+                        ReforgeRichText(profile.overview)
+                    }
                     ExpandableRecordSection("Known Information", true) {
                         val known = facts.filter { it.entityId == entity.id }
-                        if (known.isEmpty()) Text("No learned information yet.", color = RebuildPalette.Muted)
+                        if (profile.facts.isNotBlank()) ReforgeRichText(profile.facts)
+                        if (known.isEmpty() && profile.facts.isBlank()) Text("No learned information yet.", color = RebuildPalette.Muted)
                         known.forEach { fact ->
-                            Text(fact.detail); Text("${fact.category} · ${fact.evidenceStatus}", color = RebuildPalette.Ice, style = MaterialTheme.typography.labelMedium)
-                            Text("Source: ${fact.source}", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                            ReforgeRichText(fact.detail)
+                            ReforgeBadgeRow(listOf(fact.category, fact.evidenceStatus))
                         }
                         PlayerTextButton(onClick = { append("fact") }) { Text("Add learned information") }
                     }
+                    if (profile.openThreads.isNotBlank()) ExpandableRecordSection("Open threads", true) {
+                        ReforgeRichText(profile.openThreads)
+                    }
                     ExpandableRecordSection("Meaningful milestones") {
-                        if (entity.relationship.isNotBlank()) Text(entity.relationship)
-                        val meaningful = milestones.filter { it.entityId == entity.id }
+                        val meaningful = milestones.filter { it.entityId == entity.id }.sortedBy { it.updatedAt }
                         if (meaningful.isEmpty()) Text("No milestones recorded.", color = RebuildPalette.Muted)
                         meaningful.forEach { milestone ->
                             Text(milestone.title, style = MaterialTheme.typography.titleSmall)
-                            if (milestone.detail.isNotBlank()) Text(milestone.detail)
-                            Text("Source: ${milestone.source}", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                            if (milestone.updatedAt > 0) Text(connectionTime(milestone.updatedAt), color = RebuildPalette.Muted, style = MaterialTheme.typography.labelSmall)
+                            if (milestone.detail.isNotBlank()) ReforgeRichText(milestone.detail)
+                            HorizontalDivider(color = RebuildPalette.Active)
                         }
                         PlayerTextButton(onClick = { append("milestone") }) { Text("Add milestone") }
                     }
@@ -308,12 +321,22 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                             val id = if (outgoing) link.toId else link.fromId
                             val target = if (type == "item") items.firstOrNull { it.id == id }?.title else projects.firstOrNull { it.id == id }?.title
                             PlayerEntry(target ?: "Related $type", link.label, if (type == "item") "Core" else "Weapon", { recordType = type; recordId = id; mode = "linked" })
-                            Text("Source: ${link.source}", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
                         }
                         PlayerTextButton(onClick = { append("link") }) { Text("Link existing record") }
                     }
                     PlayerEntry("History", "Saved changes and sources", "History", { mode = "history" })
-                    Text("Source: ${entity.source}", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                    PlayerDisclosure("Sources & record details") {
+                        if (entity.source.isNotBlank()) ReforgeRichText(entity.source)
+                        profile.technical.forEach { (label, value) ->
+                            Text(label, color = RebuildPalette.Muted, style = MaterialTheme.typography.labelLarge)
+                            ReforgeRichText(value)
+                        }
+                        Text("Record ${entity.id} · revision ${entity.revision}", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                        PlayerDisclosure("Original imported text") { Text(entity.notes, style = MaterialTheme.typography.bodySmall) }
+                        facts.filter { it.entityId == entity.id && it.source.isNotBlank() }.forEach { ReforgeRichText(it.source) }
+                        milestones.filter { it.entityId == entity.id && it.source.isNotBlank() }.forEach { ReforgeRichText(it.source) }
+                        links.filter { (it.fromId == entity.id || it.toId == entity.id) && it.source.isNotBlank() }.forEach { ReforgeRichText(it.source) }
+                    }
                 } ?: LinearProgressIndicator(Modifier.fillMaxWidth())
             }
         }

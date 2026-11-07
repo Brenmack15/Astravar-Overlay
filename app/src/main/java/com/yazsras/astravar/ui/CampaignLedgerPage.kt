@@ -167,7 +167,7 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (()
         val raw = quantity.trim()
         val draft = LedgerDraft(title = title, category = category, owner = owner, itemState = itemState,
             location = location, evidenceStatus = evidence, quantity = raw.toIntOrNull(), description = description,
-            knownProperties = known, possibleUses = potential, limitations = limitations, source = source,
+            knownProperties = known, possibleUses = potential, limitations = limitations, source = source.ifBlank { "Local inventory edit" },
             notionPageId = notionId.trim().ifEmpty { null }, imageBase64 = iconData, archived = archived)
         execute {
             require(raw.isEmpty() || raw.toIntOrNull() != null) { "Quantity must be a whole number or blank." }
@@ -232,27 +232,27 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (()
             if (mode in setOf("create", "edit")) PlayerButton(onClick = ::saveProfile, enabled = !busy && profileDraftValid && !stale && title.isNotBlank()) { Text(if (mode == "create") "Save new item" else "Save item changes") }
             if (mode == "detail") PlayerButton(onClick = { selected?.let(::load); mode = "edit" }, enabled = !busy) { Text("Edit item") }
             if (mode == "handling") PlayerButton(onClick = {
-                val item = selected ?: return@PlayerButton; val before = loadedDetails; val raw = weight.trim(); val provenance = source
+                val item = selected ?: return@PlayerButton; val before = loadedDetails; val raw = weight.trim(); val provenance = source.ifBlank { "Local inventory edit" }
                 val model = before?.copy(weightGrams = raw.toLongOrNull(), notes = notes) ?: ItemDetails(itemId = item.id, weightGrams = raw.toLongOrNull(), notes = notes)
                 execute {
                     require(raw.isEmpty() || raw.toLongOrNull()?.let { it >= 0 } == true) { "Weight must be nonnegative grams or unknown." }
                     records.saveItemDetails(model, before?.revision, provenance); mode = "detail"; message = "Weight and handling saved"
                 }
-            }, enabled = !busy && itemDraftValid && detailsDraftValid && !staleDetails && source.isNotBlank()) { Text("Save weight and handling") }
+            }, enabled = !busy && itemDraftValid && detailsDraftValid && !staleDetails) { Text("Save weight and handling") }
             if (mode == "property") PlayerButton(onClick = {
-                val item = selected ?: return@PlayerButton; val before = loadedProperty; val provenance = source
+                val item = selected ?: return@PlayerButton; val before = loadedProperty; val provenance = source.ifBlank { "Local inventory edit" }
                 val model = before?.copy(label = propertyLabel, value = propertyValue, evidenceStatus = propertyEvidence) ?: ItemProperty(itemId = item.id, label = propertyLabel, value = propertyValue, evidenceStatus = propertyEvidence)
                 execute { records.saveItemProperty(model, before?.revision, provenance); mode = "detail"; message = "Property saved" }
-            }, enabled = !busy && itemDraftValid && propertyDraftValid && propertyLabel.isNotBlank() && propertyValue.isNotBlank() && source.isNotBlank()) { Text(if (loadedProperty == null) "Add item property" else "Save item property") }
+            }, enabled = !busy && itemDraftValid && propertyDraftValid && propertyLabel.isNotBlank() && propertyValue.isNotBlank()) { Text(if (loadedProperty == null) "Add item property" else "Save item property") }
             if (mode == "link") PlayerButton(onClick = {
-                val item = selected ?: return@PlayerButton; val target = relatedId ?: return@PlayerButton; val provenance = source
+                val item = selected ?: return@PlayerButton; val target = relatedId ?: return@PlayerButton; val provenance = source.ifBlank { "Local inventory edit" }
                 val link = CampaignLink(fromType = "item", fromId = item.id, toType = relatedType, toId = target, label = relationLabel)
                 execute { records.saveLink(link, null, provenance); relatedId = null; mode = "detail"; message = "Record connected" }
-            }, enabled = !busy && itemDraftValid && relatedId != null && source.isNotBlank()) { Text("Link this existing item") }
+            }, enabled = !busy && itemDraftValid && relatedId != null) { Text("Link this existing item") }
             if (mode == "research") PlayerButton(onClick = {
-                val item = selected ?: return@PlayerButton; val kind = discoveryType; val text = discoveryText; val provenance = discoverySource
+                val item = selected ?: return@PlayerButton; val kind = discoveryType; val text = discoveryText; val provenance = discoverySource.ifBlank { "Local discovery entry" }
                 execute { val saved = repository.discover(item.id, item.revision, kind, text, provenance); load(saved); discoveryText = ""; discoverySource = ""; mode = "detail"; message = "Discovery saved" }
-            }, enabled = !busy && itemDraftValid && discoveryText.isNotBlank() && discoverySource.isNotBlank()) { Text("Append discovery") }
+            }, enabled = !busy && itemDraftValid && discoveryText.isNotBlank()) { Text("Append discovery") }
         }) {
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             draftErrors.forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
@@ -286,7 +286,10 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (()
                         Choices("Evidence", listOf("Unverified", "Confirmed", "Proposed", "Disputed"), evidence, enabled = !busy) { evidence = it }
                         Field("Notion item page ID or URL (optional)", notionId, { notionId = it }, enabled = !busy)
                     }
-                    Field("Source / checkpoint", source, { source = it }, single = false, enabled = !busy)
+                    PlayerDisclosure("Sources & advanced details") {
+                        Field("Source / checkpoint (optional)", source, { source = it }, single = false, enabled = !busy)
+                        Text("Local edits are attributed automatically. Existing source text is preserved.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    }
                     if (loadedItem != null) ExpandableRecordSection("Archive") { Toggle("Archive this entry (keep history)", archived, enabled = !busy) { archived = it } }
                 }
                 "detail" -> selected?.let { item ->
@@ -295,27 +298,32 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (()
                         Column { Text(item.category, color = Frost, style = MaterialTheme.typography.labelLarge); Text("${item.quantity?.toString() ?: "Unknown"} quantity · ${item.itemState}", color = Muted) }
                     }
                     ExpandableRecordSection("Overview", true) {
-                        if (item.description.isNotBlank()) Text(item.description)
+                        if (item.description.isNotBlank()) ReforgeRichText(item.description)
                         RecordValue("Owner", item.owner); RecordValue("Location", item.location); RecordValue("Evidence", item.evidenceStatus)
-                        if (item.source.isNotBlank()) RecordValue("Source", item.source)
                     }
-                    ExpandableRecordSection("Properties & Mechanics") {
-                        if (item.knownProperties.isNotBlank()) Text(item.knownProperties)
+                    ExpandableRecordSection("Properties & mechanics", true) {
+                        if (item.knownProperties.isNotBlank()) ReforgeRichText(item.knownProperties)
                         if (item.limitations.isNotBlank()) RecordValue("Limits", item.limitations)
                         val value = itemDetails.firstOrNull { it.itemId == item.id }
                         RecordValue("Weight per item", value?.weightGrams?.let { "$it g" } ?: "Unknown")
-                        if (value?.notes?.isNotBlank() == true) Text(value.notes)
+                        if (value?.notes?.isNotBlank() == true) ReforgeRichText(value.notes)
                         PlayerTextButton(onClick = { detailsSnapshot = value?.let { Json.encodeToString(it) }; weight = value?.weightGrams?.toString().orEmpty(); notes = value?.notes.orEmpty(); source = item.source; baselineSource = source; mode = "handling" }) { Text("Edit weight & handling") }
                         itemProperties.filter { it.itemId == item.id }.forEach { property ->
                             PlayerTextButton(onClick = { propertySnapshot = Json.encodeToString(property); propertyLabel = property.label; propertyValue = property.value; propertyEvidence = property.evidenceStatus; source = property.source; baselineSource = source; mode = "property" }) { Column(Modifier.fillMaxWidth()) { Text(property.label); Text(property.value, color = Muted, style = MaterialTheme.typography.bodySmall) } }
                         }
                         PlayerTextButton(onClick = { propertySnapshot = null; propertyLabel = ""; propertyValue = ""; propertyEvidence = "Unverified"; source = item.source; baselineSource = source; mode = "property" }) { Text("Add property") }
                     }
+                    PlayerDisclosure("Sources & record details") {
+                        if (item.source.isNotBlank()) ReforgeRichText(item.source)
+                        RecordValue("Record identity", item.id)
+                        item.notionPageId?.let { RecordValue("Linked source", it) }
+                        RecordValue("Saved revision", item.revision.toString())
+                    }
                     ExpandableRecordSection("Research") {
                         if (item.possibleUses.isNotBlank()) RecordValue("Possible uses", item.possibleUses)
                         val discoveries = events.filter { it.kind == "DISCOVER" || it.kind.contains("DISCOVER", true) }
                         if (discoveries.isEmpty()) Text("No discoveries recorded", color = Muted)
-                        discoveries.take(5).forEach { Text(it.detail, style = MaterialTheme.typography.bodySmall) }
+                        discoveries.take(5).forEach { ReforgeRichText(it.detail) }
                         PlayerTextButton(onClick = { discoveryText = ""; discoverySource = ""; mode = "research" }) { Text("Add discovery") }
                     }
                     ExpandableRecordSection("Connected Records") {
@@ -346,13 +354,19 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (()
                     if (staleDetails) Text("These details changed elsewhere. Your draft is preserved; reopen the item before saving.", color = Frost)
                     Field("Weight per item in grams (blank = unknown)", weight, { weight = it }, enabled = !busy)
                     Field("Property / handling notes", notes, { notes = it }, single = false, enabled = !busy)
-                    Field("Source / checkpoint", source, { source = it }, single = false, enabled = !busy)
+                    PlayerDisclosure("Sources & advanced details") {
+                        Field("Source / checkpoint (optional)", source, { source = it }, single = false, enabled = !busy)
+                        Text("Local edits are attributed automatically. Existing source text is preserved.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
                 "property" -> {
                     Field("Property name", propertyLabel, { propertyLabel = it }, enabled = !busy)
                     Field("Property value / exact rule reference", propertyValue, { propertyValue = it }, single = false, enabled = !busy)
                     Choices("Property evidence", listOf("Unverified", "Confirmed", "Proposed", "Disputed"), propertyEvidence, enabled = !busy) { propertyEvidence = it }
-                    Field("Source / checkpoint", source, { source = it }, single = false, enabled = !busy)
+                    PlayerDisclosure("Sources & advanced details") {
+                        Field("Source / checkpoint (optional)", source, { source = it }, single = false, enabled = !busy)
+                        Text("Local edits are attributed automatically. Existing source text is preserved.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
                 "link" -> {
                     Choices("Related record type", listOf("companion", "project", "connection"), relatedType, display = { when(it) { "companion" -> "Eek"; "project" -> "Invention"; else -> "Connection" } }, enabled = !busy) { relatedType = it; relatedId = null }
@@ -360,13 +374,16 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (()
                     if (targets.isEmpty()) Text("Create the related record first", color = Muted)
                     Choices("Related record", targets.map { it.first }, relatedId, display = { id -> targets.firstOrNull { it.first == id }?.second ?: "Choose record" }, enabled = !busy) { relatedId = it }
                     Choices("Relationship", listOf("Owned by", "Held by", "Equipment", "Installed component", "Material requirement", "Research subject", "Origin"), relationLabel, enabled = !busy) { relationLabel = it }
-                    Field("Source / checkpoint", source, { source = it }, single = false, enabled = !busy)
+                    PlayerDisclosure("Sources & advanced details") {
+                        Field("Source / checkpoint (optional)", source, { source = it }, single = false, enabled = !busy)
+                        Text("Local edits are attributed automatically. Existing source text is preserved.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    }
                     Text("Links keep the same item identity. Ownership and quantity stay unchanged.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 }
                 "research" -> {
                     Choices("Evidence category", listOf("Confirmed", "Possible use", "Limitation", "Correction"), discoveryType, enabled = !busy) { discoveryType = it }
                     Field("What was discovered?", discoveryText, { discoveryText = it }, single = false, enabled = !busy)
-                    Field("Source / roll / scene", discoverySource, { discoverySource = it }, single = false, enabled = !busy)
+                    PlayerDisclosure("Source details (optional)") { Field("Source / roll / scene", discoverySource, { discoverySource = it }, single = false, enabled = !busy) }
                 }
                 "event" -> events.firstOrNull { it.commandId == eventId }?.let { entry ->
                     RecordValue("Change", entry.kind); Text(entry.detail); RecordValue("Evidence", entry.evidenceStatus); RecordValue("Source", entry.source)

@@ -52,8 +52,9 @@ class ConnectionsPageV2Test {
             compose.onNodeWithText("Connection name").assertDoesNotExist()
             compose.onNodeWithContentDescription("Add connection").performClick()
             compose.onNodeWithText("Connection name").performScrollTo().performTextInput("Synthetic archivist")
-            compose.onNodeWithText("Save new connection").assertIsDisplayed().assertIsNotEnabled()
-            compose.onNodeWithText("Profile source / scene / checkpoint (required)").performScrollTo()
+            compose.onNodeWithText("Save new connection").assertIsDisplayed().assertIsEnabled()
+            compose.onNodeWithText("Advanced · sources").performScrollTo().performClick()
+            compose.onNodeWithText("Profile source (optional)").performScrollTo()
                 .performTextInput("Synthetic resolved introduction")
             compose.onNodeWithText("Save new connection").assertIsDisplayed().assertIsEnabled().performClick()
             compose.waitUntil(10_000) { runBlocking { db.recordsDao().allEntities().size == 1 } }
@@ -64,8 +65,9 @@ class ConnectionsPageV2Test {
             compose.onNodeWithText("Meaningful milestones").performScrollTo().performClick()
             compose.onNodeWithText("Add milestone").performScrollTo().performClick()
             compose.onNodeWithText("Milestone title").performScrollTo().performTextInput("Returned the borrowed map")
-            compose.onNode(hasText("Append milestone") and hasClickAction()).assertIsNotEnabled()
-            compose.onNodeWithText("Milestone source (required)").performScrollTo()
+            compose.onNode(hasText("Append milestone") and hasClickAction()).assertIsEnabled()
+            compose.onNodeWithText("Source (optional)").performScrollTo().performClick()
+            compose.onNodeWithText("Milestone source").performScrollTo()
                 .performTextInput("Synthetic resolved conversation")
             compose.onNode(hasText("Append milestone") and hasClickAction()).performClick()
             compose.waitUntil(10_000) { runBlocking { db.recordsDao().allMilestones().size == 1 } }
@@ -155,8 +157,9 @@ class ConnectionsPageV2Test {
             compose.onNodeWithText("Connection name").assertDoesNotExist()
             compose.onNodeWithText("Add learned information").performScrollTo().performClick()
             compose.onNodeWithText("Known context / agreement / promise").performScrollTo().performTextInput("Knows the western road")
-            compose.onNodeWithText("Append relationship context").assertIsNotEnabled()
-            compose.onNodeWithText("Context source (required)").performScrollTo().performTextInput("Synthetic resolved conversation")
+            compose.onNodeWithText("Append relationship context").assertIsEnabled()
+            compose.onNodeWithText("Source (optional)").performScrollTo().performClick()
+            compose.onNodeWithText("Context source").performScrollTo().performTextInput("Synthetic resolved conversation")
             compose.onNodeWithText("Append relationship context").performClick()
             compose.waitUntil(10_000) { runBlocking { db.recordsDao().allFacts().size == 1 } }
             runBlocking {
