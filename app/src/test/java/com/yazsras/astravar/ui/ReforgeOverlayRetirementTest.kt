@@ -36,6 +36,11 @@ class ReforgeOverlayRetirementTest {
         assertFalse(info.requestedPermissions.orEmpty().contains("android.permission.FOREGROUND_SERVICE_SPECIAL_USE"))
         assertFalse(info.requestedPermissions.orEmpty().contains("android.permission.FOREGROUND_SERVICE"))
         assertNull(context.packageManager.resolveService(Intent(context, OverlayService::class.java), 0))
+        assertNull(context.packageManager.resolveService(Intent().setClassName(context,
+            "androidx.work.impl.foreground.SystemForegroundService"), 0))
+        assertNotNull("Bounded WorkManager JobScheduler support must remain installed",
+            context.packageManager.resolveService(Intent().setClassName(context,
+                "androidx.work.impl.background.systemjob.SystemJobService"), 0))
     }
     @Test fun retiredLifecycleCannotRestartEvenWithAnOldOverlayGrant() {
         val context = ApplicationProvider.getApplicationContext<Application>()

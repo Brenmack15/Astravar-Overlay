@@ -26,6 +26,7 @@ def main():
         "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
         "android.permission.FOREGROUND_SERVICE\"",
         "com.yazsras.astravar.overlay.OverlayService",
+        "androidx.work.impl.foreground.SystemForegroundService",
     )
     if any(value in manifest for value in retired):
         raise ValueError("Packaged manifest retains retired overlay permissions or service")
