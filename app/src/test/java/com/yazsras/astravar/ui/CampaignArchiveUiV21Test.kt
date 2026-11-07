@@ -9,7 +9,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.data.*
@@ -36,7 +35,7 @@ import org.robolectric.annotation.LooperMode
 @LooperMode(LooperMode.Mode.PAUSED)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class CampaignArchiveUiV21Test {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     private fun db() = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), CampaignLedgerDb::class.java).build()
     private fun record(id: String, title: String, body: String, category: String = "Reference", links: List<String> = emptyList()) = CampaignArchiveRecord(
         externalId = id, title = title, category = category, body = body, propertiesJson = "{\"originalField\":\"Preserved unknown\"}",
@@ -107,6 +106,7 @@ class CampaignArchiveUiV21Test {
             compose.onNodeWithText("notion-relation · unresolved reference: synthetic-ui-campaign::synthetic-missing").performScrollTo().assertExists()
             compose.onNodeWithText("Synthetic proposed blueprint").performScrollTo().performClick()
             compose.onNodeWithText("Proposed only; no inventory output.").performScrollTo().assertExists()
+            compose.onNodeWithText("Sources & record details").performScrollTo().performClick()
             compose.onNodeWithText("Source revision\nsynthetic-revision-2").performScrollTo().assertExists()
             runBlocking {
                 assertTrue(repo.archive.verify(receipt.packageHash).valid)

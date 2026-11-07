@@ -148,11 +148,8 @@ import kotlinx.serialization.encodeToString
             }
             if(unresolved!=null) PlayerTextButton(onClick={overlay="Resolve"}) {Text("Complete saved ${unresolved.plan.ability.title.lowercase()}")}
             if(!s.attuned) Action("Confirm attunement",!a.busy) {a.change("Attunement confirmed by player") {it.copy(attuned=true)}}
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
-                Text("Internal core · ${s.installed?.readiness(s.gameSeconds) ?: "Not configured"}",
-                    style=MaterialTheme.typography.bodySmall,color=Muted)
-                PlayerTextButton(onClick={start}) {Text("Floating controls")}
-            }
+            Text("Internal core · ${s.installed?.readiness(s.gameSeconds) ?: "Not configured"}",
+                style=MaterialTheme.typography.bodySmall,color=Muted)
         }
         Column(Modifier.fillMaxWidth().background(RebuildPalette.Canvas).padding(horizontal=16.dp,vertical=8.dp),
             verticalArrangement=Arrangement.spacedBy(8.dp)) {

@@ -34,7 +34,11 @@ fun elementTint(type: DamageType)=when(type) {
     MaterialTheme(colorScheme=darkColorScheme(primary=Brass,onPrimary=Color(0xFF241B10),secondary=Frost,
         primaryContainer=Color(0xFF011D49),onPrimaryContainer=Brass,secondaryContainer=Color(0xFF17323F),onSecondaryContainer=Frost,tertiary=Brass,tertiaryContainer=Color(0xFF011D49),surfaceTint=Frost,background=Gunmetal,surface=Color(0xFF000F28),surfaceVariant=Color(0xFF011534),
         onSurface=Color(0xFFF7F9FA),onSurfaceVariant=Muted,outline=Color(0xFF294769),error=Color(0xFFFF6578)),
-        typography=arcaneTypography(),shapes=Shapes(small=androidx.compose.foundation.shape.CutCornerShape(5.dp),medium=androidx.compose.foundation.shape.CutCornerShape(10.dp),large=androidx.compose.foundation.shape.CutCornerShape(14.dp)),content=content)
+        typography=arcaneTypography(),shapes=Shapes(small=androidx.compose.foundation.shape.CutCornerShape(5.dp),medium=androidx.compose.foundation.shape.CutCornerShape(10.dp),large=androidx.compose.foundation.shape.CutCornerShape(14.dp))) {
+        // Custom navy containers have no Material color-pair lookup. Supply the
+        // reading color at the root so ordinary Text never inherits black.
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface, content = content)
+    }
 }
 class Actions(val repo: Repository,private val scope: CoroutineScope) {
     var message by mutableStateOf(""); var busy by mutableStateOf(false)

@@ -1,0 +1,176 @@
+{
+  "product_source_commit": "30f0b9dda4e558246ecc481a4a97b23acf898cf0",
+  "product_source_tree": "4afff5814fe16612a93d682a22f13bf2a42fc60d",
+  "source_input_sha256": "8b2727f33b809e4b26eb9e945a3a45ce91d39f589c4c9e14dbf4e6a115330945",
+  "capture_runtime": "Actual native Android Compose drawing under Robolectric API35; not physical-device screenshots",
+  "capture_variant": "Final focused run: release then debug; copied after both selected suites passed. These are the last debug captures.",
+  "selected_test_result": {
+    "debug": {
+      "tests": 56,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "release": {
+      "tests": 56,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "fixtures": "Isolated fictional fixtures; no owner campaign exports or account screenshots",
+  "captures": [
+    {
+      "file": "reforge-compact-ability-editor.png",
+      "bytes": 98237,
+      "sha256": "936e31462a57bb797e68c169f3bdd0ad229aff520c799d59b95b53137770facc",
+      "dimensions": [
+        400,
+        1000
+      ]
+    },
+    {
+      "file": "reforge-npc-profile.png",
+      "bytes": 80810,
+      "sha256": "3fc695857b302c24e3fe6d8b142d98419bfbfa282e122953b21964e8770c50a1",
+      "dimensions": [
+        400,
+        1000
+      ]
+    },
+    {
+      "file": "reforge-native-equipment-preview.png",
+      "bytes": 112289,
+      "sha256": "0e9182a736468b0d6ffad054bfc45ac3dffffa6258eb8f44c5b904414795ea7e",
+      "dimensions": [
+        400,
+        1000
+      ]
+    },
+    {
+      "file": "reforge-native-character-sheet.png",
+      "bytes": 204316,
+      "sha256": "b5b7f6b444e8c41a0b0396aadaeece013e01bc105351d6723bf973706412e6b3",
+      "dimensions": [
+        400,
+        1000
+      ]
+    },
+    {
+      "file": "reforge-native-dice-result.png",
+      "bytes": 110046,
+      "sha256": "edee14e3227b3b443609536e41a258a769d3298f7b4f80857b19771e75c8000d",
+      "dimensions": [
+        400,
+        1000
+      ]
+    }
+  ],
+  "installed_apk_capture": {
+    "file": "owner-apk-api35-offline.png",
+    "bytes": 168343,
+    "sha256": "f40f2491f9c2be4dddb695a4d943c817c653792343b2ca41b21419eda7ba7132",
+    "dimensions": [
+      480,
+      960
+    ],
+    "runtime": "Actual original-owner optimized code42 APK installed over code41 on isolated software AOSP35; MainActivity has input focus; no ANR dialog in this frame",
+    "apk_sha256": "d46907c39f729145d3b1169090812b054296180cdb47802eef7a0f811746679a",
+    "fixture": "Fictional QA upgrade artificer; no real campaign data",
+    "offline_evidence": "Airplane mode enabled, Wi-Fi disabled, ConnectivityService Active default network: none",
+    "physical_device": false
+  },
+  "installed_equipment_preview": {
+    "file": "owner-apk-equipment-preview.png",
+    "sha256": "32287b4bbcb66d286dbe80fc437576c5b3309a5f7d1780472355926065f5d3d1",
+    "bytes": 95270,
+    "dimensions": [
+      480,
+      960
+    ],
+    "runtime": "Actual optimized original-owner code42 APK on isolated offline AOSP35",
+    "apk_sha256": "d46907c39f729145d3b1169090812b054296180cdb47802eef7a0f811746679a",
+    "fixture": "Separately created fictional QA equipment actor and explicitly reviewed QAChassis item",
+    "observed_changes": {
+      "strength": [
+        8,
+        21
+      ],
+      "constitution": [
+        14,
+        16
+      ],
+      "armor_class": [
+        10,
+        20
+      ],
+      "maximum_hp": [
+        66,
+        75
+      ],
+      "current_hp": [
+        40,
+        49
+      ],
+      "spell_attack": [
+        9,
+        9
+      ],
+      "spell_save_dc": [
+        17,
+        17
+      ]
+    },
+    "confirmed_reversal_and_reequip": true,
+    "damage_retained": 26,
+    "physical_device": false
+  },
+  "installed_equipment_cold_restart": {
+    "runtime": "Actual optimized original-owner code42 APK, isolated offline AOSP35, after force-stop/relaunch",
+    "apk_sha256": "d46907c39f729145d3b1169090812b054296180cdb47802eef7a0f811746679a",
+    "profile": "Fictional QA equipment",
+    "effective": {
+      "STR": 21,
+      "CON": 16,
+      "INT": 21,
+      "AC": 20,
+      "maximum_hp": 75,
+      "current_hp": 49
+    },
+    "permanent": {
+      "STR": 8,
+      "CON": 14,
+      "INT": 21
+    },
+    "damage_retained": 26,
+    "saved_roll": {
+      "ability": "STR",
+      "face": 19,
+      "modifier": 5,
+      "total": 24,
+      "manual": false,
+      "immutable_receipt_match": true
+    },
+    "captures": [
+      {
+        "file": "owner-apk-equipped-after-restart.png",
+        "bytes": 172169,
+        "sha256": "8f25fe7be77b6f3a0ecd76e8d622d38c9723272db8f11c06b3d2500c2bd3251e",
+        "dimensions": [
+          480,
+          960
+        ]
+      },
+      {
+        "file": "owner-apk-saved-roll-after-restart.png",
+        "bytes": 174402,
+        "sha256": "243969f39db2503d73e289f44d3acf5c1ae3c5c84befa9d49b0b882afed2abcb",
+        "dimensions": [
+          480,
+          960
+        ]
+      }
+    ],
+    "physical_device": false
+  }
+}

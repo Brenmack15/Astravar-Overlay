@@ -80,10 +80,8 @@ internal fun campaignSourceMetadataV21(source: CampaignArchivePayload) = Campaig
             PlayerCard(onClick = { selectedId = record.id; linkError = "" }) {
                 Text(record.title, style = MaterialTheme.typography.titleMedium)
                 Text(record.category, color = RebuildPalette.Ice, style = MaterialTheme.typography.labelLarge)
-                if (record.body.isNotBlank()) Text(record.body.take(600), color = RebuildPalette.Muted,
+                if (record.body.isNotBlank()) Text(com.yazsras.astravar.data.RecordPresentation.normalize(record.body).take(600), color = RebuildPalette.Muted,
                     style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                Text("Source revision · ${record.sourceRevision.ifBlank { "Unknown" }}", color = RebuildPalette.Muted,
-                    style = MaterialTheme.typography.bodySmall)
             }
         }
         if (visible.size > limit) PlayerOutlinedButton(onClick = { limit += 40 }, modifier = Modifier.fillMaxWidth()) { Text("Show more campaign references") }
@@ -94,8 +92,11 @@ internal fun campaignSourceMetadataV21(source: CampaignArchivePayload) = Campaig
         val associated = relations.filter { it.fromId == record.id || it.toId == record.id }
         PlayerSheet(record.title, onDismiss = { selectedId = null; linkError = "" }) {
             Text(record.category, color = RebuildPalette.Ice, style = MaterialTheme.typography.labelLarge)
-            PlayerDisclosure("Original source text", initiallyOpen = true) {
-                ArchiveOriginalTextV21(record.body.ifBlank { "This source has no body text. See its preserved properties below." }, "source text", record.id)
+            ReforgeRichText(record.body.ifBlank { "This source has no body text. See preserved source details below." }, onRecordLink = { target ->
+                references.firstOrNull { it.id == target || it.externalId == target }?.let { selectedId = it.id }
+            })
+            PlayerDisclosure("Original source text") {
+                ArchiveOriginalTextV21(record.body, "source text", record.id)
             }
             PlayerDisclosure("Source properties") {
                 ArchiveOriginalTextV21(record.propertiesJson, "source properties", record.id)
@@ -114,7 +115,7 @@ internal fun campaignSourceMetadataV21(source: CampaignArchivePayload) = Campaig
                 if (associated.size > relationLimit) PlayerOutlinedButton(onClick = { relationLimit += 40 }) { Text("Show more relationships") }
                 if (associated.isEmpty()) Text("No explicit source relationships recorded.", color = RebuildPalette.Muted)
             }
-            PlayerDisclosure("Provenance", initiallyOpen = true) {
+            PlayerDisclosure("Sources & record details") {
                 SelectionContainer {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Original Notion ID\n${record.externalId}", style = MaterialTheme.typography.bodySmall)

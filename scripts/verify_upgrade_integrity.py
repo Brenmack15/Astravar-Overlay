@@ -14,6 +14,7 @@ IMMUTABLE_SCHEMAS = {
     "com.yazsras.astravar.data.CampaignLedgerDb/3.json": "d030a6759b35784528732ff331ed20b27cb3c41561db0b7031d839b962f49901",
     "com.yazsras.astravar.data.CampaignLedgerDb/4.json": "076ebbba19127c09137b7095d84cc89bc9fb64c25ab74951677b9d2537cd3c5f",
     "com.yazsras.astravar.data.CampaignLedgerDb/5.json": "055d82545e23397ef2a785aceb6856534b3d1b50ad918cd4e74e2ef87abf7349",
+    "com.yazsras.astravar.data.CampaignLedgerDb/6.json": "e6a8c8388f27cf5188d3574206afe2a91645d9843832d0a8e0d6c57b5917faac",
     "com.yazsras.astravar.data.SandboxSyncDb/1.json": "23de63787037f830e1295ba7cd7efbc7d62cf18e3ba836c4e511bec8fd6cef03",
 }
 for name, digest in IMMUTABLE_SCHEMAS.items():
@@ -68,4 +69,4 @@ for suffix in (".v2uidebug", ".v2statdebug"):
     assert f'applicationIdSuffix = "{suffix}"' in gradle
 manifest = (ROOT / "app/src/main/AndroidManifest.xml").read_text()
 assert 'android:allowBackup="false"' in manifest and 'android:usesCleartextTraffic="false"' in manifest
-print("Verified eight immutable historical schemas, additive wallet and prompt migrations, unchanged campaign tables, package boundaries and private-artifact exclusion")
+print("Verified nine immutable historical schemas, additive wallet and prompt migrations, unchanged campaign tables, package boundaries and private-artifact exclusion")

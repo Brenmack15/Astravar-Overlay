@@ -8,7 +8,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.unit.dp
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -34,7 +33,7 @@ import org.robolectric.annotation.LooperMode
 @LooperMode(LooperMode.Mode.PAUSED)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class WeaponPresentationTest {
-    @get:Rule val compose=createEmptyComposeRule()
+    @get:Rule val compose=createAstravarComposeRule()
     private var previousRequestedSize:String?=null
     @Before fun dialogBounds() {previousRequestedSize=System.getProperty("robolectric.windowManager.useRequestedSize");System.setProperty("robolectric.windowManager.useRequestedSize","true")}
     @After fun restoreDialogBounds() {previousRequestedSize?.let {System.setProperty("robolectric.windowManager.useRequestedSize",it)} ?: System.clearProperty("robolectric.windowManager.useRequestedSize")}
@@ -160,7 +159,7 @@ class WeaponPresentationTest {
                 Box(Modifier.padding(padding)) {ControlRoomPage {}}
             }}}
             compose.onNodeWithText("Control room").assertIsDisplayed()
-            listOf("Weapon resources & recovery","Rules & upgrades","Overlay & appearance","Backup & restore","Help & diagnostics").forEach {
+            listOf("Weapon resources & recovery","Rules & upgrades","Appearance","Backup & restore","Help & diagnostics").forEach {
                 compose.onNodeWithText(it).performScrollTo().assertIsDisplayed()
             }
             compose.onNodeWithText("Control room").performScrollTo()

@@ -4,7 +4,6 @@ import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.activity.compose.setContent
 import com.yazsras.astravar.rules.*
 import org.junit.Rule
@@ -19,7 +18,7 @@ import org.robolectric.annotation.LooperMode
 @Config(sdk=[35],qualifiers="w400dp-h1200dp")
 @LooperMode(LooperMode.Mode.PAUSED)
 class ForcePresentationTest {
-    @get:Rule val compose=createEmptyComposeRule()
+    @get:Rule val compose=createAstravarComposeRule()
 
     @Test fun neutralAndDualPreviewsFollowSameProfileComponents() {
         val elements=mutableStateOf(emptyList<DamageType>())

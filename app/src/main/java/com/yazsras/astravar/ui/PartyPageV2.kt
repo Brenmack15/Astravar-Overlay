@@ -75,14 +75,14 @@ fun PartyPageV2(repository: CampaignLedgerRepository, campaign: Campaign?, openR
             when (section) {
                 "Sheet" -> {
                     CharacterOverviewV2(repository = repository, campaign = campaign, profileId = current.id)
+                    if (current.id == "eek") PlayerEntry("Eek's specialized companion tools",
+                        "Existing approved mechanics, records, resources and equipment links", "Emblem",
+                        onClick = { detailsOpen = true })
                     if (current.id in setOf("korr", "veyrath")) Text(
                         "HP in older review references is disputed. Keep unresolved values unknown until a later authoritative source establishes the correct current and maximum HP.",
                         color = RebuildPalette.Ice, style = MaterialTheme.typography.bodySmall)
                     PartyTypedSheetV2(repository, current.id, current.label)
                     if (current.id != "local-player") PartyCompanionEditorV2(repository, current.id, current.label)
-                    if (current.id == "eek") PlayerEntry("Eek's specialized companion tools",
-                        "Existing approved mechanics, records, resources and equipment links", "Emblem",
-                        onClick = { detailsOpen = true })
                 }
                 "Equipment" -> PartyEquipmentV2(repository, current.id, openInventory)
                 "Currency" -> PartyWalletV2(repository, current.id)

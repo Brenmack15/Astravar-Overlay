@@ -1,5 +1,6 @@
 package com.yazsras.astravar.ui
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -14,6 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -27,10 +30,13 @@ import androidx.compose.ui.window.DialogProperties
 /** Approved palette. Ornament is reserved for the identity, ability tiles and primary attack. */
 object RebuildPalette {
     val Void = Color(0xFF000510)
-    val Canvas = Color(0xFF000C21)
-    val Panel = Color(0xFF000F28)
-    val Elevated = Color(0xFF011534)
-    val Active = Color(0xFF011D49)
+    val Canvas = Color(0xFF080E1B)
+    val Panel = Color(0xFF101A2D)
+    val Elevated = Color(0xFF142038)
+    val Active = Color(0xFF20304D)
+    val Outline = Color(0xFF2A3952)
+    val Purple = Color(0xFFB7A5DF)
+    val Silver = Color(0xFFE3E8F1)
     val GoldShadow = Color(0xFF6E481E)
     val GoldBurnished = Color(0xFFBF7B1A)
     val Gold = Color(0xFFF29E11)
@@ -49,7 +55,7 @@ object PlayerSpace {
     val Gap = 12.dp
     val Screen = 16.dp
     val Touch = 48.dp
-    val Radius = 16.dp
+    val Radius = 18.dp
 }
 
 @Composable fun PlayerCard(
@@ -57,7 +63,7 @@ object PlayerSpace {
     content: @Composable ColumnScope.() -> Unit
 ) {
     val shape = RoundedCornerShape(PlayerSpace.Radius)
-    Column(modifier.fillMaxWidth().clip(shape).background(RebuildPalette.Elevated)
+    Column(modifier.fillMaxWidth().clip(shape).background(RebuildPalette.Elevated).border(1.dp, RebuildPalette.Outline.copy(alpha = .6f), shape)
         .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
         .padding(padding), verticalArrangement = Arrangement.spacedBy(spacing), content = content)
 }
@@ -97,6 +103,7 @@ val LocalPlayerToolTitle = staticCompositionLocalOf<String?> { null }
 @Composable fun PlayerSearch(value: String, onValueChange: (String) -> Unit, placeholder: String) {
     OutlinedTextField(value, onValueChange, singleLine = true, modifier = Modifier.fillMaxWidth(),
         label = { Text(placeholder) }, shape = RoundedCornerShape(14.dp),
+        trailingIcon = { if (value.isNotEmpty()) IconButton(onClick = { onValueChange("") }, modifier = Modifier.semantics { contentDescription = "Clear search" }) { Text("×", style = MaterialTheme.typography.titleLarge) } },
         colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Color.Transparent,
             focusedBorderColor = RebuildPalette.BlueAccent,
             unfocusedContainerColor = RebuildPalette.Elevated, focusedContainerColor = RebuildPalette.Elevated))
@@ -126,7 +133,7 @@ val LocalPlayerDismiss = staticCompositionLocalOf<() -> Unit> { {} }
         CompositionLocalProvider(LocalPlayerDismiss provides close) {
             Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(12.dp), contentAlignment = Alignment.Center) {
                 Surface(Modifier.widthIn(max = 600.dp).fillMaxWidth(), shape = RoundedCornerShape(24.dp),
-                    color = RebuildPalette.Panel, tonalElevation = 0.dp) {
+                    color = RebuildPalette.Panel, contentColor = MaterialTheme.colorScheme.onSurface, tonalElevation = 0.dp) {
                     Column(Modifier.heightIn(max = (LocalConfiguration.current.screenHeightDp * .88f).dp)) {
                         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp),
                             verticalAlignment = Alignment.CenterVertically) {
@@ -156,7 +163,7 @@ val LocalPlayerDismiss = staticCompositionLocalOf<() -> Unit> { {} }
 @Composable fun PlayerDisclosure(title: String, initiallyOpen: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     var expanded by rememberSaveable(title) { mutableStateOf(initiallyOpen) }
     Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable(role = Role.Button) { expanded = !expanded },
+        Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }.clickable(role = Role.Button, onClickLabel = if (expanded) "Collapse $title" else "Expand $title") { expanded = !expanded },
             verticalAlignment = Alignment.CenterVertically) {
             Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             Text(if (expanded) "−" else "+", color = RebuildPalette.Ice, fontSize = 24.sp)

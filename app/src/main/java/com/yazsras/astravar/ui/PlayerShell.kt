@@ -15,20 +15,22 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
-val rebuildDestinations = listOf("Armor", "Combat", "Party", "Campaign", "Config")
+val rebuildDestinations = listOf("Character", "Combat", "Inventory", "Campaign", "More")
 
-@Composable fun RebuildAppHeader(demo: Boolean) {
+@Composable fun RebuildAppHeader(demo: Boolean, search: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().background(RebuildPalette.Void).statusBarsPadding()
         .padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         ArcaneIcon("Emblem", Modifier.size(24.dp), Brass)
         Text("ASTRAVAR", fontFamily = DisplayFace, fontSize = 20.sp, letterSpacing = 2.sp, color = Brass)
         Spacer(Modifier.weight(1f))
+        if (search != null) PlayerTextButton(onClick = search) { Text("Search") }
         if (demo) Text("DEMO", color = RebuildPalette.Cyan, style = MaterialTheme.typography.labelSmall)
     }
 }
@@ -57,13 +59,13 @@ val rebuildDestinations = listOf("Armor", "Combat", "Party", "Campaign", "Config
                 Row(Modifier.fillMaxWidth()) {
                     row.forEach { name ->
                         val active = name == selected
-                        Column(Modifier.weight(1f).heightIn(min = 68.dp).semantics { this.selected = active }
+                        Column(Modifier.weight(1f).heightIn(min = 68.dp).testTag("navigation-$name").semantics { this.selected = active }
                             .clickable(role = Role.Tab) { change(name) }.padding(horizontal = 2.dp, vertical = 8.dp),
                             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Box(Modifier.width(56.dp).height(28.dp).background(if (active) RebuildPalette.Active else Color.Transparent,
                                 RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
                                 if (name == "Combat") ApprovedAttackMedallion(ApprovedAttackArt.ELEMENTAL, Modifier.size(24.dp))
-                                else ArcaneIcon(when (name) { "Armor" -> "Emblem"; "Party" -> "Emblem"; "Campaign" -> "History"; else -> "Settings" },
+                                else ArcaneIcon(when (name) { "Character" -> "Emblem"; "Inventory" -> "Core"; "Campaign" -> "History"; else -> "More" },
                                     Modifier.size(24.dp), if (active) RebuildPalette.Cyan else Muted)
                             }
                             Text(name, Modifier.fillMaxWidth(), style = labelStyle,
@@ -80,7 +82,8 @@ val rebuildDestinations = listOf("Armor", "Combat", "Party", "Campaign", "Config
 @Composable fun RebuildCampaignHub(open: (String) -> Unit) {
     Page {
         PlayerHeading("Campaign")
-        listOf(Triple("Inventory", "Items & equipment", "Core"),
+        listOf(Triple("Search everything", "Find people, items, abilities and campaign records", "History"),
+            Triple("Inventory", "Items & equipment", "Core"),
             Triple("Inventions", "Blueprints & construction", "Settings"),
             Triple("Connections", "People, groups & milestones", "Emblem"),
             Triple("Checkpoints", "Sourced session records & unresolved decisions", "History"),
@@ -95,7 +98,11 @@ val rebuildDestinations = listOf("Armor", "Combat", "Party", "Campaign", "Config
 
 @Composable fun RebuildConfigHub(open: (String) -> Unit) {
     Page {
-        PlayerHeading("Config")
+        PlayerHeading("More")
+        PlayerEntry("Companions", "Independent sheets, equipment and accepted forms", "Emblem", { open("Companions") })
+        PlayerEntry("Armor systems", "Astravar capabilities and the preserved weapon engine", "Weapon", { open("Armor systems") })
+        PlayerEntry("Armor weapon", "Accepted Astravar attack engine and weapon setup", "Weapon", { open("Armor weapon") })
+        PlayerEntry("Character sources", "Original campaign values, revisions and reconciliation", "History", { open("Character sources") })
         SectionCaption("Systems")
         PlayerEntry("Spell reservoir", "Permanent internal core · manage spell loads", "Core", { open("Spell reservoir") })
         PlayerEntry("Spell library", "Configured templates & payloads", "Payload", { open("Spell library") })
@@ -104,13 +111,14 @@ val rebuildDestinations = listOf("Armor", "Combat", "Party", "Campaign", "Config
         PlayerEntry("Roll history", "Saved rolls & exact dice", "History", { open("Roll history") })
         PlayerEntry("ChatGPT Prompts", "Create, edit and organize reusable handoffs", "More", { open("ChatGPT Prompts") })
         SectionCaption("App & data")
-        PlayerEntry("Overlay & appearance", "Floating controls & app preferences", "Settings", { open("Overlay & appearance") })
+        PlayerEntry("Appearance", "Artwork and feedback preferences", "Settings", { open("Appearance") })
+        PlayerEntry("Character backup", "Playable characters, effects, resources, rolls and notes", "History", { open("Character backup") })
         PlayerEntry("Campaign backup", "Items, projects, connections & companion", "History", { open("Campaign backup") })
         PlayerEntry("Campaign import", "Private source archive · preview, backup & receipts", "History", { open("Campaign import") })
         PlayerEntry("Owner connection", "Character HP · owner pairing & approvals", "Settings", { open("Owner connection") })
         PlayerEntry("Weapon backup", "Separate combat save", "History", { open("Weapon backup") })
-        PlayerEntry("Fictional sync", "Public disposable test records", "More", { open("Fictional sync") })
         if (com.yazsras.astravar.BuildConfig.DEBUG) {
+            PlayerEntry("Fictional sync", "Isolated connectivity diagnostics", "More", { open("Fictional sync") })
             PlayerEntry("Remote Updates", "Opt-in disposable ability test", "Settings", { open("Remote Updates") })
         }
         PlayerEntry("Help & diagnostics", "Device & build information", "More", { open("Help & diagnostics") })
@@ -122,7 +130,7 @@ val rebuildDestinations = listOf("Armor", "Combat", "Party", "Campaign", "Config
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(8.dp), contentAlignment = Alignment.Center) {
             Surface(Modifier.widthIn(max = 720.dp).fillMaxWidth().fillMaxHeight(.96f),
-                color = RebuildPalette.Canvas, shape = RoundedCornerShape(24.dp)) {
+                color = RebuildPalette.Canvas, contentColor = MaterialTheme.colorScheme.onSurface, shape = RoundedCornerShape(24.dp)) {
                 Column {
                     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)

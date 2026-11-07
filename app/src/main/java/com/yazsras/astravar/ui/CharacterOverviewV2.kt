@@ -218,9 +218,9 @@ private fun CharacterProfileDialog(snapshot: CharacterProfile?, latest: Characte
                 val model = (snapshot ?: CharacterProfile(id = profileId)).copy(name = name.trim(), currentHp = optionalNumber(hp, "Current HP"),
                     maximumHp = optionalNumber(maximum, "Maximum HP"), temporaryHp = optionalNumber(temporary, "Temporary HP"),
                     armorClass = optionalNumber(ac, "Armor class"), level = optionalNumber(level, "Level"))
-                records.saveProfile(model, snapshot?.revision, source.trim()); onSaved(); "Saved locally."
+                records.saveProfile(model, snapshot?.revision, source.trim().ifBlank { "Local character edit in Astravar" }); onSaved(); "Saved locally."
             }
-        }, enabled = !actions.busy && !stale && source.isNotBlank()) { Text("Save character status") }
+        }, enabled = !actions.busy && !stale && dirty) { Text("Save character status") }
     }) {
         if (stale) Text("Status changed. Close and reopen to review it.", color = MaterialTheme.colorScheme.error)
         Field("Character name (optional)", name, { name = it }, enabled = !actions.busy)
@@ -231,7 +231,10 @@ private fun CharacterProfileDialog(snapshot: CharacterProfile?, latest: Characte
         CharacterNumberField("Temporary HP (blank = unknown)", temporary, { temporary = it }, !actions.busy)
         CharacterNumberField("Armor class (blank = unknown)", ac, { ac = it }, !actions.busy)
         CharacterNumberField("Character level (blank = unknown)", level, { level = it }, !actions.busy)
-        Field("Character status source (required)", source, { source = it }, single = false, enabled = !actions.busy)
+        PlayerDisclosure("History & sources") {
+            Field("Character status source (optional)", source, { source = it }, single = false, enabled = !actions.busy)
+            Text("Local edits are recorded automatically. Existing attribution is preserved.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+        }
         Text("Blank values stay unknown. Combat settings stay separate.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
         if (actions.message.isNotBlank()) Text(actions.message, color = RebuildPalette.Ice, style = MaterialTheme.typography.bodySmall)
     }
@@ -244,7 +247,6 @@ private fun CharacterAbilityDialog(key: String, snapshot: CharacterAbility?, lat
     var magic by rememberSaveable(key) { mutableStateOf(snapshot?.magicModifier?.toString() ?: "0") }
     var notes by rememberSaveable(key) { mutableStateOf(snapshot?.notes.orEmpty()) }
     var source by rememberSaveable(key) { mutableStateOf(snapshot?.source.orEmpty()) }
-    var notesOpen by rememberSaveable(key) { mutableStateOf(false) }
     val actions = rememberLocalRecordActions()
     val stale = latest?.revision != snapshot?.revision
     val scorePreview = score.toIntOrNull()?.takeIf { it in 0..1000 }
@@ -260,29 +262,29 @@ private fun CharacterAbilityDialog(key: String, snapshot: CharacterAbility?, lat
                 val raw = optionalNumber(score, "Ability score")
                 val magical = magic.toIntOrNull() ?: error("Magical modifier must be a whole number.")
                 val model = (snapshot ?: CharacterAbility(key = key, profileId = profileId)).copy(score = raw, magicModifier = magical, notes = notes)
-                records.saveAbility(model, snapshot?.revision, source.trim()); onSaved(); "Saved locally."
+                records.saveAbility(model, snapshot?.revision, source.trim().ifBlank { "Local ability edit in Astravar" }); onSaved(); "Saved locally."
             }
-        }, enabled = !actions.busy && !stale && profileExists && source.isNotBlank()) { Text("Save ability") }
+        }, enabled = !actions.busy && !stale && profileExists && dirty) { Text("Save ability") }
     }) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             AbilityTile(key, abilityNames[key] ?: key, scorePreview, totalPreview, Modifier.width(92.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Base ${signedModifier(basePreview)}", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodyMedium)
-                Text("Magic ${signedModifier(magicPreview)}", color = RebuildPalette.Ice, style = MaterialTheme.typography.bodyMedium)
-                Text("Total ${signedModifier(totalPreview)}", color = RebuildPalette.Gold, style = MaterialTheme.typography.titleMedium)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("${abilityNames[key] ?: key} modifier", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelLarge)
+                Text(signedModifier(totalPreview), color = RebuildPalette.Gold, style = MaterialTheme.typography.headlineMedium)
+                if (magicPreview != null && magicPreview != 0) Text("Includes recorded bonus ${signedModifier(magicPreview)}", color = RebuildPalette.Ice, style = MaterialTheme.typography.bodySmall)
             }
         }
-        if (!profileExists) Text("Save a sourced character status first.", color = RebuildPalette.Ice)
-        if (stale) Text("This ability changed. Close and reopen before saving.", color = MaterialTheme.colorScheme.error)
-        CharacterNumberField("Raw ability score (blank = unknown)", score, { score = it }, !actions.busy)
-        CharacterNumberField("Separate magical modifier", magic, { magic = it }, !actions.busy, signed = true)
-        Field("Ability source (required)", source, { source = it }, single = false, enabled = !actions.busy)
-        PlayerTextButton(onClick = { notesOpen = !notesOpen }) { Text(if (notesOpen) "Hide modifier sources" else "Modifier sources") }
-        if (notesOpen) {
-            Field("Ability / magic source notes", notes, { notes = it }, single = false, enabled = !actions.busy)
-            Text("Check- or save-only bonuses stay in source notes. These display values do not change the weapon engine.",
-                color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+        if (!profileExists) Text("Save your character status first.", color = RebuildPalette.Ice)
+        if (stale) Text("This ability changed. Your draft is kept; reopen it to review the latest value.", color = MaterialTheme.colorScheme.error)
+        CharacterNumberField("Ability score", score, { score = it }, !actions.busy)
+        Text("Leave blank if unknown. Equipment effects are managed on your Character sheet.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+        PlayerDisclosure("Advanced · recorded modifiers & sources") {
+            CharacterNumberField("Recorded modifier adjustment", magic, { magic = it }, !actions.busy, signed = true)
+            Text("Preserved legacy adjustment to the modifier. It is not an automatic item effect.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+            Field("Ability source (optional)", source, { source = it }, single = false, enabled = !actions.busy)
+            ReforgeDocumentEditor("Notes", notes, { notes = it }, enabled = !actions.busy)
+            Text("Local edits are recorded automatically. Prior attribution remains in record history.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
         }
         if (actions.message.isNotBlank()) Text(actions.message, color = RebuildPalette.Ice, style = MaterialTheme.typography.bodySmall)
     }

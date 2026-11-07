@@ -20,7 +20,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import android.content.res.Configuration
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.data.*
@@ -52,7 +51,7 @@ import org.robolectric.annotation.LooperMode
 @LooperMode(LooperMode.Mode.PAUSED)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class PartyPlayerFirstTest {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     private var previousSize: String? = null
     @Before fun configureDialogs() {
         previousSize = System.getProperty("robolectric.windowManager.useRequestedSize")
@@ -327,7 +326,8 @@ class PartyPlayerFirstTest {
                 }
             }
             compose.onNodeWithText("Eek").performScrollTo().performClick()
-            compose.onNodeWithText("Eek's specialized companion tools").performScrollTo().performClick()
+            compose.onNode(hasText("Eek's specialized companion tools") and hasClickAction())
+                .performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
             compose.onNodeWithText("Condition unknown").performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("Resources").performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("Equipment & upgrades").performScrollTo().assertIsDisplayed()

@@ -142,7 +142,7 @@ val campaignDestinationsV2 = listOf("Astravar", "Inventory", "Campaign", "More")
         ControlRoomLink("Weapon backup & restore", "Preserve the separate existing combat save", "Core") { open("Backup") }
         ControlRoomLink("Rules & weapon configuration", "Existing engine, damage settings and approved upgrades", "Weapon") { open("Rules") }
         ControlRoomLink("Weapon resources & recovery", "Recorded game time, slots and core recovery", "Core") { open("Resources") }
-        ControlRoomLink("Overlay & appearance", "Floating controls, permission and artwork", "Settings") { open("Settings") }
+        ControlRoomLink("Appearance", "Artwork and feedback preferences", "Settings") { open("Settings") }
         ControlRoomLink("Help & diagnostics", "Build identity, device details and integration limits", "More") { open("Help") }
         Text("Campaign records stay local. The public sandbox uses only fixed fictional test messages in a separate database.",
             style = MaterialTheme.typography.bodySmall, color = Muted)

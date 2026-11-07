@@ -105,7 +105,7 @@ data class CampaignConnectionView(
                 Switch(view.automaticSyncPaused, onPauseSync,
                     modifier = Modifier.testTag("campaign-sync-pause").semantics { contentDescription = "Pause automatic campaign sync" })
             }
-            if (view.automaticSyncPaused) Text("Automatic delivery is paused in the app, overlay and background. Queued transactions and saved permissions are retained. Sync now remains available.", color = RebuildPalette.GoldBright)
+            if (view.automaticSyncPaused) Text("Automatic delivery is paused in the app and background. Queued transactions and saved permissions are retained. Sync now remains available.", color = RebuildPalette.GoldBright)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Show Background Sync notification", modifier = Modifier.weight(1f))
                 Switch(view.syncNotificationEnabled, onSyncNotification,

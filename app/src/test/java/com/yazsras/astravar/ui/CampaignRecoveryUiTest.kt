@@ -5,7 +5,6 @@ import android.os.Parcel
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.data.*
@@ -26,7 +25,7 @@ import org.robolectric.android.controller.ActivityController
 @LooperMode(LooperMode.Mode.PAUSED)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class CampaignRecoveryUiTest {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     private fun database() = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), CampaignLedgerDb::class.java).build()
 
     /** Android saves a parcelled Bundle, not a registry map retaining live in-process objects. */
@@ -51,7 +50,8 @@ class CampaignRecoveryUiTest {
             mount()
             compose.onNodeWithText("Add Item").performClick()
             compose.onNodeWithText("Item name").performScrollTo().performTextInput("Synthetic crash-retry lens")
-            compose.onNodeWithText("Source / checkpoint").performScrollTo().performTextInput("Synthetic confirmed acquisition")
+            compose.onNodeWithText("Sources & advanced details").performScrollTo().performClick()
+            compose.onNodeWithText("Source / checkpoint (optional)").performScrollTo().performTextInput("Synthetic confirmed acquisition")
             val beforeCommit = precommitActivityState(activity)
             compose.onNodeWithText("Save new item").performClick()
             compose.waitUntil(10_000) { runBlocking { db.ledgerDao().allItems().size == 1 } }
@@ -63,7 +63,10 @@ class CampaignRecoveryUiTest {
             mount()
             compose.waitForIdle()
             compose.onNodeWithText("Item name").performScrollTo().assertTextContains("Synthetic crash-retry lens")
-            compose.onNodeWithText("Source / checkpoint").performScrollTo().assertTextContains("Synthetic confirmed acquisition")
+            if (compose.onAllNodesWithText("Source / checkpoint (optional)").fetchSemanticsNodes().isEmpty()) {
+                compose.onNodeWithText("Sources & advanced details").performScrollTo().performClick()
+            }
+            compose.onNodeWithText("Source / checkpoint (optional)").performScrollTo().assertTextContains("Synthetic confirmed acquisition")
             compose.onNodeWithText("Save new item").assertIsEnabled().performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithText("Save new item").fetchSemanticsNodes().isEmpty() }
             runBlocking {
@@ -82,6 +85,7 @@ class CampaignRecoveryUiTest {
             mount()
             compose.onNodeWithText("Add Invention").performClick()
             compose.onNodeWithText("Invention name").performScrollTo().performTextInput("Synthetic crash-retry blueprint")
+            compose.onNodeWithText("Sources (optional)").performScrollTo().performClick()
             compose.onNodeWithText("Source / resolved scene / checkpoint").performScrollTo().performTextInput("Synthetic accepted design")
             val beforeCommit = precommitActivityState(activity)
             compose.onNodeWithText("Save invention").performClick()

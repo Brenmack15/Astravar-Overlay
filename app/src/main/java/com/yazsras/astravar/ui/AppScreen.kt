@@ -1,7 +1,6 @@
 package com.yazsras.astravar.ui
 
 import android.os.Build
-import android.provider.Settings
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
 import androidx.compose.material3.*
@@ -15,6 +14,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.yazsras.astravar.*
 import com.yazsras.astravar.data.RemoteStatProtocol
+import com.yazsras.astravar.data.ReforgeRepository
 import com.yazsras.astravar.rules.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -39,12 +39,15 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     val prefs by app.preferences.flow.collectAsState(initial=com.yazsras.astravar.data.OverlayPrefs())
     val scope=rememberCoroutineScope()
     val actions=remember { Actions(app.repository,scope) }
-    var tab by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf("Armor")}
+    val localContext = LocalContext.current.applicationContext
+    val playableRepository = remember(localContext) { ReforgeRepository.open(localContext) }
+    var tab by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf("Character")}
+    LaunchedEffect(Unit) { if (tab == "Armor") tab = "Character"; if (tab == "Party") tab = "More"; if (tab == "Config") tab = "More" }
     var configSection by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("Settings") }
     var campaignPage by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
     var tool by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
     LaunchedEffect(ownerConnectionRequest) {
-        if (ownerConnectionRequest > 0) { tab = "Config"; configSection = "Settings"; tool = "Owner connection" }
+        if (ownerConnectionRequest > 0) { tab = "More"; configSection = "Settings"; tool = "Owner connection" }
     }
     var elementPicker by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf(false)}
     val screenStates=androidx.compose.runtime.saveable.rememberSaveableStateHolder()
@@ -77,7 +80,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
         if (!remoteTestEnabled) remoteReviewId = null
         else if (reviewCommand?.status in listOf("APPLIED", "REJECTED")) remoteReviewId = null
         else if (remoteReviewId == null && tool == null && !elementPicker &&
-            (tab == "Config" || (tab == "Armor" && !armorModalOpen))) {
+            (tab == "More" || (tab == "Character" && !armorModalOpen))) {
             remoteReviewId = waitingRemote.firstOrNull { it.commandId !in deferredRemoteCommands }?.commandId
         }
     }
@@ -97,7 +100,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     AstravarTheme {
         Scaffold(containerColor=RebuildPalette.Canvas,
             snackbarHost={SnackbarHost(snackbar)},
-            topBar={RebuildAppHeader(s?.demo==true)},
+            topBar={RebuildAppHeader(s?.demo==true) {tool="Global search"}},
             bottomBar={RebuildPrimaryNavigation(tab) {tab=it}}
         ) {insets->
             Column(Modifier.padding(insets).imePadding()) {
@@ -107,7 +110,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                 if(actions.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (remoteTestEnabled) Row(Modifier.fillMaxWidth().background(RebuildPalette.Active).padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    Text(if(tab=="Armor") "Disposable profile" else "Remote test on", Modifier.weight(1f), color = RebuildPalette.Ice,
+                    Text(if(tab=="Character") "Disposable profile" else "Remote test on", Modifier.weight(1f), color = RebuildPalette.Ice,
                         style = MaterialTheme.typography.labelLarge)
                     PlayerTextButton(onClick = {
                         val next = waitingRemote.firstOrNull()
@@ -117,16 +120,17 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                 }
                 screenStates.SaveableStateProvider(tab) {
                     when(tab) {
+                        "Character" -> if (remoteTestEnabled) Page { CharacterOverviewV2(app.campaignLedger, current, RemoteStatProtocol.PROFILE_ID) } else ReforgeCharacterSheet(app.campaignLedger)
                         "Armor" -> ArmorOverviewV2(current,app.campaignLedger,
-                            combat={tab="Combat"},systems={tool="Spell reservoir"},
+                            combat={tool="Armor weapon"},systems={tool="Spell reservoir"},
                             eek={tab="Campaign";campaignPage="Eek"},inventory={tab="Campaign";campaignPage="Inventory"},
                             elements=if(prefs.mode==Ability.ARCANE || prefs.mode==Ability.SPELL) emptyList() else prefs.elements,
                             selectElement={elementPicker=true},
                             characterProfileId=if(remoteTestEnabled) RemoteStatProtocol.PROFILE_ID else "local-player",
                             onOverlayVisibilityChanged={armorModalOpen=it},
                             openReferences={tab="Campaign";campaignPage="Reference Library"})
-                        "Combat" -> if(current.onboarded) Dashboard(current,actions,startOverlay,grantOverlay,stopOverlay,app.preferences,prefs)
-                            else WeaponSetupV2(current,actions,{tool="Rules & profile"},{tool="Weapon backup"})
+                        "Combat" -> ReforgeCharacterSheet(app.campaignLedger, initialSection = "Combat")
+                        "Inventory" -> CampaignLedgerPage(app.campaignLedger) {tab="Campaign";campaignPage="Reference Library"}
                         "Party" -> if (remoteTestEnabled) Page { Text("Party records are isolated from the disposable Remote Stat Test. Disable Remote Updates to edit party records.") }
                             else PartyPageV2(app.campaignLedger, current,
                                 openReferences={tab="Campaign";campaignPage="Reference Library"}) {tab="Campaign";campaignPage="Inventory"}
@@ -140,6 +144,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                                 }
                                 Box(Modifier.weight(1f)) {screenStates.SaveableStateProvider("campaign-$page") {
                                     when(page) {
+                                        "Search everything" -> ReforgeGlobalSearch(app.campaignLedger)
                                         "Inventory" -> CampaignLedgerPage(app.campaignLedger) {campaignPage="Reference Library"}
                                         "Inventions" -> InventionsPageV2(app.campaignLedger)
                                         "Checkpoints" -> CampaignCheckpointPanel(app.campaignLedger)
@@ -160,21 +165,28 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                 }
                 tool?.let {name->RebuildToolSheet(name,{tool=null}) {
                     when(name) {
+                        "Global search" -> ReforgeGlobalSearch(app.campaignLedger)
                         "Fictional sync" -> SandboxSyncPage(app.sandboxSync)
                         "Remote Updates" -> if(BuildConfig.DEBUG) RemoteUpdatesPage(app.remoteStats, characterAbilities) {id->
                             tool=null;remoteReviewId=id
                         }
                         "Owner connection" -> CampaignConnectionPage()
                         "Campaign backup" -> CampaignBackupPageV2(app.campaignLedger)
+                        "Character backup" -> ReforgeBackupPage(playableRepository)
                         "Campaign import" -> CampaignArchiveImportV21(app.campaignLedger)
                         "Weapon backup" -> Page {BackupPage(current,actions)}
+                        "Armor weapon" -> if(current.onboarded) Dashboard(current,actions,startOverlay,grantOverlay,stopOverlay,app.preferences,prefs)
+                            else WeaponSetupV2(current,actions,{tool="Rules & profile"},{tool="Weapon backup"})
                         "Rules & profile" -> RulesPage(current,actions,if(prefs.mode in listOf(Ability.ARCANE,Ability.SPELL)) emptyList() else prefs.elements)
                         "Resources & recovery" -> ResourcesPage(current,history,actions)
                         "Spell reservoir" -> CoresPage(current,actions)
                         "ChatGPT Prompts", "ChatGPT toolkit" -> ChatGptPromptsPage(app.campaignLedger.prompts)
                         "Spell library" -> PayloadsPage(current,actions,app.preferences,prefs.selectedPayloads)
                         "Roll history" -> CombatHistoryPage(current)
-                        "Overlay & appearance" -> SettingsPage(app,current,actions,startOverlay,grantOverlay,stopOverlay)
+                        "Appearance", "Overlay & appearance" -> SettingsPage(app,current,actions,startOverlay,grantOverlay,stopOverlay)
+                        "Companions" -> PartyPageV2(app.campaignLedger, current, openReferences={tool=null;tab="Campaign";campaignPage="Reference Library"}) {tool=null;tab="Inventory"}
+                        "Character sources" -> Page { CharacterOverviewV2(app.campaignLedger, current) }
+                        "Armor systems" -> ArmorOverviewV2(current,app.campaignLedger,combat={tool="Armor weapon"},systems={tool="Spell reservoir"},eek={tool="Companions"},inventory={tool=null;tab="Inventory"},elements=prefs.elements,selectElement={elementPicker=true})
                         else -> HelpPage()
                     }
                 }}
@@ -221,7 +233,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
         SectionCaption("WEAPON SYSTEMS")
         ControlRoomLink("Weapon resources & recovery","Action limits, core recovery and spell slots","Core") {open("Resources")}
         ControlRoomLink("Rules & upgrades","Damage sliders, profile and approved upgrades","Weapon") {open("Rules")}
-        ControlRoomLink("Overlay & appearance","Permissions, panel size and artwork","Settings") {open("Settings")}
+        ControlRoomLink("Appearance","Artwork and feedback preferences","Settings") {open("Settings")}
         if (com.yazsras.astravar.BuildConfig.DEBUG) {
             SectionCaption("CAMPAIGN RECORDS")
             ControlRoomLink("Campaign inventory · local beta", "Item profiles, artwork and research history", "History") { open("Campaign Inventory") }
@@ -245,12 +257,12 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
             Text("Future updates require this package identity, a compatible signing certificate and an increased build number. Export backups before installing an update.", style=MaterialTheme.typography.bodySmall)
         }
         Section("Device diagnostics") {
-            Text("${Build.MANUFACTURER} ${Build.MODEL}\nAndroid ${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}\nBuild ${Build.DISPLAY}\nPackage ${c.packageName}\nDisplay-over-apps permission: ${Settings.canDrawOverlays(c)}")
+            Text("${Build.MANUFACTURER} ${Build.MODEL}\nAndroid ${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}\nBuild ${Build.DISPLAY}\nPackage ${c.packageName}\nStandalone mode · overlay retired")
         }
         Section("Dice & your character sheet") {
-            Text("Astravar does not read, control, or synchronize D&D Beyond. Tap Roll to generate attack and damage dice, or choose external dice. Individual faces are saved and never rerolled on restart. The DM determines ordinary hits; potential damage is clearly labeled. Natural 20s are criticals and natural 1s automatically miss. Reconcile your sheet manually. Damage averages are estimates, never rolled results. The optional public connectivity lab sends fixed fictional test messages only. Your local campaign records are not uploaded. No analytics, account, accessibility access, or screen capture.")
-            Text("The floating crystal is a genuine Android overlay. Some apps and protected screens hide overlays. Start sessions while Astravar is visible; sessions do not restart at boot or after you stop them. Locking the phone hides the panel; resume from its notification.")
-            Text("If Samsung pauses a session, first reopen Astravar and start it again. Check the app's battery settings only if sessions repeatedly stop; no blanket security changes are required.")
+            Text("Character and Combat use your reviewed playable character. Tap a score, skill, attack or spell to use its calculated modifiers; each saved roll retains its dice and explanation. Nothing rolls automatically. The DM determines ordinary hits. Damage previews are potential damage, and averages are estimates. More → Armor weapon retains the accepted specialized Astravar weapon engine. Character backup and Campaign backup preserve their separate records.")
+            Text("Astravar does not read, control, or synchronize D&D Beyond. Imported source records remain available for review and reconciliation. Playable character changes are saved on this device; their presence does not establish authoritative campaign synchronization. The optional public connectivity lab sends fixed fictional test messages only.")
+            Text("Astravar runs as a standalone application. Overlay permissions, floating controls and the persistent overlay service are retired.")
             Text("Unofficial tabletop companion. Not affiliated with or endorsed by Wizards of the Coast, D&D Beyond, or Samsung.")
         }
     }

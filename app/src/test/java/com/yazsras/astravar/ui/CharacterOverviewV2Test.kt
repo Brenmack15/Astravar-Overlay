@@ -4,7 +4,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.text.AnnotatedString
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -30,7 +29,7 @@ import org.robolectric.annotation.LooperMode
 @LooperMode(LooperMode.Mode.PAUSED)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class CharacterOverviewV2Test {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     private var previousRequestedSize: String? = null
 
     @Before fun respectRequestedDialogSize() {
@@ -115,9 +114,10 @@ class CharacterOverviewV2Test {
                 compose.onAllNodes(hasContentDescription("Strength score 16", substring = true)).fetchSemanticsNodes().isNotEmpty()
             }
             compose.onNodeWithTag("ability-STR").performScrollTo().performClick()
-            compose.onNodeWithText("Raw ability score (blank = unknown)").performScrollTo().performTextClearance()
-            compose.onNodeWithText("Raw ability score (blank = unknown)").performTextInput("18")
-            compose.onNodeWithText("Separate magical modifier").assert(
+            compose.onNodeWithText("Ability score").performScrollTo().performTextClearance()
+            compose.onNodeWithText("Ability score").performTextInput("18")
+            compose.onNodeWithText("Advanced · recorded modifiers & sources").performScrollTo().performClick()
+            compose.onNodeWithText("Recorded modifier adjustment").performScrollTo().assert(
                 SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("2"))
             )
             compose.onNodeWithText("Save ability").performClick()

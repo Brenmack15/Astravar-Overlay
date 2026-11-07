@@ -9,7 +9,6 @@ import androidx.activity.compose.setContent
 import androidx.room.MultiInstanceInvalidationService
 import androidx.compose.runtime.*
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.AstravarApp
 import com.yazsras.astravar.savePresentationCapture
@@ -33,7 +32,7 @@ import org.robolectric.annotation.LooperMode
 @LooperMode(LooperMode.Mode.PAUSED)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class NavigationV2Test {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
 
     private fun capture(name: String, activity: ComponentActivity) {
         if (System.getProperty("astravar.screenshots") == null) return
@@ -73,13 +72,13 @@ class NavigationV2Test {
                 app.repository.error.value?.let { error("Weapon repository could not open: $it") }
                 app.repository.state.value != null
             }
-            compose.onNodeWithText("Ability scores").assertExists()
+            compose.onNodeWithTag("navigation-Character").assertIsSelected()
             capture("v2-armor", activity.get())
             val before = app.repository.state.value!!
             assertFalse(before.onboarded)
             assertFalse(before.attuned)
-            compose.onNodeWithText("Campaign").performClick()
-            compose.onNodeWithText("Inventory").performClick()
+            compose.onNodeWithTag("navigation-Campaign").performClick()
+            compose.onNode(hasText("Inventory") and !hasTestTag("navigation-Inventory")).performClick()
             compose.onNodeWithText("Add Item").assertExists()
             capture("v2-inventory", activity.get())
             compose.onNodeWithText("‹ Campaign").performClick()
@@ -90,7 +89,8 @@ class NavigationV2Test {
             compose.onNodeWithText("Inventions").performClick()
             compose.onNodeWithText("Add Invention").assertExists()
             compose.onNodeWithText("‹ Campaign").performClick()
-            compose.onNodeWithText("Party").performClick()
+            compose.onNodeWithTag("navigation-More").performClick()
+            compose.onNodeWithText("Companions").performScrollTo().performClick()
             listOf("Zerg Hasma", "Eek", "Korr", "Veyrath").forEach { compose.onNodeWithText(it).assertExists() }
             capture("v2-party", activity.get())
             compose.onNodeWithText("Eek").performClick()
@@ -98,17 +98,24 @@ class NavigationV2Test {
             compose.onNodeWithText("Eek's specialized companion tools").performScrollTo().performClick()
             compose.onNodeWithText("Condition unknown").assertExists()
             compose.runOnIdle { captureNativeTestWindows("v2-eek", activity.get(), modal = true) }
-            compose.onNodeWithText("Close").performClick()
-            compose.onNodeWithText("Config").performClick()
+            compose.onAllNodesWithText("Close").onLast().performClick()
+            compose.onAllNodesWithText("Close").onLast().performClick()
+            compose.onNodeWithTag("navigation-More").performClick()
             compose.onNodeWithText("Campaign backup").performScrollTo().performClick()
             compose.onNodeWithText("Export campaign backup").assertExists()
-            compose.onNodeWithText("Close").performClick()
-            compose.onNodeWithText("Combat").performClick()
+            compose.onAllNodesWithText("Close").onLast().performClick()
+            compose.onNodeWithTag("navigation-Combat").performClick()
+            compose.onNodeWithTag("navigation-Combat").assertIsSelected()
+            compose.onNodeWithTag("navigation-More").performClick()
+            compose.onNodeWithText("Armor weapon").performScrollTo().performClick()
             compose.onNodeWithText("CONFIRM YOUR WEAPON PROFILE").assertExists()
-            compose.onNodeWithText("Campaign").performClick()
-            compose.onNodeWithText("Inventory").assertExists()
+            compose.onAllNodesWithText("Close").onLast().performClick()
+            compose.onNodeWithTag("navigation-Campaign").performClick()
+            compose.onAllNodesWithText("Inventory").onFirst().assertExists()
             compose.onNodeWithText("Checkpoints").assertExists()
-            compose.onNodeWithText("Party").performClick()
+            compose.onNodeWithTag("navigation-More").performClick()
+            compose.onNodeWithText("Companions").performScrollTo().performClick()
+            compose.onNodeWithText("Eek").performClick()
             compose.onNodeWithText("Eek's specialized companion tools").performScrollTo().assertExists()
             compose.runOnIdle { assertEquals(before, app.repository.state.value) }
             assertEquals(0, overlayStarts)
@@ -126,19 +133,19 @@ class NavigationV2Test {
     }
 
     @Test fun primaryNavigationExposesSelectedDestinationAndReportsEachUserSelection() {
-        var selected by mutableStateOf("Armor")
+        var selected by mutableStateOf("Character")
         val visited = mutableListOf<String>()
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent {
                 AstravarTheme { RebuildPrimaryNavigation(selected) { selected = it; visited += it } }
             }
-            compose.onNodeWithText("Armor").assertIsSelected()
-            listOf("Combat", "Party", "Campaign", "Config", "Armor").forEach { destination ->
+            compose.onNodeWithTag("navigation-Character").assertIsSelected()
+            listOf("Combat", "Inventory", "Campaign", "More", "Character").forEach { destination ->
                 compose.onNodeWithText(destination).performClick()
                 compose.onNodeWithText(destination).assertIsSelected()
             }
-            assertEquals(listOf("Combat", "Party", "Campaign", "Config", "Armor"), visited)
+            assertEquals(listOf("Combat", "Inventory", "Campaign", "More", "Character"), visited)
         } finally { activity.pause().stop().destroy() }
     }
 }

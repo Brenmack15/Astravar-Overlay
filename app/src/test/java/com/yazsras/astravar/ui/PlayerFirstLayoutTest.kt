@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.room.Room
@@ -28,7 +27,7 @@ import org.robolectric.annotation.LooperMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @LooperMode(LooperMode.Mode.PAUSED)
 class PlayerFirstLayoutTest {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
 
     @Test fun largeTextArmorAllowsScrollingToBothSystemCardsAndEditingAllSixAbilities() {
         val db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), CampaignLedgerDb::class.java).build()
@@ -52,12 +51,12 @@ class PlayerFirstLayoutTest {
         try {
             activity.get().setContent {
                 CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale = 2f)) {
-                    AstravarTheme { Column { RebuildPrimaryNavigation("Armor", selected::add) } }
+                    AstravarTheme { Column { RebuildPrimaryNavigation("Character", selected::add) } }
                 }
             }
-            for (name in listOf("Armor", "Combat", "Party", "Campaign", "Config"))
+            for (name in listOf("Character", "Combat", "Inventory", "Campaign", "More"))
                 compose.onNode(hasText(name) and hasClickAction()).assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
-            assertEquals(listOf("Armor", "Combat", "Party", "Campaign", "Config"), selected)
+            assertEquals(listOf("Character", "Combat", "Inventory", "Campaign", "More"), selected)
         } finally { activity.pause().stop().destroy() }
     }
 }

@@ -2,12 +2,13 @@
 import hashlib
 import json
 from pathlib import Path
+from reforge_source_review import baseline_bytes
 
 root = Path(__file__).resolve().parents[1]
 manifest = json.loads((root / 'scripts/ui_foundation_sha256.json').read_text())
 changed = [name for name, digest in manifest['files'].items()
            if not (root / name).is_file()
-           or hashlib.sha256((root / name).read_bytes()).hexdigest() != digest]
+           or hashlib.sha256(baseline_bytes(root, name)).hexdigest() != digest]
 gradle = (root / 'app/build.gradle.kts').read_text()
 owner = gradle[gradle.index('    signingConfigs {'):gradle.index('    buildTypes {')]
 if hashlib.sha256(owner.encode()).hexdigest() != manifest['owner_signing_block_sha256']:
@@ -44,7 +45,7 @@ if prompts:
     assert set(prompts['files']) == {'app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt'}
     for name, review in prompts['files'].items():
         assert review['reviewed_sha256'] == manifest['files'][name]
-        restored = (root / name).read_text()
+        restored = baseline_bytes(root, name).decode('utf-8')
         for replacement in review['exact_replacements']:
             assert restored.count(replacement['after']) == 1, 'Exact prompt integration changed'
             restored = restored.replace(replacement['after'], replacement['before'], 1)

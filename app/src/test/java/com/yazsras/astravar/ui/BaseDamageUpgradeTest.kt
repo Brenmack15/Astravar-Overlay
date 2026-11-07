@@ -8,7 +8,6 @@ import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import com.yazsras.astravar.rules.Profile
 import org.junit.Assert.*
 import org.junit.Rule
@@ -23,7 +22,7 @@ import org.robolectric.annotation.LooperMode
 @Config(sdk=[35],qualifiers="w400dp-h1000dp")
 @LooperMode(LooperMode.Mode.PAUSED)
 class BaseDamageUpgradeTest {
-    @get:Rule val compose=createEmptyComposeRule()
+    @get:Rule val compose=createAstravarComposeRule()
 
     @Test fun discreteSliderExposesAllTenValuesAndUpdatesEveryPreview() {
         val profile=mutableStateOf(Profile())

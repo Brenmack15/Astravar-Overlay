@@ -43,6 +43,7 @@ private fun lines(text: String) = text.lineSequence().map(String::trim).filter(S
     }
     Text("Character & creature sheet", style = MaterialTheme.typography.titleLarge,
         modifier = Modifier.semantics { heading() })
+    if (memberId != "local-player") ReforgeCompanionAttackReviewButton(repository, memberId)
     if (sheet.unresolvedConflicts.isNotEmpty()) PlayerCard {
         Text("Unresolved source conflicts", color = MaterialTheme.colorScheme.error,
             style = MaterialTheme.typography.titleMedium)
@@ -78,8 +79,8 @@ private fun lines(text: String) = text.lineSequence().map(String::trim).filter(S
                 Text(capability.name, style = MaterialTheme.typography.titleMedium)
                 Text("${capability.kind} · ${capability.evidenceStatus}", color = RebuildPalette.Ice,
                     style = MaterialTheme.typography.labelLarge)
-                Text(capability.detail)
-                if (capability.source.isNotBlank()) RecordValue("Source", capability.source)
+                ReforgeRichText(capability.detail)
+                if (capability.source.isNotBlank()) PlayerDisclosure("Source") { ReforgeRichText(capability.source) }
             }
         }
     }
@@ -95,7 +96,7 @@ private fun lines(text: String) = text.lineSequence().map(String::trim).filter(S
                 if (attack.criticalRule.isNotBlank()) RecordValue("Critical rule", attack.criticalRule)
                 if (attack.resourceCost.isNotBlank()) RecordValue("Resource cost", attack.resourceCost)
                 if (attack.multiattack.isNotBlank()) RecordValue("Multiattack / sequence", attack.multiattack)
-                if (attack.source.isNotBlank()) RecordValue("Source", attack.source)
+                if (attack.source.isNotBlank()) PlayerDisclosure("Source") { ReforgeRichText(attack.source) }
             }
         }
         Text("These sourced sheet entries do not automatically execute Astravar's weapon engine or spend a turn.",

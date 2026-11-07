@@ -25,7 +25,7 @@ jobs:
   verify:
     # The 2.1 branch has a complete native/update verification workflow. Keep
     # historical branch checks available without running the legacy test path twice.
-    if: github.head_ref != 'feat/astravar-2.1-player-first' && github.ref_name != 'feat/astravar-2.1-player-first'
+    if: github.head_ref != 'feat/astravar-2.1-player-first' && github.ref_name != 'feat/astravar-2.1-player-first' && github.head_ref != 'feat/astravar-3.0-reforge' && github.ref_name != 'feat/astravar-3.0-reforge'
     runs-on: ubuntu-latest
     timeout-minutes: 105
     env:

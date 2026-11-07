@@ -9,6 +9,7 @@ signing.properties
 .idea/
 *.iml
 captures/
+validation/
 *.apk
 *.aab
 

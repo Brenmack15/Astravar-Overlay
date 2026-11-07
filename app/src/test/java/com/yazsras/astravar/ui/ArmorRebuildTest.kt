@@ -5,7 +5,6 @@ import androidx.activity.compose.setContent
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.data.*
@@ -29,7 +28,7 @@ import org.robolectric.annotation.LooperMode
 @LooperMode(LooperMode.Mode.PAUSED)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ArmorRebuildTest {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     private var requestedSize: String? = null
 
     @Before fun prepareNativeDialogSizing() {
@@ -94,12 +93,13 @@ class ArmorRebuildTest {
                 compose.onAllNodes(hasContentDescription("Dexterity score 14", substring = true)).fetchSemanticsNodes().isNotEmpty()
             }
             compose.onNodeWithTag("ability-DEX").performScrollTo().performClick()
-            compose.onNodeWithText("Raw ability score (blank = unknown)").performTextClearance()
-            compose.onNodeWithText("Raw ability score (blank = unknown)").performTextInput("18")
+            compose.onNodeWithText("Ability score").performTextClearance()
+            compose.onNodeWithText("Ability score").performTextInput("18")
             compose.onNodeWithText("Close").performClick()
             compose.onNodeWithText("Discard changes?").assertExists()
             compose.onNodeWithText("Keep editing").performClick()
-            compose.onNodeWithText("Separate magical modifier").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("2")))
+            compose.onNodeWithText("Advanced · recorded modifiers & sources").performClick()
+            compose.onNodeWithText("Recorded modifier adjustment").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("2")))
             compose.onNodeWithText("Cancel").performClick()
             compose.onNodeWithText("Discard").performClick()
             runBlocking {

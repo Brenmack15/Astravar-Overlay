@@ -3,7 +3,6 @@ package com.yazsras.astravar.ui
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.data.*
@@ -25,7 +24,7 @@ import org.robolectric.annotation.LooperMode
 @LooperMode(LooperMode.Mode.PAUSED)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class CampaignPagesV2Test {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createAstravarComposeRule()
     private var oldRequestedSize: String? = null
     @Before fun useRequestedDialogSize() {
         oldRequestedSize = System.getProperty("robolectric.windowManager.useRequestedSize")
@@ -72,7 +71,8 @@ class CampaignPagesV2Test {
             compose.onNodeWithText("Invention name").assertDoesNotExist()
             compose.onNodeWithText("Add Invention").performClick()
             compose.onNodeWithText("Invention name").performScrollTo().performTextInput("Fictional test blueprint")
-            compose.onNodeWithText("Save invention").assertIsNotEnabled()
+            compose.onNodeWithText("Save invention").assertIsEnabled()
+            compose.onNodeWithText("Sources (optional)").performScrollTo().performClick()
             compose.onNodeWithText("Source / resolved scene / checkpoint").performScrollTo().performTextInput("Synthetic resolved design notes")
             compose.onNodeWithText("Save invention").performClick()
             compose.waitUntil(10_000) { runBlocking { db.recordsDao().allProjects().size == 1 } }
