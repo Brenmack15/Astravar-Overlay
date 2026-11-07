@@ -64,6 +64,9 @@ class CampaignRecoveryUiTest {
             mount()
             compose.waitForIdle()
             compose.onNodeWithText("Item name").performScrollTo().assertTextContains("Synthetic crash-retry lens")
+            if (compose.onAllNodesWithText("Source / checkpoint (optional)").fetchSemanticsNodes().isEmpty()) {
+                compose.onNodeWithText("Sources & advanced details").performScrollTo().performClick()
+            }
             compose.onNodeWithText("Source / checkpoint (optional)").performScrollTo().assertTextContains("Synthetic confirmed acquisition")
             compose.onNodeWithText("Save new item").assertIsEnabled().performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithText("Save new item").fetchSemanticsNodes().isEmpty() }

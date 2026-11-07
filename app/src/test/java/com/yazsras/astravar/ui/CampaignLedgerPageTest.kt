@@ -112,6 +112,9 @@ class CampaignLedgerPageTest {
             compose.onNodeWithText("Quantity").assert(
                 SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("3"))
             )
+            if (compose.onAllNodesWithText("Source / checkpoint (optional)").fetchSemanticsNodes().isEmpty()) {
+                compose.onNodeWithText("Sources & advanced details").performScrollTo().performClick()
+            }
             compose.onNodeWithText("Source / checkpoint (optional)").assert(
                 SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("Synthetic saved UI state"))
             )
