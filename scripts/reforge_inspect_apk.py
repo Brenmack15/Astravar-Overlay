@@ -14,10 +14,12 @@ def main():
     parser.add_argument("--sdk", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--owner-signed", action="store_true")
+    parser.add_argument("--version-code", type=int, default=43)
+    parser.add_argument("--version-name", default="3.0.0-rc2")
     args = parser.parse_args()
     package = "com.yazsras.astravar" if args.owner_signed else "com.yazsras.astravar.v2uidebug"
-    version = "3.0.0-rc1" if args.owner_signed else "3.0.0-rc1-ui-rebuild"
-    result = inspect(args.apk, args.sdk, package, version, 42, owner_signed=args.owner_signed)
+    version = args.version_name if args.owner_signed else args.version_name + "-ui-rebuild"
+    result = inspect(args.apk, args.sdk, package, version, args.version_code, owner_signed=args.owner_signed)
     manifest = subprocess.check_output([
         str(args.sdk / "build-tools/35.0.0/aapt"), "dump", "xmltree",
         str(args.apk), "AndroidManifest.xml"], text=True)

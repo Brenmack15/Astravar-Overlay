@@ -133,6 +133,7 @@ abstract class CampaignLedgerDb : RoomDatabase() {
     abstract fun partyDao(): PartyRecordsDao
     abstract fun archiveDao(): CampaignArchiveDao
     abstract fun promptDao(): ChatGptPromptDao
+    abstract fun characterDao(): CampaignCharacterDao
 
     companion object {
         fun open(context: Context): CampaignLedgerDb = Room.databaseBuilder(
@@ -143,6 +144,11 @@ abstract class CampaignLedgerDb : RoomDatabase() {
 }
 
 class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
+    /** Selection is scoped and transactional; complete backup limits never govern character reads. */
+    suspend fun readCharacterSnapshot(profileId: String): ReforgeLegacySnapshot {
+        checkId(profileId)
+        return db.characterDao().snapshot(profileId)
+    }
     private val dao = db.ledgerDao()
     val records = CampaignRecordsRepository(db)
     val party = PartyRecordsRepository(db)

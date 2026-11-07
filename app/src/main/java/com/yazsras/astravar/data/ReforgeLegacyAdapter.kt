@@ -11,27 +11,26 @@ import java.util.UUID
 @Serializable data class ReforgeLegacySnapshot(
     val profile: CharacterProfile, val abilities: List<CharacterAbility>, val sheet: PartySheetRecord?,
     val items: List<LedgerItem>, val placements: List<ItemPlacement>, val itemDetails: List<ItemDetails>,
-    val itemProperties: List<ItemProperty>
+    val itemProperties: List<ItemProperty>,
+    val links: List<CampaignLink> = emptyList(),
+    val externalReferences: List<ExternalRecordReference> = emptyList(),
+    val referenceMetadata: List<CampaignReferenceMetadata> = emptyList(),
+    val referenceRelations: List<CampaignReferenceRelation> = emptyList()
 )
 data class ReforgeAdoptionPreview(
     val character: ReforgeCharacter, val warnings: List<String>, val legacyFingerprint: String,
     val sourceJson: String, val sourceProfileRevision: Long
 )
 
-/** Read a consistent local snapshot through the existing export path; no remote mirror is consulted. */
+/** Read only this character's consistent SQLite snapshot; no complete export or remote mirror. */
 suspend fun ReforgeRepository.readLegacyPreview(legacy: CampaignLedgerRepository, profileId: String): ReforgeAdoptionPreview = withContext(Dispatchers.Default) {
     checkId(profileId)
-    val snapshot = campaignDecodeBackup(legacy.export())
-    val profile = snapshot.records.characterProfiles.firstOrNull { it.id == profileId }
-        ?: error("The original character is no longer available.")
-    val abilities = snapshot.records.characterAbilities.filter { it.profileId == profileId }.sortedBy { it.key }
-    val sheet = snapshot.records.partySheets.firstOrNull { it.profileId == profileId }
-    val placements = snapshot.records.placements.filter { it.holderProfileId == profileId }.sortedBy { it.itemId }
-    val itemIds = placements.map { it.itemId }.toSet()
-    val items = snapshot.items.filter { it.id in itemIds }.sortedBy { it.id }
-    val source = ReforgeLegacySnapshot(profile, abilities, sheet, items, placements,
-        snapshot.records.itemDetails.filter { it.itemId in itemIds }.sortedBy { it.itemId },
-        snapshot.records.itemProperties.filter { it.itemId in itemIds }.sortedBy { it.id })
+    val source = legacy.readCharacterSnapshot(profileId)
+    val profile = source.profile
+    val abilities = source.abilities
+    val sheet = source.sheet
+    val placements = source.placements
+    val items = source.items
     val sourceJson = reforgeJson.encodeToString(source)
     val warnings = buildList {
         add("This is a reviewed local copy. Original campaign records and their synchronization remain separate.")

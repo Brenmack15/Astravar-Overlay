@@ -41,6 +41,30 @@
           "after": "            }\n        }\n    }\n    override fun onConfigurationChanged(newConfig: Configuration) { super.onConfigurationChanged(newConfig) }\n    private fun removeWindow() { view?.let { try { wm.removeViewImmediate(it) } catch(_: RuntimeException) {} }; view=null }\n    override fun onDestroy() { removeWindow(); scope.cancel(); super.onDestroy() }\n}\n"
         }
       ]
+    },
+    "app/src/main/java/com/yazsras/astravar/data/CampaignArchive.kt": {
+      "previous_pinned_sha256": "aa977e9b193e4985cf842ca75160ec7004529d9bc293258be87e02337a8dc0df",
+      "reviewed_sha256": "e4ed83ed5c932e3e5bacd9a79508de133c3a86469498aaaaaeeb25fd2fdd280c",
+      "exact_replacements": [
+        {
+          "before": "data class CampaignReferenceMetadata(",
+          "after": "@Serializable data class CampaignReferenceMetadata("
+        }
+      ]
+    },
+    "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": {
+      "previous_pinned_sha256": "4508292bc1910e269340be58d0fcb83cef3a3dd32af02fc6464424fd433e0fa2",
+      "reviewed_sha256": "398c9a2062ee6a349150b021d083ec1e9c59cdfc20c736db9ef5a375132b7db6",
+      "exact_replacements": [
+        {
+          "before": "    abstract fun promptDao(): ChatGptPromptDao\n",
+          "after": "    abstract fun promptDao(): ChatGptPromptDao\n    abstract fun characterDao(): CampaignCharacterDao\n"
+        },
+        {
+          "before": "class CampaignLedgerRepository(private val db: CampaignLedgerDb) {\n",
+          "after": "class CampaignLedgerRepository(private val db: CampaignLedgerDb) {\n    /** Selection is scoped and transactional; complete backup limits never govern character reads. */\n    suspend fun readCharacterSnapshot(profileId: String): ReforgeLegacySnapshot {\n        checkId(profileId)\n        return db.characterDao().snapshot(profileId)\n    }\n"
+        }
+      ]
     }
   }
 }

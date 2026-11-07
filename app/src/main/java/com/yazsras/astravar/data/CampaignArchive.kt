@@ -64,7 +64,7 @@ data class CampaignArchivePreview(
 data class CampaignArchiveVerification(val valid: Boolean, val summary: String, val errors: List<String>)
 
 /** Cursor projections deliberately exclude potentially multi-megabyte TEXT columns. */
-data class CampaignReferenceMetadata(
+@Serializable data class CampaignReferenceMetadata(
     val id: String, val campaignId: String, val externalId: String, val title: String, val category: String,
     val sourceUrl: String, val sourceRevision: String, val contentSha256: String, val packageHash: String,
     val bodyBytes: Long, val propertiesBytes: Long
