@@ -2,18 +2,14 @@ package com.yazsras.astravar.overlay
 
 import android.app.*
 import android.content.*
-import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
-import android.hardware.display.DisplayManager
 import android.os.*
 import android.provider.Settings
 import android.view.*
 import android.widget.*
-import androidx.core.app.NotificationCompat
-import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.res.ResourcesCompat
 import androidx.core.widget.doAfterTextChanged
@@ -62,67 +58,19 @@ class OverlayService: Service() {
     private var targetResults=listOf<TargetSave>()
     private var portrait=true
     private var imeBottom=0
-    private var registered=false
-    private val watcher=Handler(Looper.getMainLooper())
-    private val permissionCheck=object: Runnable {
-        override fun run() {
-            if(!Settings.canDrawOverlays(this@OverlayService)) { stopSelf(); return }
-            if(getSystemService(KeyguardManager::class.java).isKeyguardLocked) { hidden=true; removeWindow() }
-            watcher.postDelayed(this,1200)
-        }
-    }
-    private val lockReceiver=object: BroadcastReceiver() {
-        override fun onReceive(c: Context?,i: Intent?) { if(i?.action==Intent.ACTION_SCREEN_OFF) { hidden=true; removeWindow(); updateNotification() } }
-    }
     override fun onBind(intent: Intent?): IBinder?=null
+    // Retired in Reforge. The manifest has no service or overlay permissions.
+    // Keep the legacy view builder below only for historical native captures;
+    // even a direct lifecycle invocation must not start windows, polling,
+    // receivers, notification channels or a foreground service.
     override fun onCreate() {
         super.onCreate()
-        uiContext=if(Build.VERSION.SDK_INT>=30) {
-            val display=getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY)
-            createDisplayContext(display).createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,null)
-        } else this
-        wm=uiContext.getSystemService(WindowManager::class.java)
-        portrait=resources.configuration.orientation!=Configuration.ORIENTATION_LANDSCAPE
-        getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel("session","Astravar play session",NotificationManager.IMPORTANCE_LOW))
-        ContextCompat.registerReceiver(this,lockReceiver,IntentFilter(Intent.ACTION_SCREEN_OFF),ContextCompat.RECEIVER_NOT_EXPORTED); registered=true
-        scope.launch { app.preferences.flow.collect { prefs=it;if(!editingTarget) {distance=it.distance;targetPoint=it.targetPoint;directImpact=it.directImpact;immediateId=it.immediateId;manualSlot=it.manualSlot};elements=it.elements;selected=it.selectedPayloads.filter {id->state?.installed?.payloads?.any {p->p.id==id}==true}.toSet();if(!preferencesLoaded) {params=null;preferencesLoaded=true};if(!hidden) render() } }
-        scope.launch { app.repository.state.filterNotNull().collect { state=it; selected=prefs.selectedPayloads.filter { id -> it.installed?.payloads?.any { p->p.id==id }==true }.toSet(); if(!hidden) render() } }
-        // Only the visible play session polls. Hidden/screen-off delivery uses push and OS work.
-        // A successful network poll alone never becomes a claimed committed gameplay save.
-        scope.launch(Dispatchers.IO) {
-            val campaign = CampaignConnectionClient(applicationContext)
-            try {
-                while (isActive) {
-                    try { if (!CampaignSyncPreferences(applicationContext).paused && !hidden &&
-                        !getSystemService(KeyguardManager::class.java).isKeyguardLocked) campaign.foreground() }
-                    catch (e: CancellationException) { throw e }
-                    catch (_: Exception) { /* Durable inbox/outbox and verified status survive network interruption. */ }
-                    delay(5_000)
-                }
-            } finally { campaign.close() }
-        }
-        watcher.post(permissionCheck)
+        stopSelf()
     }
     override fun onStartCommand(intent: Intent?,flags: Int,startId: Int): Int {
-        if(intent?.action=="STOP") { stopSelf(); return START_NOT_STICKY }
-        if(!Settings.canDrawOverlays(this)) { stopSelf(); return START_NOT_STICKY }
-        if(getSystemService(KeyguardManager::class.java).isKeyguardLocked) { stopSelf(); return START_NOT_STICKY }
-        hidden=false
-        try {
-            ServiceCompat.startForeground(this,7,notification(),if(Build.VERSION.SDK_INT>=34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
-            render()
-        } catch(e: RuntimeException) { stopSelf() }
+        stopSelf()
         return START_NOT_STICKY
     }
-    private fun notification(): Notification {
-        fun pi(action: String,request: Int)=PendingIntent.getService(this,request,Intent(this,OverlayService::class.java).setAction(action),PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val open=PendingIntent.getActivity(this,0,Intent(this,MainActivity::class.java),PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        return NotificationCompat.Builder(this,"session").setSmallIcon(R.drawable.ic_crystal).setContentTitle("Astravar session ${if(hidden) "hidden" else "active"}")
-            .setContentText("Astravar combat controls · ${if(hidden) "tap Show to resume" else "crystal controls float above ordinary apps"}")
-            .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
-            .addAction(0,"Show",pi("SHOW",1)).addAction(0,"Stop",pi("STOP",2)).build()
-    }
-    private fun updateNotification() { getSystemService(NotificationManager::class.java).notify(7,notification()) }
     private fun dp(v: Int)=(v*resources.displayMetrics.density*prefs.scale).toInt()
     private val displayTypeface by lazy { ResourcesCompat.getFont(uiContext,R.font.cinzel) ?: Typeface.create("serif",Typeface.NORMAL) }
     private val bodyTypeface by lazy { ResourcesCompat.getFont(uiContext,R.font.inter) ?: Typeface.create("sans-serif",Typeface.NORMAL) }
@@ -261,7 +209,7 @@ class OverlayService: Service() {
         if(busy) return; busy=true
         scope.launch { try { block(); status=label } catch(e: Exception) { status=e.message ?: "Operation failed" } finally { busy=false; preview=null; render() } }
     }
-    private fun mainApp() { hidden=true; removeWindow(); updateNotification(); startActivity(Intent(this,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)) }
+    private fun mainApp() { hidden=true; removeWindow(); startActivity(Intent(this,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)) }
     private fun saveElements(values: List<DamageType>) {elements=values;scope.launch {app.preferences.elements(values)};render()}
     // User scaling may shrink the artwork/frame, but never the real drag/tap
     // target. Measuring the actual header also respects large Android fonts.
@@ -454,7 +402,7 @@ class OverlayService: Service() {
                 if(prefs.manualOverrides) content.addView(button("Manual roll override") {try {val p=makePlan(s);run("External dice pending") {app.repository.commit(p,"overlay");resultId=p.id;panelPage="result"}} catch(e:Exception) {status=e.message ?: "Check shot";render()}})
                 if(pending?.rolled!=null) content.addView(button("Last roll · ${pending.rolled?.attackTotal ?: "blast"}") {resultId=pending.plan.id;panelPage="result";render()})
                 content.addView(button("Open full app") {mainApp()})
-                content.addView(button("Hide · use notification to return") {hidden=true;removeWindow();updateNotification()})
+                content.addView(button("Hide · use notification to return") {hidden=true;removeWindow()})
                 content.addView(button("Stop session") {stopSelf()})
                 content.addView(button("Back") {panelPage="combat";render()})
             }
@@ -547,7 +495,7 @@ class OverlayService: Service() {
             }
         }
     }
-    override fun onConfigurationChanged(newConfig: Configuration) { super.onConfigurationChanged(newConfig); portrait=newConfig.orientation!=Configuration.ORIENTATION_LANDSCAPE; params=null; imeBottom=0; render() }
+    override fun onConfigurationChanged(newConfig: Configuration) { super.onConfigurationChanged(newConfig) }
     private fun removeWindow() { view?.let { try { wm.removeViewImmediate(it) } catch(_: RuntimeException) {} }; view=null }
-    override fun onDestroy() { watcher.removeCallbacksAndMessages(null); if(registered) unregisterReceiver(lockReceiver); removeWindow(); scope.cancel(); stopForeground(STOP_FOREGROUND_REMOVE); super.onDestroy() }
+    override fun onDestroy() { removeWindow(); scope.cancel(); super.onDestroy() }
 }
