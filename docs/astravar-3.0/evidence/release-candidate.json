@@ -1,0 +1,203 @@
+{
+  "candidate": {
+    "package": "com.yazsras.astravar",
+    "version_name": "3.0.0-rc1",
+    "version_code": 42,
+    "debuggable": false,
+    "apk_bytes": 12631215,
+    "apk_sha256": "d46907c39f729145d3b1169090812b054296180cdb47802eef7a0f811746679a",
+    "certificate_sha256": "4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847",
+    "source_commit": "30f0b9dda4e558246ecc481a4a97b23acf898cf0",
+    "build_test_input_sha256": "8b2727f33b809e4b26eb9e945a3a45ce91d39f589c4c9e14dbf4e6a115330945",
+    "artwork_and_16kb_alignment_verified": true
+  },
+  "verification_source": {
+    "commit": "4732d87ebd066fd284f860a505bf62fdcb73ebbc",
+    "test_input_sha256": "67c785a6bb64a62556ca68d47475af582a83723f4af9efc19d17c5692cfaf920",
+    "input_files": 308,
+    "runtime_input_sha256": "79358ce8b963563997d775c27078da76c8bdabe7bb9539aa1fff9a5a718d96da",
+    "runtime_input_files": 198,
+    "runtime_inputs_identical_to_signed_apk_source": true,
+    "post_build_changes": "UI test readiness and queued frame scheduling only"
+  },
+  "executed_local": {
+    "rules_passed": 163,
+    "python_passed": 147,
+    "backend_protocol_passed": 134,
+    "selected_native_before_scheduler_change": {
+      "debug_passed": 56,
+      "release_passed": 56,
+      "failures": 0,
+      "skipped": 0
+    },
+    "final_readiness": {
+      "debug_passed": 4,
+      "release_passed": 4,
+      "failures": 0,
+      "skipped": 0
+    },
+    "queued_scheduler_pilot": {
+      "debug_passed": 12,
+      "release_passed": 12,
+      "failures": 0,
+      "skipped": 0
+    },
+    "broader_queued_scheduler": {
+      "ui_suites": 39,
+      "ui_cases": 162,
+      "additional_data_suites": 1,
+      "additional_data_cases": 29,
+      "debug": {
+        "cases": 191,
+        "passed": 191,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "release": {
+        "cases": 191,
+        "passed": 189,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 2
+      }
+    },
+    "lint": {
+      "debug": {
+        "errors": 0,
+        "warnings": 63,
+        "hints": 1
+      },
+      "release": {
+        "errors": 0,
+        "warnings": 65,
+        "hints": 1
+      }
+    }
+  },
+  "complete_ci": {
+    "run_id": 42414763933,
+    "source_commit": "4732d87ebd066fd284f860a505bf62fdcb73ebbc",
+    "status": "completed",
+    "conclusion": "success",
+    "url": "https://github.com/Brenmack15/Astravar-Overlay/actions/runs/42414763933",
+    "job_id": 128530335458,
+    "completed_at": "2026-11-07T21:49:29Z",
+    "artifact_id": 13591809354,
+    "artifact_sha256": "8d9994865acf049883509c81c99f7fbbb409891d070f9b90bf1138d23305cda8",
+    "rules": {
+      "cases": 163,
+      "passed": 163,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "debug": {
+      "cases": 583,
+      "passed": 580,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 3,
+      "junit_seconds": 610.848
+    },
+    "release": {
+      "cases": 583,
+      "passed": 566,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 17,
+      "junit_seconds": 608.467
+    },
+    "gradle_wall": "36m 5s",
+    "gradle_tasks_executed": 105,
+    "lint": {
+      "debug": {
+        "errors": 0,
+        "warnings": 77,
+        "hints": 1
+      },
+      "release": {
+        "errors": 0,
+        "warnings": 79,
+        "hints": 1
+      }
+    },
+    "qa_apk": {
+      "package": "com.yazsras.astravar.v2uidebug",
+      "bytes": 29827110,
+      "sha256": "a86602a421b8e2a83605806f44deb0cbac5543052a18dcabd37006c5454b4825",
+      "owner_signed": false
+    }
+  },
+  "actual_isolated_upgrade": {
+    "environment": "AOSP35 software emulator; fictional fixtures",
+    "from_version_code": 41,
+    "to_version_code": 42,
+    "install_r_succeeded": true,
+    "unchanged_uid": 10148,
+    "original_databases": 4,
+    "original_tables": 50,
+    "original_rows": 22,
+    "all_original_schema_and_table_hashes_unchanged": true,
+    "existing_settings_files_byte_identical": 3,
+    "expected_profileinstaller_bookkeeping_files_changed": 2,
+    "uninstall_clear_or_wipe": false
+  },
+  "actual_installed_offline": {
+    "default_network": "none",
+    "airplane_enabled": true,
+    "wifi_disabled": true,
+    "unknown_and_zero_preserved": true,
+    "adopted_actor_roll": {
+      "face": 14,
+      "modifier": 5,
+      "total": 19,
+      "manual": false,
+      "exact_receipt_and_cold_restart": true
+    },
+    "equipment_fixture": {
+      "permanent": [
+        8,
+        15,
+        14,
+        21,
+        11,
+        12
+      ],
+      "level": 9,
+      "baseline_hp": 66,
+      "baseline_current_hp": 40,
+      "equipped": {
+        "strength": 21,
+        "constitution": 16,
+        "intelligence": 21,
+        "armor_class": 20,
+        "maximum_hp": 75,
+        "current_hp": 49
+      },
+      "damage_preserved": 26,
+      "unequip_reversed_and_reequip_did_not_duplicate": true,
+      "cold_restart_preserved": true,
+      "derived_strength_roll": {
+        "face": 19,
+        "modifier": 5,
+        "total": 24,
+        "manual": false,
+        "exact_receipt_and_cold_restart": true
+      },
+      "game_seconds": 0,
+      "turn_number": 0
+    }
+  },
+  "boundaries": {
+    "full_beyond_replacement_complete": false,
+    "new_workspace": "local-only; existing authenticated campaign sync remains separate",
+    "canonical_inventory_unified": false,
+    "production_backend_cutover": false,
+    "protected_branch_merge": false,
+    "production_release_published": false,
+    "physical_phone_installation": false,
+    "real_campaign_records_modified": false
+  },
+  "evidence": "README.md and native-captures.json in this directory; complete private generated proof/mapping bundle accompanies candidate"
+}

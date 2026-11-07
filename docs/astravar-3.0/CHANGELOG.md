@@ -11,6 +11,7 @@ Source candidate: 3.0.0-rc1/code42, built on the unmerged 2.4.0/code41 branch. R
 - Added guarded spell preparation/casting previews, concentration, slot tracking, conditions, incoming damage, recovery resources and actual-rest confirmation.
 - Added identity/background/features/feats/tool/language records, player-confirmed advancement, safe local portraits and autosaved notes with durable conflict-reviewed recovery drafts.
 - Added reviewed conversion of eligible confirmed companion attacks, keeping independent companion identity and statistics. Complex source costs, custom critical rules and multiattack remain explicit manual setup.
+- Preserved training, effect and condition drafts across recreation with bounded recovery, and retained independent companion attack bonuses plus critical/magical damage flags during editing.
 
 ## Product and information design
 
@@ -26,11 +27,16 @@ Source candidate: 3.0.0-rc1/code42, built on the unmerged 2.4.0/code41 branch. R
 
 - Added an isolated versioned Room store for typed local mechanics, immutable revisioned changes, exact roll outcomes and recovery drafts. Original campaign and weapon schemas/stores remain preserved.
 - Added atomic roll/resource outcomes, idempotent command retries, stale-edit rejection, full local workspace backup and guarded merge-only restore.
-- Retired the overlay service declaration, display-over-apps permission, special-use foreground permission, launch controls and permission requests. Historical source/preferences remain for recovery; the overlay no longer runs in normal product use.
+- Retired the overlay service declaration, display-over-apps permission, special-use foreground permission, launch controls and permission requests. Removed its foreground startup, polling, notification channels, permission watcher and screen receiver; direct lifecycle invocation now stops immediately. Historical view-rendering source/preferences remain for recovery and regression evidence.
 - Preserved the authenticated Cloudflare connection and anonymous fictional sandbox boundaries. New workspace records are explicitly local-only, with no silent production cutover.
+
+## Verification infrastructure
+
+- Fixed bounded UI-readiness waits without weakening backup, recovery or conflict assertions.
+- Routed test composition through a queued dispatcher supported by the pinned Compose version, preventing Room callbacks from applying test frames on IO threads. The application, database executors and dependency versions are unchanged by this harness fix.
 
 ## Evidence and limits
 
-Actual D&D Beyond interface research, a functional parity matrix, 32 product findings, data audit, versioned engine design, migration notes and verification evidence live in this directory. Numerical tests are synthetic fixtures rather than imports of live campaign state.
+Actual D&D Beyond interface research, a functional parity matrix, 35 product and engineering findings, data audit, versioned engine design, migration notes and verification evidence live in this directory. Numerical tests are synthetic fixtures rather than imports of live campaign state.
 
 A full commercial compendium, complete class/multiclass catalog, automatic interpretation of arbitrary prose, complete companion form policies and an authenticated sync adapter for new mechanics are not implied by this candidate. See `gameplay.md`, `verification.md`, `release.md` and the exact continuation checkpoint.

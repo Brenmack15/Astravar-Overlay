@@ -75,7 +75,11 @@ Measured physical-device accessibility, TalkBack navigation, real Galaxy insets,
 | Raw Notion mention tags occupy reading area | Human link label rendered natively |
 | Long NPC note hides actionable unfinished matters | Open threads have a separate section |
 
-Build screenshots use fictional fixtures and are distinct from the owner's supplied before-images. They are evidence of native rendering, not physical-device installation.
+The [native evidence gallery](evidence/README.md) links actual before/after
+captures and the new character, equipment-preview and dice views, with exact
+PNG hashes. Build screenshots use fictional fixtures and are distinct from the
+owner's supplied before-images. They are evidence of native rendering, not
+physical-device installation.
 
 ## Reviewed companion actions
 

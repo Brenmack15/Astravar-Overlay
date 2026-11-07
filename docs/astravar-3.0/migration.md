@@ -61,9 +61,9 @@ More → Character backup exposes the native backup workflow through Android Sto
 
 ## Rollback and release boundary
 
-Returning to an older APK leaves the new separate database unused; no existing schema was upgraded by Reforge. The new database is retained in the permanent app sandbox. Android still requires the same package and original owner signing certificate plus increasing versionCode for an in-place update. This storage design does not prove an installed update, a usable owner signing key or physical device preservation.
+No existing schema was upgraded by Reforge; the new database remains separate in the permanent app sandbox. If a source rollback becomes necessary, prepare and test a suitable higher-versionCode build with the same package and original owner signature. Ordinary Android updates do not permit a lower-versionCode APK. A rollback build must preserve the new store even if it no longer uses it; this storage design alone does not establish rollback safety.
 
-Never uninstall, clear data or replace the signing identity to test compatibility. An emulator acceptance must populate a previous build, install the newer build with the same disposable test signer and compare independently read database records before claiming in-place preservation. Owner installation and authoritative backend cutover remain separate approval gates.
+Never downgrade, uninstall, clear data or replace the signing identity to bypass compatibility checks. The actual isolated acceptance installed the original-owner code 42 APK over the actual original-owner code 41 APK, then independently compared every original table and existing setting. See [release.md](release.md) for this executed proof and its limits. Physical owner installation and authoritative backend cutover remain separate approval gates.
 
 ## Verification scope
 

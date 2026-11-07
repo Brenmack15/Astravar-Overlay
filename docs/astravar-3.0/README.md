@@ -18,7 +18,7 @@ Reforge is a major native Android change. It preserves the permanent release pac
 
 ## Acceptance and authority
 
-The target is one full ordinary session with native checks, saves, attacks, damage, equipment-derived statistics, spells/resources, companion management and readable campaign records. Code alone does not establish this outcome. Tests A–L from the owner directive are tracked in verification; features requiring account access, unavailable signing material or physical hardware stay explicitly unverified.
+The target is one full ordinary session with native checks, saves, attacks, damage, equipment-derived statistics, spells/resources, companion management and readable campaign records. Code alone does not establish this outcome. Tests A–L from the owner directive are tracked in verification. The original signing identity and predecessor APK are verified; final candidate packaging and upgrade gates have their own evidence. Owner-only account workflows and physical hardware remain unverified where access is unavailable.
 
 The new rules workspace requires a reviewed adoption of existing records. It is local-only and does not silently replace Android's existing authoritative campaign records or connect new mechanics to a production service. Existing campaign/weapon saves and the new workspace must be backed up through their respective export paths. A production canonical cutover, protected-branch merge, release publication and phone installation remain separate owner decisions.
 

@@ -1,4 +1,38 @@
-# Astravar 2.4.0 development candidate
+# Astravar 3.0 — Project Reforge
+
+Native Android character management by Yazsras Studios. The current development
+branch is `feat/astravar-3.0-reforge`, based on the preserved 2.4.0/code41 branch.
+The built Reforge candidate is `3.0.0-rc1`/code42 with the permanent package
+`com.yazsras.astravar` and the original owner-signing identity.
+
+The launcher opens Character, with Combat, Inventory, Campaign and More as the
+primary destinations. A pure typed rules engine calculates equipment effects,
+checks, saves, attacks, defenses and resources. Native dice preserve their exact
+faces and explanations. Campaign/NPC content uses safe native rich text, and the
+overlay service and permissions are retired from the runtime manifest.
+
+The new mechanics workspace is **local-only** and requires reviewed source
+adoption and structured reconciliation. Existing campaign stores, specialized
+armor tools, inventory history and authenticated connection remain available.
+They are not silently replaced or bidirectionally synchronized with the new
+workspace. This candidate does not claim complete D&D Beyond parity.
+
+Start with the [Reforge documentation](docs/astravar-3.0/README.md),
+[executed verification](docs/astravar-3.0/verification.md),
+[release readiness](docs/astravar-3.0/release.md), and
+[remaining milestones](docs/astravar-3.0/known-limitations.md).
+The original signer and actual owner code41 predecessor have been independently
+verified; final candidate assembly and upgrade evidence are recorded in those
+reports. No protected merge, production cutover or physical-phone installation
+is performed by this source branch.
+
+## Historical 2.x implementation notes
+
+The material below documents inherited branches and their original behavior.
+Version numbers, navigation, overlay references and manual-statistic limitations
+in this historical section are not descriptions of the Reforge runtime.
+
+### Astravar 2.4.0 development candidate
 
 `feat/astravar-dynamic-prompts` adds persistent **ChatGPT Prompts** management under Config: create, read, edit, confirmed delete, search/category filtering and reusable variables. All eleven original handoffs migrate once with their stable identities and wording preserved; edits and deletions persist across restarts. Room 5→6 adds only prompt settings tables. The permanent owner update is 2.4.0/code41 and retains `com.yazsras.astravar` and its original signing identity. See [architecture, migration and prompt management](docs/DYNAMIC_CHATGPT_PROMPTS.md).
 
