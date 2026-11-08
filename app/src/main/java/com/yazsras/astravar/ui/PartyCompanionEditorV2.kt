@@ -19,7 +19,7 @@ import java.util.UUID
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PartyCompanionEditorV2(repository: CampaignLedgerRepository, memberId: String, memberName: String) {
-    require(memberId in setOf("eek", "korr", "veyrath")) { "Only separately reviewed party IDs belong in this editor" }
+    require(memberId != "local-player") { "The player has a separate character editor" }
     val records = repository.records
     val allStates by records.companionStates.collectAsState(initial = emptyList())
     val allResources by records.companionResources.collectAsState(initial = emptyList())

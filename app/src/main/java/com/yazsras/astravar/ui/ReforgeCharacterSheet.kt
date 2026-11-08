@@ -26,13 +26,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yazsras.astravar.data.*
+import com.yazsras.astravar.R
 import com.yazsras.astravar.rules.reforge.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
+
+/** Decorative only; text is native, readable, selectable and responsive to font scaling. */
+@Composable private fun AstravarHeroBanner(title: String, subtitle: String) =
+    PlayerArtBanner("THE ADVENTURER", title, subtitle, R.drawable.astravar_atlas_banner)
 
 /** A local-first playable sheet. Legacy campaign adoption is reviewed and never changes its source. */
-@Composable fun ReforgeCharacterSheet(repository: CampaignLedgerRepository, localRepository: ReforgeRepository? = null, initialSection: String = "Sheet") {
+@OptIn(ExperimentalLayoutApi::class)
+@Composable fun ReforgeCharacterSheet(repository: CampaignLedgerRepository, localRepository: ReforgeRepository? = null,
+    initialSection: String = "Sheet", sectionOnly: Boolean = false) {
     val context = LocalContext.current.applicationContext
     val preferences = remember(context) { Preferences(context) }
     val preferencesState by preferences.flow.collectAsState(initial = OverlayPrefs())
@@ -42,8 +50,13 @@ import kotlinx.coroutines.flow.map
     val actorPreferences = remember(context) { ReforgePreferences.open(context) }
     val actorSelection by remember(actorPreferences) { actorPreferences.activeProfileId.map { true to it } }.collectAsState(initial = false to null)
     val legacyProfiles by repository.records.characterProfiles.collectAsState(initial = emptyList())
+    val campaignItems by repository.items.collectAsState(initial = emptyList())
     var selectedId by remember { mutableStateOf<String?>(null) }
     var section by rememberSaveable(initialSection) { mutableStateOf(initialSection) }
+    var extraSections by rememberSaveable { mutableStateOf(false) }
+    var importQuery by rememberSaveable { mutableStateOf("") }
+    var importId by rememberSaveable { mutableStateOf<String?>(null) }
+    var importRevision by rememberSaveable { mutableStateOf<Long?>(null) }
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
     var inspecting by rememberSaveable { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf("") }
@@ -104,11 +117,8 @@ import kotlinx.coroutines.flow.map
         if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.labelMedium, color = RebuildPalette.Ice, modifier = Modifier.testTag("reforge-save-status"))
         if (character == null || projection == null) {
             PlayerHeading("Your character")
-            PlayerCard {
-                Text("A sheet that follows your equipment", style = MaterialTheme.typography.headlineSmall)
-                Text("Roll from your statistics, inspect every bonus, and track your session offline. Start with a character or review a copy of your saved campaign profile.", color = RebuildPalette.Muted)
-                PlayerButton(onClick = { dialog = "Create" }) { Text("Create character") }
-            }
+            AstravarHeroBanner("Make your legend", "Your character, equipment and story. In one place.")
+            PlayerButton(onClick = { dialog = "Create" }) { Text("Create character") }
             if (legacyProfiles.isNotEmpty()) {
                 Text("Saved campaign profiles", style = MaterialTheme.typography.titleMedium)
                 legacyProfiles.forEach { profile -> PlayerEntry(profile.name.ifBlank { "Unnamed character" },
@@ -118,27 +128,43 @@ import kotlinx.coroutines.flow.map
             }
             Text("Character sheets in Reforge are saved on this device. Existing campaign synchronization continues separately; these sheets are not synchronized yet.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
         } else {
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(character.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-                Text("Level ${character.level} · Proficiency +${projection.proficiencyBonus}", color = RebuildPalette.Ice)
-                Text(saved!!.saveState, color = RebuildPalette.Muted, style = MaterialTheme.typography.labelSmall)
-                if (saved.origin.sourceProfileId != null) {
-                    Text("Source copy · rolls use only configured training and effects. Review Training, attacks, spells, resources and movement before play.",
-                        color = RebuildPalette.GoldBright, style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.testTag("reforge-setup-review"))
+            if (sectionOnly) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${character.name}'s gear", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
+                    PlayerTextButton(onClick = { dialog = "Characters" }) { Text("Switch") }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Equipped items affect this character's calculations. Original campaign items are in the other inventory tab.",
+                    color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+            } else {
+                AstravarHeroBanner(character.name, "Level ${character.level} · Proficiency +${projection.proficiencyBonus}")
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     PlayerOutlinedButton(onClick = { dialog = "Characters" }) { Text("Switch character") }
                     PlayerTextButton(onClick = { dialog = "Setup" }) { Text("Character setup") }
                 }
+                if (saved!!.origin.sourceProfileId != null) PlayerDisclosure("Imported sheet · review before play") {
+                    Text("Training, attacks, spells, resources, and movement need your review before relying on calculated values.",
+                        color = RebuildPalette.GoldBright, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.testTag("reforge-setup-review"))
+                    Text(saved.saveState, color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                }
             }
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("Sheet", "Combat", "Equipment", "Spells", "Resources", "History").forEach { name ->
-                    FilterChip(selected = name == section, onClick = { section = name }, label = { Text(name) }, modifier = Modifier.heightIn(min = 48.dp))
+            if (!sectionOnly) {
+                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Sheet", "Combat", "Equipment", "Spells").forEach { name ->
+                        PlayerFilterChip(selected = name == section, onClick = { section = name }, label = { Text(name) })
+                    }
+                    Box {
+                        PlayerFilterChip(selected = section in setOf("Resources", "History"), onClick = { extraSections = true }, label = { Text(if (section in setOf("Resources", "History")) section else "More") })
+                        DropdownMenu(expanded = extraSections, onDismissRequest = { extraSections = false }) {
+                            listOf("Resources", "History").forEach { name ->
+                                DropdownMenuItem(text = { Text(name) }, onClick = { section = name; extraSections = false })
+                            }
+                        }
+                    }
                 }
             }
             val summaryLabels = listOf("HP", "Armor Class", "Initiative")
-            summaryLabels.chunked(if (expandedText) 1 else 3).forEach { row ->
+            (if (sectionOnly) emptyList() else summaryLabels).chunked(if (expandedText) 1 else 3).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     row.forEach { label ->
                         val value = when (label) {
@@ -167,13 +193,13 @@ import kotlinx.coroutines.flow.map
                         PlayerButton(onClick = { rollRequest = ReforgeRollRequest("Custom roll", null, characterRevision = saved!!.revision) }, modifier = Modifier.weight(1f)) { Text("Roll dice") }
                         PlayerOutlinedButton(onClick = { dialog = "Training" }, modifier = Modifier.weight(1f)) { Text("Training") }
                     }
-                    PlayerDisclosure("Saving throws", initiallyOpen = true) {
+                    PlayerDisclosure("Saving throws") {
                         Stat.entries.chunked(if (expandedText) 1 else 2).forEach { row -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { row.forEach { stat ->
                             PlayerOutlinedButton(onClick = { projection.saves[stat]?.value?.let { requestRoll("${stat.name} save", it, RollKind.SAVE, stat.name) } },
                                 enabled = projection.saves[stat]?.value != null, modifier = Modifier.weight(1f)) { Text("${stat.name} ${reforgeSigned(projection.saves[stat]?.value)}") }
                         } } }
                     }
-                    PlayerDisclosure("Skills", initiallyOpen = true) {
+                    PlayerDisclosure("Skills") {
                         reforgeSkills.forEach { (name, stat) ->
                             val value = projection.skills[name]?.value ?: projection.abilities[stat]?.modifier
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -241,6 +267,9 @@ import kotlinx.coroutines.flow.map
                 }
                 "Equipment" -> {
                     Row(verticalAlignment = Alignment.CenterVertically) { Text("Equipment", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge); PlayerTextButton(onClick = { dialog = "Item" }) { Text("Add item") } }
+                    PlayerOutlinedButton(onClick = { importId = null; importQuery = ""; dialog = "ImportItem" }) {
+                        Text("Add from campaign inventory")
+                    }
                     Text("Attuned · ${character.items.filter { it.attuned }.sumOf { instance -> character.itemDefinitions.firstOrNull { it.id == instance.definitionId }?.attunementCost ?: 0 }} / ${character.attunementLimit}", color = RebuildPalette.Ice)
                     if (character.items.isEmpty()) PlayerEmpty("Add your equipment", "Items carried over from your source retain their identity and description. Mechanical effects activate only after structured review.")
                     character.items.forEach { item -> val definition = character.itemDefinitions.firstOrNull { it.id == item.definitionId }
@@ -361,6 +390,56 @@ import kotlinx.coroutines.flow.map
             "Setup" -> ReforgeCharacterEditor(character, { dialog = null }) { change("Edit character setup", it) }
             "Training" -> ReforgeTrainingEditor(character, { dialog = null }) { change("Edit training", it) }
             "Item" -> ReforgeItemEditor(character, { dialog = null }, onSave = { change("Add reviewed equipment", it) })
+            "ImportItem" -> {
+                val available = campaignItems.filter { !it.archived && it.quantity != null && it.quantity > 0 &&
+                    it.itemState !in setOf("Consumed", "Lost", "Sold") &&
+                    character.items.none { held -> held.id == it.id } }
+                val chosen = available.firstOrNull { it.id == importId }
+                PlayerSheet("Add from campaign", onDismiss = { dialog = null }, actions = {
+                    PlayerButton(enabled = !busy && chosen != null && chosen.revision == importRevision, onClick = {
+                        val expectedId = importId ?: return@PlayerButton
+                        val expectedRevision = importRevision ?: return@PlayerButton
+                        val snapshot = saved ?: return@PlayerButton
+                        action("Campaign item copied to your playable gear") {
+                            val latest = repository.items.first().firstOrNull { it.id == expectedId }
+                                ?: error("The campaign item is no longer available. Reopen this picker.")
+                            check(latest.revision == expectedRevision && !latest.archived && latest.quantity != null && latest.quantity > 0 &&
+                                latest.itemState !in setOf("Consumed", "Lost", "Sold")) {
+                                "The campaign item changed. Reopen and review its latest values."
+                            }
+                            check(snapshot.character.items.none { it.id == latest.id } &&
+                                snapshot.character.itemDefinitions.none { it.id == latest.id }) {
+                                "This item already belongs to your playable character. No duplicate was created."
+                            }
+                            val (definition, instance) = campaignItemPlayableCopy(latest)
+                            val updated = snapshot.character.copy(
+                                itemDefinitions = snapshot.character.itemDefinitions + definition,
+                                items = snapshot.character.items + instance)
+                            local.save(snapshot.character.id, snapshot.revision, updated,
+                                "Reviewed copy of campaign item ${latest.id}, source revision ${latest.revision}")
+                            dialog = null; importId = null
+                        }
+                    }) { Text("Copy item to character") }
+                }) {
+                    Text("This creates a reviewed local copy with the original item ID and quantity. Your campaign record stays unchanged; no magical effects activate automatically.",
+                        color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                    if (chosen == null) {
+                        PlayerSearch(importQuery, { importQuery = it }, "Find a campaign item")
+                        val matches = available.filter { importQuery.isBlank() || it.title.contains(importQuery, true) }
+                        if (matches.isEmpty()) Text("No eligible items. Add one in Campaign items, or check its quantity and status.", color = RebuildPalette.Muted)
+                        matches.take(40).forEach { item -> PlayerEntry(item.title,
+                            "${item.category} · Qty ${item.quantity} · ${item.itemState}", "Core", {
+                                importId = item.id; importRevision = item.revision
+                            }) }
+                        if (matches.size > 40) Text("Refine your search for more results.", color = RebuildPalette.Muted)
+                    } else {
+                        Text(chosen.title, style = MaterialTheme.typography.titleLarge)
+                        Text("Quantity ${chosen.quantity} · ${chosen.category} · Original revision ${chosen.revision}", color = RebuildPalette.Ice)
+                        Text(chosen.description.ifBlank { "No description recorded." }, color = RebuildPalette.Muted)
+                        PlayerTextButton(onClick = { importId = null; importRevision = null }) { Text("Choose another") }
+                    }
+                }
+            }
             "Attack" -> ReforgeAttackEditor(character, { dialog = null }, onSave = { change("Add attack", it) })
             "Spell" -> ReforgeSpellEditor(character, { dialog = null }, onSave = { change("Add spell", it) })
             "Resource" -> ReforgeResourceEditor(character, { dialog = null }, onSave = { change("Add resource", it) })

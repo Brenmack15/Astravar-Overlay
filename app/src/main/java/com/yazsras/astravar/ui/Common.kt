@@ -15,11 +15,11 @@ import com.yazsras.astravar.rules.Campaign
 import com.yazsras.astravar.rules.DamageType
 import kotlinx.coroutines.*
 
-val Gunmetal=Color(0xFF000C21)
-val Ready=Color(0xFF35D5A3)
-val Muted=Color(0xFFA4B3CC)
-val Brass=Color(0xFFFAC71E)
-val Frost=Color(0xFFA1E8FB)
+val Gunmetal=RebuildPalette.Void
+val Ready=Color(0xFF8ED0B4)
+val Muted=RebuildPalette.Muted
+val Brass=RebuildPalette.GoldBright
+val Frost=RebuildPalette.Silver
 fun elementTint(type: DamageType)=when(type) {
     DamageType.FIRE -> Color(0xFFFFA36A)
     DamageType.LIGHTNING -> Color(0xFF8FCEFF)
@@ -31,10 +31,12 @@ fun elementTint(type: DamageType)=when(type) {
     else -> Frost
 }
 @Composable fun AstravarTheme(content: @Composable ()->Unit) {
-    MaterialTheme(colorScheme=darkColorScheme(primary=Brass,onPrimary=Color(0xFF241B10),secondary=Frost,
-        primaryContainer=Color(0xFF011D49),onPrimaryContainer=Brass,secondaryContainer=Color(0xFF17323F),onSecondaryContainer=Frost,tertiary=Brass,tertiaryContainer=Color(0xFF011D49),surfaceTint=Frost,background=Gunmetal,surface=Color(0xFF000F28),surfaceVariant=Color(0xFF011534),
-        onSurface=Color(0xFFF7F9FA),onSurfaceVariant=Muted,outline=Color(0xFF294769),error=Color(0xFFFF6578)),
-        typography=arcaneTypography(),shapes=Shapes(small=androidx.compose.foundation.shape.CutCornerShape(5.dp),medium=androidx.compose.foundation.shape.CutCornerShape(10.dp),large=androidx.compose.foundation.shape.CutCornerShape(14.dp))) {
+    MaterialTheme(colorScheme=darkColorScheme(primary=Brass,onPrimary=Color(0xFF251A17),secondary=RebuildPalette.Ice,
+        primaryContainer=RebuildPalette.Active,onPrimaryContainer=Brass,secondaryContainer=RebuildPalette.BlueDeep,onSecondaryContainer=RebuildPalette.Ice,
+        tertiary=RebuildPalette.Purple,tertiaryContainer=RebuildPalette.Panel,surfaceTint=RebuildPalette.Purple,
+        background=RebuildPalette.Canvas,surface=RebuildPalette.Panel,surfaceVariant=RebuildPalette.Elevated,
+        onBackground=Frost,onSurface=Frost,onSurfaceVariant=Muted,outline=RebuildPalette.Outline,error=Color(0xFFFF8D9D)),
+        typography=arcaneTypography(),shapes=Shapes(small=androidx.compose.foundation.shape.RoundedCornerShape(8.dp),medium=androidx.compose.foundation.shape.RoundedCornerShape(14.dp),large=androidx.compose.foundation.shape.RoundedCornerShape(20.dp))) {
         // Custom navy containers have no Material color-pair lookup. Supply the
         // reading color at the root so ordinary Text never inherits black.
         CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface, content = content)

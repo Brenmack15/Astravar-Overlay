@@ -269,6 +269,17 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
     fun requirementsFor(projectId: String) = dao.requirementsFor(projectId)
     suspend fun receipt(commandId: String) = dao.receipt(commandId)
 
+    /** Creates the two linked records together. No default HP, ability scores, or lore is invented. */
+    suspend fun createCompanion(name: String): String = db.withTransaction {
+        val displayName = name.trim()
+        text(displayName, 120, true)
+        val companionId = "companion-${UUID.randomUUID()}"
+        val provenance = "Player-created local companion"
+        saveProfile(CharacterProfile(id = companionId, name = displayName), source = provenance)
+        saveCompanionState(CompanionState(companionId = companionId, name = displayName), source = provenance)
+        companionId
+    }
+
     private fun text(value: String, max: Int = 16000, required: Boolean = false) {
         require(value.length <= max && (!required || value.isNotBlank())) { "A required field is blank or too long." }
     }

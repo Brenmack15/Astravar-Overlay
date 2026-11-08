@@ -52,6 +52,13 @@
         }
       ]
     },
+    "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": {
+      "previous_pinned_sha256": "7e5b92d763929c131ddef1f8ee5f08bad520233939f51234feace666b45c77c3",
+      "reviewed_sha256": "3c50c232d6e97b380b551e085d667bf5988dc191e7a8ed8b54444b012f98f26a",
+      "authorization": "Owner Astravar comprehensive overhaul directive, 2026-11-07",
+      "reason": "Add a transactional, non-destructive companion creation path; original record IDs and source history remain immutable.",
+      "exact_replacements": [{"before": "", "after": "    /** Creates the two linked records together. No default HP, ability scores, or lore is invented. */\n    suspend fun createCompanion(name: String): String = db.withTransaction {\n        val displayName = name.trim()\n        text(displayName, 120, true)\n        val companionId = \"companion-${UUID.randomUUID()}\"\n        val provenance = \"Player-created local companion\"\n        saveProfile(CharacterProfile(id = companionId, name = displayName), source = provenance)\n        saveCompanionState(CompanionState(companionId = companionId, name = displayName), source = provenance)\n        companionId\n    }\n\n"}]
+    },
     "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": {
       "previous_pinned_sha256": "4508292bc1910e269340be58d0fcb83cef3a3dd32af02fc6464424fd433e0fa2",
       "reviewed_sha256": "398c9a2062ee6a349150b021d083ec1e9c59cdfc20c736db9ef5a375132b7db6",

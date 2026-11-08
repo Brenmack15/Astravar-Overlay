@@ -79,6 +79,25 @@ class PartyPlayerFirstTest {
     private fun database() = Room.inMemoryDatabaseBuilder(
         ApplicationProvider.getApplicationContext(), CampaignLedgerDb::class.java).build()
 
+    @Test fun addingCompanionFromRosterOpensNewSheetAndPreservesUnknownStats() {
+        val db = database()
+        val repo = CampaignLedgerRepository(db)
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { PartyTestTheme { PartyPageV2(repo, null) {} } }
+            compose.onNodeWithText("+ Add companion").performScrollTo().performClick()
+            compose.onNode(hasSetTextAction() and hasText("Companion name")).performTextInput("Glimmer")
+            compose.onNodeWithText("Create companion").performClick()
+            waitForText("Glimmer")
+            compose.waitUntil(10_000) {
+                runBlocking { db.recordsDao().allCompanionStates().any { it.name == "Glimmer" } }
+            }
+            val newId = runBlocking { db.recordsDao().allCompanionStates().single { it.name == "Glimmer" }.companionId }
+            assertTrue(newId.startsWith("companion-"))
+            assertNull(runBlocking { db.recordsDao().allCharacterProfiles().single { it.id == newId }.currentHp })
+        } finally { activity.pause().stop().destroy(); db.close() }
+    }
+
     @Test fun partyRosterOpensFourStableIdentitiesWithoutImportingPrivateStats() {
         val db = database()
         val repo = CampaignLedgerRepository(db)

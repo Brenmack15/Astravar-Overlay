@@ -45,7 +45,7 @@ class PlayerFirstLayoutTest {
         } finally { activity.pause().stop().destroy(); db.close() }
     }
 
-    @Test fun allFivePrimaryDestinationsRemainReachableAtLargeText() {
+    @Test fun allFourPrimaryDestinationsRemainReachableAtLargeText() {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         val selected = mutableListOf<String>()
         try {
@@ -54,9 +54,9 @@ class PlayerFirstLayoutTest {
                     AstravarTheme { Column { RebuildPrimaryNavigation("Character", selected::add) } }
                 }
             }
-            for (name in listOf("Character", "Combat", "Inventory", "Campaign", "More"))
+            for (name in listOf("Character", "Inventory", "Companions", "Campaign"))
                 compose.onNode(hasText(name) and hasClickAction()).assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
-            assertEquals(listOf("Character", "Combat", "Inventory", "Campaign", "More"), selected)
+            assertEquals(listOf("Character", "Inventory", "Companions", "Campaign"), selected)
         } finally { activity.pause().stop().destroy() }
     }
 }

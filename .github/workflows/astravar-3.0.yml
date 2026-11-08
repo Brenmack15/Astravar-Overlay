@@ -1,7 +1,7 @@
-name: Astravar 3.0 Reforge verification
+name: Astravar Reforge verification
 on:
   push:
-    branches: ['feat/astravar-3.0-reforge', 'fix/astravar-3.0-*']
+    branches: ['feat/astravar-3.0-reforge', 'fix/astravar-3.0-*', 'feat/astravar-3.1-*']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   verify:
-    if: github.head_ref == 'feat/astravar-3.0-reforge' || github.ref_name == 'feat/astravar-3.0-reforge' || startsWith(github.head_ref, 'fix/astravar-3.0-') || startsWith(github.ref_name, 'fix/astravar-3.0-')
+    if: github.head_ref == 'feat/astravar-3.0-reforge' || github.ref_name == 'feat/astravar-3.0-reforge' || startsWith(github.head_ref, 'fix/astravar-3.0-') || startsWith(github.ref_name, 'fix/astravar-3.0-') || startsWith(github.head_ref, 'feat/astravar-3.1-') || startsWith(github.ref_name, 'feat/astravar-3.1-')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:

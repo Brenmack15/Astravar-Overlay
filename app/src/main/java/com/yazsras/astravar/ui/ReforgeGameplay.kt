@@ -155,7 +155,7 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
     is EffectPayload.DamageConversion -> "${payload.from} becomes ${payload.to}"
 }
 
-/** Typed effect entry requires explicit review; narrative text never activates a modifier. */
+/** Ordinary inventory entry takes two fields; only mechanical effects need an approval step. */
 @Composable internal fun ReforgeItemEditor(latestCharacter: ReforgeCharacter, onDismiss: () -> Unit,
     onSave: (ReforgeCharacter) -> Unit, existingItemId: String? = null) {
     val character = requireNotNull(rememberReforgeSnapshot(latestCharacter))
@@ -190,8 +190,12 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
     var error by remember { mutableStateOf("") }
     val definitionId = rememberSaveable { originalDefinition?.id ?: UUID.randomUUID().toString() }
     val instanceId = rememberSaveable { original?.id ?: UUID.randomUUID().toString() }
-    PlayerSheet(if (original == null) "Add equipment" else "Edit equipment", onDismiss, dirty = true, actions = {
-        PlayerButton(enabled = name.isNotBlank() && reviewed && effectsDraft.canSave, onClick = {
+    val dirty = name != originalDefinition?.name.orEmpty() || description != originalDefinition?.description.orEmpty() ||
+        quantity != (original?.quantity?.toString() ?: "1") || slot != (originalDefinition?.equipmentSlot ?: "") ||
+        state != (original?.state ?: ItemState.CARRIED) || favorite != (original?.favorite ?: false) ||
+        attune != (originalDefinition?.requiresAttunement ?: false) || effects != originalDefinition?.effects.orEmpty()
+    PlayerSheet(if (original == null) "Add equipment" else "Edit equipment", onDismiss, dirty = dirty, actions = {
+        PlayerButton(enabled = name.isNotBlank() && (effects.isEmpty() || reviewed) && effectsDraft.canSave, onClick = {
             try {
                 val definition = (originalDefinition ?: ItemDefinition(definitionId, name)).copy(name = name.trim(), effects = effects,
                     requiresAttunement = attune, equipmentSlot = slot.trim().ifBlank { null }, description = description)
@@ -201,24 +205,26 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
                 val equipped = GameplayRules.equip(candidate, instanceId, state)
                 onSave(GameplayRules.preserveCapacities(character, equipped))
             } catch (e: Exception) { error = e.message ?: "Check item" }
-        }) { Text("Save reviewed item") }
+        }) { Text(if (effects.isEmpty()) "Save item" else "Save reviewed item") }
     }) {
         ReforgeDraftRecovery(effectsDraft)
         Field("Item name", name, { name = it; reviewed = false })
         Field("Description", description, { description = it }, single = false)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Field("Quantity", quantity, { quantity = it; reviewed = false }, Modifier.weight(1f))
-            Field("Slot (optional)", slot, { slot = it; reviewed = false }, Modifier.weight(1f))
+        Field("Quantity", quantity, { quantity = it; reviewed = false })
+        PlayerDisclosure("Equipment options", initiallyOpen = original != null) {
+            Field("Slot (optional)", slot, { slot = it; reviewed = false })
+            Choices("Location / equipment", ItemState.entries, state) { state = it; reviewed = false }
+            Toggle("Favorite", favorite) { favorite = it }
+            Toggle("Requires attunement", attune) { attune = it; reviewed = false }
         }
-        Choices("Location / equipment", ItemState.entries, state) { state = it; reviewed = false }
-        Toggle("Favorite", favorite) { favorite = it }
-        Toggle("Requires attunement", attune) { attune = it; reviewed = false }
-        Text("Mechanical effects", style = MaterialTheme.typography.titleMedium)
-        effects.forEachIndexed { index, effect ->
-            Text("${index + 1}. ${effect.name} · ${reforgeEffectSummary(effect)}${if (attune && !effect.requiresAttunement) " · available without attunement" else ""}", style = MaterialTheme.typography.bodySmall)
-            PlayerTextButton(onClick = { effects = effects - effect; reviewed = false }) { Text("Remove effect") }
-        }
-        PlayerDisclosure("Add a structured effect") {
+        PlayerDisclosure("Magic & mechanical effects", initiallyOpen = effects.isNotEmpty()) {
+            Text("Only effects you explicitly review can change your character's statistics.",
+                color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+            effects.forEachIndexed { index, effect ->
+                Text("${index + 1}. ${effect.name} · ${reforgeEffectSummary(effect)}${if (attune && !effect.requiresAttunement) " · available without attunement" else ""}", style = MaterialTheme.typography.bodySmall)
+                PlayerTextButton(onClick = { effects = effects - effect; reviewed = false }) { Text("Remove effect") }
+            }
+            PlayerDisclosure("Add a structured effect") {
             Field("Effect name", effectName, { effectName = it })
             Choices("Effect type", listOf("Statistic", "Damage dice", "Damage defense", "Advantage / Disadvantage"), effectType) { effectType = it }
             when (effectType) {
@@ -259,9 +265,9 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
                     reviewed = false; amount = ""; effectName = ""; error = ""
                 } catch (e: Exception) { error = e.message ?: "Check effect" }
             }) { Text("Add effect to review") }
+            }
+            if (effects.isNotEmpty()) Toggle("I reviewed these mechanics", reviewed) { reviewed = it }
         }
-        Text("Equipment requirements, attunement and active conditions are checked by the character engine. This edits the existing item identity when applicable.", color = RebuildPalette.Muted)
-        Toggle("I reviewed these mechanics", reviewed) { reviewed = it }
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
     }
 }
