@@ -25,6 +25,8 @@ This is a validation candidate, not a declaration of release acceptance.
 - [x] Add real-emulator journeys for character create/edit/advance, reviewed gear
   equip/restart/unequip, generic companion HP and relationship create/edit/remove.
 - [x] Add native isolated SQLite >32-million-character selection/adoption regression.
+- [x] Add native disk SQLite invalid/duplicate/stale-command checks, interrupted
+  receipt-write rollback, same-command recovery, and backup restore after reopen.
 - [ ] Pass final exact-commit full automated and native workflows.
 - [ ] Verify the final candidate APK and retain exact source/hash evidence.
 - [ ] Original-owner signing and physical Galaxy S26 acceptance.

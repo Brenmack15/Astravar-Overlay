@@ -1,6 +1,8 @@
 package com.yazsras.astravar
 
 import android.content.pm.PackageManager
+import android.content.ComponentName
+import android.content.Intent
 import android.graphics.Rect
 import android.os.Bundle
 import android.view.accessibility.AccessibilityWindowInfo
@@ -108,8 +110,11 @@ class OverlayInstrumentationTest {
         assertFalse(permissions.contains("android.permission.SYSTEM_ALERT_WINDOW"))
         assertFalse(permissions.contains("android.permission.FOREGROUND_SERVICE_SPECIAL_USE"))
         assertFalse(info.services.orEmpty().any { it.name.endsWith(".OverlayService") })
-        val result = shell("am startservice -n $product/com.yazsras.astravar.overlay.OverlayService")
-        assertTrue("Android must reject the retired overlay component: $result", result.contains("Error"))
+        // UiDevice shell output omits stderr, where am reports a missing service.
+        // Use the Android API result directly instead of interpreting stdout text.
+        val result = instrumentation.targetContext.startService(Intent().setComponent(
+            ComponentName(product, "com.yazsras.astravar.overlay.OverlayService")))
+        assertNull("Android must return no component for the retired overlay service", result)
         openMain()
         ui.openTool(product, "Appearance")
         ui.textBounds("Appearance & feedback", product)
