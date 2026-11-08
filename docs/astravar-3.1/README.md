@@ -55,8 +55,10 @@ repository unit test. A screenshot alone is not a success criterion.
 ## Honest limitations
 
 - This is **not** a new production release or proof of Samsung Galaxy S26
-  acceptance. CI builds use disposable debug signatures. Never ask the owner to
-  uninstall the permanent app or clear its data to test them.
+  acceptance. CI builds use disposable debug signatures. The separately installed
+  test app is labeled **Astravar QA**, has package `com.yazsras.astravar.v2uidebug`
+  and does not read the permanent app's private records. Never ask the owner to
+  uninstall the permanent app or clear its data to test the preview.
 - The playable Reforge store and legacy campaign ledger still have distinct
   authority. Copies are **not** bidirectionally synchronized. No canonical
   migration/cutover is attempted here.

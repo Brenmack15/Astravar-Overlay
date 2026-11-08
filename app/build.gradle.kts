@@ -30,10 +30,12 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".v2uidebug"; versionNameSuffix = "-ui-rebuild"
-            manifestPlaceholders["astravarDebugLabel"] = "Astravar"
+            // The QA package intentionally has its own empty data sandbox. Label it
+            // unmistakably so it cannot be confused with the owner's real install.
+            manifestPlaceholders["astravarDebugLabel"] = "Astravar QA"
             if (remoteStatTest) {
                 applicationIdSuffix = ".v2statdebug"; versionNameSuffix = "-remote-stat-test"
-                manifestPlaceholders["astravarDebugLabel"] = "Astravar"
+                manifestPlaceholders["astravarDebugLabel"] = "Astravar Remote QA"
             }
         }
         release {

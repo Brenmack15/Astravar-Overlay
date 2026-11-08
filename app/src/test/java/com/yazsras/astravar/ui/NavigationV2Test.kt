@@ -113,7 +113,8 @@ class NavigationV2Test {
             compose.onNodeWithTag("navigation-Campaign").performClick()
             compose.onNodeWithText("Checkpoints").assertExists()
             compose.onNodeWithTag("navigation-Companions").performClick()
-            compose.onNodeWithText("Eek").performClick()
+            // Tab state restores the already-open Eek sheet. Do not click a name
+            // again: both its heading and roster context legitimately say "Eek".
             compose.onNodeWithText("Eek's specialized companion tools").performScrollTo().assertExists()
             compose.runOnIdle { assertEquals(before, app.repository.state.value) }
             assertEquals(0, overlayStarts)
