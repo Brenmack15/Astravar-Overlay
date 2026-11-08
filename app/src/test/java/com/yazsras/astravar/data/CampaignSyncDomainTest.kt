@@ -238,6 +238,130 @@ class CampaignSyncDomainTest {
         rejects { apply("bypass-slot",CampaignSyncOperation("set_record",profile.id,"party-sheet",1,campaignJson.encodeToJsonElement(sheet.copy(contentJson=campaignJson.encodeToString(sheet.sheet.copy(resources=emptyList())))).jsonObject)) }
         assertEquals(12,db.recordsDao().characterProfile(profile.id)?.currentHp)
     }
+    @Test fun alternateFormsNeverLeaveNativeSnapshotOrFullScopeAuditPublication() = runBlocking {
+        val old = requireNotNull(db.partyDao().sheet("synthetic-player"))
+        val forms = listOf(SheetForm("LOCAL_ONLY_FORM_SENTINEL", statBlock = "LOCAL_ONLY_FORM_CAPABILITIES",
+            currentHp = 73519, maximumHp = 73529, source = "LOCAL_ONLY_FORM_SOURCE"))
+        ledger.party.saveSheet(old.profileId, old.sheet.copy(forms = forms), old.revision, source)
+        val originals = db.recordsDao().allAudit()
+        val snapshot = domain.snapshot(campaign)
+        val published = campaignJson.encodeToString(snapshot)
+        assertFalse(published.contains("LOCAL_ONLY_FORM"))
+        assertFalse(published.contains("73519"))
+        val sheet = snapshot.single { it.kind == "party-sheet" }
+        assertFalse(Json.parseToJsonElement(sheet.fields.getValue("contentJson").jsonPrimitive.content).jsonObject.containsKey("forms"))
+        assertFalse(campaignJson.encodeToString(CampaignConnectionProjection.project(snapshot, CampaignConnectionProtocol.categories)).contains("LOCAL_ONLY_FORM"))
+        assertEquals(forms, db.partyDao().sheet(old.profileId)!!.sheet.forms)
+        assertEquals(originals, db.recordsDao().allAudit())
+        assertTrue(originals.any { it.afterJson?.contains("LOCAL_ONLY_FORM_SENTINEL") == true })
+    }
+
+    @Test fun remoteDescriptiveAndStatusEditsPreserveLocalFormsAndBackupProofs() = runBlocking {
+        val old = requireNotNull(db.partyDao().sheet("synthetic-player"))
+        val forms = listOf(SheetForm("LOCAL_ONLY_FORM_SENTINEL", currentHp = 3, maximumHp = 7,
+            source = "Fictional local form"), SheetForm("Unknown local form"))
+        ledger.party.saveSheet(old.profileId, old.sheet.copy(forms = forms), old.revision, source)
+        val receipt = apply("remote-role-with-local-forms", CampaignSyncOperation("set_record", old.profileId, "party-sheet", 2,
+            fields("contentJson" to JsonPrimitive(buildJsonObject { put("role", "Remote descriptive correction"); put("forms", JsonArray(emptyList())) }.toString()))))
+        val updated = requireNotNull(db.partyDao().sheet(old.profileId))
+        assertEquals("Remote descriptive correction", updated.sheet.role)
+        assertEquals(forms, updated.sheet.forms)
+        assertFalse(receipt.outcomeJson.contains("LOCAL_ONLY_FORM"))
+        apply("remote-status-with-local-forms", CampaignSyncOperation("set_status", old.profileId, "party-sheet", 3,
+            fields("conditions" to JsonPrimitive("Fictional condition"))))
+        assertEquals(forms, db.partyDao().sheet(old.profileId)!!.sheet.forms)
+        assertEquals("Fictional condition", db.partyDao().sheet(old.profileId)!!.sheet.conditions)
+        assertEquals(12, db.recordsDao().characterProfile(old.profileId)!!.currentHp)
+        val target = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext<Context>(), CampaignLedgerDb::class.java).allowMainThreadQueries().build()
+        try {
+            val restored = CampaignLedgerRepository(target)
+            val preview = restored.previewImport(ledger.export())
+            assertTrue(preview.conflicts.joinToString(), preview.valid)
+            restored.restore(preview, "restore-local-forms-after-remote-edit")
+            assertEquals(forms, target.partyDao().sheet(old.profileId)!!.sheet.forms)
+            assertEquals(receipt, target.recordsDao().receipt(CampaignSyncDomain.receiptId("remote-role-with-local-forms")))
+        } finally { target.close() }
+    }
+
+    @Test fun legacyEmptyOrOmittedFormsInAggregateBackupRemainCompatibleWithoutRelaxingOtherFields() = runBlocking {
+        val originalSheet = requireNotNull(db.partyDao().sheet("synthetic-player"))
+        val originalForms = listOf(SheetForm("Fictional original historical form", currentHp = 3, maximumHp = 7, id = "original-historical-form"))
+        ledger.party.saveSheet(originalSheet.profileId, originalSheet.sheet.copy(forms = originalForms), originalSheet.revision, source)
+        val receipt = apply("legacy-party-sheet-aggregate", CampaignSyncOperation("set_record", "synthetic-player", "party-sheet", 2,
+            fields("contentJson" to JsonPrimitive(buildJsonObject { put("role", "Confirmed remote role") }.toString()))))
+        val exported = campaignDecodeBackup(ledger.export())
+        val aggregate = exported.records.audit.single { it.id == receipt.commandId }
+        fun representation(json: String, emptyForms: Boolean, forgedRole: Boolean = false,
+            forgedForms: Boolean = false, forgedPortrait: Boolean = false, exactHistoricalForms: Boolean = false): String = campaignJson.encodeToString(
+            campaignJson.decodeFromString<List<CampaignSyncRecord>>(json).map { record ->
+                if (record.kind != "party-sheet") record else {
+                    val body = Json.parseToJsonElement(record.fields.getValue("contentJson").jsonPrimitive.content).jsonObject
+                    var projected = if (emptyForms) JsonObject(body + ("forms" to JsonArray(emptyList()))) else JsonObject(body - "forms")
+                    if (forgedRole) projected = JsonObject(projected + ("role" to JsonPrimitive("Forged unrelated role")))
+                    if (exactHistoricalForms) projected = JsonObject(projected + ("forms" to campaignJson.encodeToJsonElement(originalForms)))
+                    if (forgedForms) projected = JsonObject(projected + ("forms" to campaignJson.encodeToJsonElement(listOf(originalForms.single().copy(currentHp = 7)))))
+                    if (forgedPortrait) projected = JsonObject(projected + ("portraitBase64" to JsonPrimitive("forged-private-portrait")))
+                    record.copy(fields = JsonObject(record.fields + ("contentJson" to JsonPrimitive(projected.toString()))))
+                }
+            })
+        fun fixture(emptyForms: Boolean, forgedRole: Boolean = false, forgedForms: Boolean = false,
+            forgedPortrait: Boolean = false, exactHistoricalForms: Boolean = false): LedgerExport {
+            val before = representation(requireNotNull(aggregate.beforeJson), emptyForms, exactHistoricalForms = exactHistoricalForms)
+            val after = representation(requireNotNull(aggregate.afterJson), emptyForms, forgedRole, forgedForms, forgedPortrait, exactHistoricalForms)
+            return exported.copy(records = exported.records.copy(
+                audit = exported.records.audit.map { if (it.id == aggregate.id) it.copy(beforeJson = before, afterJson = after) else it },
+                receipts = exported.records.receipts.map { if (it.commandId == receipt.commandId) it.copy(outcomeJson = after) else it }))
+        }
+        for ((emptyForms, exactHistoricalForms) in listOf(false to false, true to false, false to true)) {
+            val historical = fixture(emptyForms, exactHistoricalForms = exactHistoricalForms)
+            val target = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext<Context>(), CampaignLedgerDb::class.java).allowMainThreadQueries().build()
+            try {
+                val restored = CampaignLedgerRepository(target)
+                val preview = restored.previewImport(campaignJson.encodeToString(historical))
+                assertTrue(preview.conflicts.joinToString(), preview.valid)
+                restored.restore(preview, "restore-historical-forms-$emptyForms-$exactHistoricalForms")
+                assertEquals("Confirmed remote role", target.partyDao().sheet("synthetic-player")!!.sheet.role)
+                assertEquals(originalForms, target.partyDao().sheet("synthetic-player")!!.sheet.forms)
+                assertEquals(historical.records.receipts.single { it.commandId == receipt.commandId }, target.recordsDao().receipt(receipt.commandId))
+                assertEquals(historical.records.audit.single { it.id == aggregate.id }, target.recordsDao().allAudit().single { it.id == aggregate.id })
+            } finally { target.close() }
+        }
+        val clean = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext<Context>(), CampaignLedgerDb::class.java).allowMainThreadQueries().build()
+        try {
+            for ((label, forged) in listOf(
+                "role" to fixture(true, forgedRole = true),
+                "form health" to fixture(false, forgedForms = true),
+                "portrait" to fixture(false, forgedPortrait = true))) {
+                val tampered = CampaignLedgerRepository(clean).previewImport(campaignJson.encodeToString(forged))
+                assertFalse("Form compatibility must not hide tampered aggregate $label", tampered.valid)
+            }
+            assertTrue(clean.partyDao().allSheets().isEmpty())
+        } finally { clean.close() }
+        assertEquals(receipt, db.recordsDao().receipt(receipt.commandId))
+        assertEquals(aggregate, db.recordsDao().allAudit().single { it.id == aggregate.id })
+    }
+
+    @Test fun remoteFormHealthInjectionRejectsWholeTransactionAndCannotReplaceLocalForms() = runBlocking {
+        val old = requireNotNull(db.partyDao().sheet("synthetic-player"))
+        val forms = listOf(SheetForm("Fictional local form", currentHp = 2, maximumHp = 5))
+        ledger.party.saveSheet(old.profileId, old.sheet.copy(forms = forms), old.revision, source)
+        val before = db.partyDao().sheet(old.profileId)
+        val malicious = fields("contentJson" to JsonPrimitive(buildJsonObject {
+            put("forms", campaignJson.encodeToJsonElement(listOf(forms.single().copy(currentHp = 5))))
+        }.toString()))
+        rejects { apply("reject-form-hp-bypass",
+            CampaignSyncOperation("adjust_currency", "synthetic-wallet", "wallet", 1, fields("goldDelta" to number(-2))),
+            CampaignSyncOperation("set_record", old.profileId, "party-sheet", 2, malicious)) }
+        assertEquals(before, db.partyDao().sheet(old.profileId))
+        assertEquals(10L, db.partyDao().wallet("synthetic-wallet")!!.gold)
+        assertNull(db.recordsDao().receipt(CampaignSyncDomain.receiptId("reject-form-hp-bypass")))
+        assertFalse(db.recordsDao().allAudit().any { it.commandId.startsWith("campaign-sync-${campaignHash("reject-form-hp-bypass").take(40)}-") })
+        ledger.records.saveProfile(CharacterProfile(id = "new-form-owner", name = "Fictional new owner"), source = source)
+        rejects { apply("reject-new-remote-form", CampaignSyncOperation("set_record", "new-form-owner", "party-sheet", 0,
+            fields("contentJson" to JsonPrimitive(campaignJson.encodeToString(PartySheetData(forms = forms)))))) }
+        assertNull(db.partyDao().sheet("new-form-owner"))
+    }
+
     @Test fun campaignScopePreventsLegacyInventoryOrHiddenCrossCampaignMutation() = runBlocking {
         val item=ledger.create(LedgerDraft("Fictional private item",quantity=1))
         ledger.records.saveProfile(CharacterProfile(name="Other campaign",id="synthetic-other"),source=source)

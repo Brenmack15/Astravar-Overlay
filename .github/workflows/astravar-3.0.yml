@@ -64,6 +64,8 @@ jobs:
             --tests 'com.yazsras.astravar.ui.StorageRecoveryPanelTest' \
             --tests 'com.yazsras.astravar.data.ReforgeItemTransferTest' \
             --tests 'com.yazsras.astravar.data.CompanionCreationTest' \
+            --tests 'com.yazsras.astravar.data.CampaignSyncDomainTest' \
+            --tests 'com.yazsras.astravar.data.CampaignConnectionProjectionTest' \
             --tests 'com.yazsras.astravar.data.ReforgeLargeCampaignSelectionTest'
       - name: Rules, Room, native Compose, lint and debug APK
         timeout-minutes: 75

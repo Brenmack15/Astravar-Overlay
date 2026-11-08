@@ -27,16 +27,22 @@ import com.yazsras.astravar.R
 /** A place for each everyday task. Combat lives on the character sheet; tools are in the header. */
 val rebuildDestinations = listOf("Character", "Inventory", "Companions", "Campaign")
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable fun RebuildAppHeader(demo: Boolean, search: (() -> Unit)? = null, tools: (() -> Unit)? = null) {
-    Row(Modifier.fillMaxWidth().background(RebuildPalette.Void).statusBarsPadding()
-        .padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ArcaneIcon("Emblem", Modifier.size(24.dp), RebuildPalette.GoldBright)
-        Text("ASTRAVAR", fontFamily = DisplayFace, fontSize = 18.sp, letterSpacing = 1.2.sp, color = RebuildPalette.GoldBright)
-        Spacer(Modifier.weight(1f))
-        if (search != null) PlayerTextButton(onClick = search) { Text("Find") }
-        if (tools != null) PlayerTextButton(onClick = tools) { Text("Tools") }
-        if (demo) Text("DEMO", color = RebuildPalette.Cyan, style = MaterialTheme.typography.labelSmall)
+    FlowRow(Modifier.fillMaxWidth().background(RebuildPalette.Void).statusBarsPadding()
+        .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ArcaneIcon("Emblem", Modifier.size(24.dp), RebuildPalette.GoldBright)
+            Text("ASTRAVAR", fontFamily = DisplayFace, fontSize = 18.sp, letterSpacing = 1.2.sp, color = RebuildPalette.GoldBright)
+        }
+        // Move this complete group to a second row when scaled text cannot fit.
+        // Find and Tools remain real 48dp controls instead of clipping offscreen.
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (search != null) PlayerTextButton(onClick = search) { Text("Find") }
+            if (tools != null) PlayerTextButton(onClick = tools) { Text("Tools") }
+            if (demo) Text("DEMO", color = RebuildPalette.Cyan, style = MaterialTheme.typography.labelSmall)
+        }
     }
 }
 

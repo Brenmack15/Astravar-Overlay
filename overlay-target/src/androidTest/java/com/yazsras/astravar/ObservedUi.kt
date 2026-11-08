@@ -380,18 +380,19 @@ internal class ObservedUi(private val device: UiDevice) {
             snapshot(selector, description, timeoutMs = 10_000, refreshCache = true) { it.text.orEmpty().takeIf { current -> current == value } })
     }
 
-    /** Fixture editor input through the focused native field's SET_TEXT action. */
-    fun setFocusedField(value: String, packageName: String, description: String) {
+    fun assertFocusedField(value: String, packageName: String, description: String) {
         val selector = By.clazz("android.widget.EditText").focused(true).pkg(packageName)
-        val field = snapshot(selector, description, timeoutMs = 10_000, refreshCache = true) {
-            it.takeIf { observed -> observed.isFocused && observed.isEnabled }
-        }
-        // One accessibility input action avoids IME dictionary recasing fixture
-        // provenance. The following fresh observation independently checks text.
-        field.text = value
-        assertEquals("Native editor input must reach the focused field: $description", value,
+        assertEquals("Committed editor text must remain exact after keyboard dismissal: $description", value,
             snapshot(selector, description, timeoutMs = 10_000, refreshCache = true) {
                 it.text.orEmpty().takeIf { current -> current == value }
             })
+    }
+
+    /** Fixture editing uses Android key dispatch, with independent exact AX readback. */
+    fun setFocusedField(value: String, packageName: String, description: String) {
+        // Compose can acknowledge ACTION_SET_TEXT during an IME/scroll transition
+        // without committing the text. Exercise the same InputConnection as a
+        // keyboard user; each action is dispatched once and must read back exactly.
+        enterFocusedField(value, packageName, description)
     }
 }

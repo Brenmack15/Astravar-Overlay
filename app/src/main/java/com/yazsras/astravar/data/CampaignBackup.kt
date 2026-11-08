@@ -320,15 +320,22 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
             val original = requireNotNull(snapshot).let { campaignJson.parseToJsonElement(it).jsonObject }
             val normalized = when (record.kind) {
                 "item", "connection" -> JsonObject(original + ("imageBase64" to JsonNull))
-                "party-sheet" -> {
-                    val content = campaignJson.parseToJsonElement(original.getValue("contentJson").jsonPrimitive.content).jsonObject
-                    JsonObject(original + ("contentJson" to JsonPrimitive(campaignJson.encodeToString(
-                        campaignJson.decodeFromJsonElement<PartySheetData>(content).copy(portraitBase64 = null)))))
-                }
+                "party-sheet" -> CampaignLocalFormBoundary.sheetFields(original)
                 "wallet" -> JsonObject(original + mapOf("electrum" to (original["electrum"] ?: JsonNull), "platinum" to (original["platinum"] ?: JsonNull)))
                 else -> original
             }
-            normalized == record.fields
+            // Historical aggregates may include the exact child forms or an empty
+            // array; current projections omit them. This compatibility must not
+            // validate invented form evidence or relax the portrait comparison.
+            val expectedFields = if (record.kind == "party-sheet") {
+                val expectedContent = Json.parseToJsonElement(record.fields.getValue("contentJson").jsonPrimitive.content).jsonObject
+                val originalContent = Json.parseToJsonElement(original.getValue("contentJson").jsonPrimitive.content).jsonObject
+                expectedContent["forms"]?.let { forms ->
+                    require(forms is JsonArray && (forms.isEmpty() || forms == originalContent["forms"]))
+                }
+                JsonObject(record.fields + ("contentJson" to JsonPrimitive(JsonObject(expectedContent - "forms").toString())))
+            } else record.fields
+            normalized == expectedFields
         } catch (_: Exception) { false }
         fun validateSyncAudit(event: CampaignAudit): Boolean = try {
             require(incoming.schema >= 5 && event.kind == "TRUSTED_DM_TRANSACTION" && event.id == event.commandId &&

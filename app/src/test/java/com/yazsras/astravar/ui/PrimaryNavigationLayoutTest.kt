@@ -40,6 +40,37 @@ class PrimaryNavigationLayoutTest {
     // complete labels and the requested font size rather than squeezing a row.
     @Test fun doubleTextKeepsCompleteSingleLineLabelsAndSelectedNavigationInTwoRows() = verifyNavigation(2f, 2)
 
+    @Test fun doubleTextKeepsFindAndToolsVisibleAndActionableOnANarrowPhone() {
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        val opened = mutableListOf<String>()
+        try {
+            activity.get().setContent {
+                CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 2f)) {
+                    AstravarTheme {
+                        Box(Modifier.width(360.dp)) {
+                            RebuildAppHeader(true, search = { opened += "Find" }, tools = { opened += "Tools" })
+                        }
+                    }
+                }
+            }
+            val viewport = compose.onRoot().fetchSemanticsNode().boundsInRoot
+            listOf("Find", "Tools").forEach { name ->
+                val button = compose.onNode(hasText(name) and hasClickAction())
+                    .assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+                val bounds = button.fetchSemanticsNode().boundsInRoot
+                assertTrue("$name must fit entirely on screen at double text", bounds.left >= viewport.left && bounds.right <= viewport.right)
+                val text = compose.onNodeWithText(name, useUnmergedTree = true).fetchSemanticsNode()
+                val layouts = mutableListOf<TextLayoutResult>()
+                compose.runOnIdle {
+                    assertTrue(text.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(layouts) == true)
+                    assertFalse("$name must retain its complete label", layouts.single().hasVisualOverflow)
+                }
+                button.performClick()
+            }
+            assertEquals(listOf("Find", "Tools"), opened)
+        } finally { activity.pause().stop().destroy() }
+    }
+
     private fun verifyNavigation(fontScale: Float, expectedRows: Int) {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         val visited = mutableListOf<String>()

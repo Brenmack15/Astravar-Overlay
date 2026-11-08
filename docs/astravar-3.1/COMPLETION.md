@@ -24,6 +24,9 @@ This is a validation candidate, not a declaration of release acceptance.
 - [x] Keep focused fields visible after keyboard resizing and text changes;
   bound multiline editors without truncating their saved text.
 - [x] Restore armor-source reference navigation through Tools.
+- [x] Wrap header actions at large text sizes, retaining full labels and touch targets.
+- [x] Keep alternate-form payloads local to the device and backups; exclude them from
+  direct, scoped and chunked audit publication and reject unsupported remote form edits.
 - [x] Add real-emulator journeys for character create/edit/advance, reviewed gear
   equip/restart/unequip, generic companion HP and relationship create/edit/remove.
 - [x] Add native isolated SQLite >32-million-character selection/adoption regression.
@@ -79,7 +82,9 @@ it does not establish original-owner key or physical handset compatibility.
   campaign cutover is performed.
 - Companion source records require reviewed playable adoption before rules-engine
   equipment/attacks. New forms retain their independent sourced values; changing
-  a form does not automatically transform, spend resources or swap effects.
+  a form does not automatically transform, spend resources or swap effects. Form
+  payloads are local to this device and full backups; existing connection grants
+  cannot publish or modify them.
 - Structured relationships use saved campaign identities; unrelated local playable
   character IDs are not silently presented as campaign-store identities.
 - Complete campaign JSON backup retains its explicit 32-million-character/32MiB

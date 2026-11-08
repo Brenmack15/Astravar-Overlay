@@ -126,7 +126,7 @@ private fun lines(text: String) = text.lineSequence().map(String::trim).filter(S
                 if (form.source.isNotBlank()) PlayerDisclosure("Form source") { ReforgeRichText(form.source) }
             }
         }
-        Text("Each form preserves its own recorded values. Editing a form never transforms the companion, changes its main HP, or applies equipment effects.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+        Text("Forms are saved on this device and in local campaign backups. They are not published or changed through the campaign connection. Editing a form never transforms the companion, changes its main HP, or applies equipment effects.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
     }
     PartySheetSection("Sources & unresolved decisions", { edit("Sources") }) {
         if (sheet.references.isEmpty()) Text("No source references recorded.", color = RebuildPalette.Muted)
@@ -320,7 +320,7 @@ private fun modifierDescription(value: SheetModifier): String =
                 PlayerTextButton(onClick = { resourceKeys = resourceKeys + UUID.randomUUID().toString(); update(draft.copy(resources = draft.resources + SheetResource(name = ""))) }) { Text("Add sheet resource") }
             }
             "Forms" -> {
-                Text("Record only confirmed statistics and costs. These independent form records never replace the main profile or spend resources automatically.", color = RebuildPalette.Muted)
+                Text("Forms stay on this device and in local campaign backups; the campaign connection does not synchronize them. Record only confirmed statistics and costs. Form edits never replace the main profile or spend resources automatically.", color = RebuildPalette.Muted)
                 draft.forms.forEachIndexed { index, row -> key(row.id) {
                     PlayerCard {
                         val replace: (SheetForm) -> Unit = { next -> update(draft.copy(forms = draft.forms.toMutableList().apply { set(index, next) })) }

@@ -44,6 +44,7 @@ class UpdateFixtureInstrumentationTest {
                 assertTrue(device.takeScreenshot(File(instrumentation.targetContext.getExternalFilesDir(null), "native-item-provenance-keyboard.png")))
             }
             device.pressBack()
+            ui.assertFocusedField(value, product, label)
         }
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
         ui.awaitMainAfterSavedDialogs(product)

@@ -25,6 +25,7 @@ class PlayerFirstJourneyInstrumentationTest {
         tap(label)
         ui.setFocusedField(value, product, label)
         device.pressBack()
+        ui.assertFocusedField(value, product, label)
     }
     private fun capture(name: String) {
         assertTrue(device.takeScreenshot(File(files, "player-first-$name.png")))
