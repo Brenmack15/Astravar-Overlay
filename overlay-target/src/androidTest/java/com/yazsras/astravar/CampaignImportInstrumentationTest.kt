@@ -149,6 +149,26 @@ class CampaignImportInstrumentationTest {
         assertTrue("Large fictional document operation must finish: $text; last observation: $lastObserved", visible)
     }
 
+    /** The review title is fixed outside its scroll body. Wait without touching the previous page. */
+    private fun awaitArchiveReviewDialog() {
+        var previous: Rect? = null
+        var stableSince: Long? = null
+        ui.snapshot(By.text("Review campaign archive").pkg(product), "stationary campaign archive review dialog",
+            timeoutMs = 180_000, refreshCache = true) { label ->
+            val bounds = Rect(label.visibleBounds)
+            if (bounds.isEmpty || bounds.left < 0 || bounds.top < 0 ||
+                bounds.right > device.displayWidth || bounds.bottom > device.displayHeight) {
+                previous = null; stableSince = null
+                null
+            } else {
+                val now = SystemClock.uptimeMillis()
+                stableSince = if (previous == bounds) stableSince ?: now else now
+                previous = bounds
+                bounds.takeIf { now - requireNotNull(stableSince) >= 500 }
+            }
+        }
+    }
+
     private fun campaignEntry(name: String) {
         if (name == "Inventory") { ui.campaignItems(product); return }
         ui.ensurePrimaryTab(product, "Campaign")
@@ -279,7 +299,9 @@ class CampaignImportInstrumentationTest {
         val document = device.wait(Until.findObject(By.text(name)), 20_000)
         assertNotNull("Fictional archive must be selected in DocumentsUI", document)
         document.click()
-        awaitText("Review campaign archive")
+        // Document reading/preview is asynchronous. Scrolling before this new
+        // dialog exists would move the old import page or overscroll the review.
+        awaitArchiveReviewDialog()
     }
 
     private fun saveBackup(fileName: String = "astravar-native-preimport-backup.json") {
