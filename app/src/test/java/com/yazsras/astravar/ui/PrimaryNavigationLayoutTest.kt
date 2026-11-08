@@ -63,7 +63,10 @@ class PrimaryNavigationLayoutTest {
                 val layouts = mutableListOf<TextLayoutResult>()
                 compose.runOnIdle {
                     assertTrue(text.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(layouts) == true)
-                    assertFalse("$name must retain its complete label", layouts.single().hasVisualOverflow)
+                    val layout = layouts.single()
+                    assertFalse("$name must retain its complete label: size=${layout.size}; " +
+                        "constraints=${layout.layoutInput.constraints}; widthOverflow=${layout.didOverflowWidth}; " +
+                        "heightOverflow=${layout.didOverflowHeight}; paragraph=${layout.multiParagraph.width}x${layout.multiParagraph.height}", layout.hasVisualOverflow)
                 }
                 button.performClick()
             }

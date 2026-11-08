@@ -27,21 +27,48 @@ import com.yazsras.astravar.R
 /** A place for each everyday task. Combat lives on the character sheet; tools are in the header. */
 val rebuildDestinations = listOf("Character", "Inventory", "Companions", "Campaign")
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable fun RebuildAppHeader(demo: Boolean, search: (() -> Unit)? = null, tools: (() -> Unit)? = null) {
-    FlowRow(Modifier.fillMaxWidth().background(RebuildPalette.Void).statusBarsPadding()
-        .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
+    val brandStyle = androidx.compose.ui.text.TextStyle(fontFamily = DisplayFace, fontSize = 18.sp, letterSpacing = 1.2.sp)
+    val actionStyle = MaterialTheme.typography.labelLarge
+    val actions = listOfNotNull(search?.let { "Find" to it }, tools?.let { "Tools" to it })
+    val widths = actions.associate { (name, _) -> name to with(density) {
+        // Reserve the measured single-line label plus content padding and a small
+        // rounding allowance. Row measurement must not squeeze the first action
+        // into the space left beside the brand before deciding to wrap.
+        measurer.measure(name, style = actionStyle, softWrap = false, maxLines = 1).size.width.toDp() + 32.dp
+    } }
+    val brandWidth = with(density) { measurer.measure("ASTRAVAR", style = brandStyle).size.width.toDp() } + 32.dp
+    val demoWidth = if (demo) with(density) {
+        measurer.measure("DEMO", style = MaterialTheme.typography.labelSmall).size.width.toDp()
+    } else 0.dp
+    val actionCount = actions.size + if (demo) 1 else 0
+    val actionWidth = widths.values.fold(demoWidth) { total, width -> total + width.coerceAtLeast(48.dp) } +
+        8.dp * (actionCount - 1).coerceAtLeast(0)
+    val brand: @Composable () -> Unit = {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ArcaneIcon("Emblem", Modifier.size(24.dp), RebuildPalette.GoldBright)
-            Text("ASTRAVAR", fontFamily = DisplayFace, fontSize = 18.sp, letterSpacing = 1.2.sp, color = RebuildPalette.GoldBright)
+            Text("ASTRAVAR", style = brandStyle, color = RebuildPalette.GoldBright, maxLines = 1, softWrap = false)
         }
-        // Move this complete group to a second row when scaled text cannot fit.
-        // Find and Tools remain real 48dp controls instead of clipping offscreen.
+    }
+    val controls: @Composable () -> Unit = {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (search != null) PlayerTextButton(onClick = search) { Text("Find") }
-            if (tools != null) PlayerTextButton(onClick = tools) { Text("Tools") }
+            actions.forEach { (name, action) ->
+                PlayerTextButton(onClick = action, modifier = Modifier.widthIn(min = widths.getValue(name))) {
+                    Text(name, style = actionStyle, maxLines = 1, softWrap = false)
+                }
+            }
             if (demo) Text("DEMO", color = RebuildPalette.Cyan, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxWidth().background(RebuildPalette.Void).statusBarsPadding()
+        .padding(horizontal = 16.dp, vertical = 8.dp)) {
+        if (brandWidth + actionWidth + 8.dp <= maxWidth) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) { brand(); controls() }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) { brand(); controls() }
         }
     }
 }

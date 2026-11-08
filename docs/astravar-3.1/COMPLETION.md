@@ -66,9 +66,11 @@ new Kotlin implementation.
 
 Local Gradle cannot resolve `org.jetbrains.kotlin.android:2.2.21` from the pinned
 repositories; it fails before source compilation. Required new Kotlin, Compose,
-Room, debug/release, lint and native tests must execute in hosted CI. No owner
-signing environment is provisioned in this workspace. Existing signing inputs,
-permanent package and certificate pin remain unchanged.
+Room, debug/release, lint and native tests must execute in hosted CI. The existing private owner-signing recovery artifact was subsequently recovered
+outside Git/CI. Its private/public pair and certificate match the historical pin
+and actual code43 owner APK. Final owner signing still follows successful final
+validation and exact non-signature entry comparison with the tested optimized APK.
+No replacement identity or CI owner secret was created.
 
 Hosted native testing uses an isolated Android 16/API36 emulator and disposable
 CI certificates. The optimized release and debug QA SQLite fixture run in separate
@@ -85,8 +87,10 @@ it does not establish original-owner key or physical handset compatibility.
   a form does not automatically transform, spend resources or swap effects. Form
   payloads are local to this device and full backups; existing connection grants
   cannot publish or modify them.
-- Structured relationships use saved campaign identities; unrelated local playable
-  character IDs are not silently presented as campaign-store identities.
+- Structured relationships use saved campaign identities. A newly created
+  playable-only character cannot be a campaign relationship endpoint until it has
+  a separately reviewed source counterpart. These identities are not silently
+  mirrored, aliased or presented as synchronized.
 - Complete campaign JSON backup retains its explicit 32-million-character/32MiB
   document limits. Fixing character selection does not remove full-backup limits.
 - Training, resources, spells and accepted homebrew still require explicit review

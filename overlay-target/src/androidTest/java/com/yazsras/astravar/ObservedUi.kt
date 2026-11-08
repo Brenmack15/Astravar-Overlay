@@ -90,6 +90,10 @@ internal class ObservedUi(private val device: UiDevice) {
                 val remaining = deadline - SystemClock.uptimeMillis()
                 if (remaining <= 0) missing()
                 try {
+                    // Compose scroll can leave individual descendant AX bounds
+                    // cached at the old viewport even after pixels have moved.
+                    // Refresh observations before looking up labels; never retry taps.
+                    clearObservationCache()
                     device.wait(Until.hasObject(selector), minOf(1_000L, remaining))
                     val matches = device.findObjects(selector)
                     val node = if (preferLast) matches.lastOrNull() else matches.firstOrNull()

@@ -62,7 +62,7 @@ class UpdatePreservationInstrumentationTest {
         tap("Companions", preferLast = true)
         if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
         find("Party & family")
-        listOf("Zerg Hasma", "Eek", "Korr", "Veyrath").forEach { find(it) }
+        listOf("CI Native Handler", "Eek", "Korr", "Veyrath").forEach { find(it) }
         // Layout acceptance captures are native emulator output, not a physical Galaxy test.
         device.executeShellCommand("wm size 1080x2400")
         for (scale in listOf("1.0", "1.3", "2.0")) {
