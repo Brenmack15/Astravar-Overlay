@@ -11,6 +11,39 @@ import struct
 import zipfile
 
 OWNER_CERTIFICATE = "4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847"
+PERMANENT_PACKAGE = "com.yazsras.astravar"
+QA_LABELS = {
+    "com.yazsras.astravar.v2uidebug": "Astravar QA",
+    "com.yazsras.astravar.v2statdebug": "Astravar Remote QA",
+}
+
+
+def verify_application_identity(badging: str, package: str, version_code: int,
+                                owner_signed: bool = False) -> tuple[str, bool]:
+    """Validate the merged label for the exact product; never relax release checks.
+
+    Code 44 intentionally distinguishes the disposable QA installs. Older QA
+    artifacts used Astravar, so retain verification of those historical builds.
+    The caller cannot supply an arbitrary expected label to bypass this policy.
+    """
+    debuggable = "application-debuggable" in badging.splitlines()
+    if owner_signed and package != PERMANENT_PACKAGE:
+        raise ValueError("An owner release candidate must use the permanent package")
+    if package == PERMANENT_PACKAGE and debuggable:
+        raise ValueError("The permanent Astravar application must not be debuggable")
+    qa_label = QA_LABELS.get(package) if version_code >= 44 else None
+    if qa_label is not None and not debuggable:
+        raise ValueError("A disposable QA package must be debuggable")
+    expected_label = qa_label or "Astravar"
+    labels = re.findall(r"^application-label(?:-[^:]+)?:'([^']*)'$", badging, re.MULTILINE)
+    if not labels or any(label != expected_label for label in labels):
+        raise ValueError(f"Every application label must be {expected_label} for {package}")
+    # aapt emits an empty launcher label when the activity inherits the verified
+    # application label. Validate explicit nonempty activity-level overrides.
+    launcher_labels = re.findall(r"^launchable-activity:.*? label='([^']*)'", badging, re.MULTILINE)
+    if any(label and label != expected_label for label in launcher_labels):
+        raise ValueError(f"Every launcher label must be {expected_label} for {package}")
+    return expected_label, debuggable
 
 
 def dex_defined_types(data: bytes) -> set[str]:
@@ -85,12 +118,7 @@ def inspect(apk: Path, sdk: Path, package: str, version_name: str, version_code:
     actual_package, actual_code, actual_name = metadata.groups()
     if (actual_package, int(actual_code), actual_name) != (package, version_code, version_name):
         raise ValueError(f"Unexpected package/version: {metadata.group(0)}")
-    debuggable = "application-debuggable" in badging
-    if owner_signed and debuggable:
-        raise ValueError("An owner release candidate must not be debuggable")
-    labels = re.findall(r"^application-label(?:-[^:]+)?:'([^']+)'$", badging, re.MULTILINE)
-    if not labels or any(label != "Astravar" for label in labels):
-        raise ValueError("Every application label must be Astravar")
+    label, debuggable = verify_application_identity(badging, actual_package, int(actual_code), owner_signed)
     icons = re.findall(r"^application-icon-[^:]+:'([^']+)'$", badging, re.MULTILINE)
     if not icons:
         raise ValueError("Supplied launcher icon resource missing")
@@ -149,7 +177,7 @@ def inspect(apk: Path, sdk: Path, package: str, version_name: str, version_code:
     if owner_signed and certificate != OWNER_CERTIFICATE:
         raise ValueError("APK certificate differs from the historical owner identity")
     return dict(package=actual_package, version_code=int(actual_code), version_name=actual_name,
-                label="Astravar", launcher_icons=icons, launcher_foreground_sha256=foreground_hash,
+                label=label, launcher_icons=icons, launcher_foreground_sha256=foreground_hash,
                 launcher_artwork_bytes_verified=True, certificate_sha256=certificate,
                 debuggable=debuggable, native_64bit_load_alignment=native_alignment,
                 owner_signature_verified=certificate == OWNER_CERTIFICATE,

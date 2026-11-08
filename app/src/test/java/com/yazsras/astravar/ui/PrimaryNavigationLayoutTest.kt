@@ -34,11 +34,45 @@ import org.robolectric.annotation.LooperMode
 class PrimaryNavigationLayoutTest {
     @get:Rule val compose = createAstravarComposeRule()
 
-    @Test fun normalTextKeepsAllFiveReadableDestinationsInOneRow() = verifyNavigation(1f, 1)
+    @Test fun normalTextKeepsAllFourReadableDestinationsInOneRow() = verifyNavigation(1f, 1)
 
-    // Character and Inventory require pairs at 360 dp with doubled text. Keep
+    // Four destinations require two rows at 360 dp with doubled text. Keep
     // complete labels and the requested font size rather than squeezing a row.
-    @Test fun doubleTextKeepsCompleteSingleLineLabelsAndSelectedNavigationInThreeRows() = verifyNavigation(2f, 3)
+    @Test fun doubleTextKeepsCompleteSingleLineLabelsAndSelectedNavigationInTwoRows() = verifyNavigation(2f, 2)
+
+    @Test fun doubleTextKeepsFindAndToolsVisibleAndActionableOnANarrowPhone() {
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        val opened = mutableListOf<String>()
+        try {
+            activity.get().setContent {
+                CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 2f)) {
+                    AstravarTheme {
+                        Box(Modifier.width(360.dp)) {
+                            RebuildAppHeader(true, search = { opened += "Find" }, tools = { opened += "Tools" })
+                        }
+                    }
+                }
+            }
+            val viewport = compose.onRoot().fetchSemanticsNode().boundsInRoot
+            listOf("Find", "Tools").forEach { name ->
+                val button = compose.onNode(hasText(name) and hasClickAction())
+                    .assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+                val bounds = button.fetchSemanticsNode().boundsInRoot
+                assertTrue("$name must fit entirely on screen at double text", bounds.left >= viewport.left && bounds.right <= viewport.right)
+                val text = compose.onNodeWithText(name, useUnmergedTree = true).fetchSemanticsNode()
+                val layouts = mutableListOf<TextLayoutResult>()
+                compose.runOnIdle {
+                    assertTrue(text.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(layouts) == true)
+                    val layout = layouts.single()
+                    assertFalse("$name must retain its complete label: size=${layout.size}; " +
+                        "constraints=${layout.layoutInput.constraints}; widthOverflow=${layout.didOverflowWidth}; " +
+                        "heightOverflow=${layout.didOverflowHeight}; paragraph=${layout.multiParagraph.width}x${layout.multiParagraph.height}", layout.hasVisualOverflow)
+                }
+                button.performClick()
+            }
+            assertEquals(listOf("Find", "Tools"), opened)
+        } finally { activity.pause().stop().destroy() }
+    }
 
     private fun verifyNavigation(fontScale: Float, expectedRows: Int) {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()

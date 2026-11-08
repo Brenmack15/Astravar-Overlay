@@ -107,17 +107,17 @@ import java.util.UUID
             if (filtered.isEmpty()) Text("No matching item. Add an acquired item through Inventory first.", color = RebuildPalette.Muted)
             filtered.take(80).forEach { item ->
                 val placement = placements.firstOrNull { it.itemId == item.id }
-                PlayerEntry(item.title, "${partyMemberName(placement?.holderProfileId)} · ${placement?.state ?: item.itemState} · quantity ${item.quantity ?: "unknown"}",
+                PlayerEntry(item.title, "${partyMemberName(placement?.holderProfileId, profiles)} · ${placement?.state ?: item.itemState} · quantity ${item.quantity ?: "unknown"}",
                     "Core", onClick = { select(item) })
             }
             if (filtered.size > 80) Text("Refine the search to show more matching items.", color = RebuildPalette.Muted)
         } else {
             Text(snapshot.title, style = MaterialTheme.typography.titleLarge)
-            Text("Current holder: ${placementSnapshot?.holderProfileId?.let(::partyMemberName) ?: snapshot.owner}\nCurrent state: ${placementSnapshot?.state ?: snapshot.itemState}\nQuantity: ${snapshot.quantity ?: "unknown"} · item ID: ${snapshot.id}",
+            Text("Current holder: ${partyMemberName(placementSnapshot?.holderProfileId, profiles)}\nCurrent state: ${placementSnapshot?.state ?: snapshot.itemState}\nQuantity: ${snapshot.quantity ?: "unknown"} · item ID: ${snapshot.id}",
                 color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
             if (stale) Text("This item or its possession changed. Close and reopen to review the latest revision.", color = MaterialTheme.colorScheme.error)
-            PartySelection("Destination holder", partyMemberName(holder.takeIf(String::isNotBlank)),
-                listOf("" to "Unknown holder") + profiles.map { it.id to it.name.ifBlank { partyMemberName(it.id) } }) { holder = it }
+            PartySelection("Destination holder", partyMemberName(holder.takeIf(String::isNotBlank), profiles),
+                listOf("" to "Unknown holder") + profiles.map { it.id to it.name.ifBlank { partyMemberName(it.id, profiles) } }) { holder = it }
             PartySelection("Equipment state", state, listOf("Carried", "Equipped", "Installed", "Stored").map { it to it }) {
                 state = it
                 if (it != "Installed") project = null
@@ -126,7 +126,7 @@ import java.util.UUID
                 listOf("" to "No container") + items.filter { it.id != snapshot.id && it.itemState !in setOf("Consumed", "Sold", "Lost") && it.quantity != 0 }.map { it.id to it.title }) { container = it.ifBlank { null }; if (container != null) project = null }
             if (state == "Installed") PartySelection("Attach to invention", projects.firstOrNull { it.id == project }?.title ?: "No invention",
                 listOf("" to "No invention") + projects.map { it.id to it.title }) { project = it.ifBlank { null }; if (project != null) container = null }
-            Text("Review: ${snapshot.title} → ${partyMemberName(holder.takeIf(String::isNotBlank))} · $state${container?.let { " · in ${items.firstOrNull { item -> item.id == it }?.title ?: it}" }.orEmpty()}${project?.let { " · attached to ${projects.firstOrNull { row -> row.id == it }?.title ?: it}" }.orEmpty()}.",
+            Text("Review: ${snapshot.title} → ${partyMemberName(holder.takeIf(String::isNotBlank), profiles)} · $state${container?.let { " · in ${items.firstOrNull { item -> item.id == it }?.title ?: it}" }.orEmpty()}${project?.let { " · attached to ${projects.firstOrNull { row -> row.id == it }?.title ?: it}" }.orEmpty()}.",
                 color = RebuildPalette.Ice)
             Field("Confirmed transfer / equipment event source", source, { source = it }, single = false, enabled = !actions.busy)
             Text("The entire existing item entry moves. Unknown quantities stay unknown. Containers cannot cycle; container contents must be reconciled before changing their holder. A revision conflict saves nothing.",
@@ -139,12 +139,18 @@ import java.util.UUID
 
 @Composable internal fun PartySelection(label: String, selected: String, options: List<Pair<String, String>>, choose: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
     Column {
         Text(label, style = MaterialTheme.typography.labelLarge, color = RebuildPalette.Muted)
         Box {
-            PlayerOutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text("$selected ▾") }
+            PlayerOutlinedButton(onClick = { query = ""; expanded = true }, modifier = Modifier.fillMaxWidth()) { Text("$selected ▾") }
             DropdownMenu(expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = 320.dp)) {
-                options.forEach { (id, title) -> DropdownMenuItem(text = { Text(title) }, onClick = { choose(id); expanded = false }) }
+                if (options.size > 12) OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true,
+                    label = { Text("Search $label") }, modifier = Modifier.padding(8.dp).widthIn(min = 220.dp))
+                val matches = options.filter { (_, title) -> query.isBlank() || title.contains(query.trim(), ignoreCase = true) }
+                if (matches.isEmpty()) DropdownMenuItem(text = { Text("No matching records") }, onClick = {}, enabled = false)
+                matches.take(40).forEach { (id, title) -> DropdownMenuItem(text = { Text(title) }, onClick = { choose(id); expanded = false }) }
+                if (matches.size > 40) DropdownMenuItem(text = { Text("Search to narrow ${matches.size} records") }, onClick = {}, enabled = false)
             }
         }
     }

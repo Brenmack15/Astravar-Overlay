@@ -26,7 +26,7 @@ import kotlinx.coroutines.launch
     var busy by remember(profileId) { mutableStateOf(false) }
     var reviewed by remember(profileId) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    PlayerOutlinedButton(enabled = !busy, onClick = {
+    PlayerOutlinedButton(enabled = !busy && saved?.character?.archived != true, onClick = {
         busy = true; message = "Reading saved source…"
         scope.launch {
             try {
@@ -39,11 +39,12 @@ import kotlinx.coroutines.launch
             finally { busy = false }
         }
     }) { Text(if (busy) "Reading source…" else "Review playable attacks") }
+    if (saved?.character?.archived == true) Text("Restore this companion's playable sheet from Character → Switch before reviewing attacks.", color = RebuildPalette.GoldBright)
     if (message.isNotBlank()) Text(message, color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
     review?.let { current ->
         val stale = expectedRevision != saved?.revision
         PlayerSheet("Review companion attacks", onDismiss = { if (!busy) review = null }, dirty = selected.isNotEmpty(), actions = {
-            PlayerButton(enabled = !busy && expectedRevision != null && !stale && selected.isNotEmpty() && reviewed,
+            PlayerButton(enabled = !busy && expectedRevision != null && !stale && saved?.character?.archived != true && selected.isNotEmpty() && reviewed,
                 onClick = {
                     busy = true
                     scope.launch {

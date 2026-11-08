@@ -132,4 +132,15 @@ class CampaignCharacterSnapshotTest {
         assertEquals(1100, source.items.count { it.quantity == null })
         assertTrue(preview.warnings.any { it.contains("unknown quantities") })
     }
+    @Test fun companionEndpointRelationshipsAreScopedAndRemovedLinksStayHistorical() = runBlocking {
+        db.recordsDao().put(CompanionState(name = "Fictional selected companion", companionId = "selected"))
+        val link = CampaignLink("companion", "selected", "character-profile", "other", "Fictional bond", id = "companion-bond")
+        legacy.records.saveLink(link, source = "Fictional fixture")
+        assertTrue(legacy.readCharacterSnapshot("selected").links.any { it.id == link.id })
+        legacy.records.unlink(link.id, 1, "Fictional unlink", "unlink-scoped-edge")
+        assertFalse(legacy.readCharacterSnapshot("selected").links.any { it.id == link.id })
+        assertEquals(2L, db.recordsDao().allLinks().single { it.id == link.id }.revision)
+        assertEquals("UNLINK", db.recordsDao().allAudit().single { it.commandId == "unlink-scoped-edge" }.kind)
+    }
+
 }

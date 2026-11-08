@@ -64,18 +64,21 @@ class ReforgeCharacterUiTest {
             EffectDefinition("constitution", "Armor constitution", RuleSource("synthetic", "Test fixture", Acceptance.ACCEPTED_HOMEBREW), EffectPayload.Number(NumericTarget.ABILITY, NumberOperation.SET, 16, "CON"), requiresAttunement = false)
         ))), items = listOf(ItemInstance("armor-instance", "armor-definition")))
 
-    private fun withSheet(seed: Boolean = true, block: (ReforgeRepository) -> Unit) {
+    private fun withSheet(seed: Boolean = true, campaignSetup: (CampaignLedgerRepository) -> Unit = {},
+        block: (ReforgeRepository) -> Unit) {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val legacyDb = Room.inMemoryDatabaseBuilder(context, CampaignLedgerDb::class.java).build()
+        val ledger = CampaignLedgerRepository(legacyDb)
         val localDb = Room.inMemoryDatabaseBuilder(context, ReforgeDb::class.java).build()
         val repository = ReforgeRepository(localDb)
         if (seed) runBlocking { repository.create(fixture()) }
+        campaignSetup(ledger)
         val previous = System.getProperty("robolectric.windowManager.useRequestedSize")
         System.setProperty("robolectric.windowManager.useRequestedSize", "true")
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             captureView = controller.get().window.decorView
-            controller.get().setContent { AstravarTheme { ReforgeCharacterSheet(CampaignLedgerRepository(legacyDb), repository) } }
+            controller.get().setContent { AstravarTheme { ReforgeCharacterSheet(ledger, repository) } }
             block(repository)
         } finally {
             captureView = null
@@ -89,6 +92,40 @@ class ReforgeCharacterUiTest {
         compose.onNodeWithText("Create character").assertIsDisplayed()
         compose.waitForIdle()
         assertTrue(runBlocking { repository.observeAll().first() }.isEmpty())
+    }
+
+    @Test fun newCharacterNeedsOnlyNameAndRetainsUnknownStats() = withSheet(seed = false) { repository ->
+        compose.waitUntil(10000) { compose.onAllNodesWithText("Create character").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Create character").performClick()
+        compose.onNodeWithText("Name", substring = false).performTextInput("Fictional traveler")
+        compose.onNodeWithText("Save character").performClick()
+        compose.waitUntil(10000) { runBlocking { repository.observeAll().first() }.any { it.character.name == "Fictional traveler" } }
+        val character = runBlocking { repository.observeAll().first() }.single().character
+        assertEquals(1, character.level)
+        assertNull(character.baseMaxHp)
+        assertTrue(character.baseAbilities.values.all { it == null })
+        assertTrue(character.items.isEmpty())
+    }
+
+    @Test fun copyingCampaignItemIsExplicitAndKeepsOriginalIdentityWithoutMagic() {
+        var sourceId = ""
+        withSheet(campaignSetup = { ledger ->
+            sourceId = runBlocking { ledger.create(LedgerDraft(title = "Runed lantern", quantity = 1,
+                description = "Mysterious runes, no confirmed effect")).id }
+        }) { repository ->
+            compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Equipment").performScrollTo().performClick()
+            compose.onNodeWithText("Add from campaign inventory").performScrollTo().performClick()
+            assertTrue(runBlocking { repository.get("synthetic-player") }!!.character.items.none { it.id == sourceId })
+            compose.onNodeWithText("Runed lantern").performScrollTo().performClick()
+            compose.onNodeWithText("Copy item to character").performClick()
+            compose.waitUntil(10000) {
+                runBlocking { repository.get("synthetic-player") }!!.character.items.any { it.id == sourceId }
+            }
+            val character = runBlocking { repository.get("synthetic-player") }!!.character
+            assertEquals(1, character.items.single { it.id == sourceId }.quantity)
+            assertTrue(character.itemDefinitions.single { it.id == sourceId }.effects.isEmpty())
+        }
     }
 
     @Test fun equipPreviewIsReadOnlyAndConfirmationPreservesDamage() = withSheet { repository ->
@@ -145,6 +182,24 @@ class ReforgeCharacterUiTest {
         assertEquals(2, after.baselineConstitutionModifier)
         assertEquals(26, after.hpDamage)
         assertEquals(49, CharacterCalculator.calculate(after).currentHp)
+    }
+
+    @Test fun archiveRequiresConfirmationAndRestoreReturnsSameSavedSheet() = withSheet { repository ->
+        compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Switch character").performScrollTo().performClick()
+        compose.onNodeWithText("Archive Synthetic artificer").performScrollTo().performClick()
+        assertFalse(runBlocking { repository.get("synthetic-player") }!!.character.archived)
+        compose.onNodeWithText("Archive sheet").performClick()
+        compose.waitUntil(10000) { runBlocking { repository.observeActive().first() }.isEmpty() }
+        compose.onNodeWithTag("reforge-STR").assertDoesNotExist()
+        compose.onNodeWithText("View archived sheets").performScrollTo().performClick()
+        compose.onNodeWithText("Restore Synthetic artificer").performScrollTo().performClick()
+        compose.waitUntil(10000) { runBlocking { repository.get("synthetic-player") }!!.revision == 3L }
+        val after = runBlocking { repository.get("synthetic-player") }!!.character
+        assertFalse(after.archived)
+        assertEquals(fixture().items, after.items)
+        assertEquals(fixture().baseAbilities, after.baseAbilities)
+        assertEquals(fixture().currentHp, after.currentHp)
     }
 
 }

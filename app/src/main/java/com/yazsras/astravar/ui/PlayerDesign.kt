@@ -27,27 +27,27 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
-/** Approved palette. Ornament is reserved for the identity, ability tiles and primary attack. */
+/** Astravar 3.1: calm, legible fantasy UI. Art is a supporting detail, never a control. */
 object RebuildPalette {
-    val Void = Color(0xFF000510)
-    val Canvas = Color(0xFF080E1B)
-    val Panel = Color(0xFF101A2D)
-    val Elevated = Color(0xFF142038)
-    val Active = Color(0xFF20304D)
-    val Outline = Color(0xFF2A3952)
-    val Purple = Color(0xFFB7A5DF)
-    val Silver = Color(0xFFE3E8F1)
-    val GoldShadow = Color(0xFF6E481E)
-    val GoldBurnished = Color(0xFFBF7B1A)
-    val Gold = Color(0xFFF29E11)
-    val GoldBright = Color(0xFFFAC71E)
-    val GoldGlint = Color(0xFFF9E14E)
-    val BlueDeep = Color(0xFF012F74)
-    val BlueVivid = Color(0xFF034FBF)
-    val BlueAccent = Color(0xFF0771E7)
-    val Cyan = Color(0xFF05D6F6)
-    val Ice = Color(0xFFA1E8FB)
-    val Muted = Color(0xFFA4B3CC)
+    val Void = Color(0xFF0F0C16)
+    val Canvas = Color(0xFF15121F)
+    val Panel = Color(0xFF1C1829)
+    val Elevated = Color(0xFF252033)
+    val Active = Color(0xFF383046)
+    val Outline = Color(0xFF504558)
+    val Purple = Color(0xFFC7AEDB)
+    val Silver = Color(0xFFF1EDF3)
+    val GoldShadow = Color(0xFF5D4737)
+    val GoldBurnished = Color(0xFFAE8861)
+    val Gold = Color(0xFFD7B486)
+    val GoldBright = Color(0xFFE9CAA0)
+    val GoldGlint = Color(0xFFF6DCB3)
+    val BlueDeep = Color(0xFF363049)
+    val BlueVivid = Color(0xFF6E6087)
+    val BlueAccent = Color(0xFFBD9CD6)
+    val Cyan = Color(0xFF99CEC1)
+    val Ice = Color(0xFFC4E3D9)
+    val Muted = Color(0xFFB5AFBE)
 }
 
 object PlayerSpace {
@@ -55,7 +55,7 @@ object PlayerSpace {
     val Gap = 12.dp
     val Screen = 16.dp
     val Touch = 48.dp
-    val Radius = 18.dp
+    val Radius = 20.dp
 }
 
 @Composable fun PlayerCard(
@@ -63,7 +63,7 @@ object PlayerSpace {
     content: @Composable ColumnScope.() -> Unit
 ) {
     val shape = RoundedCornerShape(PlayerSpace.Radius)
-    Column(modifier.fillMaxWidth().clip(shape).background(RebuildPalette.Elevated).border(1.dp, RebuildPalette.Outline.copy(alpha = .6f), shape)
+    Column(modifier.fillMaxWidth().clip(shape).background(RebuildPalette.Panel).border(1.dp, RebuildPalette.Outline.copy(alpha = .55f), shape)
         .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
         .padding(padding), verticalArrangement = Arrangement.spacedBy(spacing), content = content)
 }

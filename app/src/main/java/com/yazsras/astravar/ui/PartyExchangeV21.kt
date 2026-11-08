@@ -72,7 +72,7 @@ import java.util.UUID
                     require(title.isNotBlank()) { "Name the acquired item." }
                     val quantity = itemCount(count)
                     require(quantity == null || quantity > 0) { "An acquired item needs a positive count, or blank for unknown." }
-                    creation = listOf(LedgerDraft(title = title.trim(), owner = partyMemberName(memberId),
+                    creation = listOf(LedgerDraft(title = title.trim(), owner = partyMemberName(memberId, profiles),
                         itemState = "Carried", location = "Actor:$memberId", quantity = quantity,
                         evidenceStatus = "Confirmed", source = source.trim()))
                 }
@@ -122,9 +122,9 @@ import java.util.UUID
             RecordValue("Opening balances", "${wallet?.copper ?: "?"} cp · ${wallet?.silver ?: "?"} sp · ${wallet?.gold ?: "?"} gp · ${wallet?.electrum ?: "?"} ep · ${wallet?.platinum ?: "?"} pp")
             val change = review.currency.firstOrNull()
             RecordValue("Exact coin changes", "${change?.copperDelta ?: 0} cp · ${change?.silverDelta ?: 0} sp · ${change?.goldDelta ?: 0} gp · ${change?.electrumDelta ?: 0} ep · ${change?.platinumDelta ?: 0} pp")
-            review.creations.forEach { RecordValue("Acquired item", "${it.title} · quantity ${it.quantity ?: "unknown"} → ${partyMemberName(memberId)} · Carried") }
+            review.creations.forEach { RecordValue("Acquired item", "${it.title} · quantity ${it.quantity ?: "unknown"} → ${partyMemberName(memberId, profiles)} · Carried") }
             review.quantities.forEach { RecordValue("Existing item quantity", "${item?.title ?: it.itemId} · ${item?.quantity ?: "unknown"} with change ${it.delta}") }
-            review.moves.forEach { RecordValue("Existing item transfer", "${item?.title ?: it.itemId} → ${partyMemberName(it.holderProfileId)} · ${it.state}") }
+            review.moves.forEach { RecordValue("Existing item transfer", "${item?.title ?: it.itemId} → ${partyMemberName(it.holderProfileId, profiles)} · ${it.state}") }
             RecordValue("Confirmed source", review.source)
             if (stale) Text("A reviewed record changed. Close and reopen to use its current revision. No exchange has been applied.", color = MaterialTheme.colorScheme.error)
             PlayerTextButton(onClick = { reviewJson = null }) { Text("Edit exchange") }
@@ -144,7 +144,7 @@ import java.util.UUID
             if (operation == "New item") {
                 Field("Acquired item name", title, { title = it })
                 Field("Acquired quantity · blank = unknown", count, { count = it })
-                Text("A new acquired physical item receives one persistent ID and recorded possession by ${partyMemberName(memberId)}. Use Quantity for an existing stock entry.", color = RebuildPalette.Muted,
+                Text("A new acquired physical item receives one persistent ID and recorded possession by ${partyMemberName(memberId, profiles)}. Use Quantity for an existing stock entry.", color = RebuildPalette.Muted,
                     style = MaterialTheme.typography.bodySmall)
             } else {
                 PartySelection("Existing inventory item", item?.title ?: "Choose item", items.filter {
@@ -157,7 +157,7 @@ import java.util.UUID
                 }
                 if (operation == "Quantity") Field("Existing quantity change · + gain / − spend", quantityDelta, { quantityDelta = it })
                 else {
-                    PartySelection("Destination holder", partyMemberName(destination), profiles.map { it.id to it.name.ifBlank { partyMemberName(it.id) } }) { destination = it }
+                    PartySelection("Destination holder", partyMemberName(destination, profiles), profiles.map { it.id to it.name.ifBlank { partyMemberName(it.id, profiles) } }) { destination = it }
                     PartySelection("Destination state", placementState, listOf("Carried", "Equipped", "Stored").map { it to it }) { placementState = it }
                 }
             }

@@ -13,8 +13,8 @@ android {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(43)
-        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("3.0.0-rc2")
+        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(45)
+        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("3.1.0-rc1")
     }
     signingConfigs {
         create("owner") {
@@ -30,10 +30,12 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".v2uidebug"; versionNameSuffix = "-ui-rebuild"
-            manifestPlaceholders["astravarDebugLabel"] = "Astravar"
+            // The QA package intentionally has its own empty data sandbox. Label it
+            // unmistakably so it cannot be confused with the owner's real install.
+            manifestPlaceholders["astravarDebugLabel"] = "Astravar QA"
             if (remoteStatTest) {
                 applicationIdSuffix = ".v2statdebug"; versionNameSuffix = "-remote-stat-test"
-                manifestPlaceholders["astravarDebugLabel"] = "Astravar"
+                manifestPlaceholders["astravarDebugLabel"] = "Astravar Remote QA"
             }
         }
         release {

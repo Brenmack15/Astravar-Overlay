@@ -65,7 +65,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         val output = mutableListOf<CampaignSyncRecord>()
         db.recordsDao().allCharacterProfiles().filter { it.id in profileIds }.forEach { output += envelope("character-profile", it.id, it.revision, it) }
         db.recordsDao().allCharacterAbilities().filter { it.profileId in profileIds }.forEach { output += envelope("character-ability", it.id, it.revision, it) }
-        sheets.forEach { output += envelope("party-sheet", it.profileId, it.revision, it.copy(contentJson = campaignJson.encodeToString(it.sheet.copy(portraitBase64 = null)))) }
+        sheets.forEach { output += envelope("party-sheet", it.profileId, it.revision, it.copy(contentJson = CampaignLocalFormBoundary.sheetContent(it.sheet))) }
         db.partyDao().allWallets().filter { it.campaignId == campaignId }.forEach { wallet ->
             val row = envelope("wallet",wallet.id,wallet.revision,wallet)
             output += row.copy(fields = JsonObject(row.fields + mapOf("electrum" to (wallet.electrum?.let(::JsonPrimitive) ?: JsonNull),"platinum" to (wallet.platinum?.let(::JsonPrimitive) ?: JsonNull))))
@@ -86,7 +86,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         db.recordsDao().allFacts().filter {it.entityId in entityIds}.forEach {output += envelope("fact",it.id,it.revision,it)}
         db.recordsDao().allMilestones().filter {it.entityId in entityIds}.forEach {output += envelope("milestone",it.id,it.revision,it)}
         fun endpoint(type:String,id:String) = when(type){"item"->id in itemIds;"project"->id in projectIds;"connection"->id in entityIds;"companion"->id in companionIds;"character-profile"->id in profileIds;else->false}
-        db.recordsDao().allLinks().filter {endpoint(it.fromType,it.fromId) && endpoint(it.toType,it.toId)}.forEach {output += envelope("link",it.id,it.revision,it)}
+        db.recordsDao().activeLinks().filter {endpoint(it.fromType,it.fromId) && endpoint(it.toType,it.toId)}.forEach {output += envelope("link",it.id,it.revision,it)}
         val visibleSubjects=output.map {it.recordId}.toSet() + profileIds + companionIds
         if (includeReadOnly) db.recordsDao().allAudit().filter {audit -> (audit.recordId in visibleSubjects || audit.recordType=="campaign-transaction" && audit.recordId==campaignId) && diagnostics.none {audit.recordId==it || audit.recordId.startsWith("$it:")}}.forEach {output += CampaignSyncAuditProjection.records(envelope("audit",it.id,1,it))}
         // Initial acquisition and later inventory edits predate CampaignAudit and retain their original ledger identities.
@@ -335,8 +335,12 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
                 val old = current?.let { campaignJson.decodeFromJsonElement<PartySheetRecord>(it.fields) }
                 require(if (old == null) v.sheet.resources.all { it.current == null } else v.sheet.resources == old.sheet.resources) { "Use resource operations for expenditure." }
                 require(v.sheet.conditions == (old?.sheet?.conditions ?: "")) { "Use status operations for conditions." }
+                // Forms are local-only in this RC. Remote descriptive edits cannot
+                // introduce form HP or erase forms omitted from the public projection.
+                require(v.sheet.forms.isEmpty()) { "Alternate forms are local-only. Edit them on this device." }
                 val existing = db.partyDao().sheet(v.profileId)?.sheet
-                party.saveSheet(v.profileId,v.sheet.copy(portraitBase64 = existing?.portraitBase64),expected,source,child) }
+                party.saveSheet(v.profileId,v.sheet.copy(portraitBase64 = existing?.portraitBase64,
+                    forms = existing?.forms.orEmpty()),expected,source,child) }
             "companion-state" -> { val v = campaignJson.decodeFromJsonElement<CompanionState>(f); identity(v.companionId); records.saveCompanionState(v,expected,source,child) }
             "companion-resource" -> { val v = campaignJson.decodeFromJsonElement<CompanionResource>(f); identity(v.id); records.saveCompanionResource(v,expected,source,child) }
             "item-details" -> { val v = campaignJson.decodeFromJsonElement<ItemDetails>(f); identity(v.itemId); records.saveItemDetails(v,expected,source,child) }
@@ -428,10 +432,73 @@ internal object CampaignSyncReferenceProjection {
 }
 
 
-/** Bounded read-only history projections retain the exact full original fields and immutable source IDs. */
+/** Alternate forms have no remote scope or typed mutation contract in this RC. */
+internal object CampaignLocalFormBoundary {
+    /** Explicit omission is independent of serializer default-encoding policy. */
+    fun sheetContent(sheet: PartySheetData): String = JsonObject(campaignJson.encodeToJsonElement(
+        sheet.copy(portraitBase64 = null, forms = emptyList())).jsonObject - "forms").toString()
+
+    fun sheetFields(fields: JsonObject): JsonObject {
+        val content = Json.parseToJsonElement(fields.getValue("contentJson").jsonPrimitive.content).jsonObject
+        return JsonObject(fields + ("contentJson" to JsonPrimitive(sheetContent(
+            campaignJson.decodeFromJsonElement<PartySheetData>(content)))))
+    }
+
+    private fun sheetRecordJson(value: String): String {
+        val record = Json.parseToJsonElement(value).jsonObject
+        val content = Json.parseToJsonElement(record.getValue("contentJson").jsonPrimitive.content).jsonObject
+        if (!content.containsKey("forms")) return value
+        return JsonObject(record + ("contentJson" to JsonPrimitive(JsonObject(content - "forms").toString()))).toString()
+    }
+
+    private fun transactionJson(value: String): String {
+        val rows = Json.parseToJsonElement(value).jsonArray
+        var changed = false
+        val projected = rows.map { row ->
+            val entry = row.jsonObject
+            if (entry["kind"]?.jsonPrimitive?.content != "party-sheet") row
+            else {
+                val fields = entry.getValue("fields").jsonObject
+                val projectedFields = Json.parseToJsonElement(sheetRecordJson(fields.toString())).jsonObject
+                if (projectedFields != fields) changed = true
+                JsonObject(entry + ("fields" to projectedFields))
+            }
+        }
+        return if (changed) JsonArray(projected).toString() else value
+    }
+
+    fun audit(record: CampaignSyncRecord): CampaignSyncRecord {
+        try {
+            val type = record.fields["recordType"]?.jsonPrimitive?.content
+            if (type !in setOf("party-sheet", "campaign-transaction")) return record
+            // Project copies only. Original local audit bytes and receipts remain immutable.
+            val fields = record.fields.toMutableMap()
+            for (key in listOf("beforeJson", "afterJson")) {
+                val value = fields[key]?.takeUnless { it is JsonNull }?.jsonPrimitive?.content ?: continue
+                fields[key] = JsonPrimitive(if (type == "party-sheet") sheetRecordJson(value) else transactionJson(value))
+            }
+            return record.copy(fields = JsonObject(fields))
+        } catch (_: Exception) {
+            // Older validated history could have identity/revision-only snapshots.
+            // Unsupported payloads cannot stop unrelated reads or escape unredacted.
+            val metadata = setOf("id", "commandId", "recordType", "recordId", "itemId", "kind", "evidenceStatus",
+                "source", "payloadFingerprint", "priorRevision", "resultingRevision", "createdAt")
+            return record.copy(fields = buildJsonObject {
+                record.fields.filter { (key, value) -> key in metadata && value is JsonPrimitive }
+                    .forEach { (key, value) -> put(key, value) }
+                put("projectionStatus", "METADATA_ONLY_UNSUPPORTED_HISTORICAL_PAYLOAD")
+                put("detail", "Historical payload omitted because its shape is unsupported. Original evidence remains on this device.")
+            })
+        }
+    }
+}
+
+/** Bounded history preserves original source IDs while omitting local-only form payloads. */
 internal object CampaignSyncAuditProjection {
-    fun records(record: CampaignSyncRecord): List<CampaignSyncRecord> {
-        require(record.kind == "audit")
+    fun records(original: CampaignSyncRecord): List<CampaignSyncRecord> {
+        require(original.kind == "audit")
+        // Sanitize before chunking so all-scope audit transport also stays local-only.
+        val record = CampaignLocalFormBoundary.audit(original)
         val content = OwnerSyncProtocol.canonical(record.fields)
         val bytes = content.toByteArray(Charsets.UTF_8).size
         if (bytes <= 30_000) return listOf(record)

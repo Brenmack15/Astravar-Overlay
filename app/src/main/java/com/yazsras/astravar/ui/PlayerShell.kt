@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -20,18 +21,55 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.yazsras.astravar.data.CampaignLedgerRepository
+import com.yazsras.astravar.R
 
-val rebuildDestinations = listOf("Character", "Combat", "Inventory", "Campaign", "More")
+/** A place for each everyday task. Combat lives on the character sheet; tools are in the header. */
+val rebuildDestinations = listOf("Character", "Inventory", "Companions", "Campaign")
 
-@Composable fun RebuildAppHeader(demo: Boolean, search: (() -> Unit)? = null) {
-    Row(Modifier.fillMaxWidth().background(RebuildPalette.Void).statusBarsPadding()
-        .padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ArcaneIcon("Emblem", Modifier.size(24.dp), Brass)
-        Text("ASTRAVAR", fontFamily = DisplayFace, fontSize = 20.sp, letterSpacing = 2.sp, color = Brass)
-        Spacer(Modifier.weight(1f))
-        if (search != null) PlayerTextButton(onClick = search) { Text("Search") }
-        if (demo) Text("DEMO", color = RebuildPalette.Cyan, style = MaterialTheme.typography.labelSmall)
+@Composable fun RebuildAppHeader(demo: Boolean, search: (() -> Unit)? = null, tools: (() -> Unit)? = null) {
+    val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
+    val brandStyle = androidx.compose.ui.text.TextStyle(fontFamily = DisplayFace, fontSize = 18.sp, letterSpacing = 1.2.sp)
+    val actionStyle = MaterialTheme.typography.labelLarge
+    val actions = listOfNotNull(search?.let { "Find" to it }, tools?.let { "Tools" to it })
+    val widths = actions.associate { (name, _) -> name to with(density) {
+        // Reserve the measured single-line label plus content padding and a small
+        // rounding allowance. Row measurement must not squeeze the first action
+        // into the space left beside the brand before deciding to wrap.
+        measurer.measure(name, style = actionStyle, softWrap = false, maxLines = 1).size.width.toDp() + 32.dp
+    } }
+    val brandWidth = with(density) { measurer.measure("ASTRAVAR", style = brandStyle).size.width.toDp() } + 32.dp
+    val demoWidth = if (demo) with(density) {
+        measurer.measure("DEMO", style = MaterialTheme.typography.labelSmall).size.width.toDp()
+    } else 0.dp
+    val actionCount = actions.size + if (demo) 1 else 0
+    val actionWidth = widths.values.fold(demoWidth) { total, width -> total + width.coerceAtLeast(48.dp) } +
+        8.dp * (actionCount - 1).coerceAtLeast(0)
+    val brand: @Composable () -> Unit = {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ArcaneIcon("Emblem", Modifier.size(24.dp), RebuildPalette.GoldBright)
+            Text("ASTRAVAR", style = brandStyle, color = RebuildPalette.GoldBright, maxLines = 1, softWrap = false)
+        }
+    }
+    val controls: @Composable () -> Unit = {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            actions.forEach { (name, action) ->
+                PlayerTextButton(onClick = action, modifier = Modifier.width(widths.getValue(name).coerceAtLeast(48.dp))) {
+                    Text(name, Modifier.fillMaxWidth(), style = actionStyle, textAlign = TextAlign.Center, maxLines = 1, softWrap = false)
+                }
+            }
+            if (demo) Text("DEMO", color = RebuildPalette.Cyan, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxWidth().background(RebuildPalette.Void).statusBarsPadding()
+        .padding(horizontal = 16.dp, vertical = 8.dp)) {
+        if (brandWidth + actionWidth + 8.dp <= maxWidth) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) { brand(); controls() }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) { brand(); controls() }
+        }
     }
 }
 
@@ -49,8 +87,7 @@ val rebuildDestinations = listOf("Character", "Combat", "Inventory", "Campaign",
         fun fits(rows: List<List<String>>) = rows.all { row ->
             row.all { name -> maxOf(iconWidth, labelWidths.getValue(name).toFloat()) + labelPadding <= constraints.maxWidth.toFloat() / row.size }
         }
-        // Preserve the compact row when the actual scaled text fits. Otherwise
-        // keep all five labels readable, normally in balanced rows of three/two.
+        // Large-font layouts wrap while retaining 48dp touch targets and whole labels.
         val rows = listOf(rebuildDestinations).takeIf(::fits)
             ?: (3 downTo 1).map { rebuildDestinations.chunked(it) }.firstOrNull(::fits)
             ?: rebuildDestinations.map { listOf(it) }
@@ -64,9 +101,8 @@ val rebuildDestinations = listOf("Character", "Combat", "Inventory", "Campaign",
                             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Box(Modifier.width(56.dp).height(28.dp).background(if (active) RebuildPalette.Active else Color.Transparent,
                                 RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
-                                if (name == "Combat") ApprovedAttackMedallion(ApprovedAttackArt.ELEMENTAL, Modifier.size(24.dp))
-                                else ArcaneIcon(when (name) { "Character" -> "Emblem"; "Inventory" -> "Core"; "Campaign" -> "History"; else -> "More" },
-                                    Modifier.size(24.dp), if (active) RebuildPalette.Cyan else Muted)
+                                ArcaneIcon(when (name) { "Character" -> "Emblem"; "Inventory" -> "Core"; "Companions" -> "More"; else -> "History" },
+                                    Modifier.size(24.dp), if (active) RebuildPalette.GoldBright else Muted)
                             }
                             Text(name, Modifier.fillMaxWidth(), style = labelStyle,
                                 color = if (active) Frost else Muted, textAlign = TextAlign.Center,
@@ -79,47 +115,69 @@ val rebuildDestinations = listOf("Character", "Combat", "Inventory", "Campaign",
     }
 }
 
+/** The playable gear and original campaign ledger are different stores. Keep both discoverable. */
+@Composable fun RebuildInventoryHub(repository: CampaignLedgerRepository, openReferences: () -> Unit,
+    requestedSection: String = "My gear", routeToken: Int = 0) {
+    var section by rememberSaveable { mutableStateOf("My gear") }
+    LaunchedEffect(routeToken) { section = requestedSection }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("My gear", "Campaign items").forEach { name ->
+                PlayerFilterChip(selected = section == name, onClick = { section = name },
+                    modifier = Modifier.weight(1f), label = { Text(name) })
+            }
+        }
+        Box(Modifier.weight(1f)) {
+            if (section == "My gear") ReforgeCharacterSheet(repository, initialSection = "Equipment", sectionOnly = true)
+            else CampaignLedgerPage(repository, openReferences)
+        }
+    }
+}
+
 @Composable fun RebuildCampaignHub(open: (String) -> Unit) {
     Page {
         PlayerHeading("Campaign")
-        listOf(Triple("Search everything", "Find people, items, abilities and campaign records", "History"),
-            Triple("Inventory", "Items & equipment", "Core"),
-            Triple("Inventions", "Blueprints & construction", "Settings"),
-            Triple("Connections", "People, groups & milestones", "Emblem"),
-            Triple("Checkpoints", "Sourced session records & unresolved decisions", "History"),
-            Triple("Reference Library", "Imported campaign sources, history & relationships", "History"),
-            Triple("Campaign import", "Review a private archive, backup & import locally", "Settings")).forEach { (name, detail, icon) ->
-            PlayerCard(onClick = { open(name) }) {
-                PlayerEntry(name, detail, icon, { open(name) })
-            }
+        PlayerArtBanner("YOUR CHRONICLE", "The living world", "Keep the story connected.", R.drawable.astravar_atlas_banner)
+        Text("Your people, projects, and story in one place.", color = RebuildPalette.Muted)
+        listOf(Triple("Search everything", "Find anything in your campaign", "History"),
+            Triple("Connections", "People, groups and relationships", "Emblem"),
+            Triple("Inventions", "Builds, blueprints and progress", "Settings"),
+            Triple("Checkpoints", "Session progress and unresolved choices", "History")).forEach { (name, detail, icon) ->
+            PlayerCard(onClick = { open(name) }) { PlayerEntry(name, detail, icon, { open(name) }) }
+        }
+        PlayerDisclosure("Library & source records") {
+            PlayerEntry("Reference Library", "Imported records and original source history", "History", { open("Reference Library") })
+            PlayerEntry("Campaign import", "Review an imported archive", "Settings", { open("Campaign import") })
         }
     }
 }
 
 @Composable fun RebuildConfigHub(open: (String) -> Unit) {
     Page {
-        PlayerHeading("More")
-        PlayerEntry("Companions", "Independent sheets, equipment and accepted forms", "Emblem", { open("Companions") })
-        PlayerEntry("Armor systems", "Astravar capabilities and the preserved weapon engine", "Weapon", { open("Armor systems") })
-        PlayerEntry("Armor weapon", "Accepted Astravar attack engine and weapon setup", "Weapon", { open("Armor weapon") })
-        PlayerEntry("Character sources", "Original campaign values, revisions and reconciliation", "History", { open("Character sources") })
-        SectionCaption("Systems")
-        PlayerEntry("Spell reservoir", "Permanent internal core · manage spell loads", "Core", { open("Spell reservoir") })
-        PlayerEntry("Spell library", "Configured templates & payloads", "Payload", { open("Spell library") })
-        PlayerEntry("Rules & profile", "Accepted configuration & upgrades", "Weapon", { open("Rules & profile") })
-        PlayerEntry("Resources & recovery", "Confirmed game time & resources", "Core", { open("Resources & recovery") })
-        PlayerEntry("Roll history", "Saved rolls & exact dice", "History", { open("Roll history") })
-        PlayerEntry("ChatGPT Prompts", "Create, edit and organize reusable handoffs", "More", { open("ChatGPT Prompts") })
-        SectionCaption("App & data")
-        PlayerEntry("Appearance", "Artwork and feedback preferences", "Settings", { open("Appearance") })
-        PlayerEntry("Character backup", "Playable characters, effects, resources, rolls and notes", "History", { open("Character backup") })
-        PlayerEntry("Campaign backup", "Items, projects, connections & companion", "History", { open("Campaign backup") })
-        PlayerEntry("Campaign import", "Private source archive · preview, backup & receipts", "History", { open("Campaign import") })
-        PlayerEntry("Owner connection", "Character HP · owner pairing & approvals", "Settings", { open("Owner connection") })
-        PlayerEntry("Weapon backup", "Separate combat save", "History", { open("Weapon backup") })
-        if (com.yazsras.astravar.BuildConfig.DEBUG) {
-            PlayerEntry("Fictional sync", "Isolated connectivity diagnostics", "More", { open("Fictional sync") })
-            PlayerEntry("Remote Updates", "Opt-in disposable ability test", "Settings", { open("Remote Updates") })
+        PlayerHeading("Tools & settings")
+        PlayerEntry("Armor systems", "Your accepted Astravar abilities", "Weapon", { open("Armor systems") })
+        PlayerEntry("ChatGPT Prompts", "Edit campaign handoff prompts", "More", { open("ChatGPT Prompts") })
+        PlayerEntry("Appearance", "Visual and feedback preferences", "Settings", { open("Appearance") })
+        PlayerDisclosure("Advanced combat & magic") {
+            PlayerEntry("Armor weapon", "Specialized attack engine", "Weapon", { open("Armor weapon") })
+            PlayerEntry("Spell reservoir", "Internal core and spell loads", "Core", { open("Spell reservoir") })
+            PlayerEntry("Spell library", "Spell templates and payloads", "Payload", { open("Spell library") })
+            PlayerEntry("Rules & profile", "Accepted upgrades and configuration", "Weapon", { open("Rules & profile") })
+            PlayerEntry("Resources & recovery", "Resources and game time", "Core", { open("Resources & recovery") })
+            PlayerEntry("Roll history", "Saved dice and rolls", "History", { open("Roll history") })
+        }
+        PlayerDisclosure("Records, backups & connection") {
+            PlayerEntry("Character sources", "Original campaign values and revisions", "History", { open("Character sources") })
+            PlayerEntry("Character backup", "Backup your playable sheets", "History", { open("Character backup") })
+            PlayerEntry("Campaign backup", "Backup campaign records", "History", { open("Campaign backup") })
+            PlayerEntry("Campaign import", "Review an imported archive", "History", { open("Campaign import") })
+            PlayerEntry("Owner connection", "Trusted pairing and approvals", "Settings", { open("Owner connection") })
+            PlayerEntry("Weapon backup", "Backup the separate weapon system", "History", { open("Weapon backup") })
+            if (com.yazsras.astravar.BuildConfig.DEBUG) {
+                PlayerEntry("Fictional sync", "Isolated test lab", "More", { open("Fictional sync") })
+                PlayerEntry("Remote Updates", "Disposable test profile", "Settings", { open("Remote Updates") })
+            }
         }
         PlayerEntry("Help & diagnostics", "Device & build information", "More", { open("Help & diagnostics") })
     }

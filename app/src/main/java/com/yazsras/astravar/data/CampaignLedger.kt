@@ -85,6 +85,9 @@ data class LedgerExport(
     val archive: CampaignArchiveState = CampaignArchiveState()
 )
 
+/** Exact exported snapshot plus its timestamp-independent restore protection fingerprint. */
+data class CampaignExportSnapshot(val text: String, val currentFingerprint: String)
+
 @Dao
 interface LedgerDao {
     @Query("SELECT * FROM ledger_items WHERE archived=0 ORDER BY title COLLATE NOCASE ASC")
@@ -310,6 +313,15 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
     suspend fun export(): String = db.withTransaction {
         campaignBackupJson(LedgerExport(exportedAt = System.currentTimeMillis(),
             items = dao.allItems(), events = dao.allEvents(), records = records.snapshot(), archive = archive.snapshot()))
+    }
+
+    /** Text and proof come from one consistent read, never a second potentially newer snapshot. */
+    suspend fun exportWithProof(): CampaignExportSnapshot = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+        db.withTransaction {
+            val current = CampaignBackup(db).snapshot()
+            val text = campaignBackupJson(current.copy(exportedAt = System.currentTimeMillis()))
+            CampaignExportSnapshot(text, campaignSerializedHash(LedgerExport.serializer(), current))
+        }
     }
 
     /** Historical compatibility export only: does not include new inventions/connections/companion records. */

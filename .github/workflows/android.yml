@@ -27,9 +27,13 @@ jobs:
     # historical branch checks available without running the legacy test path twice.
     if: github.head_ref != 'feat/astravar-2.1-player-first' && github.ref_name != 'feat/astravar-2.1-player-first' && github.head_ref != 'feat/astravar-3.0-reforge' && github.ref_name != 'feat/astravar-3.0-reforge'
     runs-on: ubuntu-latest
-    timeout-minutes: 105
+    timeout-minutes: 130
     env:
       REUSE_RUN_ID: ${{ inputs.reuse_run_id || '0' }}
+      # The Reforge workflow is the exact-head full rules/debug/release/lint gate.
+      # Run native acceptance concurrently instead of duplicating that 30-minute
+      # regression batch before the first touch on every 3.1 candidate.
+      REFORGE_FULL_GATE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-3.1-') }}
       INVENTORY_BETA: ${{ github.head_ref == 'feat/astravar-inventory-mvp-v170' || github.ref_name == 'feat/astravar-inventory-mvp-v170' || github.head_ref == 'feat/astravar-2.0-integrated' || github.ref_name == 'feat/astravar-2.0-integrated' || github.head_ref == 'feat/astravar-2.0-ui-rebuild' || github.ref_name == 'feat/astravar-2.0-ui-rebuild' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -67,7 +71,7 @@ jobs:
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "$ANDROID_HOME/cmdline-tools/19.0/bin" >> "$GITHUB_PATH"
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
-      - name: Unit tests, lint and native APKs
+      - name: Build native APKs; full regressions stay in the exact-head Reforge gate
         if: env.REUSE_RUN_ID == '0'
         timeout-minutes: 45
         env:
@@ -105,7 +109,15 @@ jobs:
           export ASTRAVAR_KEY_ALIAS=astravar-ci
           timeout 15s keytool -genkeypair -noprompt -keystore "$ASTRAVAR_KEYSTORE" -storetype PKCS12 -storepass "$ASTRAVAR_STORE_PASSWORD" -keypass "$ASTRAVAR_KEY_PASSWORD" -alias "$ASTRAVAR_KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 2 -dname 'CN=Astravar CI test only'
           trap 'rm -f "$ASTRAVAR_KEYSTORE"' EXIT
-          timeout -k 10s 2640s ./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
+          regression_tasks=(:rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease)
+          if [[ "$REFORGE_FULL_GATE" == 'true' ]]; then
+            regression_tasks=()
+            printf '%s\n' 'Full rules, debug/release unit tests and both lint variants remain required in Astravar Reforge verification for this exact source commit.'
+          fi
+          timeout -k 10s 2640s ./gradlew --no-daemon --console=plain "${regression_tasks[@]}" :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
+          mkdir -p validation
+          python3 scripts/inspect_release_apk.py app/build/outputs/apk/release/app-release.apk --sdk "$ANDROID_HOME" --package com.yazsras.astravar --version-name 3.1.0-rc1 --version-code 45 --output validation/ci-release-package.json
+          printf '%s\n' 'Optimized release variant, disposable CI signer only. Not compatible with the original owner installation.' > validation/CI-RELEASE-ONLY.txt
       - name: Reuse verified product and build current overlay tests
         if: env.REUSE_RUN_ID != '0'
         timeout-minutes: 5
@@ -127,17 +139,18 @@ jobs:
           timeout -k 10s 210s ./gradlew --no-daemon --console=plain :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
       - name: Ordered release UI, import, recovery and in-place update on Android 16
         if: env.INVENTORY_BETA != 'true'
-        timeout-minutes: 48
+        timeout-minutes: 65
         env:
           ASTRAVAR_TEST_APK: app/build/outputs/apk/release/app-release.apk
           ASTRAVAR_TEST_PACKAGE: com.yazsras.astravar
-        run: timeout -k 10s 2820s bash scripts/ci-emulator.sh
+        run: timeout -k 10s 3840s bash scripts/ci-emulator.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: android-verification
           path: |
             app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/androidTest/debug/*.apk
             app/build/outputs/apk/release/*.apk
             overlay-target/build/outputs/apk/**/*.apk
             app/build/reports/

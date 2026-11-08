@@ -1,7 +1,7 @@
-name: Astravar 3.0 Reforge verification
+name: Astravar Reforge verification
 on:
   push:
-    branches: ['feat/astravar-3.0-reforge', 'fix/astravar-3.0-*']
+    branches: ['feat/astravar-3.0-reforge', 'fix/astravar-3.0-*', 'feat/astravar-3.1-*']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   verify:
-    if: github.head_ref == 'feat/astravar-3.0-reforge' || github.ref_name == 'feat/astravar-3.0-reforge' || startsWith(github.head_ref, 'fix/astravar-3.0-') || startsWith(github.ref_name, 'fix/astravar-3.0-')
+    if: github.head_ref == 'feat/astravar-3.0-reforge' || github.ref_name == 'feat/astravar-3.0-reforge' || startsWith(github.head_ref, 'fix/astravar-3.0-') || startsWith(github.ref_name, 'fix/astravar-3.0-') || startsWith(github.head_ref, 'feat/astravar-3.1-') || startsWith(github.ref_name, 'feat/astravar-3.1-')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -50,6 +50,26 @@ jobs:
           python3 scripts/verify_upgrade_integrity.py
           python3 scripts/verify_branding.py
           python3 scripts/verify_particle_resources.py
+      - name: Player journey smoke tests before the full suite
+        timeout-minutes: 20
+        run: |
+          bash gradlew --no-daemon --console=plain :app:testDebugUnitTest \
+            --tests 'com.yazsras.astravar.ui.NavigationV2Test' \
+            --tests 'com.yazsras.astravar.ui.PrimaryNavigationLayoutTest' \
+            --tests 'com.yazsras.astravar.ui.CampaignVisualAcceptanceTest' \
+            --tests 'com.yazsras.astravar.ui.ReforgeCharacterUiTest' \
+            --tests 'com.yazsras.astravar.ui.ReforgeCampaignConnectionsTest' \
+            --tests 'com.yazsras.astravar.data.ReforgeCampaignIdentityTest' \
+            --tests 'com.yazsras.astravar.ui.PartyPlayerFirstTest' \
+            --tests 'com.yazsras.astravar.ui.ConnectionsPageV2Test' \
+            --tests 'com.yazsras.astravar.ui.CampaignBackupUiSafetyTest' \
+            --tests 'com.yazsras.astravar.ui.CampaignArchiveUiV21Test' \
+            --tests 'com.yazsras.astravar.ui.StorageRecoveryPanelTest' \
+            --tests 'com.yazsras.astravar.data.ReforgeItemTransferTest' \
+            --tests 'com.yazsras.astravar.data.CompanionCreationTest' \
+            --tests 'com.yazsras.astravar.data.CampaignSyncDomainTest' \
+            --tests 'com.yazsras.astravar.data.CampaignConnectionProjectionTest' \
+            --tests 'com.yazsras.astravar.data.ReforgeLargeCampaignSelectionTest'
       - name: Rules, Room, native Compose, lint and debug APK
         timeout-minutes: 75
         run: |

@@ -223,7 +223,16 @@ interface CampaignRecordsDao {
     @Query("SELECT * FROM item_properties ORDER BY label,id") fun itemProperties(): Flow<List<ItemProperty>>
     @Query("SELECT * FROM item_properties ORDER BY id") suspend fun allItemProperties(): List<ItemProperty>
     @Query("SELECT * FROM item_properties WHERE id=:id") suspend fun property(id: String): ItemProperty?
-    @Query("SELECT * FROM campaign_links ORDER BY label,id") fun links(): Flow<List<CampaignLink>>
+    // An unlink retains the original endpoints and full before/after snapshots. Only the
+    // latest matching revision is hidden; an explicit later edit may restore it.
+    @Query("""SELECT * FROM campaign_links WHERE NOT EXISTS
+        (SELECT 1 FROM campaign_audit a WHERE a.recordType='link' AND a.recordId=campaign_links.id
+         AND a.kind='UNLINK' AND a.resultingRevision=campaign_links.revision) ORDER BY label,id""")
+    fun links(): Flow<List<CampaignLink>>
+    @Query("""SELECT * FROM campaign_links WHERE NOT EXISTS
+        (SELECT 1 FROM campaign_audit a WHERE a.recordType='link' AND a.recordId=campaign_links.id
+         AND a.kind='UNLINK' AND a.resultingRevision=campaign_links.revision) ORDER BY id""")
+    suspend fun activeLinks(): List<CampaignLink>
     @Query("SELECT * FROM campaign_links ORDER BY id") suspend fun allLinks(): List<CampaignLink>
     @Query("SELECT * FROM campaign_links WHERE id=:id") suspend fun link(id: String): CampaignLink?
     @Query("SELECT * FROM campaign_audit ORDER BY createdAt DESC,id") fun audit(): Flow<List<CampaignAudit>>
@@ -268,6 +277,17 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
     fun stagesFor(projectId: String) = dao.stagesFor(projectId)
     fun requirementsFor(projectId: String) = dao.requirementsFor(projectId)
     suspend fun receipt(commandId: String) = dao.receipt(commandId)
+
+    /** Creates the two linked records together. No default HP, ability scores, or lore is invented. */
+    suspend fun createCompanion(name: String): String = db.withTransaction {
+        val displayName = name.trim()
+        text(displayName, 120, true)
+        val companionId = "companion-${UUID.randomUUID()}"
+        val provenance = "Player-created local companion"
+        saveProfile(CharacterProfile(id = companionId, name = displayName), source = provenance)
+        saveCompanionState(CompanionState(companionId = companionId, name = displayName), source = provenance)
+        companionId
+    }
 
     private fun text(value: String, max: Int = 16000, required: Boolean = false) {
         require(value.length <= max && (!required || value.isNotBlank())) { "A required field is blank or too long." }
@@ -337,7 +357,7 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
     suspend fun saveEntity(value: ConnectionEntity, expectedRevision: Long? = null, source: String,
         commandId: String = UUID.randomUUID().toString()): CommandReceipt = db.withTransaction {
         text(value.name, 120, true); text(value.notes); text(value.aliases, 2000); text(value.relationship, 3000)
-        require(value.kind in setOf("Person", "Organization", "Faction", "Creature", "Other"))
+        require(value.kind in setOf("Person", "Organization", "Faction", "Creature", "Location", "Other"))
         require(value.imageBase64 == null || value.imageBase64.length <= 1_000_000)
         val old = dao.entity(value.id)
         save("connection", value.id, expectedRevision, old?.revision, old?.let { campaignJson.encodeToString(it) },
@@ -449,6 +469,28 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
             campaignJson.encodeToString(value.copy(revision = 0, source = "", updatedAt = 0)), source, commandId) { rev, now ->
             value.copy(revision = rev, source = source, updatedAt = now).let { dao.put(it); campaignJson.encodeToString(it) }
         }
+    }
+
+    /** Remove an active association without deleting either endpoint or its immutable history. */
+    suspend fun unlink(linkId: String, expectedRevision: Long, source: String,
+        commandId: String = UUID.randomUUID().toString()): CommandReceipt = db.withTransaction {
+        id(linkId); id(commandId); text(source, 2000, true)
+        val fingerprint = campaignHash(campaignJson.encodeToString(listOf("unlink-v1", linkId, expectedRevision.toString(), source)))
+        dao.receipt(commandId)?.let {
+            require(it.fingerprint == fingerprint) { "Command ID collision. No changes saved." }
+            return@withTransaction it
+        }
+        require(db.ledgerDao().event(commandId) == null) { "Command ID already belongs to an inventory operation." }
+        val before = dao.link(linkId) ?: error("The relationship is no longer available.")
+        check(before.revision == expectedRevision) { "The relationship changed. Reopen it before removing." }
+        check(dao.activeLinks().any { it.id == linkId }) { "The relationship was already removed." }
+        val now = System.currentTimeMillis()
+        val after = before.copy(revision = Math.addExact(expectedRevision, 1), source = source, updatedAt = now)
+        val json = campaignJson.encodeToString(after)
+        dao.put(after)
+        dao.insert(CampaignAudit(commandId, commandId, "link", linkId, "UNLINK", source,
+            expectedRevision, after.revision, now, campaignJson.encodeToString(before), json))
+        CommandReceipt(commandId, fingerprint, "link", linkId, after.revision, now, outcomeJson = json).also { dao.insert(it) }
     }
 
     /** Only records an already confirmed result. Does not roll, advance time or infer a recipe. */

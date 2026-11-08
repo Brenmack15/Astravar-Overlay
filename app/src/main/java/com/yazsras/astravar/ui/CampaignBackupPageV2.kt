@@ -8,11 +8,13 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import com.yazsras.astravar.data.CampaignLedgerRepository
 import com.yazsras.astravar.data.ImportPreview
+import com.yazsras.astravar.data.campaignBackupJson
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -26,7 +28,7 @@ import kotlinx.coroutines.withContext
     var status by rememberSaveable { mutableStateOf("") }
     var failure by rememberSaveable { mutableStateOf(false) }
     var preview by remember { mutableStateOf<ImportPreview?>(null) }
-    var backupCreated by remember { mutableStateOf(false) }
+    var savedBackupFingerprint by remember { mutableStateOf<String?>(null) }
     var info by rememberSaveable { mutableStateOf(false) }
     var reviewWasOpen by rememberSaveable { mutableStateOf(false) }
     // A potentially 32 Mi-character campaign file must not enter Android's small state Bundle.
@@ -39,21 +41,31 @@ import kotlinx.coroutines.withContext
     }
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null && !busy) {
-            busy = true; failure = false
+            busy = true; failure = false; savedBackupFingerprint = null
             scope.launch {
                 try {
-                    val text = repository.export()
+                    val snapshot = repository.exportWithProof()
                     withContext(Dispatchers.IO) {
-                        val stream = context.contentResolver.openOutputStream(uri) ?: error("Cannot open the chosen document.")
-                        stream.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                        require(CampaignDocumentIoV21.utf8Size(snapshot.text) <= CampaignDocumentIoV21.MAX_DOCUMENT_BYTES) {
+                            "Backup is too large for verified document transfer. Restore remains blocked."
+                        }
+                        val output = context.contentResolver.openOutputStream(uri, "wt") ?: error("Cannot open the chosen document.")
+                        output.use { CampaignDocumentIoV21.writeUtf8(snapshot.text, it); it.flush() }
+                        val input = context.contentResolver.openInputStream(uri) ?: error("Cannot reopen the saved backup for verification.")
+                        CampaignDocumentIoV21.verifySavedUtf8(snapshot.text, input)
                     }
-                    backupCreated = true
-                    status = "Campaign backup saved."
+                    // Only independently verified bytes protect this exact current-state fingerprint.
+                    savedBackupFingerprint = snapshot.currentFingerprint
+                    preview?.backup?.let { incoming ->
+                        val text = withContext(Dispatchers.Default) { campaignBackupJson(incoming) }
+                        preview = repository.previewImport(text)
+                    }
+                    status = "Campaign backup saved and independently verified."
                 } catch (e: CancellationException) { throw e }
-                catch (e: Exception) { failure = true; status = "Export failed: ${e.message}" }
+                catch (e: Exception) { savedBackupFingerprint = null; failure = true; status = "Backup not verified: ${e.message}" }
                 finally { busy = false }
             }
-        }
+        } else if (uri == null) status = "Backup save cancelled."
     }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null && !busy) {
@@ -62,16 +74,7 @@ import kotlinx.coroutines.withContext
                 try {
                     val text = withContext(Dispatchers.IO) {
                         val stream = context.contentResolver.openInputStream(uri) ?: error("Cannot open the selected file.")
-                        stream.bufferedReader(Charsets.UTF_8).use { input ->
-                            val result = StringBuilder(); val buffer = CharArray(8192)
-                            while (true) {
-                                val count = input.read(buffer)
-                                if (count < 0) break
-                                require(result.length + count <= 32 * 1024 * 1024) { "Backup exceeds the 32 Mi-character review limit." }
-                                result.append(buffer, 0, count)
-                            }
-                            result.toString()
-                        }
+                        CampaignDocumentIoV21.readUtf8(stream)
                     }
                     preview = repository.previewImport(text)
                     reviewWasOpen = true
@@ -109,25 +112,27 @@ import kotlinx.coroutines.withContext
             Text("The weapon save and public fictional sync queue are not included. Keep the existing weapon backup too.")
         }
         PlayerDisclosure("Restore safeguards") {
-            Text("Inventory Beta and campaign schema 2/3/4 files are supported. Conflicting records are never silently overwritten. Export a current backup in this session before confirming a restore.")
+            Text("Inventory Beta and campaign schema 2/3/4/5 files are supported. Conflicting records are never silently overwritten. Save and independently verify a backup of the current records before confirming a restore.")
             Text("Backup files contain private campaign data. Keep them out of public GitHub and the public sandbox.")
         }
     }
     preview?.let { candidate ->
+        val backupProtected = savedBackupFingerprint == candidate.currentFingerprint
         PlayerSheet("Review campaign backup", onDismiss = {
             if (!busy) { preview = null; reviewWasOpen = false }
         }, actions = {
             PlayerTextButton(onClick = { if (!busy) { preview = null; reviewWasOpen = false } }, enabled = !busy) { Text("Cancel") }
-            PlayerButton(enabled = !busy && candidate.valid && backupCreated, onClick = {
-                if (busy) return@PlayerButton
+            PlayerButton(enabled = !busy && candidate.valid && backupProtected,
+                modifier = Modifier.testTag("campaign-confirm-restore"), onClick = {
+                if (busy || !candidate.valid || !backupProtected) return@PlayerButton
                 busy = true; failure = false
                 scope.launch {
                     try {
                         repository.restore(candidate)
                         status = "Restore committed locally."
-                        preview = null; reviewWasOpen = false; backupCreated = false
+                        preview = null; reviewWasOpen = false; savedBackupFingerprint = null
                     } catch (e: CancellationException) { throw e }
-                    catch (e: Exception) { failure = true; status = "Restore not applied: ${e.message}" }
+                    catch (e: Exception) { savedBackupFingerprint = null; failure = true; status = "Restore not applied: ${e.message}" }
                     finally { busy = false }
                 }
             }) { Text("Confirm restore") }
@@ -135,11 +140,11 @@ import kotlinx.coroutines.withContext
             Text(candidate.summary, style = MaterialTheme.typography.titleMedium,
                 color = if (candidate.valid) RebuildPalette.Ice else MaterialTheme.colorScheme.error)
             Text("Only validated missing records will be added. Existing records and weapon data stay intact.", color = RebuildPalette.Muted)
-            if (!backupCreated) {
-                Text("Save a current campaign backup to enable restore.", color = RebuildPalette.GoldBright)
+            if (!backupProtected) {
+                Text("Save and verify a backup of the current campaign records to enable restore.", color = RebuildPalette.GoldBright)
                 PlayerOutlinedButton(onClick = { exporter.launch("astravar-campaign-v4.json") }, enabled = !busy,
                     modifier = Modifier.fillMaxWidth()) { Text("Save current backup") }
-            }
+            } else Text("Current campaign records have a verified backup.", color = RebuildPalette.Ice)
             candidate.backup?.let { incoming ->
                 PlayerDisclosure("Inspect incoming records") { CampaignBackupContentsV21(incoming) }
             }

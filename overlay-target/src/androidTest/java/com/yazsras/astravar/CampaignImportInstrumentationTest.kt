@@ -100,6 +100,7 @@ class CampaignImportInstrumentationTest {
         val deadline = SystemClock.uptimeMillis() + timeoutMillis
         var direction = Direction.DOWN
         var scrolls = 0
+        var unchangedSwipes = 0
         var nextScrollAt = 0L
         var visible = false
         var lastObserved = "No fresh status observation"
@@ -115,19 +116,26 @@ class CampaignImportInstrumentationTest {
                     visible = true
                     break
                 }
+                if (text == "Database readback matches every imported identity, relationship and content hash.") {
+                    val errors = device.findObjects(By.textStartsWith("Readback failed:").pkg(product)) +
+                        device.findObjects(By.textStartsWith("Review the database readback differences.").pkg(product))
+                    errors.lastOrNull { !it.visibleBounds.isEmpty }?.let {
+                        fail("Saved import verification reported an actual readback error: ${it.text}")
+                    }
+                }
                 // Completion text can follow the backup button below the sheet
                 // viewport, or precede receipts on the underlying import page.
                 // Scroll only to observe it; never retry a campaign action.
                 if (SystemClock.uptimeMillis() >= nextScrollAt && SystemClock.uptimeMillis() < deadline) {
-                    val scroll = device.findObjects(By.scrollable(true).pkg(product)).lastOrNull()
-                    if (scroll != null) {
-                        val viewport = scroll.visibleBounds
-                        val moved = scroll.scroll(direction, .6f)
+                    val changed = ui.scrollForObservation(product, direction)
+                    if (changed != null) {
                         scrolls++
-                        lastObserved += "; viewport=$viewport; $direction scroll $scrolls/18; moved=$moved"
-                        if (!moved || scrolls >= 18) {
+                        unchangedSwipes = if (changed) 0 else unchangedSwipes + 1
+                        lastObserved += "; $direction scroll $scrolls/18; changed=$changed; unchanged=$unchangedSwipes"
+                        if (unchangedSwipes >= 2 || scrolls >= 18) {
                             direction = if (direction == Direction.DOWN) Direction.UP else Direction.DOWN
                             scrolls = 0
+                            unchangedSwipes = 0
                         }
                     } else lastObserved += "; no product scrollable viewport"
                     nextScrollAt = SystemClock.uptimeMillis() + 500
@@ -141,9 +149,31 @@ class CampaignImportInstrumentationTest {
         assertTrue("Large fictional document operation must finish: $text; last observation: $lastObserved", visible)
     }
 
+    /** The review title is fixed outside its scroll body. Wait without touching the previous page. */
+    private fun awaitArchiveReviewDialog() {
+        var previous: Rect? = null
+        var stableSince: Long? = null
+        ui.snapshot(By.text("Review campaign archive").pkg(product), "stationary campaign archive review dialog",
+            timeoutMs = 180_000, refreshCache = true) { label ->
+            val bounds = Rect(label.visibleBounds)
+            if (bounds.isEmpty || bounds.left < 0 || bounds.top < 0 ||
+                bounds.right > device.displayWidth || bounds.bottom > device.displayHeight) {
+                previous = null; stableSince = null
+                null
+            } else {
+                val now = SystemClock.uptimeMillis()
+                stableSince = if (previous == bounds) stableSince ?: now else now
+                previous = bounds
+                bounds.takeIf { now - requireNotNull(stableSince) >= 500 }
+            }
+        }
+    }
+
     private fun campaignEntry(name: String) {
+        if (name == "Inventory") { ui.campaignItems(product); return }
         ui.ensurePrimaryTab(product, "Campaign")
         if (device.hasObject(By.text("‹ Campaign").pkg(product))) tap("‹ Campaign")
+        if (name in listOf("Campaign import", "Reference Library")) tap("Library & source records")
         tap(name)
     }
 
@@ -269,7 +299,9 @@ class CampaignImportInstrumentationTest {
         val document = device.wait(Until.findObject(By.text(name)), 20_000)
         assertNotNull("Fictional archive must be selected in DocumentsUI", document)
         document.click()
-        awaitText("Review campaign archive")
+        // Document reading/preview is asynchronous. Scrolling before this new
+        // dialog exists would move the old import page or overscroll the review.
+        awaitArchiveReviewDialog()
     }
 
     private fun saveBackup(fileName: String = "astravar-native-preimport-backup.json") {
@@ -461,7 +493,10 @@ class CampaignImportInstrumentationTest {
         awaitText("Import saved. Independent database readback passed.")
         assertTrue(device.takeScreenshot(File(files, "native-campaign-import-receipt.png")))
         tap("Verify saved import")
-        assertTrue(device.wait(Until.hasObject(By.text("Database readback matches every imported identity, relationship and content hash.").pkg(product)), 180_000))
+        // The global status is above the receipt we just touched. Observe it
+        // through native scrolling instead of waiting on an offscreen AX node.
+        awaitText("Database readback matches every imported identity, relationship and content hash.")
+        assertTrue(device.takeScreenshot(File(files, "native-campaign-verified-import.png")))
 
         campaignEntry("Reference Library")
         find("320 of 320 references")
@@ -595,7 +630,13 @@ class CampaignImportInstrumentationTest {
                     val labels = device.findObjects(selector)
                     val scroll = device.findObjects(By.clazz("android.widget.ScrollView").pkg(product)).singleOrNull()
                     val viewport = scroll?.let { Rect(it.visibleBounds) }
-                    val title = labels.singleOrNull()?.let { Rect(it.visibleBounds) }
+                    // The selected name appears in both the page heading and
+                    // its character-status summary. This is read-only evidence,
+                    // so observe the topmost fully visible exact name rather
+                    // than treating those two legitimate labels as ambiguity.
+                    val title = if (viewport == null) null else labels.map { Rect(it.visibleBounds) }
+                        .filter { !it.isEmpty && viewport.contains(it) }
+                        .minByOrNull { it.top }
                     lastObserved = "direction=$direction scrolls=$scrolls/18; scrollResult=$lastScrollResult; labels=${labels.size}; viewport=$viewport; title=$title"
                     val observed = if (title != null && viewport != null && viewport.contains(title) &&
                         listOf(title, viewport).all { !it.isEmpty && it.left >= 0 && it.top >= 0 &&
@@ -743,30 +784,30 @@ class CampaignImportInstrumentationTest {
         tap("Confirm local import")
         awaitText("Import saved. Independent database readback passed.")
 
-        ui.ensurePrimaryTab(product, "Armor")
+        ui.openTool(product, "Armor systems")
         find("Fictional Mapped Operator")
         assertTrue("Armor must display the imported manual ability independently of weapon mechanics",
             device.wait(Until.hasObject(By.descContains("Intelligence score 14").pkg(product)), 10_000))
-        captureMapped("armor", "Armor", "Fictional Mapped Operator", "Ability scores")
+        captureMapped("armor", "Character", "Fictional Mapped Operator", "Ability scores", dialogTitle = "Armor systems")
         openMappedSourceEntry("Armor source references")
         find("1 of 1 references")
         observations.put(JSONObject().put("route", "armor-source-entry").put("primaryTab", "Campaign")
             .put("visibleMarker", "1 of 1 references"))
 
-        ui.ensurePrimaryTab(product, "Party")
+        ui.ensurePrimaryTab(product, "Companions")
         tap("Fictional Mapped Operator")
         find("Fictional Mapped Operator")
         if (!device.hasObject(By.text("Fictional archival operator").pkg(product))) tap("Identity & progression")
-        captureMapped("party", "Party", "Class / role", "Fictional archival operator")
+        captureMapped("party", "Companions", "Class / role", "Fictional archival operator")
         openTypedPartyTab("Equipment")
-        captureMapped("equipment", "Party", "Fictional Mapped Lens", "Carried · quantity unknown")
+        captureMapped("equipment", "Companions", "Fictional Mapped Lens", "Carried · quantity unknown")
         openTypedPartyTab("Currency")
-        captureMapped("currency", "Party", "Fictional Mapped Purse", "? cp · 2 sp · 7 gp · ? ep · ? pp")
+        captureMapped("currency", "Companions", "Fictional Mapped Purse", "? cp · 2 sp · 7 gp · ? ep · ? pp")
         tap("‹ Party")
         tap("Fictional Mapped Owl")
         observeMappedOwlHeader()
         if (!device.hasObject(By.text("Fictional archival owl").pkg(product))) tap("Identity & progression")
-        captureMapped("companion", "Party", "Class / role", "Fictional archival owl")
+        captureMapped("companion", "Companions", "Class / role", "Fictional archival owl")
         openMappedSourceEntry("Party source dossiers")
         find("1 of 1 references")
         observations.put(JSONObject().put("route", "party-source-entry").put("primaryTab", "Campaign")
@@ -774,8 +815,10 @@ class CampaignImportInstrumentationTest {
 
         campaignEntry("Inventory")
         tap("Fictional Mapped Lens")
-        captureMapped("inventory", "Campaign", "Unknown quantity · Carried", "Fictional lens description preserved.", dialogTitle = "Fictional Mapped Lens")
-        tap("Properties & Mechanics")
+        captureMapped("inventory", "Inventory", "Unknown quantity · Carried", "Fictional lens description preserved.", dialogTitle = "Fictional Mapped Lens")
+        // Item details open this section by default; toggling would hide the
+        // original property records immediately before their readback checks.
+        find("Properties & mechanics")
         find("Fictional optical property")
         find("Fictional optical note; no automatic bonus.")
         tap("Close")

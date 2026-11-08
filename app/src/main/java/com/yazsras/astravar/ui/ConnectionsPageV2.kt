@@ -32,6 +32,25 @@ private fun connectionStoredKind(kind: String) = when (kind) {
     "Being" -> "Creature"
     else -> kind
 }
+internal fun connectionTargetType(label: String): String = when (label) {
+    "Inventory item" -> "item"
+    "Invention" -> "project"
+    "Companion" -> "companion"
+    "Character" -> "character-profile"
+    "Connection" -> "connection"
+    else -> error("Unknown connection target: $label")
+}
+
+/** Removed associations remain inspectable from the directory's History. */
+internal fun connectionHistoryLinkIds(links: List<CampaignLink>, audit: List<CampaignAudit>, entityId: String?): Set<String> {
+    fun related(link: CampaignLink) = (link.fromType == "connection" && link.fromId == entityId) ||
+        (link.toType == "connection" && link.toId == entityId)
+    return links.filter(::related).map { it.id }.toSet() + audit.filter { event ->
+        event.recordType == "link" && listOfNotNull(event.beforeJson, event.afterJson).any { json ->
+            runCatching { related(Json.decodeFromString<CampaignLink>(json)) }.getOrDefault(false)
+        }
+    }.map { it.recordId }
+}
 
 /** A directory first. All record inspection and editing stays in one focused sheet. */
 @Composable
@@ -43,12 +62,17 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
     val milestones by records.milestones.collectAsState(initial = emptyList())
     val links by records.links.collectAsState(initial = emptyList())
     val projects by records.projects.collectAsState(initial = emptyList())
+    val companionStates by records.companionStates.collectAsState(initial = emptyList())
+    val characterProfiles by records.characterProfiles.collectAsState(initial = emptyList())
     val items by repository.items.collectAsState(initial = emptyList())
     val audit by records.audit.collectAsState(initial = emptyList())
     val actions = rememberLocalRecordActions()
     var query by rememberSaveable { mutableStateOf("") }
     var kindFilter by rememberSaveable { mutableStateOf("All") }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Keep this context across detail/edit/remove sheets. State belongs to the
+    // selected directory record, so opening another connection starts collapsed.
+    var connectedRecordsOpen by rememberSaveable(selectedId) { mutableStateOf(false) }
     var mode by rememberSaveable { mutableStateOf<String?>(null) }
     val baselineDraft = rememberUiDraftText()
     var baseJson by baselineDraft
@@ -69,6 +93,9 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
     var entrySource by rememberSaveable { mutableStateOf("") }
     var entryKind by rememberSaveable { mutableStateOf("Known information") }
     var evidence by rememberSaveable { mutableStateOf("Unverified") }
+    val linkBaselineDraft = rememberUiDraftText()
+    var linkBaselineJson by linkBaselineDraft
+    val linkBaseline = remember(linkBaselineJson) { linkBaselineJson?.let { runCatching { Json.decodeFromString<CampaignLink>(it) }.getOrNull() } }
     var linkType by rememberSaveable { mutableStateOf("Inventory item") }
     var targetId by rememberSaveable { mutableStateOf<String?>(null) }
     var eventId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -88,6 +115,7 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
         relationship != baseline?.relationship.orEmpty() || image != baseline?.imageBase64 || source != baseline?.source.orEmpty()
     val dirty = when(mode) {
         "edit" -> profileDirty
+        "link-edit" -> entryTitle != linkBaseline?.label.orEmpty() || entrySource != linkBaseline?.source.orEmpty()
         "fact", "milestone", "link" -> entryTitle.isNotBlank() || entryDetail.isNotBlank() || entrySource.isNotBlank() || targetId != null
         else -> false
     }
@@ -106,7 +134,13 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
         evidence = "Unverified"; targetId = null; linkType = "Inventory item"; mode = next
         actions.message = ""
     }
-    fun closeSheet() { if (!actions.busy) mode = if (mode in listOf("edit", "fact", "milestone", "link", "history", "linked") && selectedId != null) "detail" else if (mode == "event") "history" else null }
+    fun editLink(link: CampaignLink, remove: Boolean = false) {
+        linkBaselineJson = Json.encodeToString(link)
+        entryTitle = link.label; entrySource = link.source
+        appendId = UUID.randomUUID().toString(); actions.message = ""
+        mode = if (remove) "link-remove" else "link-edit"
+    }
+    fun closeSheet() { if (!actions.busy) mode = if (mode in listOf("edit", "fact", "milestone", "link", "link-edit", "link-remove", "history", "linked") && selectedId != null) "detail" else if (mode == "event") "history" else null }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null && !actions.busy) {
             val requested = imageTarget
@@ -132,7 +166,7 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                 modifier = Modifier.semantics { contentDescription = "Add connection" }) { Text("Add") }
         }
         PlayerSearch(query, { query = it }, "Search names, aliases and known notes")
-        ConnectionChoice("Directory type", listOf("All", "Person", "Group", "Faction", "Being", "Other"), kindFilter, !actions.busy) { kindFilter = it }
+        ConnectionChoice("Directory type", listOf("All", "Person", "Group", "Faction", "Being", "Location", "Other"), kindFilter, !actions.busy) { kindFilter = it }
         if (mode == null) {
             ConnectionSaveStatus(actions)
             baselineDraft.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -165,6 +199,8 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
             "fact" -> "Add learned information"
             "milestone" -> "Append milestone"
             "link" -> "Link a record"
+            "link-edit" -> "Edit relationship"
+            "link-remove" -> "Remove relationship"
             "history" -> "Connection history"
             "event" -> "Event details"
             "linked" -> "Connected record"
@@ -194,8 +230,20 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                     val src = entrySource.trim().ifBlank { "Local campaign note in Astravar" }
                     actions.run { records.saveMilestone(entry, source = src); entryTitle = ""; entryDetail = ""; entrySource = ""; mode = "detail"; "Milestone saved locally." }
                 }) { Text("Append milestone") }
+                "link-edit", "link-remove" -> PlayerButton(enabled = !actions.busy && linkBaselineDraft.canSave &&
+                    linkBaseline != null && links.any { it.id == linkBaseline.id && it.revision == linkBaseline.revision } &&
+                    (currentMode == "link-remove" || entryTitle.isNotBlank()), onClick = {
+                    val original = requireNotNull(linkBaseline)
+                    val src = entrySource.trim().ifBlank { "Local relationship edit in Astravar" }
+                    actions.run {
+                        if (currentMode == "link-remove") records.unlink(original.id, original.revision, src, appendId)
+                        else records.saveLink(original.copy(label = entryTitle.trim()), original.revision, src, appendId)
+                        mode = "detail"
+                        if (currentMode == "link-remove") "Relationship removed locally; its history is retained." else "Relationship saved locally."
+                    }
+                }) { Text(if (currentMode == "link-remove") "Remove relationship" else "Save relationship") }
                 "link" -> PlayerButton(enabled = !actions.busy && selectedId != null && targetId != null && entryTitle.isNotBlank(), onClick = {
-                    val entry = CampaignLink(fromType = "connection", fromId = selectedId!!, toType = if (linkType == "Inventory item") "item" else "project", toId = targetId!!, label = entryTitle.trim(), id = appendId)
+                    val entry = CampaignLink(fromType = "connection", fromId = selectedId!!, toType = connectionTargetType(linkType), toId = targetId!!, label = entryTitle.trim(), id = appendId)
                     val src = entrySource.trim().ifBlank { "Local campaign note in Astravar" }
                     actions.run { records.saveLink(entry, source = src); targetId = null; entryTitle = ""; entrySource = ""; mode = "detail"; "Record linked locally." }
                 }) { Text("Link existing record") }
@@ -210,7 +258,7 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                         Text("A newer record exists. Your draft is preserved. Cancel and reopen to load it.", color = MaterialTheme.colorScheme.error)
                     }
                     ConnectionField("Connection name", name, !actions.busy) { name = it }
-                    ConnectionChoice("Connection type", listOf("Person", "Group", "Faction", "Being", "Other"), kind, !actions.busy) { kind = it }
+                    ConnectionChoice("Connection type", listOf("Person", "Group", "Faction", "Being", "Location", "Other"), kind, !actions.busy) { kind = it }
                     ConnectionField("Aliases / other known names (optional)", aliases, !actions.busy) { aliases = it }
                     ReforgeDocumentEditor("Overview & appearance", notes, { notes = it }, !actions.busy)
                     ConnectionField("Known relationship context (optional)", relationship, !actions.busy, false) { relationship = it }
@@ -235,10 +283,31 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                     ConnectionField("What happened / significance", entryDetail, !actions.busy, false) { entryDetail = it }
                     PlayerDisclosure("Source (optional)") { ConnectionField("Milestone source", entrySource, !actions.busy, false) { entrySource = it } }
                 }
+                "link-edit", "link-remove" -> {
+                    if (linkBaseline == null || !linkBaselineDraft.canSave) Text(
+                        linkBaselineDraft.error ?: "The relationship draft could not be read. Close and reopen it.", color = MaterialTheme.colorScheme.error)
+                    else {
+                        if (links.none { it.id == linkBaseline.id && it.revision == linkBaseline.revision }) Text(
+                            "This relationship changed. Close and reopen it before continuing.", color = MaterialTheme.colorScheme.error)
+                        if (currentMode == "link-remove") Text(
+                            "Remove “${linkBaseline.label}” from connected records? Both records, item ownership and the full relationship history remain saved.", color = RebuildPalette.Muted)
+                        else ConnectionField("Relationship to this record", entryTitle, !actions.busy) { entryTitle = it }
+                        PlayerDisclosure("Source (optional)") { ConnectionField("Link source", entrySource, !actions.busy, false) { entrySource = it } }
+                    }
+                }
                 "link" -> {
-                    ConnectionChoice("Related record type", listOf("Inventory item", "Invention"), linkType, !actions.busy) { linkType = it; targetId = null }
-                    val targets = if (linkType == "Inventory item") items.map { it.id to it.title } else projects.map { it.id to it.title }
-                    if (targets.isEmpty()) Text("No ${if (linkType == "Inventory item") "items" else "inventions"} available to link.", color = RebuildPalette.Muted)
+                    ConnectionChoice("Related record type", listOf("Inventory item", "Invention", "Companion", "Character", "Connection"), linkType, !actions.busy) { linkType = it; targetId = null }
+                    val companionIds = companionStates.map { it.companionId }.toSet()
+                    val targets = when (linkType) {
+                        "Inventory item" -> items.map { it.id to it.title }
+                        "Invention" -> projects.map { it.id to it.title }
+                        "Companion" -> companionStates.map { companion -> companion.companionId to
+                            (characterProfiles.firstOrNull { it.id == companion.companionId }?.name?.takeIf(String::isNotBlank)
+                                ?: companion.name.ifBlank { "Unnamed companion" }) }
+                        "Character" -> characterProfiles.filterNot { it.id in companionIds }.map { it.id to it.name.ifBlank { "Unnamed character" } }
+                        else -> entities.filterNot { it.id == selectedId }.map { it.id to "${it.name} · ${connectionKindLabel(it.kind)}" }
+                    }
+                    if (targets.isEmpty()) Text("No saved ${linkType.lowercase()} records available to link.", color = RebuildPalette.Muted)
                     else ConnectionTargetChoice(targets, targetId, !actions.busy) { targetId = it }
                     ConnectionField("Relationship to this record", entryTitle, !actions.busy) { entryTitle = it }
                     PlayerDisclosure("Source (optional)") { ConnectionField("Link source", entrySource, !actions.busy, false) { entrySource = it } }
@@ -247,7 +316,7 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                 "history", "event" -> {
                     val factIds = facts.filter { it.entityId == selectedId }.map { it.id }.toSet()
                     val milestoneIds = milestones.filter { it.entityId == selectedId }.map { it.id }.toSet()
-                    val linkIds = links.filter { (it.fromType == "connection" && it.fromId == selectedId) || (it.toType == "connection" && it.toId == selectedId) }.map { it.id }.toSet()
+                    val linkIds = connectionHistoryLinkIds(links, audit, selectedId)
                     val entries = audit.filter { when(it.recordType) { "connection" -> it.recordId == selectedId; "fact" -> it.recordId in factIds; "milestone" -> it.recordId in milestoneIds; "link" -> it.recordId in linkIds; else -> false } }
                     if (currentMode == "event") {
                         entries.firstOrNull { it.id == eventId }?.let { ConnectionAuditDetail(it) }
@@ -258,7 +327,16 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                     }
                 }
                 "linked" -> {
-                    if (recordType == "item") items.firstOrNull { it.id == recordId }?.let { item ->
+                    val available = when (recordType) {
+                        "item" -> items.any { it.id == recordId }
+                        "project" -> projects.any { it.id == recordId }
+                        "companion" -> companionStates.any { it.companionId == recordId }
+                        "character-profile" -> characterProfiles.any { it.id == recordId }
+                        "connection" -> entities.any { it.id == recordId }
+                        else -> false
+                    }
+                    if (!available) Text("The linked record is unavailable. Close this view and check its source; the relationship is retained.", color = RebuildPalette.Muted)
+                    else if (recordType == "item") items.firstOrNull { it.id == recordId }?.let { item ->
                         Text(item.title, style = MaterialTheme.typography.titleLarge)
                         Text("${item.category} · ${item.quantity?.toString() ?: "Quantity unknown"}", color = RebuildPalette.Ice)
                         ReforgeRichText(item.description)
@@ -266,9 +344,36 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                         Text("${item.owner} · ${item.itemState} · ${item.location}", color = RebuildPalette.Muted)
                         PlayerDisclosure("Sources & record details") { ReforgeRichText(item.source) }
                     }
-                    else projects.firstOrNull { it.id == recordId }?.let { project ->
-                        Text(project.title, style = MaterialTheme.typography.titleLarge); Text(project.status, color = RebuildPalette.Ice)
-                        ReforgeRichText(project.description); PlayerDisclosure("Sources & record details") { ReforgeRichText(project.source) }
+                    else when (recordType) {
+                        "project" -> projects.firstOrNull { it.id == recordId }?.let { project ->
+                            Text(project.title, style = MaterialTheme.typography.titleLarge); Text(project.status, color = RebuildPalette.Ice)
+                            ReforgeRichText(project.description); PlayerDisclosure("Sources & record details") { ReforgeRichText(project.source) }
+                        }
+                        "companion" -> companionStates.firstOrNull { it.companionId == recordId }?.let { state ->
+                            Text(characterProfiles.firstOrNull { it.id == state.companionId }?.name?.takeIf(String::isNotBlank)
+                                ?: state.name.ifBlank { "Unnamed companion" }, style = MaterialTheme.typography.titleLarge)
+                            Text("Companion · ${state.condition.ifBlank { "Condition unknown" }}", color = RebuildPalette.Ice)
+                            if (state.notes.isNotBlank()) ReforgeRichText(state.notes)
+                            PlayerDisclosure("Sources & record details") {
+                                Text("Record ${state.companionId} · revision ${state.revision}", color = RebuildPalette.Muted)
+                                ReforgeRichText(state.source)
+                            }
+                        }
+                        "character-profile" -> characterProfiles.firstOrNull { it.id == recordId }?.let { profile ->
+                            Text(profile.name.ifBlank { "Unnamed character" }, style = MaterialTheme.typography.titleLarge)
+                            Text("Level ${profile.level ?: "unknown"} · HP ${profile.currentHp ?: "?"} / ${profile.maximumHp ?: "?"}", color = RebuildPalette.Ice)
+                            PlayerDisclosure("Sources & record details") {
+                                Text("Record ${profile.id} · revision ${profile.revision}", color = RebuildPalette.Muted)
+                                ReforgeRichText(profile.source)
+                            }
+                        }
+                        "connection" -> entities.firstOrNull { it.id == recordId }?.let { connection ->
+                            Text(connection.name, style = MaterialTheme.typography.titleLarge)
+                            Text(connection.relationship.ifBlank { connectionKindLabel(connection.kind) }, color = RebuildPalette.Ice)
+                            if (connection.notes.isNotBlank()) ReforgeRichText(connection.notes)
+                            PlayerTextButton(onClick = { selectedId = connection.id; mode = "detail" }) { Text("Open this connection") }
+                        }
+                        else -> Text("Original linked record is unavailable. The relationship is retained.", color = RebuildPalette.Muted)
                     }
                 }
                 else -> selected?.let { entity ->
@@ -312,15 +417,29 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                         }
                         PlayerTextButton(onClick = { append("milestone") }) { Text("Add milestone") }
                     }
-                    ExpandableRecordSection("Connected Records") {
+                    ConnectionRecordsSection(connectedRecordsOpen, { connectedRecordsOpen = it }) {
                         val related = links.filter { (it.fromType == "connection" && it.fromId == entity.id) || (it.toType == "connection" && it.toId == entity.id) }
                         if (related.isEmpty()) Text("No linked records.", color = RebuildPalette.Muted)
                         related.forEach { link ->
                             val outgoing = link.fromType == "connection" && link.fromId == entity.id
                             val type = if (outgoing) link.toType else link.fromType
                             val id = if (outgoing) link.toId else link.fromId
-                            val target = if (type == "item") items.firstOrNull { it.id == id }?.title else projects.firstOrNull { it.id == id }?.title
-                            PlayerEntry(target ?: "Related $type", link.label, if (type == "item") "Core" else "Weapon", { recordType = type; recordId = id; mode = "linked" })
+                            val target = when (type) {
+                                "item" -> items.firstOrNull { it.id == id }?.title
+                                "project" -> projects.firstOrNull { it.id == id }?.title
+                                "companion" -> characterProfiles.firstOrNull { it.id == id }?.name?.takeIf(String::isNotBlank)
+                                    ?: companionStates.firstOrNull { it.companionId == id }?.name
+                                "character-profile" -> characterProfiles.firstOrNull { it.id == id }?.name
+                                "connection" -> entities.firstOrNull { it.id == id }?.name
+                                else -> null
+                            }
+                            PlayerEntry(target ?: "Related $type", link.label,
+                                if (type in setOf("item", "companion")) "Core" else "Emblem",
+                                { recordType = type; recordId = id; mode = "linked" })
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                PlayerTextButton(onClick = { editLink(link) }, enabled = !actions.busy) { Text("Edit relationship") }
+                                PlayerTextButton(onClick = { editLink(link, remove = true) }, enabled = !actions.busy) { Text("Remove relationship") }
+                            }
                         }
                         PlayerTextButton(onClick = { append("link") }) { Text("Link existing record") }
                     }
@@ -337,9 +456,24 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                         milestones.filter { it.entityId == entity.id && it.source.isNotBlank() }.forEach { ReforgeRichText(it.source) }
                         links.filter { (it.fromId == entity.id || it.toId == entity.id) && it.source.isNotBlank() }.forEach { ReforgeRichText(it.source) }
                     }
-                } ?: LinearProgressIndicator(Modifier.fillMaxWidth())
+                } ?: Text("This connection is unavailable. Close this view and reopen it from the directory.", color = RebuildPalette.Muted)
             }
         }
+    }
+}
+
+/** Controlled by the directory, which outlives the nested relationship editor. */
+@Composable private fun ConnectionRecordsSection(expanded: Boolean, onExpandedChange: (Boolean) -> Unit,
+    content: @Composable ColumnScope.() -> Unit) {
+    PlayerCard {
+        PlayerTextButton(onClick = { onExpandedChange(!expanded) }, modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Connected Records", Modifier.weight(1f), color = RebuildPalette.Gold,
+                    style = MaterialTheme.typography.titleMedium)
+                Text(if (expanded) "−" else "+", color = RebuildPalette.Ice)
+            }
+        }
+        if (expanded) content()
     }
 }
 
@@ -377,12 +511,18 @@ private fun connectionTime(time: Long) = DateFormat.getDateTimeInstance(DateForm
 }
 @Composable internal fun ConnectionTargetChoice(options: List<Pair<String, String>>, selected: String?, enabled: Boolean, change: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
     Box {
-        PlayerOutlinedButton(onClick = { expanded = true }, enabled = enabled, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+        PlayerOutlinedButton(onClick = { query = ""; expanded = true }, enabled = enabled, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
             Text(options.firstOrNull { it.first == selected }?.second ?: "Choose an existing record")
         }
         DropdownMenu(expanded && enabled, { expanded = false }, modifier = Modifier.heightIn(max = 360.dp)) {
-            options.forEach { (id, title) -> DropdownMenuItem(text = { Text(title) }, onClick = { expanded = false; change(id) }) }
+            OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true,
+                label = { Text("Find a record") }, modifier = Modifier.padding(8.dp).widthIn(min = 220.dp))
+            val matches = options.filter { (_, title) -> query.isBlank() || title.contains(query.trim(), ignoreCase = true) }
+            if (matches.isEmpty()) DropdownMenuItem(text = { Text("No matching records") }, onClick = {}, enabled = false)
+            matches.take(40).forEach { (id, title) -> DropdownMenuItem(text = { Text(title) }, onClick = { expanded = false; change(id) }) }
+            if (matches.size > 40) DropdownMenuItem(text = { Text("Search to narrow ${matches.size} records") }, onClick = {}, enabled = false)
         }
     }
 }

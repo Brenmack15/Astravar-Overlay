@@ -79,6 +79,25 @@ class PartyPlayerFirstTest {
     private fun database() = Room.inMemoryDatabaseBuilder(
         ApplicationProvider.getApplicationContext(), CampaignLedgerDb::class.java).build()
 
+    @Test fun addingCompanionFromRosterOpensNewSheetAndPreservesUnknownStats() {
+        val db = database()
+        val repo = CampaignLedgerRepository(db)
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { PartyTestTheme { PartyPageV2(repo, null) {} } }
+            compose.onNodeWithText("+ Add companion").performScrollTo().performClick()
+            compose.onNode(hasSetTextAction() and hasText("Companion name")).performTextInput("Glimmer")
+            compose.onNodeWithText("Create companion").performClick()
+            waitForText("Glimmer")
+            compose.waitUntil(10_000) {
+                runBlocking { db.recordsDao().allCompanionStates().any { it.name == "Glimmer" } }
+            }
+            val newId = runBlocking { db.recordsDao().allCompanionStates().single { it.name == "Glimmer" }.companionId }
+            assertTrue(newId.startsWith("companion-"))
+            assertNull(runBlocking { db.recordsDao().allCharacterProfiles().single { it.id == newId }.currentHp })
+        } finally { activity.pause().stop().destroy(); db.close() }
+    }
+
     @Test fun partyRosterOpensFourStableIdentitiesWithoutImportingPrivateStats() {
         val db = database()
         val repo = CampaignLedgerRepository(db)
@@ -155,7 +174,7 @@ class PartyPlayerFirstTest {
             compose.onNodeWithText("Give / take / move item").performScrollTo().performClick()
             waitForText("Synthetic harness")
             compose.onNodeWithText("Synthetic harness").performScrollTo().performClick()
-            compose.onNodeWithText("Zerg Hasma ▾").performScrollTo().performClick()
+            compose.onNodeWithText("Fictional owner ▾").performScrollTo().performClick()
             compose.onNodeWithText("Korr", useUnmergedTree = true).performClick()
             compose.onNodeWithText("Carried ▾").performScrollTo().performClick()
             compose.onNodeWithText("Equipped", useUnmergedTree = true).performClick()
@@ -432,6 +451,32 @@ class PartyPlayerFirstTest {
                 assertTrue(db.recordsDao().allAudit().any { it.recordType == "party-sheet" && it.beforeJson?.contains(portrait) == true })
             }
         } finally { activity.pause().stop().destroy(); file.delete(); db.close() }
+    }
+
+    @Test fun alternateCompanionFormCanBeSavedWithoutAssigningUnknownStatsOrChangingMainHp() {
+        val db = database()
+        val repo = CampaignLedgerRepository(db)
+        val companion = runBlocking { repo.records.createCompanion("Synthetic form keeper") }
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { PartyTestTheme { Page { PartyTypedSheetV2(repo, companion, "Synthetic form keeper") } } }
+            compose.onNodeWithText("Forms & transformations").performScrollTo().performClick()
+            compose.onNodeWithText("Edit Forms & transformations").performScrollTo().performClick()
+            compose.onNodeWithText("Add form").performScrollTo().performClick()
+            compose.onNodeWithText("Form name 1").performScrollTo().performTextInput("Synthetic alternate shell")
+            compose.onNodeWithText("Form stat block and transformation rules 1").performScrollTo().performTextInput("Transform only after player confirmation.")
+            compose.onNodeWithText("Change source / resolved event (required)").performScrollTo().performTextInput("Fictional form fixture")
+            compose.onNodeWithText("Save sheet").performClick()
+            compose.waitUntil(10_000) { runBlocking { db.partyDao().sheet(companion)?.revision == 1L } }
+            compose.onNodeWithText("Synthetic alternate shell").performScrollTo().assertExists()
+            runBlocking {
+                val form = db.partyDao().sheet(companion)!!.sheet.forms.single()
+                assertNull(form.currentHp); assertNull(form.maximumHp); assertNull(form.armorClass)
+                assertEquals("Unverified", form.evidenceStatus)
+                assertNull(db.recordsDao().characterProfile(companion)!!.currentHp)
+                assertTrue(db.recordsDao().allCompanionResources().isEmpty())
+            }
+        } finally { activity.pause().stop().destroy(); db.close() }
     }
 
 }

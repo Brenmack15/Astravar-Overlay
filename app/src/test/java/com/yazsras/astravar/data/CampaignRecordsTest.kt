@@ -95,6 +95,54 @@ class CampaignRecordsTest {
         assertEquals("Proposed", repo.itemProperties.first().single().evidenceStatus)
     }
 
+    @Test fun relationshipEditUnlinkRetryAndBackupRetainEveryIdentityAndReceipt() = runBlocking {
+        val contact = ConnectionEntity("Synthetic observatory", kind = "Location")
+        repo.saveEntity(contact, source = "Fictional location fixture")
+        val companion = repo.createCompanion("Synthetic survey owl")
+        val link = CampaignLink("connection", contact.id, "companion", companion, "Visits", id = "synthetic-location-link")
+        repo.saveLink(link, source = "Fictional relationship", commandId = "relationship-create")
+        repo.saveLink(link.copy(label = "Protects"), 1, "Fictional relationship correction", "relationship-edit")
+        fails { repo.unlink(link.id, 1, "Stale operation", "relationship-stale") }
+        assertEquals("Protects", repo.links.first().single().label)
+        val receipt = repo.unlink(link.id, 2, "Fictional unlink", "relationship-unlink")
+        assertEquals(receipt, repo.unlink(link.id, 2, "Fictional unlink", "relationship-unlink"))
+        fails { repo.unlink(link.id, 2, "Changed command", "relationship-unlink") }
+        fails { repo.unlink(link.id, 3, "Second unlink", "relationship-unlink-again") }
+        assertTrue(repo.links.first().isEmpty())
+        assertTrue(db.recordsDao().activeLinks().isEmpty())
+        assertEquals(3L, db.recordsDao().allLinks().single().revision)
+        assertEquals(3, db.recordsDao().allAudit().count { it.recordType == "link" })
+        assertNotNull(db.recordsDao().entity(contact.id))
+        assertNotNull(db.recordsDao().characterProfile(companion))
+        assertTrue(db.ledgerDao().allItems().isEmpty())
+        val other = Room.inMemoryDatabaseBuilder(context, CampaignLedgerDb::class.java).allowMainThreadQueries().build()
+        try {
+            val restored = CampaignLedgerRepository(other)
+            val preview = restored.previewImport(ledger.export())
+            assertTrue(preview.conflicts.joinToString(), preview.valid)
+            restored.restore(preview, "restore-unlinked-relationship")
+            assertTrue(restored.records.links.first().isEmpty())
+            assertEquals(db.recordsDao().allLinks(), other.recordsDao().allLinks())
+            assertEquals(receipt, other.recordsDao().receipt("relationship-unlink"))
+            assertEquals(db.recordsDao().allAudit().filter { it.recordType == "link" }, other.recordsDao().allAudit().filter { it.recordType == "link" })
+        } finally { other.close() }
+    }
+
+    @Test fun interruptedUnlinkRollsBackAndCanRetry() = runBlocking {
+        val first = ConnectionEntity("Synthetic first")
+        val second = ConnectionEntity("Synthetic second")
+        repo.saveEntity(first, source = "Fictional fixture"); repo.saveEntity(second, source = "Fictional fixture")
+        val link = CampaignLink("connection", first.id, "connection", second.id, "Knows")
+        repo.saveLink(link, source = "Fictional fixture")
+        db.openHelper.writableDatabase.execSQL("CREATE TRIGGER fictional_unlink_failure BEFORE INSERT ON campaign_audit WHEN NEW.kind='UNLINK' BEGIN SELECT RAISE(ABORT, 'Fictional interruption'); END")
+        fails { repo.unlink(link.id, 1, "Fictional unlink", "unlink-retry") }
+        assertEquals(1L, repo.links.first().single().revision)
+        assertNull(repo.receipt("unlink-retry"))
+        db.openHelper.writableDatabase.execSQL("DROP TRIGGER fictional_unlink_failure")
+        repo.unlink(link.id, 1, "Fictional unlink", "unlink-retry")
+        assertTrue(repo.links.first().isEmpty())
+    }
+
     @Test fun resourceValidationDoesNotInferRefills() = runBlocking {
         repo.saveCompanionState(CompanionState(), source = "Player entry")
         val resource = CompanionResource("Repair resource", current = 0, maximum = 2)

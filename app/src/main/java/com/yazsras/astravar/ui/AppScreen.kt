@@ -42,12 +42,21 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     val localContext = LocalContext.current.applicationContext
     val playableRepository = remember(localContext) { ReforgeRepository.open(localContext) }
     var tab by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf("Character")}
-    LaunchedEffect(Unit) { if (tab == "Armor") tab = "Character"; if (tab == "Party") tab = "More"; if (tab == "Config") tab = "More" }
+    LaunchedEffect(Unit) {
+        tab = when (tab) {
+            "Party" -> "Companions"
+            "Armor", "Combat", "More", "Config" -> "Character"
+            in rebuildDestinations -> tab
+            else -> "Character"
+        }
+    }
     var configSection by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("Settings") }
     var campaignPage by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
     var tool by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
+    var requestedInventory by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("My gear") }
+    var inventoryRoute by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     LaunchedEffect(ownerConnectionRequest) {
-        if (ownerConnectionRequest > 0) { tab = "More"; configSection = "Settings"; tool = "Owner connection" }
+        if (ownerConnectionRequest > 0) { tab = "Character"; tool = "Owner connection" }
     }
     var elementPicker by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf(false)}
     val screenStates=androidx.compose.runtime.saveable.rememberSaveableStateHolder()
@@ -80,7 +89,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
         if (!remoteTestEnabled) remoteReviewId = null
         else if (reviewCommand?.status in listOf("APPLIED", "REJECTED")) remoteReviewId = null
         else if (remoteReviewId == null && tool == null && !elementPicker &&
-            (tab == "More" || (tab == "Character" && !armorModalOpen))) {
+            (tab == "Character" && !armorModalOpen)) {
             remoteReviewId = waitingRemote.firstOrNull { it.commandId !in deferredRemoteCommands }?.commandId
         }
     }
@@ -100,13 +109,35 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     AstravarTheme {
         Scaffold(containerColor=RebuildPalette.Canvas,
             snackbarHost={SnackbarHost(snackbar)},
-            topBar={RebuildAppHeader(s?.demo==true) {tool="Global search"}},
-            bottomBar={RebuildPrimaryNavigation(tab) {tab=it}}
+            topBar={RebuildAppHeader(s?.demo==true, search = { tool = "Global search" }, tools = { tool = "Tools" })},
+            bottomBar={RebuildPrimaryNavigation(tab) { next ->
+                if (next == "Inventory") { requestedInventory = "My gear"; inventoryRoute++ }
+                tab = next
+            }}
         ) {insets->
             Column(Modifier.padding(insets).imePadding()) {
                 if(error!=null) Text(error!!,Modifier.padding(16.dp),color=MaterialTheme.colorScheme.error)
                 val current=s
-                if(current==null) {LinearProgressIndicator(Modifier.fillMaxWidth());return@Column}
+                if(current==null) {
+                    StorageRecoveryPanel(error, open = { tool = it })
+                    // Diagnostics and the independent stores must remain reachable
+                    // when the specialized weapon store cannot initialize.
+                    tool?.let { name -> RebuildToolSheet(name, { tool = null }) {
+                        when (name) {
+                            "Tools" -> Page {
+                                PlayerHeading("Recovery tools")
+                                PlayerEntry("Help & diagnostics", "Inspect this installation", "More", { tool = "Help & diagnostics" })
+                                PlayerEntry("Character backup", "Recover playable character records", "History", { tool = "Character backup" })
+                                PlayerEntry("Campaign backup", "Recover original campaign records", "History", { tool = "Campaign backup" })
+                            }
+                            "Character backup" -> ReforgeBackupPage(playableRepository)
+                            "Campaign backup" -> CampaignBackupPageV2(app.campaignLedger)
+                            "Global search" -> ReforgeGlobalSearch(app.campaignLedger)
+                            else -> HelpPage()
+                        }
+                    } }
+                    return@Column
+                }
                 if(actions.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (remoteTestEnabled) Row(Modifier.fillMaxWidth().background(RebuildPalette.Active).padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically) {
@@ -130,7 +161,14 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                             onOverlayVisibilityChanged={armorModalOpen=it},
                             openReferences={tab="Campaign";campaignPage="Reference Library"})
                         "Combat" -> ReforgeCharacterSheet(app.campaignLedger, initialSection = "Combat")
-                        "Inventory" -> CampaignLedgerPage(app.campaignLedger) {tab="Campaign";campaignPage="Reference Library"}
+                        "Inventory" -> RebuildInventoryHub(app.campaignLedger,
+                            openReferences = { tab = "Campaign"; campaignPage = "Reference Library" },
+                            requestedSection = requestedInventory, routeToken = inventoryRoute)
+                        "Companions" -> if (remoteTestEnabled) Page { Text("Party records are isolated from the disposable Remote Stat Test. Disable Remote Updates to edit party records.") }
+                            else PartyPageV2(app.campaignLedger, current,
+                                openReferences={tab="Campaign";campaignPage="Reference Library"}) {
+                                    requestedInventory = "Campaign items"; inventoryRoute++; tab = "Inventory"
+                                }
                         "Party" -> if (remoteTestEnabled) Page { Text("Party records are isolated from the disposable Remote Stat Test. Disable Remote Updates to edit party records.") }
                             else PartyPageV2(app.campaignLedger, current,
                                 openReferences={tab="Campaign";campaignPage="Reference Library"}) {tab="Campaign";campaignPage="Inventory"}
@@ -156,15 +194,12 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                                 }}
                             }
                         }
-                        else -> Column(Modifier.fillMaxSize()) {
-                            V2SectionTabs(listOf("Settings", "ChatGPT"), configSection) { configSection = it }
-                            if (configSection == "ChatGPT") ChatGptPromptsPage(app.campaignLedger.prompts)
-                            else RebuildConfigHub {tool=it}
-                        }
+                        else -> RebuildConfigHub { tool = it }
                     }
                 }
                 tool?.let {name->RebuildToolSheet(name,{tool=null}) {
                     when(name) {
+                        "Tools" -> RebuildConfigHub { tool = it }
                         "Global search" -> ReforgeGlobalSearch(app.campaignLedger)
                         "Fictional sync" -> SandboxSyncPage(app.sandboxSync)
                         "Remote Updates" -> if(BuildConfig.DEBUG) RemoteUpdatesPage(app.remoteStats, characterAbilities) {id->
@@ -184,9 +219,12 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                         "Spell library" -> PayloadsPage(current,actions,app.preferences,prefs.selectedPayloads)
                         "Roll history" -> CombatHistoryPage(current)
                         "Appearance", "Overlay & appearance" -> SettingsPage(app,current,actions,startOverlay,grantOverlay,stopOverlay)
-                        "Companions" -> PartyPageV2(app.campaignLedger, current, openReferences={tool=null;tab="Campaign";campaignPage="Reference Library"}) {tool=null;tab="Inventory"}
+                        "Companions" -> PartyPageV2(app.campaignLedger, current, openReferences={tool=null;tab="Campaign";campaignPage="Reference Library"}) {
+                            tool = null; requestedInventory = "Campaign items"; inventoryRoute++; tab = "Inventory"
+                        }
                         "Character sources" -> Page { CharacterOverviewV2(app.campaignLedger, current) }
-                        "Armor systems" -> ArmorOverviewV2(current,app.campaignLedger,combat={tool="Armor weapon"},systems={tool="Spell reservoir"},eek={tool="Companions"},inventory={tool=null;tab="Inventory"},elements=prefs.elements,selectElement={elementPicker=true})
+                        "Armor systems" -> ArmorOverviewV2(current,app.campaignLedger,combat={tool="Armor weapon"},systems={tool="Spell reservoir"},eek={tool="Companions"},inventory={tool=null;tab="Inventory"},elements=prefs.elements,selectElement={elementPicker=true},
+                            openReferences={tool=null;tab="Campaign";campaignPage="Reference Library"})
                         else -> HelpPage()
                     }
                 }}
@@ -260,7 +298,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
             Text("${Build.MANUFACTURER} ${Build.MODEL}\nAndroid ${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}\nBuild ${Build.DISPLAY}\nPackage ${c.packageName}\nStandalone mode · overlay retired")
         }
         Section("Dice & your character sheet") {
-            Text("Character and Combat use your reviewed playable character. Tap a score, skill, attack or spell to use its calculated modifiers; each saved roll retains its dice and explanation. Nothing rolls automatically. The DM determines ordinary hits. Damage previews are potential damage, and averages are estimates. More → Armor weapon retains the accepted specialized Astravar weapon engine. Character backup and Campaign backup preserve their separate records.")
+            Text("Your character sheet includes Combat, abilities, spells, and live equipment. Tap a score, skill, attack or spell to use its calculated modifiers; each saved roll retains its dice and explanation. Nothing rolls automatically. The DM determines ordinary hits. Damage previews are potential damage, and averages are estimates. Tools → Armor weapon retains the accepted specialized Astravar weapon engine. Character backup and Campaign backup preserve their separate records.")
             Text("Astravar does not read, control, or synchronize D&D Beyond. Imported source records remain available for review and reconciliation. Playable character changes are saved on this device; their presence does not establish authoritative campaign synchronization. The optional public connectivity lab sends fixed fictional test messages only.")
             Text("Astravar runs as a standalone application. Overlay permissions, floating controls and the persistent overlay service are retired.")
             Text("Unofficial tabletop companion. Not affiliated with or endorsed by Wizards of the Coast, D&D Beyond, or Samsung.")

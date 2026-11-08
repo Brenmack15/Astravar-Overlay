@@ -24,6 +24,12 @@ private fun companionReviewFromSnapshot(sourceJson: String): ReforgeCompanionAct
     val candidates = mutableListOf<ReforgeCompanionActionCandidate>()
     val unavailable = mutableListOf<Pair<String, String>>()
     sheet?.attacks.orEmpty().forEach { attack ->
+        val actionType = when (attack.actionEconomy.trim().lowercase()) {
+            "action" -> "Action"
+            "bonus action" -> "Bonus Action"
+            "reaction" -> "Reaction"
+            else -> null
+        }
         val problem = when {
             sheet!!.unresolvedConflicts.isNotEmpty() -> "Resolve the source sheet's outstanding conflicts first."
             attack.id in duplicates -> "The source repeats this attack identity."
@@ -33,7 +39,7 @@ private fun companionReviewFromSnapshot(sourceJson: String): ReforgeCompanionAct
             attack.resourceCost.isNotBlank() -> "Resource cost needs explicit structured setup: ${attack.resourceCost}"
             attack.multiattack.isNotBlank() -> "Multiattack sequence needs explicit structured setup: ${attack.multiattack}"
             attack.criticalRule.isNotBlank() -> "Custom critical behavior needs explicit structured setup: ${attack.criticalRule}"
-            attack.actionEconomy !in setOf("Action", "Bonus Action", "Reaction") -> "Unrecognized action timing: ${attack.actionEconomy}"
+            actionType == null -> "Unrecognized action timing: ${attack.actionEconomy}"
             DamageKind.entries.none { it.name.equals(attack.damageType.trim(), true) } -> "Damage must specify one recognized type."
             else -> null
         }
@@ -44,7 +50,7 @@ private fun companionReviewFromSnapshot(sourceJson: String): ReforgeCompanionAct
             else candidates += ReforgeCompanionActionCandidate(AttackDefinition(
                 id = attack.id, name = attack.name, proficient = false, fixedAttackBonus = attack.attackBonus,
                 damage = listOf(DamageComponent("${attack.id}:source-damage", "Recorded damage", DamageKind.entries.first { it.name.equals(attack.damageType.trim(), true) }, formula)),
-                addAbilityToDamage = false, actionType = attack.actionEconomy, range = attack.range
+                addAbilityToDamage = false, actionType = requireNotNull(actionType), range = attack.range
             ), attack.source.ifBlank { record?.source.orEmpty() })
         }
     }
@@ -78,6 +84,7 @@ suspend fun ReforgeRepository.commitCompanionActions(
     val latestPreview = readLegacyPreview(legacy, review.profileId)
     check(latestPreview.legacyFingerprint == review.legacyFingerprint) { "The companion source changed. Review it again." }
     val current = get(review.profileId) ?: error("Review and adopt this companion in Character before activating attacks.")
+    check(!current.character.archived) { "Restore the archived playable companion before adding attacks." }
     check(current.revision == expectedRevision) { "The playable companion changed. Review its current state." }
     selected.forEach { incoming ->
         val existing = current.character.attacks.firstOrNull { it.id == incoming.id }

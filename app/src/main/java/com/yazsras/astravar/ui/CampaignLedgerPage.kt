@@ -45,6 +45,7 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (()
     val projects by records.projects.collectAsState(initial = emptyList())
     val entities by records.entities.collectAsState(initial = emptyList())
     val companions by records.companionStates.collectAsState(initial = emptyList())
+    val profiles by records.characterProfiles.collectAsState(initial = emptyList())
     val audit by records.audit.collectAsState(initial = emptyList())
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf("All") }
@@ -332,7 +333,14 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (()
                         related.forEach { link ->
                             val forward = link.fromType == "item" && link.fromId == item.id
                             val type = if (forward) link.toType else link.fromType; val id = if (forward) link.toId else link.fromId
-                            val name = when(type) { "companion" -> companions.firstOrNull { it.companionId == id }?.name ?: "Eek"; "project" -> projects.firstOrNull { it.id == id }?.title; "connection" -> entities.firstOrNull { it.id == id }?.name; else -> items.firstOrNull { it.id == id }?.title } ?: "Related record"
+                            val name = when(type) {
+                                "companion" -> companions.firstOrNull { it.companionId == id }?.name
+                                    ?: profiles.firstOrNull { it.id == id }?.name
+                                "character-profile" -> profiles.firstOrNull { it.id == id }?.name
+                                "project" -> projects.firstOrNull { it.id == id }?.title
+                                "connection" -> entities.firstOrNull { it.id == id }?.name
+                                else -> items.firstOrNull { it.id == id }?.title
+                            } ?: "Missing linked record ($id)"
                             RecordValue(link.label, name)
                         }
                         PlayerTextButton(onClick = { relatedType = "companion"; relatedId = null; relationLabel = "Equipment"; source = item.source; baselineSource = source; mode = "link" }) { Text("Connect record") }
@@ -369,8 +377,15 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (()
                     }
                 }
                 "link" -> {
-                    Choices("Related record type", listOf("companion", "project", "connection"), relatedType, display = { when(it) { "companion" -> "Eek"; "project" -> "Invention"; else -> "Connection" } }, enabled = !busy) { relatedType = it; relatedId = null }
-                    val targets = when(relatedType) { "companion" -> companions.map { it.companionId to it.name }; "project" -> projects.map { it.id to it.title }; else -> entities.map { it.id to it.name } }
+                    Choices("Related record type", listOf("companion", "character-profile", "project", "connection"), relatedType,
+                        display = { when(it) { "companion" -> "Companion"; "character-profile" -> "Character"; "project" -> "Invention"; else -> "Person / connection" } },
+                        enabled = !busy) { relatedType = it; relatedId = null }
+                    val targets = when(relatedType) {
+                        "companion" -> companions.map { it.companionId to it.name }
+                        "character-profile" -> profiles.map { it.id to it.name }
+                        "project" -> projects.map { it.id to it.title }
+                        else -> entities.map { it.id to it.name }
+                    }
                     if (targets.isEmpty()) Text("Create the related record first", color = Muted)
                     Choices("Related record", targets.map { it.first }, relatedId, display = { id -> targets.firstOrNull { it.first == id }?.second ?: "Choose record" }, enabled = !busy) { relatedId = it }
                     Choices("Relationship", listOf("Owned by", "Held by", "Equipment", "Installed component", "Material requirement", "Research subject", "Origin"), relationLabel, enabled = !busy) { relationLabel = it }

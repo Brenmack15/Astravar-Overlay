@@ -85,4 +85,19 @@ class ReforgeCompanionActionsTest {
             assertEquals(created, local.get("companion"))
         } finally { source.close(); localDb.close() }
     }
+    @Test fun bonusActionFromNativeSheetIsReviewedAndArchivedCompanionRejectsChanges() = runBlocking {
+        val source = sourceDb(); val localDb = localDb()
+        try {
+            val legacy = CampaignLedgerRepository(source); val local = ReforgeRepository(localDb)
+            legacy.records.saveProfile(CharacterProfile(id = "companion", name = "Synthetic companion"), source = "Fictional fixture")
+            legacy.party.saveSheet("companion", PartySheetData(attacks = listOf(attack().copy(actionEconomy = "Bonus action"))), source = "Fictional fixture")
+            val review = reviewCompanionActions(local.readLegacyPreview(legacy, "companion"))
+            assertTrue(review.unavailable.isEmpty())
+            assertEquals("Bonus Action", review.candidates.single().attack.actionType)
+            val created = local.create(ReforgeCharacter("companion", "Synthetic companion", archived = true))
+            assertTrue(runCatching { local.commitCompanionActions(legacy, review, setOf("confirmed-bite"), created.revision) }.isFailure)
+            assertEquals(created, local.get("companion"))
+        } finally { source.close(); localDb.close() }
+    }
+
 }

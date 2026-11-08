@@ -6,7 +6,11 @@ import kotlinx.serialization.json.*
 object CampaignConnectionProjection {
     fun project(records: List<CampaignSyncRecord>, scopes: Set<String>): List<CampaignSyncRecord> {
         CampaignConnectionProtocol.scopes(scopes)
-        return records.mapNotNull { record ->
+        return records.mapNotNull { original ->
+            // Unreadable or unsupported audit bodies are irrelevant without the
+            // complete audit grant and must not interfere with partial reads.
+            if (original.kind == "audit" && !scopes.containsAll(CampaignConnectionProtocol.categories)) return@mapNotNull null
+            val record = if (original.kind == "audit") CampaignLocalFormBoundary.audit(original) else original
             val f = record.fields
             val projected: JsonObject = when (record.kind) {
                 "character-profile" -> {
@@ -20,7 +24,7 @@ object CampaignConnectionProjection {
                     if (scopes.none { it in setOf("character", "hp", "resources") }) return@mapNotNull null
                     val sheet = Json.parseToJsonElement(f.getValue("contentJson").jsonPrimitive.content).jsonObject
                     val selected = buildJsonObject {
-                        if ("character" in scopes) sheet.filterKeys { it !in setOf("resources", "conditions", "portraitBase64") }.forEach { (k,v) -> put(k,v) }
+                        if ("character" in scopes) sheet.filterKeys { it !in setOf("resources", "conditions", "portraitBase64", "forms") }.forEach { (k,v) -> put(k,v) }
                         if ("resources" in scopes) sheet["resources"]?.let { put("resources", it) }
                         if ("hp" in scopes) sheet["conditions"]?.let { put("conditions", it) }
                     }

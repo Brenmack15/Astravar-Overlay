@@ -24,6 +24,13 @@ import java.util.UUID
     val source: String = "", val id: String = UUID.randomUUID().toString()
 )
 @Serializable data class SheetResource(val name: String, val current: Int? = null, val maximum: Int? = null, val notes: String = "")
+/** Sourced alternate forms retain separate known statistics; no transformation is inferred. */
+@Serializable data class SheetForm(
+    val name: String, val statBlock: String = "", val currentHp: Int? = null, val maximumHp: Int? = null,
+    val armorClass: Int? = null, val evidenceStatus: String = "Unverified", val source: String = "",
+    val id: String = UUID.randomUUID().toString()
+)
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class PartySheetData(
     val portraitBase64: String? = null, val creatureType: String = "", val size: String = "", val role: String = "",
     val progression: String = "", val proficiencyBonus: Int? = null, val initiative: Int? = null,
@@ -32,7 +39,8 @@ import java.util.UUID
     val senses: String = "", val languages: String = "", val resistances: String = "", val immunities: String = "",
     val vulnerabilities: String = "", val conditions: String = "", val capabilities: List<SheetCapability> = emptyList(),
     val attacks: List<SheetAttack> = emptyList(), val spellcasting: String = "", val resources: List<SheetResource> = emptyList(),
-    val references: List<String> = emptyList(), val unresolvedConflicts: List<String> = emptyList()
+    val references: List<String> = emptyList(), val unresolvedConflicts: List<String> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val forms: List<SheetForm> = emptyList()
 )
 
 @Serializable
@@ -469,6 +477,14 @@ class PartyRecordsRepository(private val db: CampaignLedgerDb) {
             listOf(a.damageFormula, a.damageType, a.range, a.criticalRule, a.actionEconomy, a.resourceCost, a.multiattack).forEach { checkText(it, 3000) }; checkText(a.source, 2000) }
         sheet.resources.forEach { checkText(it.name, 120, true); require(it.current == null || it.current in 0..1_000_000); require(it.maximum == null || it.maximum in 0..1_000_000)
             require(it.current == null || it.maximum == null || it.current <= it.maximum); checkText(it.notes, 3000) }
+        require(sheet.forms.size <= 20 && sheet.forms.map { it.id }.distinct().size == sheet.forms.size) { "Too many forms or duplicate form identities." }
+        sheet.forms.forEach { form ->
+            checkId(form.id); checkText(form.name, 120, true); checkText(form.statBlock); checkText(form.source, 2000); checkEvidence(form.evidenceStatus)
+            require(form.currentHp == null || form.currentHp in 0..1_000_000) { "Form current HP must be nonnegative or unknown." }
+            require(form.maximumHp == null || form.maximumHp in 0..1_000_000) { "Form maximum HP must be nonnegative or unknown." }
+            require(form.currentHp == null || form.maximumHp == null || form.currentHp <= form.maximumHp) { "Form current HP cannot exceed its maximum." }
+            require(form.armorClass == null || form.armorClass in 0..1000) { "Form Armor Class must be nonnegative or unknown." }
+        }
         require(sheet.references.size <= 200 && sheet.unresolvedConflicts.size <= 200)
         (sheet.references + sheet.unresolvedConflicts).forEach { checkText(it, 3000, true) }
         require(campaignJson.encodeToString(sheet).length <= 2_000_000) { "Character sheet is too large." }

@@ -77,11 +77,11 @@ class NavigationV2Test {
             val before = app.repository.state.value!!
             assertFalse(before.onboarded)
             assertFalse(before.attuned)
-            compose.onNodeWithTag("navigation-Campaign").performClick()
-            compose.onNode(hasText("Inventory") and !hasTestTag("navigation-Inventory")).performClick()
+            compose.onNodeWithTag("navigation-Inventory").performClick()
+            compose.onNodeWithText("Campaign items").performClick()
             compose.onNodeWithText("Add Item").assertExists()
             capture("v2-inventory", activity.get())
-            compose.onNodeWithText("‹ Campaign").performClick()
+            compose.onNodeWithTag("navigation-Campaign").performClick()
             compose.onNodeWithText("Connections").performClick()
             compose.onNodeWithContentDescription("Add connection").assertExists()
             capture("v2-connections", activity.get())
@@ -89,8 +89,7 @@ class NavigationV2Test {
             compose.onNodeWithText("Inventions").performClick()
             compose.onNodeWithText("Add Invention").assertExists()
             compose.onNodeWithText("‹ Campaign").performClick()
-            compose.onNodeWithTag("navigation-More").performClick()
-            compose.onNodeWithText("Companions").performScrollTo().performClick()
+            compose.onNodeWithTag("navigation-Companions").performClick()
             listOf("Zerg Hasma", "Eek", "Korr", "Veyrath").forEach { compose.onNodeWithText(it).assertExists() }
             capture("v2-party", activity.get())
             compose.onNodeWithText("Eek").performClick()
@@ -99,23 +98,23 @@ class NavigationV2Test {
             compose.onNodeWithText("Condition unknown").assertExists()
             compose.runOnIdle { captureNativeTestWindows("v2-eek", activity.get(), modal = true) }
             compose.onAllNodesWithText("Close").onLast().performClick()
-            compose.onAllNodesWithText("Close").onLast().performClick()
-            compose.onNodeWithTag("navigation-More").performClick()
+            compose.onNodeWithText("Tools").performClick()
+            compose.onNodeWithText("Records, backups & connection").performScrollTo().performClick()
             compose.onNodeWithText("Campaign backup").performScrollTo().performClick()
             compose.onNodeWithText("Export campaign backup").assertExists()
             compose.onAllNodesWithText("Close").onLast().performClick()
-            compose.onNodeWithTag("navigation-Combat").performClick()
-            compose.onNodeWithTag("navigation-Combat").assertIsSelected()
-            compose.onNodeWithTag("navigation-More").performClick()
+            compose.onNodeWithTag("navigation-Character").performClick()
+            compose.onNodeWithTag("navigation-Character").assertIsSelected()
+            compose.onNodeWithText("Tools").performClick()
+            compose.onNodeWithText("Advanced combat & magic").performScrollTo().performClick()
             compose.onNodeWithText("Armor weapon").performScrollTo().performClick()
             compose.onNodeWithText("CONFIRM YOUR WEAPON PROFILE").assertExists()
             compose.onAllNodesWithText("Close").onLast().performClick()
             compose.onNodeWithTag("navigation-Campaign").performClick()
-            compose.onAllNodesWithText("Inventory").onFirst().assertExists()
             compose.onNodeWithText("Checkpoints").assertExists()
-            compose.onNodeWithTag("navigation-More").performClick()
-            compose.onNodeWithText("Companions").performScrollTo().performClick()
-            compose.onNodeWithText("Eek").performClick()
+            compose.onNodeWithTag("navigation-Companions").performClick()
+            // Tab state restores the already-open Eek sheet. Do not click a name
+            // again: both its heading and roster context legitimately say "Eek".
             compose.onNodeWithText("Eek's specialized companion tools").performScrollTo().assertExists()
             compose.runOnIdle { assertEquals(before, app.repository.state.value) }
             assertEquals(0, overlayStarts)
@@ -141,11 +140,11 @@ class NavigationV2Test {
                 AstravarTheme { RebuildPrimaryNavigation(selected) { selected = it; visited += it } }
             }
             compose.onNodeWithTag("navigation-Character").assertIsSelected()
-            listOf("Combat", "Inventory", "Campaign", "More", "Character").forEach { destination ->
-                compose.onNodeWithText(destination).performClick()
-                compose.onNodeWithText(destination).assertIsSelected()
+            listOf("Inventory", "Companions", "Campaign", "Character").forEach { destination ->
+                compose.onNodeWithTag("navigation-$destination").performClick()
+                compose.onNodeWithTag("navigation-$destination").assertIsSelected()
             }
-            assertEquals(listOf("Combat", "Inventory", "Campaign", "More", "Character"), visited)
+            assertEquals(listOf("Inventory", "Companions", "Campaign", "Character"), visited)
         } finally { activity.pause().stop().destroy() }
     }
 }

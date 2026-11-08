@@ -10,6 +10,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.data.CampaignLedgerDb
 import com.yazsras.astravar.data.CampaignLedgerRepository
 import com.yazsras.astravar.data.ConnectionEntity
+import com.yazsras.astravar.data.CampaignLink
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
@@ -174,4 +175,47 @@ class ConnectionsPageV2Test {
             }
         } finally { activity.pause().stop().destroy(); db.close() }
     }
+    @Test fun linkedCompanionUsesItsOwnNameAndRelationshipCanBeEditedRemovedAndReviewed() {
+        val db = database()
+        val repo = CampaignLedgerRepository(db)
+        val contact = ConnectionEntity(name = "Synthetic keeper")
+        val companion = runBlocking {
+            repo.records.saveEntity(contact, source = "Fictional introduction")
+            repo.records.createCompanion("Synthetic Glimmer")
+        }
+        val link = CampaignLink("connection", contact.id, "companion", companion, "Guides")
+        runBlocking { repo.records.saveLink(link, source = "Fictional relationship") }
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { AstravarTheme { ConnectionsPageV2(repo) } }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText(contact.name).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(contact.name).performClick()
+            compose.onNodeWithText("Connected Records").performScrollTo().performClick()
+            compose.onNodeWithText("Synthetic Glimmer").performScrollTo().assertExists()
+            compose.onNodeWithText("Edit relationship").performScrollTo().performClick()
+            compose.onNodeWithText("Relationship to this record").performScrollTo().performTextReplacement("Protects")
+            compose.onNodeWithText("Save relationship").performClick()
+            compose.waitUntil(10_000) { runBlocking { db.recordsDao().link(link.id)?.revision == 2L } }
+            // Read back the returned UI as well as the committed revision. The
+            // connected-records section must stay open after its nested editor.
+            compose.waitUntil(10_000) {
+                compose.onAllNodes(hasText("Protects") and hasClickAction()).fetchSemanticsNodes().isNotEmpty() &&
+                    compose.onAllNodes(hasText("Remove relationship") and hasClickAction()).fetchSemanticsNodes().size == 1
+            }
+            compose.onNode(hasText("Protects") and hasClickAction()).performScrollTo().assertExists()
+            compose.onNode(hasText("Remove relationship") and hasClickAction()).performScrollTo().performClick()
+            compose.onNode(hasText("Remove relationship") and hasClickAction()).performClick()
+            compose.waitUntil(10_000) { runBlocking { db.recordsDao().activeLinks().isEmpty() } }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("No linked records.").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("No linked records.").performScrollTo().assertExists()
+            runBlocking {
+                val events = db.recordsDao().allAudit()
+                assertTrue(link.id in connectionHistoryLinkIds(emptyList(), events, contact.id))
+                assertEquals(3L, db.recordsDao().link(link.id)!!.revision)
+                assertNotNull(db.recordsDao().characterProfile(companion))
+                assertTrue(db.ledgerDao().allItems().isEmpty())
+            }
+        } finally { activity.pause().stop().destroy(); db.close() }
+    }
+
 }
