@@ -608,7 +608,13 @@ class CampaignImportInstrumentationTest {
                     val labels = device.findObjects(selector)
                     val scroll = device.findObjects(By.clazz("android.widget.ScrollView").pkg(product)).singleOrNull()
                     val viewport = scroll?.let { Rect(it.visibleBounds) }
-                    val title = labels.singleOrNull()?.let { Rect(it.visibleBounds) }
+                    // The selected name appears in both the page heading and
+                    // its character-status summary. This is read-only evidence,
+                    // so observe the topmost fully visible exact name rather
+                    // than treating those two legitimate labels as ambiguity.
+                    val title = if (viewport == null) null else labels.map { Rect(it.visibleBounds) }
+                        .filter { !it.isEmpty && viewport.contains(it) }
+                        .minByOrNull { it.top }
                     lastObserved = "direction=$direction scrolls=$scrolls/18; scrollResult=$lastScrollResult; labels=${labels.size}; viewport=$viewport; title=$title"
                     val observed = if (title != null && viewport != null && viewport.contains(title) &&
                         listOf(title, viewport).all { !it.isEmpty && it.left >= 0 && it.top >= 0 &&
@@ -788,7 +794,9 @@ class CampaignImportInstrumentationTest {
         campaignEntry("Inventory")
         tap("Fictional Mapped Lens")
         captureMapped("inventory", "Inventory", "Unknown quantity · Carried", "Fictional lens description preserved.", dialogTitle = "Fictional Mapped Lens")
-        tap("Properties & mechanics")
+        // Item details open this section by default; toggling would hide the
+        // original property records immediately before their readback checks.
+        find("Properties & mechanics")
         find("Fictional optical property")
         find("Fictional optical note; no automatic bonus.")
         tap("Close")
