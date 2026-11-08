@@ -16,6 +16,9 @@ This is a validation candidate, not a declaration of release acceptance.
 - [x] Add relationship edit/remove and companion relationship authoring with actual
   names/types, stale-revision protection and retained removal receipts.
 - [x] Add arbitrary sourced companion forms with unknown-capable HP, AC and stat blocks.
+- [x] Let fresh playable characters explicitly create a reviewed name-only campaign
+  identity for relationship selectors, with immutable proof, collision/stale guards,
+  serialized creation, recreation-safe approval, and dual-store recovery tests.
 - [x] Fix companion attack-review Bonus action capitalization and archived-sheet activation.
 - [x] Independently read back campaign backup bytes and bind restore protection to
   the exact current snapshot instead of a session-wide success flag.
@@ -87,10 +90,11 @@ it does not establish original-owner key or physical handset compatibility.
   a form does not automatically transform, spend resources or swap effects. Form
   payloads are local to this device and full backups; existing connection grants
   cannot publish or modify them.
-- Structured relationships use saved campaign identities. A newly created
-  playable-only character cannot be a campaign relationship endpoint until it has
-  a separately reviewed source counterpart. These identities are not silently
-  mirrored, aliased or presented as synchronized.
+- Structured relationships use saved campaign identities. Character → Campaign
+  connections can create an explicitly reviewed name-only identity for a fresh
+  playable sheet. HP, level, abilities and resources remain unknown in that source
+  counterpart; gameplay stays on the playable sheet. Later names are not mirrored.
+  An existing unrelated source identity is never aliased or overwritten.
 - Complete campaign JSON backup retains its explicit 32-million-character/32MiB
   document limits. Fixing character selection does not remove full-backup limits.
 - Training, resources, spells and accepted homebrew still require explicit review

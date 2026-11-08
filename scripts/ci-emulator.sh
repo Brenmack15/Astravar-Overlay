@@ -95,16 +95,24 @@ Path(sys.argv[5]).write_text(json.dumps(result,indent=2)+'\n')
 print(json.dumps(result))
 ASTRAVAR_MAPPED_READBACK
 }
-run_stage OverlayInstrumentationTest 3 420 native-overlay.txt
+# Collect independent roll, SQLite and player journeys once before dependent
+# update/import stages. Every failure remains release-blocking.
+astravar_prerequisites_ok=1
+run_stage OverlayInstrumentationTest 3 420 native-overlay.txt || astravar_prerequisites_ok=0
 # Run the >32m SQLite regression inside the separate disposable QA application.
 # The optimized release journeys above and this fixture exercise distinct packages.
 timeout -k 5s 45s adb -s "$astravar_serial" install app/build/outputs/apk/debug/app-debug.apk
 timeout -k 5s 45s adb -s "$astravar_serial" install app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-timeout -k 5s 420s adb -s "$astravar_serial" shell am instrument -w -r -e class com.yazsras.astravar.data.ReforgeLargeCampaignSelectionNativeTest,com.yazsras.astravar.data.ReforgeRecoveryNativeTest com.yazsras.astravar.v2uidebug.test/androidx.test.runner.AndroidJUnitRunner | tee validation/native-large-campaign-selection.txt
-grep -Eq '^OK \(2 tests\)' validation/native-large-campaign-selection.txt
-! grep -Eq 'FAILURES|INSTRUMENTATION_FAILED|Process crashed' validation/native-large-campaign-selection.txt
-printf 'PASS\tReforgeLargeCampaignSelectionNativeTest\tnative-large-campaign-selection.txt\n' >>validation/native-stages.tsv
-run_stage PlayerFirstJourneyInstrumentationTest 1 900 native-player-first.txt
+if timeout -k 5s 420s adb -s "$astravar_serial" shell am instrument -w -r -e class com.yazsras.astravar.data.ReforgeLargeCampaignSelectionNativeTest,com.yazsras.astravar.data.ReforgeRecoveryNativeTest com.yazsras.astravar.v2uidebug.test/androidx.test.runner.AndroidJUnitRunner | tee validation/native-large-campaign-selection.txt &&
+  grep -Eq '^OK \(2 tests\)' validation/native-large-campaign-selection.txt &&
+  ! grep -Eq 'FAILURES|INSTRUMENTATION_FAILED|Process crashed' validation/native-large-campaign-selection.txt; then
+  printf 'PASS\tReforgeLargeCampaignSelectionNativeTest\tnative-large-campaign-selection.txt\n' >>validation/native-stages.tsv
+else
+  printf 'FAIL\tReforgeLargeCampaignSelectionNativeTest\tnative-large-campaign-selection.txt\n' >>validation/native-stages.tsv
+  astravar_prerequisites_ok=0
+fi
+run_stage PlayerFirstJourneyInstrumentationTest 1 900 native-player-first.txt || astravar_prerequisites_ok=0
+test "$astravar_prerequisites_ok" = 1
 run_stage UpdateFixtureInstrumentationTest 1 120 native-update-fixture.txt
 stop_product
 timeout 15s adb -s "$astravar_serial" root

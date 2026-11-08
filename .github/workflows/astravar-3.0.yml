@@ -58,6 +58,8 @@ jobs:
             --tests 'com.yazsras.astravar.ui.PrimaryNavigationLayoutTest' \
             --tests 'com.yazsras.astravar.ui.CampaignVisualAcceptanceTest' \
             --tests 'com.yazsras.astravar.ui.ReforgeCharacterUiTest' \
+            --tests 'com.yazsras.astravar.ui.ReforgeCampaignConnectionsTest' \
+            --tests 'com.yazsras.astravar.data.ReforgeCampaignIdentityTest' \
             --tests 'com.yazsras.astravar.ui.PartyPlayerFirstTest' \
             --tests 'com.yazsras.astravar.ui.ConnectionsPageV2Test' \
             --tests 'com.yazsras.astravar.ui.CampaignBackupUiSafetyTest' \

@@ -129,6 +129,14 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
     fun historySummaries(profileId: String): Flow<List<ReforgeChangeSummary>> = dao.historySummaries(profileId)
     suspend fun get(profileId: String): ReforgeSavedCharacter? = withContext(Dispatchers.Default) { dao.character(profileId)?.saved() }
     suspend fun commandReceipt(commandId: String): ReforgeChange? = dao.change(commandId)
+    /** Lock order for the reviewed identity bridge is Reforge → Campaign. No playable write is implied. */
+    internal suspend fun <T> withReviewedIdentitySnapshot(reviewed: ReforgeSavedCharacter,
+        work: suspend () -> T): T = db.withTransaction {
+        check(dao.character(reviewed.character.id)?.saved() == reviewed) {
+            "This playable sheet changed. Close and review its latest name before creating an identity."
+        }
+        work()
+    }
     suspend fun readNoteDraft(profileId: String): ReforgeNoteDraft? = dao.draft(profileId)
     suspend fun saveNoteDraft(profileId: String, expectedRevision: Long, text: String,
         expectedDraftUpdatedAt: Long? = null): ReforgeNoteDraft = db.withTransaction {

@@ -43,7 +43,7 @@ class OverlayInstrumentationTest {
                 instrumentation.uiAutomation.clearCache()
                 val found = device.findObjects(selector).firstOrNull { !it.visibleBounds.isEmpty }
                 if (found != null) return found.text
-                device.findObjects(By.scrollable(true).pkg(product)).lastOrNull()?.scroll(direction, .6f)
+                ui.scrollForObservation(product, direction)
                 device.waitForIdle(1_000)
             }
         }
@@ -53,55 +53,68 @@ class OverlayInstrumentationTest {
 
     @Test fun aAutomaticRollingKeyboardRotationAndLargeText() {
         Configurator.getInstance().setWaitForIdleTimeout(1000).setWaitForSelectorTimeout(30000)
-        openMain()
-        ui.openTool(product, "Armor weapon")
-        tap("Start labeled demo")
-        ui.textBounds("Roll attack", product)
-        // Reopen after onboarding; the same tool now shows the preserved engine.
-        tap("Close")
-        ui.openTool(product, "Armor weapon")
-        ui.textBounds("Roll attack", product)
-        ui.tap(By.desc("Advantage").pkg(product), "Advantage")
-        tap("Roll attack")
-        val first = formula("first committed advantage formula")
-        assertTrue("Both real d20s and advantage must remain visible", first.contains(" / ") && first.contains("advantage"))
-        File(files, "saved-first-roll.txt").writeText(first)
-        assertFalse("Automatic weapon rolls need no manual damage field", device.hasObject(By.clazz("android.widget.EditText").pkg(product)))
-        screenshot("standalone-advantage-result")
-        tap("Roll attack")
-        val second = formula("second committed normal formula", normal = true)
-        assertFalse("One-shot advantage resets after its committed attack", second.contains(" / ") || second.contains("advantage"))
-        File(files, "saved-roll.txt").writeText(second)
-        screenshot("standalone-normal-result")
+        try {
+            openMain()
+            ui.openTool(product, "Armor weapon")
+            tap("Start labeled demo")
+            ui.textBounds("Roll attack", product)
+            // Reopen after onboarding; the same tool now shows the preserved engine.
+            tap("Close")
+            ui.openTool(product, "Armor weapon")
+            ui.textBounds("Roll attack", product)
+            ui.tap(By.desc("Advantage").pkg(product), "Advantage")
+            tap("Roll attack")
+            val first = formula("first committed advantage formula")
+            assertTrue("Both real d20s and advantage must remain visible", first.contains(" / ") && first.contains("advantage"))
+            File(files, "saved-first-roll.txt").writeText(first)
+            assertFalse("Automatic weapon rolls need no manual damage field", device.hasObject(By.clazz("android.widget.EditText").pkg(product)))
+            screenshot("standalone-advantage-result")
+            tap("Roll attack")
+            val second = formula("second committed normal formula", normal = true)
+            assertFalse("One-shot advantage resets after its committed attack", second.contains(" / ") || second.contains("advantage"))
+            File(files, "saved-roll.txt").writeText(second)
+            screenshot("standalone-normal-result")
 
-        tap("Options")
-        tap("Distance in feet")
-        ui.enterFocusedField("60", product, "native distance keyboard")
-        val geometry = ui.snapshot(By.clazz("android.widget.EditText").focused(true).pkg(product), "field above native IME") { field ->
-            val ime = instrumentation.uiAutomation.windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
-            if (ime == null) null else {
-                val keyboard = Rect().also { ime.getBoundsInScreen(it) }
-                val bounds = Rect(field.visibleBounds)
-                if (keyboard.isEmpty || bounds.isEmpty || bounds.bottom > keyboard.top) null else bounds to keyboard
+            tap("Options")
+            tap("Distance in feet")
+            ui.enterFocusedField("60", product, "native distance keyboard")
+            val geometry = ui.snapshot(By.clazz("android.widget.EditText").focused(true).pkg(product), "field above native IME") { field ->
+                val ime = instrumentation.uiAutomation.windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+                if (ime == null) null else {
+                    val keyboard = Rect().also { ime.getBoundsInScreen(it) }
+                    val bounds = Rect(field.visibleBounds)
+                    if (keyboard.isEmpty || bounds.isEmpty || bounds.bottom > keyboard.top) null else bounds to keyboard
+                }
             }
+            assertTrue(geometry.first.bottom <= geometry.second.top)
+            screenshot("standalone-keyboard")
+            device.pressBack()
+            tap("Save")
+            device.setOrientationLeft()
+            device.waitForIdle()
+            ui.textBounds(second, product)
+            screenshot("standalone-landscape-result")
+            device.setOrientationNatural()
+            device.unfreezeRotation()
+            shell("settings put system font_scale 1.3")
+            device.waitForIdle()
+            ui.textBounds("Roll attack", product)
+            screenshot("standalone-large-text-result")
+            shell("settings put system font_scale 1.0")
+            tap("Close")
+            checkpoint("Two real automatic weapon attacks, raw dice, one-shot advantage, native keyboard, rotation and large text exercised through Tools")
+        } catch (error: Throwable) {
+            // Preserve the failing layout before cleanup changes display geometry.
+            runCatching { screenshot("failure-before-configuration-cleanup") }
+            runCatching { device.dumpWindowHierarchy(File(files, "failure-before-configuration-cleanup.xml")) }
+            throw error
+        } finally {
+            // A failed landscape assertion must not change the next test's environment.
+            runCatching { device.setOrientationNatural() }
+            runCatching { device.unfreezeRotation() }
+            runCatching { shell("settings put system font_scale 1.0") }
+            runCatching { device.waitForIdle(1_000) }
         }
-        assertTrue(geometry.first.bottom <= geometry.second.top)
-        screenshot("standalone-keyboard")
-        device.pressBack()
-        tap("Save")
-        device.setOrientationLeft()
-        device.waitForIdle()
-        ui.textBounds(second, product)
-        screenshot("standalone-landscape-result")
-        device.setOrientationNatural()
-        device.unfreezeRotation()
-        shell("settings put system font_scale 1.3")
-        device.waitForIdle()
-        ui.textBounds("Roll attack", product)
-        screenshot("standalone-large-text-result")
-        shell("settings put system font_scale 1.0")
-        tap("Close")
-        checkpoint("Two real automatic weapon attacks, raw dice, one-shot advantage, native keyboard, rotation and large text exercised through Tools")
     }
 
     @Test fun bRetiredOverlayCannotRequestPermissionsOrStart() {

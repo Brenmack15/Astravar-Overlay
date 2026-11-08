@@ -75,6 +75,13 @@ class PlayerFirstJourneyInstrumentationTest {
         find("CI Native Hero Revised")
         assertTrue(device.wait(Until.hasObject(By.text("Level 5 · Proficiency +3").pkg(product)), 10_000))
         stat("HP 31 / 37")
+        tap("Campaign connections")
+        tap("I reviewed this name-only campaign identity")
+        tap("Create campaign identity")
+        find("Campaign identity ready")
+        find("CI Native Hero Revised · Character")
+        capture("reviewed-campaign-identity")
+        tap("Close")
 
         ui.ensurePrimaryTab(product, "Inventory")
         tap("My gear")
@@ -126,23 +133,11 @@ class PlayerFirstJourneyInstrumentationTest {
         tap("Save character status")
         find("HP 4 / 12")
         capture("generic-companion")
-        tap("‹ Party")
-        // Character links use saved campaign identities. Create a clearly fictional
-        // source character through its real editor; do not alias a playable-only ID.
-        ui.openTool(product, "Character sources")
-        tap("Edit status")
-        enter("Character name (optional)", "CI Native Handler")
-        tap("Save character status")
-        find("Edit status") // The editor closed only after its database write completed.
-        find("CI Native Handler")
-        tap("Close")
-        ui.ensurePrimaryTab(product, "Companions")
-        tap("CI Native Ally")
         tap("Relationships")
         tap("Add relationship")
         // The initial target type is Character, verified by the typed target label.
         tap("Choose an existing record")
-        tap("CI Native Handler · Character")
+        tap("CI Native Hero Revised · Character")
         enter("Relationship to this record", "Fictional native journey partner")
         tap("Save relationship")
         find("character profile · Fictional native journey partner")
@@ -164,6 +159,6 @@ class PlayerFirstJourneyInstrumentationTest {
         // The confirmation title and action share text; select the actual final control.
         ui.tapText("Remove relationship", product, preferLast = true)
         find("No relationships recorded. Link a character, ally or campaign record.")
-        instrumentation.sendStatus(0, Bundle().apply { putString("stream", "\nCHECKPOINT: native fictional character create/invalid level/edit/advance/restart; reviewed Strength equipment equip/restart/unequip/restart; arbitrary companion create/edit HP/character relationship create/restart/edit/remove passed through product controls\n") })
+        instrumentation.sendStatus(0, Bundle().apply { putString("stream", "\nCHECKPOINT: native fictional character create/invalid level/edit/advance/restart; reviewed Strength equipment equip/restart/unequip/restart; reviewed fresh playable campaign identity; arbitrary companion create/edit HP/character relationship create/restart/edit/remove passed through product controls\n") })
     }
 }

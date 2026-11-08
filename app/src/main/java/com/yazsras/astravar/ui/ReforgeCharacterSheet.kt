@@ -143,6 +143,7 @@ import kotlinx.coroutines.flow.first
                     PlayerOutlinedButton(onClick = { dialog = "Characters" }) { Text("Switch character") }
                     PlayerTextButton(onClick = { dialog = "Setup" }) { Text("Character setup") }
                 }
+                PlayerTextButton(onClick = { dialog = "CampaignConnections" }) { Text("Campaign connections") }
                 if (saved!!.origin.sourceProfileId != null) PlayerDisclosure("Imported sheet · review before play") {
                     Text("Training, attacks, spells, resources, and movement need your review before relying on calculated values.",
                         color = RebuildPalette.GoldBright, style = MaterialTheme.typography.bodySmall,
@@ -418,6 +419,7 @@ import kotlinx.coroutines.flow.first
             "Notes" -> ReforgeNotesEditor(saved!!, local, { dialog = null })
             "Advance" -> ReforgeAdvancementDialog(character, { dialog = null }) { change("Confirmed character advancement", it) }
             "Setup" -> ReforgeCharacterEditor(character, { dialog = null }) { change("Edit character setup", it) }
+            "CampaignConnections" -> ReforgeCampaignConnectionsDialog(saved!!, local, repository, { dialog = null })
             "Training" -> ReforgeTrainingEditor(character, { dialog = null }) { change("Edit training", it) }
             "Item" -> ReforgeItemEditor(character, { dialog = null }, onSave = { change("Add reviewed equipment", it) })
             "ImportItem" -> {

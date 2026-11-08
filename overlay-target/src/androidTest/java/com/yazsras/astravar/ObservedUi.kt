@@ -79,6 +79,52 @@ internal class ObservedUi(private val device: UiDevice) {
     fun tap(selector: BySelector, description: String, timeoutMs: Long = 30_000) =
         touch(controlBounds(selector, description, timeoutMs), description)
 
+    private data class ScrollSnapshot(val viewport: Rect, val content: List<String>)
+
+    /** Detach the current visible content before crossing a native gesture/window boundary. */
+    private fun scrollSnapshot(packageName: String): ScrollSnapshot? {
+        clearObservationCache()
+        val candidates = device.findObjects(By.scrollable(true).pkg(packageName)).filter {
+            it.className != "android.widget.EditText" && !it.visibleBounds.isEmpty
+        }
+        val scroll = (candidates.filter { it.className == "android.widget.ScrollView" }.ifEmpty { candidates })
+            .maxByOrNull { it.visibleBounds.width().toLong() * it.visibleBounds.height() } ?: return null
+        val viewport = Rect(scroll.visibleBounds)
+        if (!viewport.intersect(0, 0, device.displayWidth, device.displayHeight) || viewport.height() < 32) return null
+        val content = scroll.findObjects(By.pkg(packageName)).mapNotNull { node ->
+            val text = node.text.orEmpty()
+            val description = node.contentDescription.orEmpty()
+            val bounds = Rect(node.visibleBounds)
+            if ((text.isEmpty() && description.isEmpty()) || bounds.isEmpty || !Rect.intersects(viewport, bounds)) null
+            else "$text\u001f$description\u001f${bounds.toShortString()}"
+        }.sorted()
+        return ScrollSnapshot(viewport, content)
+    }
+
+    /**
+     * One slow native swipe inside observed bounds. A missing accessibility scroll event is
+     * not an edge: compare fresh text/description/geometry observations after the gesture.
+     * This read-only discovery never repeats a product tap or an entered value.
+     */
+    fun scrollForObservation(packageName: String, direction: Direction): Boolean? {
+        require(direction == Direction.DOWN || direction == Direction.UP)
+        val before = scrollSnapshot(packageName) ?: return null
+        val viewport = before.viewport
+        val inset = maxOf(4, viewport.height() / 8)
+        val top = viewport.top + inset
+        val bottom = viewport.bottom - inset - 1
+        val start = if (direction == Direction.DOWN) bottom else top
+        val end = if (direction == Direction.DOWN) top else bottom
+        assertTrue("A visible native scroll gesture must be dispatched once",
+            device.swipe(viewport.centerX(), start, viewport.centerX(), end, 60))
+        device.waitForIdle(1_000)
+        val after = scrollSnapshot(packageName)
+        // Empty content cannot establish an unchanged page/edge.
+        val changed = after == null || before.content.isEmpty() || before != after
+        android.util.Log.d("AstravarNativeScroll", "$direction viewport=$viewport changed=$changed visibleNodes=${before.content.size}")
+        return changed
+    }
+
     fun textBounds(text: String, packageName: String, scrollAttempts: Int = 12, interactive: Boolean = false, preferLast: Boolean = false): Rect {
         val selector = By.text(text).pkg(packageName)
         val deadline = SystemClock.uptimeMillis() + 30_000
@@ -86,7 +132,7 @@ internal class ObservedUi(private val device: UiDevice) {
         fun missing(): Nothing = error("Missing product control: $text; last observation: $lastObserved")
         for (direction in listOf(Direction.DOWN, Direction.UP)) {
             var scrolls = 0
-            var reachedEnd = false
+            var unchangedSwipes = 0
             while (scrolls < scrollAttempts) {
                 val remaining = deadline - SystemClock.uptimeMillis()
                 if (remaining <= 0) missing()
@@ -106,16 +152,16 @@ internal class ObservedUi(private val device: UiDevice) {
                         // ancestor is ready. Reobserve within the same deadline;
                         // an unready observation is not a scroll attempt.
                     } else {
-                        // Observe once more after the final movement before
-                        // reversing direction. Do not spend the entire deadline
-                        // repeatedly scrolling against an already reached edge.
-                        if (reachedEnd) break
-                        val scroll = device.findObject(By.scrollable(true).pkg(packageName))
-                        if (scroll == null) lastObserved = "No matching node or scrollable container"
+                        // Reobserve the requested node after each movement. Two
+                        // slow swipes with identical fresh content establish a
+                        // stationary edge; a missing scrollFinished event does not.
+                        if (unchangedSwipes >= 2) break
+                        scrolls++
+                        val changed = scrollForObservation(packageName, direction)
+                        if (changed == null) lastObserved = "No matching node or visible scroll viewport"
                         else {
-                            scrolls++
-                            lastObserved = "No matching node; $direction scroll $scrolls/$scrollAttempts"
-                            reachedEnd = !scroll.scroll(direction, .6f)
+                            unchangedSwipes = if (changed) 0 else unchangedSwipes + 1
+                            lastObserved = "No matching node; $direction scroll $scrolls/$scrollAttempts; changed=$changed; unchanged=$unchangedSwipes"
                         }
                     }
                 } catch (_: StaleObjectException) {
