@@ -70,6 +70,9 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
     var query by rememberSaveable { mutableStateOf("") }
     var kindFilter by rememberSaveable { mutableStateOf("All") }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Keep this context across detail/edit/remove sheets. State belongs to the
+    // selected directory record, so opening another connection starts collapsed.
+    var connectedRecordsOpen by rememberSaveable(selectedId) { mutableStateOf(false) }
     var mode by rememberSaveable { mutableStateOf<String?>(null) }
     val baselineDraft = rememberUiDraftText()
     var baseJson by baselineDraft
@@ -414,7 +417,7 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                         }
                         PlayerTextButton(onClick = { append("milestone") }) { Text("Add milestone") }
                     }
-                    ExpandableRecordSection("Connected Records") {
+                    ConnectionRecordsSection(connectedRecordsOpen, { connectedRecordsOpen = it }) {
                         val related = links.filter { (it.fromType == "connection" && it.fromId == entity.id) || (it.toType == "connection" && it.toId == entity.id) }
                         if (related.isEmpty()) Text("No linked records.", color = RebuildPalette.Muted)
                         related.forEach { link ->
@@ -456,6 +459,21 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                 } ?: Text("This connection is unavailable. Close this view and reopen it from the directory.", color = RebuildPalette.Muted)
             }
         }
+    }
+}
+
+/** Controlled by the directory, which outlives the nested relationship editor. */
+@Composable private fun ConnectionRecordsSection(expanded: Boolean, onExpandedChange: (Boolean) -> Unit,
+    content: @Composable ColumnScope.() -> Unit) {
+    PlayerCard {
+        PlayerTextButton(onClick = { onExpandedChange(!expanded) }, modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Connected Records", Modifier.weight(1f), color = RebuildPalette.Gold,
+                    style = MaterialTheme.typography.titleMedium)
+                Text(if (expanded) "−" else "+", color = RebuildPalette.Ice)
+            }
+        }
+        if (expanded) content()
     }
 }
 

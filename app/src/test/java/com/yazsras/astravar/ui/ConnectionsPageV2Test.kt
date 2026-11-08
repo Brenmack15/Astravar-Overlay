@@ -196,9 +196,17 @@ class ConnectionsPageV2Test {
             compose.onNodeWithText("Relationship to this record").performScrollTo().performTextReplacement("Protects")
             compose.onNodeWithText("Save relationship").performClick()
             compose.waitUntil(10_000) { runBlocking { db.recordsDao().link(link.id)?.revision == 2L } }
+            // Read back the returned UI as well as the committed revision. The
+            // connected-records section must stay open after its nested editor.
+            compose.waitUntil(10_000) {
+                compose.onAllNodes(hasText("Protects") and hasClickAction()).fetchSemanticsNodes().isNotEmpty() &&
+                    compose.onAllNodes(hasText("Remove relationship") and hasClickAction()).fetchSemanticsNodes().size == 1
+            }
+            compose.onNode(hasText("Protects") and hasClickAction()).performScrollTo().assertExists()
             compose.onNode(hasText("Remove relationship") and hasClickAction()).performScrollTo().performClick()
             compose.onNode(hasText("Remove relationship") and hasClickAction()).performClick()
             compose.waitUntil(10_000) { runBlocking { db.recordsDao().activeLinks().isEmpty() } }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("No linked records.").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("No linked records.").performScrollTo().assertExists()
             runBlocking {
                 val events = db.recordsDao().allAudit()
