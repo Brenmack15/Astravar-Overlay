@@ -21,6 +21,8 @@ This is a validation candidate, not a declaration of release acceptance.
   the exact current snapshot instead of a session-wide success flag.
 - [x] Keep diagnostics and independent recovery tools reachable after weapon-store startup failure.
 - [x] Make switch labels and their complete 48dp rows interactive and accessible.
+- [x] Keep focused fields visible after keyboard resizing and text changes;
+  bound multiline editors without truncating their saved text.
 - [x] Restore armor-source reference navigation through Tools.
 - [x] Add real-emulator journeys for character create/edit/advance, reviewed gear
   equip/restart/unequip, generic companion HP and relationship create/edit/remove.

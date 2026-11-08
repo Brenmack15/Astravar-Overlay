@@ -60,6 +60,7 @@ class UpdatePreservationInstrumentationTest {
         assertTrue(device.takeScreenshot(File(files, "same-key-update-inventory.png")))
         tap("Close")
         tap("Companions", preferLast = true)
+        if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
         find("Party & family")
         listOf("Zerg Hasma", "Eek", "Korr", "Veyrath").forEach { find(it) }
         // Layout acceptance captures are native emulator output, not a physical Galaxy test.

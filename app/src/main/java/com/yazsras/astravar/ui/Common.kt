@@ -5,10 +5,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -64,7 +68,22 @@ class Actions(val repo: Repository,private val scope: CoroutineScope) {
     }
 }
 @Composable fun Field(label: String,value: String,change: (String)->Unit,modifier: Modifier=Modifier,single: Boolean=true,enabled: Boolean=true) {
-    OutlinedTextField(value,change,enabled=enabled,label={ Text(label) },modifier=modifier.fillMaxWidth(),singleLine=single,shape=androidx.compose.foundation.shape.RoundedCornerShape(12.dp),colors=OutlinedTextFieldDefaults.colors(focusedBorderColor=RebuildPalette.BlueAccent,unfocusedBorderColor=RebuildPalette.BlueDeep,focusedContainerColor=RebuildPalette.Elevated,unfocusedContainerColor=RebuildPalette.Elevated))
+    val visibility = remember { BringIntoViewRequester() }
+    var focused by remember { mutableStateOf(false) }
+    val keyboardBottom = WindowInsets.ime.getBottom(LocalDensity.current)
+    // A lower field can be focused before Dialog's IME resize finishes. Keep its
+    // final bounds visible after focus, inset and text-size changes, including
+    // accessibility input. The native provenance-entry journey exercises this.
+    LaunchedEffect(focused, keyboardBottom, value) {
+        if (focused && enabled) {
+            withFrameNanos { }; withFrameNanos { }
+            visibility.bringIntoView()
+        }
+    }
+    OutlinedTextField(value,change,enabled=enabled,label={ Text(label) },
+        modifier=modifier.fillMaxWidth().bringIntoViewRequester(visibility).onFocusChanged { focused = it.hasFocus },
+        singleLine=single,maxLines=if(single) 1 else 8,
+        shape=androidx.compose.foundation.shape.RoundedCornerShape(12.dp),colors=OutlinedTextFieldDefaults.colors(focusedBorderColor=RebuildPalette.BlueAccent,unfocusedBorderColor=RebuildPalette.BlueDeep,focusedContainerColor=RebuildPalette.Elevated,unfocusedContainerColor=RebuildPalette.Elevated))
 }
 @Composable fun Toggle(label: String,value: Boolean,enabled: Boolean=true,change: (Boolean)->Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min=48.dp).toggleable(value=value,enabled=enabled,role=Role.Switch,onValueChange=change),

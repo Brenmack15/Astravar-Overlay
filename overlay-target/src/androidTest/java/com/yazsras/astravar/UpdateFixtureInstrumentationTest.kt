@@ -5,6 +5,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import android.graphics.Rect
+import android.view.accessibility.AccessibilityWindowInfo
+import java.io.File
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.Rule
@@ -30,6 +33,16 @@ class UpdateFixtureInstrumentationTest {
             // Observe actual focus afresh; never retry the tap or weaken input checks.
             assertNotNull("Focused field for $label", ui.bounds(By.clazz("android.widget.EditText").focused(true).pkg(product), label, timeoutMs = 10_000, refreshCache = true))
             ui.setFocusedField(value, product, label)
+            if (label == "Source / checkpoint (optional)") {
+                ui.snapshot(By.clazz("android.widget.EditText").focused(true).pkg(product), "provenance remains visible above keyboard", refreshCache = true) { field ->
+                    val keyboard = instrumentation.uiAutomation.windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+                        ?.let { Rect().also(it::getBoundsInScreen) }
+                    val bounds = field.visibleBounds
+                    true.takeIf { keyboard != null && !keyboard.isEmpty && !bounds.isEmpty &&
+                        bounds.top >= 0 && bounds.bottom <= keyboard.top }
+                }
+                assertTrue(device.takeScreenshot(File(instrumentation.targetContext.getExternalFilesDir(null), "native-item-provenance-keyboard.png")))
+            }
             device.pressBack()
         }
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
