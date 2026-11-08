@@ -55,8 +55,8 @@ val rebuildDestinations = listOf("Character", "Inventory", "Companions", "Campai
     val controls: @Composable () -> Unit = {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             actions.forEach { (name, action) ->
-                PlayerTextButton(onClick = action, modifier = Modifier.widthIn(min = widths.getValue(name))) {
-                    Text(name, style = actionStyle, maxLines = 1, softWrap = false)
+                PlayerTextButton(onClick = action, modifier = Modifier.width(widths.getValue(name).coerceAtLeast(48.dp))) {
+                    Text(name, Modifier.fillMaxWidth(), style = actionStyle, textAlign = TextAlign.Center, maxLines = 1, softWrap = false)
                 }
             }
             if (demo) Text("DEMO", color = RebuildPalette.Cyan, style = MaterialTheme.typography.labelSmall)

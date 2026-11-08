@@ -86,6 +86,7 @@ internal class ObservedUi(private val device: UiDevice) {
         fun missing(): Nothing = error("Missing product control: $text; last observation: $lastObserved")
         for (direction in listOf(Direction.DOWN, Direction.UP)) {
             var scrolls = 0
+            var reachedEnd = false
             while (scrolls < scrollAttempts) {
                 val remaining = deadline - SystemClock.uptimeMillis()
                 if (remaining <= 0) missing()
@@ -105,12 +106,16 @@ internal class ObservedUi(private val device: UiDevice) {
                         // ancestor is ready. Reobserve within the same deadline;
                         // an unready observation is not a scroll attempt.
                     } else {
+                        // Observe once more after the final movement before
+                        // reversing direction. Do not spend the entire deadline
+                        // repeatedly scrolling against an already reached edge.
+                        if (reachedEnd) break
                         val scroll = device.findObject(By.scrollable(true).pkg(packageName))
                         if (scroll == null) lastObserved = "No matching node or scrollable container"
                         else {
                             scrolls++
                             lastObserved = "No matching node; $direction scroll $scrolls/$scrollAttempts"
-                            scroll.scroll(direction, .6f)
+                            reachedEnd = !scroll.scroll(direction, .6f)
                         }
                     }
                 } catch (_: StaleObjectException) {
