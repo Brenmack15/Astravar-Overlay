@@ -53,6 +53,8 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     var configSection by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("Settings") }
     var campaignPage by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
     var tool by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
+    var requestedInventory by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("My gear") }
+    var inventoryRoute by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     LaunchedEffect(ownerConnectionRequest) {
         if (ownerConnectionRequest > 0) { tab = "Character"; tool = "Owner connection" }
     }
@@ -108,7 +110,10 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
         Scaffold(containerColor=RebuildPalette.Canvas,
             snackbarHost={SnackbarHost(snackbar)},
             topBar={RebuildAppHeader(s?.demo==true, search = { tool = "Global search" }, tools = { tool = "Tools" })},
-            bottomBar={RebuildPrimaryNavigation(tab) {tab=it}}
+            bottomBar={RebuildPrimaryNavigation(tab) { next ->
+                if (next == "Inventory") { requestedInventory = "My gear"; inventoryRoute++ }
+                tab = next
+            }}
         ) {insets->
             Column(Modifier.padding(insets).imePadding()) {
                 if(error!=null) Text(error!!,Modifier.padding(16.dp),color=MaterialTheme.colorScheme.error)
@@ -137,10 +142,14 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                             onOverlayVisibilityChanged={armorModalOpen=it},
                             openReferences={tab="Campaign";campaignPage="Reference Library"})
                         "Combat" -> ReforgeCharacterSheet(app.campaignLedger, initialSection = "Combat")
-                        "Inventory" -> RebuildInventoryHub(app.campaignLedger) {tab="Campaign";campaignPage="Reference Library"}
+                        "Inventory" -> RebuildInventoryHub(app.campaignLedger,
+                            openReferences = { tab = "Campaign"; campaignPage = "Reference Library" },
+                            requestedSection = requestedInventory, routeToken = inventoryRoute)
                         "Companions" -> if (remoteTestEnabled) Page { Text("Party records are isolated from the disposable Remote Stat Test. Disable Remote Updates to edit party records.") }
                             else PartyPageV2(app.campaignLedger, current,
-                                openReferences={tab="Campaign";campaignPage="Reference Library"}) {tab="Inventory"}
+                                openReferences={tab="Campaign";campaignPage="Reference Library"}) {
+                                    requestedInventory = "Campaign items"; inventoryRoute++; tab = "Inventory"
+                                }
                         "Party" -> if (remoteTestEnabled) Page { Text("Party records are isolated from the disposable Remote Stat Test. Disable Remote Updates to edit party records.") }
                             else PartyPageV2(app.campaignLedger, current,
                                 openReferences={tab="Campaign";campaignPage="Reference Library"}) {tab="Campaign";campaignPage="Inventory"}
@@ -191,7 +200,9 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                         "Spell library" -> PayloadsPage(current,actions,app.preferences,prefs.selectedPayloads)
                         "Roll history" -> CombatHistoryPage(current)
                         "Appearance", "Overlay & appearance" -> SettingsPage(app,current,actions,startOverlay,grantOverlay,stopOverlay)
-                        "Companions" -> PartyPageV2(app.campaignLedger, current, openReferences={tool=null;tab="Campaign";campaignPage="Reference Library"}) {tool=null;tab="Inventory"}
+                        "Companions" -> PartyPageV2(app.campaignLedger, current, openReferences={tool=null;tab="Campaign";campaignPage="Reference Library"}) {
+                            tool = null; requestedInventory = "Campaign items"; inventoryRoute++; tab = "Inventory"
+                        }
                         "Character sources" -> Page { CharacterOverviewV2(app.campaignLedger, current) }
                         "Armor systems" -> ArmorOverviewV2(current,app.campaignLedger,combat={tool="Armor weapon"},systems={tool="Spell reservoir"},eek={tool="Companions"},inventory={tool=null;tab="Inventory"},elements=prefs.elements,selectElement={elementPicker=true})
                         else -> HelpPage()

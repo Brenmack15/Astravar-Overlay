@@ -58,6 +58,13 @@ import java.util.concurrent.atomic.AtomicInteger
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class CampaignVisualAcceptanceTest {
     @get:Rule val compose = createAstravarComposeRule()
+    @Test fun connectionChoicesUseActualCampaignRecordTypes() {
+        assertEquals("item", connectionTargetType("Inventory item"))
+        assertEquals("project", connectionTargetType("Invention"))
+        assertEquals("companion", connectionTargetType("Companion"))
+        assertEquals("character-profile", connectionTargetType("Character"))
+        assertEquals("connection", connectionTargetType("Connection"))
+    }
     private var oldRequestedSize: String? = null
     private val source = "Synthetic UI acceptance fixture · not campaign data"
     private val longItemName = "Mithral focusing assembly with a deliberately long synthetic inventory name"
@@ -307,6 +314,25 @@ class CampaignVisualAcceptanceTest {
         }
     }
 
+    @Test(timeout = 90_000) fun connectionLinksToCompanionWithoutDuplicatingItsProfile() {
+        Fixture().use { fixture ->
+            fixture.render { ConnectionsPageV2(ledger) }
+            settle { compose.onAllNodesWithText(connectionName).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(connectionName).performScrollTo().performClick()
+            compose.onNodeWithText("Connected Records").performScrollTo().performClick()
+            compose.onNodeWithText("Link existing record").performScrollTo().performClick()
+            compose.onNode(hasText("Related record type", substring = true) and hasClickAction()).performClick()
+            compose.onNodeWithText("Companion").performClick()
+            compose.onNodeWithText("Choose an existing record").performScrollTo().performClick()
+            compose.onNodeWithText("Eek").performClick()
+            compose.onNodeWithText("Relationship to this record").performScrollTo().performTextInput("Trusted fictional companion")
+            compose.onNodeWithText("Link existing record").performScrollTo().performClick()
+            settle { runBlocking { fixture.db.recordsDao().allLinks().any { it.toType == "companion" && it.toId == "eek" && it.fromType == "connection" } } }
+            assertEquals(1, runBlocking { fixture.db.recordsDao().allCompanionStates() }.size)
+            assertTrue(runBlocking { fixture.db.recordsDao().allCharacterProfiles() }.isEmpty())
+        }
+    }
+
     @Test(timeout = 90_000) fun eekCompactResourcesAndCapabilityOverlayDoNotRefillAnything() {
         Fixture().use { fixture ->
             fixture.render { EekPageV2(ledger) }
@@ -339,6 +365,7 @@ class CampaignVisualAcceptanceTest {
                 RebuildConfigHub { tool = it }
                 if (tool == "Fictional sync") RebuildToolSheet("Fictional sync", { tool = null }) { SandboxSyncPage(sync) }
             }
+            compose.onNodeWithText("Advanced combat & magic").performScrollTo().performClick()
             compose.onNodeWithText("Spell reservoir").assertIsDisplayed()
             compose.onNodeWithText("Core management").assertDoesNotExist()
             capture("rebuild-config-400", fixture.activity.get())

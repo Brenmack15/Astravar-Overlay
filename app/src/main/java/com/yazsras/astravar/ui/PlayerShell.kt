@@ -83,8 +83,10 @@ val rebuildDestinations = listOf("Character", "Inventory", "Companions", "Campai
 }
 
 /** The playable gear and original campaign ledger are different stores. Keep both discoverable. */
-@Composable fun RebuildInventoryHub(repository: CampaignLedgerRepository, openReferences: () -> Unit) {
+@Composable fun RebuildInventoryHub(repository: CampaignLedgerRepository, openReferences: () -> Unit,
+    requestedSection: String = "My gear", routeToken: Int = 0) {
     var section by rememberSaveable { mutableStateOf("My gear") }
+    LaunchedEffect(routeToken) { section = requestedSection }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -94,6 +94,19 @@ class ReforgeCharacterUiTest {
         assertTrue(runBlocking { repository.observeAll().first() }.isEmpty())
     }
 
+    @Test fun newCharacterNeedsOnlyNameAndRetainsUnknownStats() = withSheet(seed = false) { repository ->
+        compose.waitUntil(10000) { compose.onAllNodesWithText("Create character").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Create character").performClick()
+        compose.onNodeWithText("Name", substring = false).performTextInput("Fictional traveler")
+        compose.onNodeWithText("Save character").performClick()
+        compose.waitUntil(10000) { runBlocking { repository.observeAll().first() }.any { it.character.name == "Fictional traveler" } }
+        val character = runBlocking { repository.observeAll().first() }.single().character
+        assertEquals(1, character.level)
+        assertNull(character.baseMaxHp)
+        assertTrue(character.baseAbilities.values.all { it == null })
+        assertTrue(character.items.isEmpty())
+    }
+
     @Test fun copyingCampaignItemIsExplicitAndKeepsOriginalIdentityWithoutMagic() {
         var sourceId = ""
         withSheet(campaignSetup = { ledger ->

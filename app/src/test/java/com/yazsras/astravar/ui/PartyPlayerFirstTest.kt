@@ -174,7 +174,7 @@ class PartyPlayerFirstTest {
             compose.onNodeWithText("Give / take / move item").performScrollTo().performClick()
             waitForText("Synthetic harness")
             compose.onNodeWithText("Synthetic harness").performScrollTo().performClick()
-            compose.onNodeWithText("Zerg Hasma ▾").performScrollTo().performClick()
+            compose.onNodeWithText("Fictional owner ▾").performScrollTo().performClick()
             compose.onNodeWithText("Korr", useUnmergedTree = true).performClick()
             compose.onNodeWithText("Carried ▾").performScrollTo().performClick()
             compose.onNodeWithText("Equipped", useUnmergedTree = true).performClick()

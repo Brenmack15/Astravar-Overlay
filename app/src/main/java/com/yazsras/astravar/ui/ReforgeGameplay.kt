@@ -42,7 +42,7 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
 ) {
     val character = rememberReforgeSnapshot(latestCharacter)
     var name by rememberSaveable { mutableStateOf(character?.name ?: "") }
-    var level by rememberSaveable { mutableStateOf(character?.level?.toString() ?: "") }
+    var level by rememberSaveable { mutableStateOf(character?.level?.toString() ?: "1") }
     var maxHp by rememberSaveable { mutableStateOf(character?.baseMaxHp?.toString() ?: "") }
     val initialCurrentHp = remember(character) { character?.let { CharacterCalculator.calculate(it).currentHp } }
     var hp by rememberSaveable { mutableStateOf(initialCurrentHp?.toString() ?: "") }
@@ -53,7 +53,13 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
     var rules by rememberSaveable { mutableStateOf(character?.rules?.classVersion ?: "unconfigured") }
     var scores by rememberSaveable { mutableStateOf(Stat.entries.associate { it.name to (character?.baseAbilities?.get(it)?.toString() ?: "") }) }
     var error by remember { mutableStateOf("") }
-    PlayerSheet(if (character == null) "Create character" else "Character setup", onDismiss, dirty = true,
+    val dirty = name != character?.name.orEmpty() || level != (character?.level?.toString() ?: "1") ||
+        maxHp != character?.baseMaxHp?.toString().orEmpty() || hp != initialCurrentHp?.toString().orEmpty() ||
+        temp != character?.temporaryHp?.toString().orEmpty() || ac != character?.baseAc?.toString().orEmpty() ||
+        speed != character?.speed?.toString().orEmpty() || casterLevel != character?.spellcastingClassLevel?.toString().orEmpty() ||
+        rules != (character?.rules?.classVersion ?: "unconfigured") ||
+        scores.any { (key, value) -> value != Stat.valueOf(key).let { character?.baseAbilities?.get(it)?.toString().orEmpty() } }
+    PlayerSheet(if (character == null) "Create character" else "Character setup", onDismiss, dirty = dirty,
         actions = {
             PlayerButton(onClick = {
                 try {
@@ -80,17 +86,22 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
                 } catch (e: Exception) { error = e.message ?: "Check these values" }
             }) { Text("Save character") }
         }) {
-        Text("Record permanent abilities and an unequipped HP/AC baseline. Blank means unknown. Equipment effects belong on items.", color = RebuildPalette.Muted)
+        Text("Start with a name and level. Add your statistics whenever you're ready; blank values stay unknown.", color = RebuildPalette.Muted)
         Field("Name", name, { name = it })
         Field("Level", level, { level = it })
-        Stat.entries.chunked(if (LocalDensity.current.fontScale >= 1.5f) 2 else 3).forEach { row -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            row.forEach { stat -> Field(stat.name, scores[stat.name].orEmpty(), { scores = scores + (stat.name to it) }, Modifier.weight(1f)) }
-        } }
-        Field("Unequipped maximum HP", maxHp, { maxHp = it })
-        Field("Current HP (blank = unknown)", hp, { hp = it })
-        Field("Temporary HP", temp, { temp = it })
-        Field("Unequipped Armor Class", ac, { ac = it })
-        Field("Walking speed (ft.)", speed, { speed = it })
+        PlayerDisclosure("Ability scores", initiallyOpen = character != null) {
+            Stat.entries.chunked(if (LocalDensity.current.fontScale >= 1.5f) 2 else 3).forEach { row -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { stat -> Field(stat.name, scores[stat.name].orEmpty(), { scores = scores + (stat.name to it) }, Modifier.weight(1f)) }
+            } }
+        }
+        PlayerDisclosure("Health, defense & movement", initiallyOpen = character != null) {
+            Text("These values are your baseline before equipment effects. Blank means unknown.", color = RebuildPalette.Muted)
+            Field("Unequipped maximum HP", maxHp, { maxHp = it })
+            Field("Current HP (blank = unknown)", hp, { hp = it })
+            Field("Temporary HP", temp, { temp = it })
+            Field("Unequipped Armor Class", ac, { ac = it })
+            Field("Walking speed (ft.)", speed, { speed = it })
+        }
         PlayerDisclosure("Spellcasting & rule versions") {
             Text("The Infusions-based Artificer is preserved. Setting its class level enables its slot/preparation table; leave blank for other classes until their capacity is configured.", color = RebuildPalette.Muted)
             Field("Legacy Artificer class level", casterLevel, { casterLevel = it })

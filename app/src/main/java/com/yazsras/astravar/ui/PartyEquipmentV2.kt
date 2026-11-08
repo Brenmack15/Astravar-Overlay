@@ -139,12 +139,18 @@ import java.util.UUID
 
 @Composable internal fun PartySelection(label: String, selected: String, options: List<Pair<String, String>>, choose: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
     Column {
         Text(label, style = MaterialTheme.typography.labelLarge, color = RebuildPalette.Muted)
         Box {
-            PlayerOutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text("$selected ▾") }
+            PlayerOutlinedButton(onClick = { query = ""; expanded = true }, modifier = Modifier.fillMaxWidth()) { Text("$selected ▾") }
             DropdownMenu(expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = 320.dp)) {
-                options.forEach { (id, title) -> DropdownMenuItem(text = { Text(title) }, onClick = { choose(id); expanded = false }) }
+                if (options.size > 12) OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true,
+                    label = { Text("Search $label") }, modifier = Modifier.padding(8.dp).widthIn(min = 220.dp))
+                val matches = options.filter { (_, title) -> query.isBlank() || title.contains(query.trim(), ignoreCase = true) }
+                if (matches.isEmpty()) DropdownMenuItem(text = { Text("No matching records") }, onClick = {}, enabled = false)
+                matches.take(40).forEach { (id, title) -> DropdownMenuItem(text = { Text(title) }, onClick = { choose(id); expanded = false }) }
+                if (matches.size > 40) DropdownMenuItem(text = { Text("Search to narrow ${matches.size} records") }, onClick = {}, enabled = false)
             }
         }
     }
