@@ -33,7 +33,9 @@ repository unit test. A screenshot alone is not a success criterion.
 - Keeps diagnostic, engineering and complex magic interfaces in a single Tools
   location instead of advertising them as everyday destinations.
 - Adds original celestial/companion banner artwork and a warmer, more coherent
-  color and card system. Native text remains real text for accessibility.
+  color and card system. These two new banners were generated specifically for
+  Astravar 3.1 and compressed to WebP; they are not cropped third-party D&D
+  illustrations. Native text remains real text for accessibility.
 - Exposes playable gear and the original campaign ledger as two clearly labeled
   inventories. The owner can explicitly copy a single eligible ledger item into
   the playable sheet with original identity, optimistic revision validation and

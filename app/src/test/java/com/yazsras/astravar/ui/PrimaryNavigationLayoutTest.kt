@@ -34,11 +34,11 @@ import org.robolectric.annotation.LooperMode
 class PrimaryNavigationLayoutTest {
     @get:Rule val compose = createAstravarComposeRule()
 
-    @Test fun normalTextKeepsAllFiveReadableDestinationsInOneRow() = verifyNavigation(1f, 1)
+    @Test fun normalTextKeepsAllFourReadableDestinationsInOneRow() = verifyNavigation(1f, 1)
 
-    // Character and Inventory require pairs at 360 dp with doubled text. Keep
+    // Four destinations require two rows at 360 dp with doubled text. Keep
     // complete labels and the requested font size rather than squeezing a row.
-    @Test fun doubleTextKeepsCompleteSingleLineLabelsAndSelectedNavigationInThreeRows() = verifyNavigation(2f, 3)
+    @Test fun doubleTextKeepsCompleteSingleLineLabelsAndSelectedNavigationInTwoRows() = verifyNavigation(2f, 2)
 
     private fun verifyNavigation(fontScale: Float, expectedRows: Int) {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()

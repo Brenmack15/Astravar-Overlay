@@ -326,7 +326,7 @@ class CampaignVisualAcceptanceTest {
             compose.onNodeWithText("Choose an existing record").performScrollTo().performClick()
             compose.onNodeWithText("Eek").performClick()
             compose.onNodeWithText("Relationship to this record").performScrollTo().performTextInput("Trusted fictional companion")
-            compose.onNodeWithText("Link existing record").performScrollTo().performClick()
+            compose.onNodeWithText("Link existing record").performClick()
             settle { runBlocking { fixture.db.recordsDao().allLinks().any { it.toType == "companion" && it.toId == "eek" && it.fromType == "connection" } } }
             assertEquals(1, runBlocking { fixture.db.recordsDao().allCompanionStates() }.size)
             assertTrue(runBlocking { fixture.db.recordsDao().allCharacterProfiles() }.isEmpty())
@@ -370,6 +370,7 @@ class CampaignVisualAcceptanceTest {
             compose.onNodeWithText("Core management").assertDoesNotExist()
             capture("rebuild-config-400", fixture.activity.get())
             if (BuildConfig.DEBUG) {
+                compose.onNodeWithText("Records, backups & connection").performScrollTo().performClick()
                 compose.onNodeWithText("Fictional sync").performScrollTo().performClick()
             } else {
                 // The public diagnostic launcher is deliberately absent from release.

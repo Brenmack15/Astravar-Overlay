@@ -50,6 +50,17 @@ jobs:
           python3 scripts/verify_upgrade_integrity.py
           python3 scripts/verify_branding.py
           python3 scripts/verify_particle_resources.py
+      - name: Player journey smoke tests before the full suite
+        timeout-minutes: 20
+        run: |
+          bash gradlew --no-daemon --console=plain :app:testDebugUnitTest \
+            --tests 'com.yazsras.astravar.ui.NavigationV2Test' \
+            --tests 'com.yazsras.astravar.ui.PrimaryNavigationLayoutTest' \
+            --tests 'com.yazsras.astravar.ui.CampaignVisualAcceptanceTest' \
+            --tests 'com.yazsras.astravar.ui.ReforgeCharacterUiTest' \
+            --tests 'com.yazsras.astravar.ui.PartyPlayerFirstTest' \
+            --tests 'com.yazsras.astravar.data.CompanionCreationTest' \
+            --tests 'com.yazsras.astravar.data.ReforgeLargeCampaignSelectionTest'
       - name: Rules, Room, native Compose, lint and debug APK
         timeout-minutes: 75
         run: |
