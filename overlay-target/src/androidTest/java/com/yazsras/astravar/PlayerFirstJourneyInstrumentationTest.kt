@@ -36,7 +36,7 @@ class PlayerFirstJourneyInstrumentationTest {
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
         ui.awaitMainAfterSavedDialogs(product)
     }
-    private fun stat(prefix: String) = ui.bounds(By.descStartsWith(prefix).pkg(product), "calculated $prefix")
+    private fun stat(prefix: String) = ui.bounds(By.descStartsWith(prefix).pkg(product), "calculated $prefix", refreshCache = true)
 
     @Test fun characterAdvancementReviewedEquipmentCompanionAndRestart() {
         assertEquals("Fictional destructive fixtures require an emulator", "1", device.executeShellCommand("getprop ro.kernel.qemu").trim())
@@ -68,6 +68,8 @@ class PlayerFirstJourneyInstrumentationTest {
         find("Level 4 → 5\nProficiency +2 → +3\nMaximum HP 30 → 37\nCurrent HP 24 → 31")
         capture("advancement-preview")
         tap("Confirm level 5")
+        find("Level 5 · Proficiency +3")
+        stat("HP 31 / 37")
         restart()
         ui.ensurePrimaryTab(product, "Character")
         find("CI Native Hero Revised")
@@ -104,6 +106,7 @@ class PlayerFirstJourneyInstrumentationTest {
         tap("Unequip")
         find("STR: 19 → 8")
         tap("Confirm change")
+        find("Carried · Quantity 1")
         restart()
         ui.ensurePrimaryTab(product, "Inventory")
         tap("My gear")
@@ -121,6 +124,7 @@ class PlayerFirstJourneyInstrumentationTest {
         enter("Current HP (blank = unknown)", "4")
         enter("Maximum HP (blank = unknown)", "12")
         tap("Save character status")
+        find("HP 4 / 12")
         capture("generic-companion")
         tap("‹ Party")
         // Character links use saved campaign identities. Create a clearly fictional
@@ -129,6 +133,7 @@ class PlayerFirstJourneyInstrumentationTest {
         tap("Edit status")
         enter("Character name (optional)", "CI Native Handler")
         tap("Save character status")
+        find("Edit status") // The editor closed only after its database write completed.
         find("CI Native Handler")
         tap("Close")
         ui.ensurePrimaryTab(product, "Companions")
