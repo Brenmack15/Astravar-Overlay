@@ -132,4 +132,13 @@ run_stage CampaignImportInstrumentationTest#dMappedCampaignRecordsRollbackAfterR
 stop_product
 copy_campaign_database validation/campaign-mapped-rolled-back
 verify_mapped validation/campaign-mapped-rolled-back/astravar-campaign-ledger.db validation/campaign-mapped-before.json validation/native-mapped-fixture.json rollback validation/native-mapped-rollback-readback.json
-printf '%s\n' 'PASS:9 native UI tests in7 explicitly ordered stages; same-version reinstall preserved persisted bytes; native readback retained rolls/inventory; large and typed imports and separately consented rollback passed independent host SQLite verification. Disposable CI signer/emulator only; no physical owner phone acceptance.' >validation/RELEASE-UI-RESULT.txt
+run_stage PlayerFirstJourneyInstrumentationTest 1 900 native-player-first.txt
+# Run the >32m SQLite regression inside the separate disposable QA application.
+# The optimized release journeys above and this fixture exercise distinct packages.
+timeout -k 5s 45s adb -s "$astravar_serial" install app/build/outputs/apk/debug/app-debug.apk
+timeout -k 5s 45s adb -s "$astravar_serial" install app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+timeout -k 5s 420s adb -s "$astravar_serial" shell am instrument -w -r -e class com.yazsras.astravar.data.ReforgeLargeCampaignSelectionNativeTest com.yazsras.astravar.v2uidebug.test/androidx.test.runner.AndroidJUnitRunner | tee validation/native-large-campaign-selection.txt
+grep -Eq '^OK \(1 test\)' validation/native-large-campaign-selection.txt
+! grep -Eq 'FAILURES|INSTRUMENTATION_FAILED|Process crashed' validation/native-large-campaign-selection.txt
+printf 'PASS\tReforgeLargeCampaignSelectionNativeTest\tnative-large-campaign-selection.txt\n' >>validation/native-stages.tsv
+printf '%s\n' 'PASS:11 native tests in9 explicitly ordered stages; standalone weapon rolls, retired overlay contract, character advancement, reviewed gear and generic companion relationships passed; same-version reinstall preserved persisted bytes; native readback retained rolls/inventory; large and typed imports and separately consented rollback passed independent host SQLite verification; native QA SQLite fixture verified scoped selection above the complete-export ceiling. Disposable CI signer/emulator only; no physical owner phone acceptance.' >validation/RELEASE-UI-RESULT.txt

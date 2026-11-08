@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.*
 import com.yazsras.astravar.rules.reforge.ReforgeCharacter
 import com.yazsras.astravar.rules.reforge.CharacterCalculator
+import com.yazsras.astravar.rules.reforge.InventoryRules
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.flowOn
@@ -122,6 +123,7 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
     companion object { fun open(context: Context): ReforgeRepository = ReforgeRepository(ReforgeDb.open(context)) }
     fun observe(profileId: String): Flow<ReforgeSavedCharacter?> = dao.observe(profileId).map { it?.saved() }.flowOn(Dispatchers.Default)
     fun observeAll(): Flow<List<ReforgeSavedCharacter>> = dao.observeAll().map { rows -> rows.map { it.saved() } }.flowOn(Dispatchers.Default)
+    fun observeActive(): Flow<List<ReforgeSavedCharacter>> = observeAll().map { profiles -> profiles.filterNot { it.character.archived } }
     fun rollHistory(profileId: String): Flow<List<ReforgeRollRecord>> = dao.rolls(profileId)
     fun history(profileId: String): Flow<List<ReforgeChange>> = dao.history(profileId)
     fun historySummaries(profileId: String): Flow<List<ReforgeChangeSummary>> = dao.historySummaries(profileId)
@@ -177,6 +179,7 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
         retry(commandId, fp)?.let { return@withTransaction reforgeJson.decodeFromString<ReforgeActionOutcome>(it.afterJson) }
         val before = dao.character(profileId) ?: error("Save the character before rolling an action.")
         check(before.revision == expectedRevision) { "Character changed since this action began. Review the latest state." }
+        require(!before.saved().character.archived && !nextCharacter.archived) { "Restore this archived sheet before recording new actions." }
         require(dao.roll(roll.id) == null && dao.change(roll.id) == null) { "Roll identity already exists." }
         check(expectedRevision < Long.MAX_VALUE)
         val now = maxOf(clock(), Math.addExact(before.updatedAt, 1))
@@ -199,6 +202,23 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
 
     suspend fun create(character: ReforgeCharacter, commandId: String = UUID.randomUUID().toString()): ReforgeSavedCharacter =
         createWithOrigin(character, ReforgeOrigin(), "Create character", commandId)
+
+    /** A reversible revision-checked change; no character, source or historical receipt is deleted. */
+    suspend fun setArchived(character: ReforgeCharacter, archived: Boolean,
+        commandId: String = UUID.randomUUID().toString()): ReforgeSavedCharacter =
+        save(character.id, character.revision, character.copy(archived = archived),
+            if (archived) "Archive playable sheet" else "Restore archived playable sheet", commandId)
+
+    /** Both ownership changes and their immutable revision receipts commit, or neither does. */
+    suspend fun transferItem(from: ReforgeCharacter, to: ReforgeCharacter, itemId: String,
+        commandId: String = UUID.randomUUID().toString()): Pair<ReforgeSavedCharacter, ReforgeSavedCharacter> = db.withTransaction {
+        checkId(commandId)
+        val (nextFrom, nextTo) = InventoryRules.transfer(from, to, itemId)
+        val transferId = reforgeHash(commandId)
+        val outgoing = save(from.id, from.revision, nextFrom, "Transfer item out", "transfer-out:$transferId")
+        val incoming = save(to.id, to.revision, nextTo, "Receive transferred item", "transfer-in:$transferId")
+        outgoing to incoming
+    }
 
     internal suspend fun createWithOrigin(character: ReforgeCharacter, origin: ReforgeOrigin, operation: String, commandId: String): ReforgeSavedCharacter = db.withTransaction {
         require(character.revision == 0L) { "A new character must have revision zero." }
@@ -242,6 +262,7 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
         retry(commandId, fp)?.let { return@withTransaction reforgeJson.decodeFromString<ReforgeRollRecord>(it.afterJson) }
         val character = dao.character(roll.profileId) ?: error("Save the character before recording a roll.")
         check(character.revision == roll.characterRevision) { "Character changed. Roll again from the latest statistics or record an explicit manual result." }
+        require(!character.saved().character.archived) { "Restore this archived sheet before recording new rolls." }
         require(dao.roll(roll.id) == null && dao.change(roll.id) == null) { "Roll identity already exists." }
         dao.insert(roll)
         dao.insert(ReforgeChange(commandId, roll.profileId, "Roll", fp, character.revision, character.revision,

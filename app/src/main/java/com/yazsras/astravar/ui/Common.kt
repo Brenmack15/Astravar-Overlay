@@ -4,11 +4,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.data.Repository
 import com.yazsras.astravar.rules.Campaign
@@ -65,7 +67,11 @@ class Actions(val repo: Repository,private val scope: CoroutineScope) {
     OutlinedTextField(value,change,enabled=enabled,label={ Text(label) },modifier=modifier.fillMaxWidth(),singleLine=single,shape=androidx.compose.foundation.shape.RoundedCornerShape(12.dp),colors=OutlinedTextFieldDefaults.colors(focusedBorderColor=RebuildPalette.BlueAccent,unfocusedBorderColor=RebuildPalette.BlueDeep,focusedContainerColor=RebuildPalette.Elevated,unfocusedContainerColor=RebuildPalette.Elevated))
 }
 @Composable fun Toggle(label: String,value: Boolean,enabled: Boolean=true,change: (Boolean)->Unit) {
-    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) { Text(label,Modifier.weight(1f).padding(top=12.dp)); Switch(value,change,enabled=enabled) }
+    Row(Modifier.fillMaxWidth().heightIn(min=48.dp).toggleable(value=value,enabled=enabled,role=Role.Switch,onValueChange=change),
+        verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
+        Text(label,Modifier.weight(1f).padding(end=12.dp))
+        Switch(value,onCheckedChange=null,enabled=enabled)
+    }
 }
 @Composable fun <T> Choices(label: String,values: List<T>,selected: T?,display: (T)->String={it.toString()},enabled: Boolean=true,change: (T)->Unit) {
     var expanded by remember {mutableStateOf(false)}

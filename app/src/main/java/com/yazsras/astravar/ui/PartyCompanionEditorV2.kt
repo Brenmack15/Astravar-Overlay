@@ -80,7 +80,9 @@ fun PartyCompanionEditorV2(repository: CampaignLedgerRepository, memberId: Strin
     else resources.forEach { row ->
         PlayerEntry(row.name, "${row.current ?: "?"} / ${row.maximum ?: "?"}", "Core", onClick = { editResource(row) })
     }
-    if (links.isNotEmpty()) PlayerEntry("Historical equipment associations", "${links.size} relationship(s) · current possession is under Equipment", "Core", onClick = { mode = "links" })
+    val itemLinks = links.filter { it.fromType == "item" || it.toType == "item" }
+    if (itemLinks.isNotEmpty()) PlayerEntry("Historical equipment associations", "${itemLinks.size} relationship(s) · current possession is under Equipment", "Core", onClick = { mode = "links" })
+    PartyRelationshipsV31(repository, memberId, memberName)
     if (mode == null) CompanionEditorFeedback(actions.message, actions.busy)
 
     if (mode == "state") PlayerSheet("Edit $memberName status", onDismiss = { mode = null },
@@ -144,8 +146,8 @@ fun PartyCompanionEditorV2(repository: CampaignLedgerRepository, memberId: Strin
 
     if (mode == "links") PlayerSheet("${memberName} equipment", onDismiss = { mode = null }) {
         Text("Existing links indicate equipment associations, not verified transfer of ownership or consumption.", color = RebuildPalette.Muted)
-        if (links.isEmpty()) Text("No item linked to this companion in the local records.", color = RebuildPalette.Muted)
-        links.forEach { link ->
+        if (itemLinks.isEmpty()) Text("No item linked to this companion in the local records.", color = RebuildPalette.Muted)
+        itemLinks.forEach { link ->
             val itemId = if (link.toType == "item") link.toId else link.fromId
             val item = items.firstOrNull { it.id == itemId }
             PlayerCard {

@@ -50,6 +50,10 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
     var ac by rememberSaveable { mutableStateOf(character?.baseAc?.toString() ?: "") }
     var speed by rememberSaveable { mutableStateOf(character?.speed?.toString() ?: "") }
     var casterLevel by rememberSaveable { mutableStateOf(character?.spellcastingClassLevel?.toString() ?: "") }
+    var castingAbility by rememberSaveable { mutableStateOf(character?.spellcastingAbility ?: Stat.INT) }
+    var attunementLimit by rememberSaveable { mutableStateOf(character?.attunementLimit?.toString() ?: "3") }
+    var armorDex by rememberSaveable { mutableStateOf(character?.armorUsesDexterity ?: false) }
+    var armorDexCap by rememberSaveable { mutableStateOf(character?.armorDexterityCap?.toString() ?: "") }
     var rules by rememberSaveable { mutableStateOf(character?.rules?.classVersion ?: "unconfigured") }
     var scores by rememberSaveable { mutableStateOf(Stat.entries.associate { it.name to (character?.baseAbilities?.get(it)?.toString() ?: "") }) }
     var error by remember { mutableStateOf("") }
@@ -57,6 +61,8 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
         maxHp != character?.baseMaxHp?.toString().orEmpty() || hp != initialCurrentHp?.toString().orEmpty() ||
         temp != character?.temporaryHp?.toString().orEmpty() || ac != character?.baseAc?.toString().orEmpty() ||
         speed != character?.speed?.toString().orEmpty() || casterLevel != character?.spellcastingClassLevel?.toString().orEmpty() ||
+        castingAbility != (character?.spellcastingAbility ?: Stat.INT) || attunementLimit != (character?.attunementLimit?.toString() ?: "3") ||
+        armorDex != (character?.armorUsesDexterity ?: false) || armorDexCap != character?.armorDexterityCap?.toString().orEmpty() ||
         rules != (character?.rules?.classVersion ?: "unconfigured") ||
         scores.any { (key, value) -> value != Stat.valueOf(key).let { character?.baseAbilities?.get(it)?.toString().orEmpty() } }
     PlayerSheet(if (character == null) "Create character" else "Character setup", onDismiss, dirty = dirty,
@@ -75,8 +81,18 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
                         currentHp = if (hpEdited || character == null) optionalInt(hp, "Current HP", 0, 10000) else base.currentHp,
                         hpDamage = if (hpEdited) null else base.hpDamage, temporaryHp = optionalInt(temp, "Temporary HP", 0, 10000),
                         baseAc = optionalInt(ac, "Baseline Armor Class", 0, 100), speed = optionalInt(speed, "Speed", 0, 1000),
+                        armorUsesDexterity = armorDex, armorDexterityCap = optionalInt(armorDexCap, "Armor Dexterity cap", 0, 100),
+                        attunementLimit = optionalInt(attunementLimit, "Attunement capacity", 0, 100) ?: error("Enter attunement capacity"),
+                        spellcastingAbility = castingAbility,
                         spellcastingClassLevel = optionalInt(casterLevel, "Artificer spellcasting level", 1, 20),
                         rules = base.rules.copy(classVersion = rules.trim()))
+                    if (candidate.attunementLimit != base.attunementLimit) {
+                        val used = candidate.items.filter { it.attuned }.sumOf { item ->
+                            candidate.itemDefinitions.find { it.id == item.definitionId }?.attunementCost
+                                ?: error("An attuned item is missing its definition. Review equipment before changing capacity.")
+                        }
+                        require(used <= candidate.attunementLimit) { "End attunement to enough items before reducing capacity below $used." }
+                    }
                     val preserved = if (character != null && !hpEdited) GameplayRules.preserveCapacities(base, candidate) else candidate
                     val projected = CharacterCalculator.calculate(preserved)
                     val currentValue = preserved.currentHp
@@ -100,11 +116,15 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
             Field("Current HP (blank = unknown)", hp, { hp = it })
             Field("Temporary HP", temp, { temp = it })
             Field("Unequipped Armor Class", ac, { ac = it })
+            Toggle("Add Dexterity modifier to Armor Class", armorDex) { armorDex = it }
+            if (armorDex) Field("Maximum Dexterity bonus (blank = no cap)", armorDexCap, { armorDexCap = it })
             Field("Walking speed (ft.)", speed, { speed = it })
+            Field("Accepted attunement capacity", attunementLimit, { attunementLimit = it })
         }
         PlayerDisclosure("Spellcasting & rule versions") {
             Text("The Infusions-based Artificer is preserved. Setting its class level enables its slot/preparation table; leave blank for other classes until their capacity is configured.", color = RebuildPalette.Muted)
             Field("Legacy Artificer class level", casterLevel, { casterLevel = it })
+            Choices("Spellcasting ability", Stat.entries, castingAbility) { castingAbility = it }
             Field("Pinned class version", rules, { rules = it })
         }
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)

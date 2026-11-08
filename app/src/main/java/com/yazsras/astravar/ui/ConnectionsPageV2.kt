@@ -41,6 +41,17 @@ internal fun connectionTargetType(label: String): String = when (label) {
     else -> error("Unknown connection target: $label")
 }
 
+/** Removed associations remain inspectable from the directory's History. */
+internal fun connectionHistoryLinkIds(links: List<CampaignLink>, audit: List<CampaignAudit>, entityId: String?): Set<String> {
+    fun related(link: CampaignLink) = (link.fromType == "connection" && link.fromId == entityId) ||
+        (link.toType == "connection" && link.toId == entityId)
+    return links.filter(::related).map { it.id }.toSet() + audit.filter { event ->
+        event.recordType == "link" && listOfNotNull(event.beforeJson, event.afterJson).any { json ->
+            runCatching { related(Json.decodeFromString<CampaignLink>(json)) }.getOrDefault(false)
+        }
+    }.map { it.recordId }
+}
+
 /** A directory first. All record inspection and editing stays in one focused sheet. */
 @Composable
 fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
@@ -79,6 +90,9 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
     var entrySource by rememberSaveable { mutableStateOf("") }
     var entryKind by rememberSaveable { mutableStateOf("Known information") }
     var evidence by rememberSaveable { mutableStateOf("Unverified") }
+    val linkBaselineDraft = rememberUiDraftText()
+    var linkBaselineJson by linkBaselineDraft
+    val linkBaseline = remember(linkBaselineJson) { linkBaselineJson?.let { runCatching { Json.decodeFromString<CampaignLink>(it) }.getOrNull() } }
     var linkType by rememberSaveable { mutableStateOf("Inventory item") }
     var targetId by rememberSaveable { mutableStateOf<String?>(null) }
     var eventId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -98,6 +112,7 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
         relationship != baseline?.relationship.orEmpty() || image != baseline?.imageBase64 || source != baseline?.source.orEmpty()
     val dirty = when(mode) {
         "edit" -> profileDirty
+        "link-edit" -> entryTitle != linkBaseline?.label.orEmpty() || entrySource != linkBaseline?.source.orEmpty()
         "fact", "milestone", "link" -> entryTitle.isNotBlank() || entryDetail.isNotBlank() || entrySource.isNotBlank() || targetId != null
         else -> false
     }
@@ -116,7 +131,13 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
         evidence = "Unverified"; targetId = null; linkType = "Inventory item"; mode = next
         actions.message = ""
     }
-    fun closeSheet() { if (!actions.busy) mode = if (mode in listOf("edit", "fact", "milestone", "link", "history", "linked") && selectedId != null) "detail" else if (mode == "event") "history" else null }
+    fun editLink(link: CampaignLink, remove: Boolean = false) {
+        linkBaselineJson = Json.encodeToString(link)
+        entryTitle = link.label; entrySource = link.source
+        appendId = UUID.randomUUID().toString(); actions.message = ""
+        mode = if (remove) "link-remove" else "link-edit"
+    }
+    fun closeSheet() { if (!actions.busy) mode = if (mode in listOf("edit", "fact", "milestone", "link", "link-edit", "link-remove", "history", "linked") && selectedId != null) "detail" else if (mode == "event") "history" else null }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null && !actions.busy) {
             val requested = imageTarget
@@ -142,7 +163,7 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                 modifier = Modifier.semantics { contentDescription = "Add connection" }) { Text("Add") }
         }
         PlayerSearch(query, { query = it }, "Search names, aliases and known notes")
-        ConnectionChoice("Directory type", listOf("All", "Person", "Group", "Faction", "Being", "Other"), kindFilter, !actions.busy) { kindFilter = it }
+        ConnectionChoice("Directory type", listOf("All", "Person", "Group", "Faction", "Being", "Location", "Other"), kindFilter, !actions.busy) { kindFilter = it }
         if (mode == null) {
             ConnectionSaveStatus(actions)
             baselineDraft.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -175,6 +196,8 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
             "fact" -> "Add learned information"
             "milestone" -> "Append milestone"
             "link" -> "Link a record"
+            "link-edit" -> "Edit relationship"
+            "link-remove" -> "Remove relationship"
             "history" -> "Connection history"
             "event" -> "Event details"
             "linked" -> "Connected record"
@@ -204,6 +227,18 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                     val src = entrySource.trim().ifBlank { "Local campaign note in Astravar" }
                     actions.run { records.saveMilestone(entry, source = src); entryTitle = ""; entryDetail = ""; entrySource = ""; mode = "detail"; "Milestone saved locally." }
                 }) { Text("Append milestone") }
+                "link-edit", "link-remove" -> PlayerButton(enabled = !actions.busy && linkBaselineDraft.canSave &&
+                    linkBaseline != null && links.any { it.id == linkBaseline.id && it.revision == linkBaseline.revision } &&
+                    (currentMode == "link-remove" || entryTitle.isNotBlank()), onClick = {
+                    val original = requireNotNull(linkBaseline)
+                    val src = entrySource.trim().ifBlank { "Local relationship edit in Astravar" }
+                    actions.run {
+                        if (currentMode == "link-remove") records.unlink(original.id, original.revision, src, appendId)
+                        else records.saveLink(original.copy(label = entryTitle.trim()), original.revision, src, appendId)
+                        mode = "detail"
+                        if (currentMode == "link-remove") "Relationship removed locally; its history is retained." else "Relationship saved locally."
+                    }
+                }) { Text(if (currentMode == "link-remove") "Remove relationship" else "Save relationship") }
                 "link" -> PlayerButton(enabled = !actions.busy && selectedId != null && targetId != null && entryTitle.isNotBlank(), onClick = {
                     val entry = CampaignLink(fromType = "connection", fromId = selectedId!!, toType = connectionTargetType(linkType), toId = targetId!!, label = entryTitle.trim(), id = appendId)
                     val src = entrySource.trim().ifBlank { "Local campaign note in Astravar" }
@@ -220,7 +255,7 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                         Text("A newer record exists. Your draft is preserved. Cancel and reopen to load it.", color = MaterialTheme.colorScheme.error)
                     }
                     ConnectionField("Connection name", name, !actions.busy) { name = it }
-                    ConnectionChoice("Connection type", listOf("Person", "Group", "Faction", "Being", "Other"), kind, !actions.busy) { kind = it }
+                    ConnectionChoice("Connection type", listOf("Person", "Group", "Faction", "Being", "Location", "Other"), kind, !actions.busy) { kind = it }
                     ConnectionField("Aliases / other known names (optional)", aliases, !actions.busy) { aliases = it }
                     ReforgeDocumentEditor("Overview & appearance", notes, { notes = it }, !actions.busy)
                     ConnectionField("Known relationship context (optional)", relationship, !actions.busy, false) { relationship = it }
@@ -245,6 +280,18 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                     ConnectionField("What happened / significance", entryDetail, !actions.busy, false) { entryDetail = it }
                     PlayerDisclosure("Source (optional)") { ConnectionField("Milestone source", entrySource, !actions.busy, false) { entrySource = it } }
                 }
+                "link-edit", "link-remove" -> {
+                    if (linkBaseline == null || !linkBaselineDraft.canSave) Text(
+                        linkBaselineDraft.error ?: "The relationship draft could not be read. Close and reopen it.", color = MaterialTheme.colorScheme.error)
+                    else {
+                        if (links.none { it.id == linkBaseline.id && it.revision == linkBaseline.revision }) Text(
+                            "This relationship changed. Close and reopen it before continuing.", color = MaterialTheme.colorScheme.error)
+                        if (currentMode == "link-remove") Text(
+                            "Remove “${linkBaseline.label}” from connected records? Both records, item ownership and the full relationship history remain saved.", color = RebuildPalette.Muted)
+                        else ConnectionField("Relationship to this record", entryTitle, !actions.busy) { entryTitle = it }
+                        PlayerDisclosure("Source (optional)") { ConnectionField("Link source", entrySource, !actions.busy, false) { entrySource = it } }
+                    }
+                }
                 "link" -> {
                     ConnectionChoice("Related record type", listOf("Inventory item", "Invention", "Companion", "Character", "Connection"), linkType, !actions.busy) { linkType = it; targetId = null }
                     val companionIds = companionStates.map { it.companionId }.toSet()
@@ -255,7 +302,7 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                             (characterProfiles.firstOrNull { it.id == companion.companionId }?.name?.takeIf(String::isNotBlank)
                                 ?: companion.name.ifBlank { "Unnamed companion" }) }
                         "Character" -> characterProfiles.filterNot { it.id in companionIds }.map { it.id to it.name.ifBlank { "Unnamed character" } }
-                        else -> entities.filterNot { it.id == selectedId }.map { it.id to it.name }
+                        else -> entities.filterNot { it.id == selectedId }.map { it.id to "${it.name} · ${connectionKindLabel(it.kind)}" }
                     }
                     if (targets.isEmpty()) Text("No saved ${linkType.lowercase()} records available to link.", color = RebuildPalette.Muted)
                     else ConnectionTargetChoice(targets, targetId, !actions.busy) { targetId = it }
@@ -266,7 +313,7 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                 "history", "event" -> {
                     val factIds = facts.filter { it.entityId == selectedId }.map { it.id }.toSet()
                     val milestoneIds = milestones.filter { it.entityId == selectedId }.map { it.id }.toSet()
-                    val linkIds = links.filter { (it.fromType == "connection" && it.fromId == selectedId) || (it.toType == "connection" && it.toId == selectedId) }.map { it.id }.toSet()
+                    val linkIds = connectionHistoryLinkIds(links, audit, selectedId)
                     val entries = audit.filter { when(it.recordType) { "connection" -> it.recordId == selectedId; "fact" -> it.recordId in factIds; "milestone" -> it.recordId in milestoneIds; "link" -> it.recordId in linkIds; else -> false } }
                     if (currentMode == "event") {
                         entries.firstOrNull { it.id == eventId }?.let { ConnectionAuditDetail(it) }
@@ -277,7 +324,16 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                     }
                 }
                 "linked" -> {
-                    if (recordType == "item") items.firstOrNull { it.id == recordId }?.let { item ->
+                    val available = when (recordType) {
+                        "item" -> items.any { it.id == recordId }
+                        "project" -> projects.any { it.id == recordId }
+                        "companion" -> companionStates.any { it.companionId == recordId }
+                        "character-profile" -> characterProfiles.any { it.id == recordId }
+                        "connection" -> entities.any { it.id == recordId }
+                        else -> false
+                    }
+                    if (!available) Text("The linked record is unavailable. Close this view and check its source; the relationship is retained.", color = RebuildPalette.Muted)
+                    else if (recordType == "item") items.firstOrNull { it.id == recordId }?.let { item ->
                         Text(item.title, style = MaterialTheme.typography.titleLarge)
                         Text("${item.category} · ${item.quantity?.toString() ?: "Quantity unknown"}", color = RebuildPalette.Ice)
                         ReforgeRichText(item.description)
@@ -377,6 +433,10 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                             PlayerEntry(target ?: "Related $type", link.label,
                                 if (type in setOf("item", "companion")) "Core" else "Emblem",
                                 { recordType = type; recordId = id; mode = "linked" })
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                PlayerTextButton(onClick = { editLink(link) }, enabled = !actions.busy) { Text("Edit relationship") }
+                                PlayerTextButton(onClick = { editLink(link, remove = true) }, enabled = !actions.busy) { Text("Remove relationship") }
+                            }
                         }
                         PlayerTextButton(onClick = { append("link") }) { Text("Link existing record") }
                     }
@@ -393,7 +453,7 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                         milestones.filter { it.entityId == entity.id && it.source.isNotBlank() }.forEach { ReforgeRichText(it.source) }
                         links.filter { (it.fromId == entity.id || it.toId == entity.id) && it.source.isNotBlank() }.forEach { ReforgeRichText(it.source) }
                     }
-                } ?: LinearProgressIndicator(Modifier.fillMaxWidth())
+                } ?: Text("This connection is unavailable. Close this view and reopen it from the directory.", color = RebuildPalette.Muted)
             }
         }
     }

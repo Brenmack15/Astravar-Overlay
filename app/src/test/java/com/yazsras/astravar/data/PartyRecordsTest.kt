@@ -55,6 +55,30 @@ class PartyRecordsTest {
         assertTrue(db.recordsDao().allCompanionResources().isEmpty())
     }
 
+    @Test fun alternateFormsRoundTripUnknownsWithoutChangingMainProfileOrOldJson() = runBlocking {
+        val oldJson = campaignJson.encodeToString(PartySheetData(role = "Legacy fixture"))
+        assertFalse(oldJson.contains("\"forms\""))
+        assertTrue(campaignJson.decodeFromString<PartySheetData>(oldJson).forms.isEmpty())
+        val forms = listOf(SheetForm("Synthetic scout form", source = "Fictional scene"),
+            SheetForm("Synthetic heavy form", currentHp = 7, maximumHp = 10, armorClass = 12,
+                statBlock = "Claws: 1d4. Transform only after explicit confirmation.", evidenceStatus = "Confirmed", source = "Fictional scene"))
+        party.saveSheet("synthetic-b", PartySheetData(forms = forms), source = "Fictional forms")
+        assertEquals(forms, db.partyDao().sheet("synthetic-b")!!.sheet.forms)
+        assertNull(db.partyDao().sheet("synthetic-b")!!.sheet.forms.first().maximumHp)
+        assertNull(db.recordsDao().characterProfile("synthetic-b")!!.currentHp)
+        assertTrue(db.recordsDao().allCompanionResources().isEmpty())
+        rejects { party.saveSheet("synthetic-b", PartySheetData(forms = listOf(forms[1].copy(currentHp = 11))), 1, "Invalid form") }
+        assertEquals(forms, db.partyDao().sheet("synthetic-b")!!.sheet.forms)
+        val other = Room.inMemoryDatabaseBuilder(context, CampaignLedgerDb::class.java).allowMainThreadQueries().build()
+        try {
+            val target = CampaignLedgerRepository(other)
+            val preview = target.previewImport(ledger.export())
+            assertTrue(preview.conflicts.joinToString(), preview.valid)
+            target.restore(preview, "restore-form-fixture")
+            assertEquals(forms, other.partyDao().sheet("synthetic-b")!!.sheet.forms)
+        } finally { other.close() }
+    }
+
     @Test fun sheetVersionsReturnOriginalReceiptAfterLaterEditsAndRejectStaleOrCollidingCommands() = runBlocking {
         val data = PartySheetData(role = "Initial")
         val original = party.saveSheet("synthetic-a", data, source = "Synthetic source", commandId = "sheet-create")

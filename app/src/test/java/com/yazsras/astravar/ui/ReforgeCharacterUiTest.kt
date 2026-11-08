@@ -184,4 +184,22 @@ class ReforgeCharacterUiTest {
         assertEquals(49, CharacterCalculator.calculate(after).currentHp)
     }
 
+    @Test fun archiveRequiresConfirmationAndRestoreReturnsSameSavedSheet() = withSheet { repository ->
+        compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Switch character").performScrollTo().performClick()
+        compose.onNodeWithText("Archive Synthetic artificer").performScrollTo().performClick()
+        assertFalse(runBlocking { repository.get("synthetic-player") }!!.character.archived)
+        compose.onNodeWithText("Archive sheet").performClick()
+        compose.waitUntil(10000) { runBlocking { repository.observeActive().first() }.isEmpty() }
+        compose.onNodeWithTag("reforge-STR").assertDoesNotExist()
+        compose.onNodeWithText("View archived sheets").performScrollTo().performClick()
+        compose.onNodeWithText("Restore Synthetic artificer").performScrollTo().performClick()
+        compose.waitUntil(10000) { runBlocking { repository.get("synthetic-player") }!!.revision == 3L }
+        val after = runBlocking { repository.get("synthetic-player") }!!.character
+        assertFalse(after.archived)
+        assertEquals(fixture().items, after.items)
+        assertEquals(fixture().baseAbilities, after.baseAbilities)
+        assertEquals(fixture().currentHp, after.currentHp)
+    }
+
 }

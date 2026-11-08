@@ -118,8 +118,8 @@ class NativeRecheckTest(unittest.TestCase):
             "run_class UpdatePreservationInstrumentationTest 1 validation/native-update-readback.txt",
             "run_class CampaignImportInstrumentationTest#aDocumentPickerPreviewConfirmationAndLibrary 1 validation/native-campaign-import.txt",
             "run_class CampaignImportInstrumentationTest#bGuardedRollbackRestoresVerifiedSnapshot 1 validation/native-campaign-rollback.txt",
-            "run_class OverlayInstrumentationTest#bNotificationStop 1 validation/native-updated-notification-stop.txt",
-            "run_class OverlayInstrumentationTest#cRollRestorationMainHistoryAndLivePermissionRecovery 1 validation/native-updated-overlay-recovery.txt",
+            "run_class OverlayInstrumentationTest#bRetiredOverlayCannotRequestPermissionsOrStart 1 validation/native-updated-notification-stop.txt",
+            "run_class OverlayInstrumentationTest#cRollRestorationMainHistoryAndPrimaryNavigation 1 validation/native-updated-overlay-recovery.txt",
         ]
         positions = []
         for call in calls:

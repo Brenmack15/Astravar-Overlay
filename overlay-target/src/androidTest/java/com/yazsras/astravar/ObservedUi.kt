@@ -146,7 +146,7 @@ internal class ObservedUi(private val device: UiDevice) {
         primaryTabState(node)?.takeIf { it.enabled && it.selected }?.bounds
 
     fun ensurePrimaryTab(packageName: String, tab: String) {
-        require(tab in listOf("Armor", "Combat", "Party", "Campaign", "Config")) { "Only primary tabs use tab-selection semantics" }
+        require(tab in listOf("Character", "Inventory", "Companions", "Campaign")) { "Only primary tabs use tab-selection semantics" }
         val deadline = SystemClock.uptimeMillis() + 30_000
         fun remaining() = (deadline - SystemClock.uptimeMillis()).coerceAtLeast(0)
         val selector = By.text(tab).pkg(packageName)
@@ -168,6 +168,23 @@ internal class ObservedUi(private val device: UiDevice) {
         snapshot(selector, "fresh selected $tab tab", timeoutMs = budget, refreshCache = true) {
             device.findObjects(selector).lastOrNull()?.let(::selectedTabBounds)
         }
+    }
+
+    /** Follow the same header and disclosure controls available to a player. */
+    fun openTool(packageName: String, name: String) {
+        tapText("Tools", packageName)
+        val group = when (name) {
+            "Armor weapon", "Spell reservoir", "Spell library", "Rules & profile", "Resources & recovery", "Roll history" -> "Advanced combat & magic"
+            "Character sources", "Character backup", "Campaign backup", "Campaign import", "Owner connection", "Weapon backup", "Fictional sync", "Remote Updates" -> "Records, backups & connection"
+            else -> null
+        }
+        if (group != null) tapText(group, packageName)
+        tapText(name, packageName)
+    }
+
+    fun campaignItems(packageName: String) {
+        ensurePrimaryTab(packageName, "Inventory")
+        tapText("Campaign items", packageName)
     }
 
     fun captureStablePage(file: File, packageName: String, tab: String, markers: List<BySelector>) {

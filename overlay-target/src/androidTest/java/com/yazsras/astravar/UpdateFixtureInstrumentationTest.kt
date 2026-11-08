@@ -34,11 +34,11 @@ class UpdateFixtureInstrumentationTest {
         }
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
         ui.awaitMainAfterSavedDialogs(product)
-        tap("Campaign", preferLast = true)
-        tap("Inventory")
+        ui.campaignItems(product)
         tap("Add Item")
         enter("Item name", "CI FICTIONAL update-preservation crystal")
-        enter("Source / checkpoint", "Fictional emulator fixture; no real campaign data")
+        tap("Sources & advanced details")
+        enter("Source / checkpoint (optional)", "Fictional emulator fixture; no real campaign data")
         tap("Save new item")
         assertTrue(device.wait(Until.hasObject(By.text("Item saved").pkg(product)), 15000))
         // The default blank quantity deliberately remains unknown through upgrade.

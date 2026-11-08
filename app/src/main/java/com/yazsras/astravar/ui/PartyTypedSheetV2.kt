@@ -116,6 +116,18 @@ private fun lines(text: String) = text.lineSequence().map(String::trim).filter(S
         Text("Companion-specific counters below retain their existing records. Editing a sheet never refills them.",
             color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
     }
+    if (memberId != "local-player" || sheet.forms.isNotEmpty()) PartySheetSection("Forms & transformations", { edit("Forms") }) {
+        if (sheet.forms.isEmpty()) Text("Add alternate forms, such as a mechanical body or warform. Unknown statistics stay blank.", color = RebuildPalette.Muted)
+        sheet.forms.forEach { form ->
+            PlayerCard(padding = 12.dp) {
+                Text(form.name, style = MaterialTheme.typography.titleMedium)
+                Text("${form.evidenceStatus} · HP ${form.currentHp ?: "?"} / ${form.maximumHp ?: "?"} · AC ${form.armorClass ?: "?"}", color = RebuildPalette.Ice)
+                if (form.statBlock.isNotBlank()) ReforgeRichText(form.statBlock)
+                if (form.source.isNotBlank()) PlayerDisclosure("Form source") { ReforgeRichText(form.source) }
+            }
+        }
+        Text("Each form preserves its own recorded values. Editing a form never transforms the companion, changes its main HP, or applies equipment effects.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+    }
     PartySheetSection("Sources & unresolved decisions", { edit("Sources") }) {
         if (sheet.references.isEmpty()) Text("No source references recorded.", color = RebuildPalette.Muted)
         sheet.references.forEach { Text(it, color = RebuildPalette.Ice) }
@@ -306,6 +318,26 @@ private fun modifierDescription(value: SheetModifier): String =
                     }
                 } }
                 PlayerTextButton(onClick = { resourceKeys = resourceKeys + UUID.randomUUID().toString(); update(draft.copy(resources = draft.resources + SheetResource(name = ""))) }) { Text("Add sheet resource") }
+            }
+            "Forms" -> {
+                Text("Record only confirmed statistics and costs. These independent form records never replace the main profile or spend resources automatically.", color = RebuildPalette.Muted)
+                draft.forms.forEachIndexed { index, row -> key(row.id) {
+                    PlayerCard {
+                        val replace: (SheetForm) -> Unit = { next -> update(draft.copy(forms = draft.forms.toMutableList().apply { set(index, next) })) }
+                        Field("Form name ${index + 1}", row.name, { replace(row.copy(name = it)) })
+                        PartyNumberField("form-current-${row.id}", "Form current HP ${index + 1}", row.currentHp, errors) { replace(row.copy(currentHp = it)) }
+                        PartyNumberField("form-maximum-${row.id}", "Form maximum HP ${index + 1}", row.maximumHp, errors) { replace(row.copy(maximumHp = it)) }
+                        PartyNumberField("form-ac-${row.id}", "Form Armor Class ${index + 1}", row.armorClass, errors) { replace(row.copy(armorClass = it)) }
+                        Field("Form stat block and transformation rules ${index + 1}", row.statBlock, { replace(row.copy(statBlock = it)) }, single = false)
+                        PartyEvidence(row.evidenceStatus) { replace(row.copy(evidenceStatus = it)) }
+                        Field("Form source ${index + 1}", row.source, { replace(row.copy(source = it)) }, single = false)
+                        PlayerTextButton(onClick = {
+                            listOf("current", "maximum", "ac").forEach { errors.remove("form-$it-${row.id}") }
+                            update(draft.copy(forms = draft.forms.filterNot { it.id == row.id }))
+                        }) { Text("Remove form ${index + 1}") }
+                    }
+                } }
+                PlayerTextButton(onClick = { update(draft.copy(forms = draft.forms + SheetForm(name = ""))) }, enabled = draft.forms.size < 20) { Text("Add form") }
             }
             "Sources" -> {
                 Field("Source references · one per line", references.orEmpty(), { references = it; update(draft.copy(references = lines(it))) }, single = false)

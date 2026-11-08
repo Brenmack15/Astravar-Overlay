@@ -86,7 +86,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         db.recordsDao().allFacts().filter {it.entityId in entityIds}.forEach {output += envelope("fact",it.id,it.revision,it)}
         db.recordsDao().allMilestones().filter {it.entityId in entityIds}.forEach {output += envelope("milestone",it.id,it.revision,it)}
         fun endpoint(type:String,id:String) = when(type){"item"->id in itemIds;"project"->id in projectIds;"connection"->id in entityIds;"companion"->id in companionIds;"character-profile"->id in profileIds;else->false}
-        db.recordsDao().allLinks().filter {endpoint(it.fromType,it.fromId) && endpoint(it.toType,it.toId)}.forEach {output += envelope("link",it.id,it.revision,it)}
+        db.recordsDao().activeLinks().filter {endpoint(it.fromType,it.fromId) && endpoint(it.toType,it.toId)}.forEach {output += envelope("link",it.id,it.revision,it)}
         val visibleSubjects=output.map {it.recordId}.toSet() + profileIds + companionIds
         if (includeReadOnly) db.recordsDao().allAudit().filter {audit -> (audit.recordId in visibleSubjects || audit.recordType=="campaign-transaction" && audit.recordId==campaignId) && diagnostics.none {audit.recordId==it || audit.recordId.startsWith("$it:")}}.forEach {output += CampaignSyncAuditProjection.records(envelope("audit",it.id,1,it))}
         // Initial acquisition and later inventory edits predate CampaignAudit and retain their original ledger identities.

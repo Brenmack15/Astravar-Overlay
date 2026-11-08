@@ -193,7 +193,7 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
             (it.quantity != null && it.quantity !in 1..1_000_000) || it.revision < 1 }) errors += "Invalid material requirement or reference."
         if (r.entities.any { it.name.isBlank() || it.revision < 1 || (it.imageBase64?.length ?: 0) > 1_000_000 }) errors += "Invalid connection values."
         if (r.entities.any { !short(it.name, 120, true) || !short(it.notes) || !short(it.aliases, 2000) || !short(it.relationship, 3000) ||
-            !provenance(it.source) || it.kind !in setOf("Person", "Organization", "Faction", "Creature", "Other") }) errors += "Invalid connection fields."
+            !provenance(it.source) || it.kind !in setOf("Person", "Organization", "Faction", "Creature", "Location", "Other") }) errors += "Invalid connection fields."
         if (r.facts.any { it.entityId !in entityIds || it.detail.isBlank() || it.revision < 1 }) errors += "Invalid connection fact or reference."
         if (r.facts.any { !short(it.detail, 6000, true) || !short(it.category, 120, true) || !provenance(it.source) || it.evidenceStatus !in evidenceValues }) errors += "Invalid connection fact fields."
         if (r.milestones.any { it.entityId !in entityIds || it.title.isBlank() || it.revision < 1 }) errors += "Invalid milestone or reference."

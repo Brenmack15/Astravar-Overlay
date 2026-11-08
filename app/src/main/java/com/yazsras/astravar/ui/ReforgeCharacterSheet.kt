@@ -47,6 +47,7 @@ import kotlinx.coroutines.flow.first
     val local = remember(localRepository, context) { localRepository ?: ReforgeRepository.open(context) }
     val profilesState by remember(local) { local.observeAll().map { true to it } }.collectAsState(initial = false to emptyList<ReforgeSavedCharacter>())
     val all = profilesState.second
+    val active = all.filterNot { it.character.archived }
     val actorPreferences = remember(context) { ReforgePreferences.open(context) }
     val actorSelection by remember(actorPreferences) { actorPreferences.activeProfileId.map { true to it } }.collectAsState(initial = false to null)
     val legacyProfiles by repository.records.characterProfiles.collectAsState(initial = emptyList())
@@ -72,8 +73,8 @@ import kotlinx.coroutines.flow.first
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     val expandedText = LocalDensity.current.fontScale >= 1.5f
-    val chosenId = ReforgePreferences.chooseProfile(selectedId ?: actorSelection.second, all.map { it.character.id })
-    val saved = all.firstOrNull { it.character.id == chosenId }
+    val chosenId = ReforgePreferences.chooseProfile(selectedId ?: actorSelection.second, active.map { it.character.id })
+    val saved = active.firstOrNull { it.character.id == chosenId }
     val character = saved?.character
     val projection = character?.let { remember(it) { CharacterCalculator.calculate(it) } }
     LaunchedEffect(actorSelection) { if (actorSelection.first && selectedId == actorSelection.second) selectedId = null }
@@ -119,9 +120,10 @@ import kotlinx.coroutines.flow.first
             PlayerHeading("Your character")
             AstravarHeroBanner("Make your legend", "Your character, equipment and story. In one place.")
             PlayerButton(onClick = { dialog = "Create" }) { Text("Create character") }
+            if (all.any { it.character.archived }) PlayerOutlinedButton(onClick = { dialog = "Characters" }) { Text("View archived sheets") }
             if (legacyProfiles.isNotEmpty()) {
                 Text("Saved campaign profiles", style = MaterialTheme.typography.titleMedium)
-                legacyProfiles.forEach { profile -> PlayerEntry(profile.name.ifBlank { "Unnamed character" },
+                legacyProfiles.filter { profile -> all.none { it.character.id == profile.id } }.forEach { profile -> PlayerEntry(profile.name.ifBlank { "Unnamed character" },
                     "Review saved values · original record retained", "Emblem", {
                         action("Profile ready for review") { adopting = local.readLegacyPreview(repository, profile.id); dialog = "Adopt" }
                     }) }
@@ -277,6 +279,7 @@ import kotlinx.coroutines.flow.first
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(definition?.name ?: "Item", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                                 PlayerTextButton(onClick = { dialog = "Item:${item.id}" }) { Text("Edit") }
+                                PlayerTextButton(onClick = { error = ""; dialog = "ManageItem:${item.id}" }) { Text("Manage") }
                             }
                             Text("${item.state.name.lowercase().replaceFirstChar { it.uppercase() }}${if (item.attuned) " · Attuned" else ""} · Quantity ${item.quantity}", color = RebuildPalette.Ice)
                             definition?.description?.takeIf { it.isNotBlank() }?.let { Text(it, color = RebuildPalette.Muted, maxLines = 4) }
@@ -376,11 +379,38 @@ import kotlinx.coroutines.flow.first
         action("Reviewed sheet saved on this device") { local.adopt(repository, preview, reviewed); selectProfile(reviewed.id); dialog = null; adopting = null }
     } }
     if (dialog == "Characters") PlayerSheet("Characters & companions", { dialog = null }) {
-        all.forEach { profile -> PlayerEntry(profile.character.name, "Local playable sheet", "Emblem", { selectProfile(profile.character.id); dialog = null }) }
+        active.forEach { profile ->
+            PlayerEntry(profile.character.name, "Local playable sheet", "Emblem", { selectProfile(profile.character.id); dialog = null })
+            PlayerTextButton(enabled = !busy, onClick = { dialog = "ArchiveCharacter:${profile.character.id}" }) { Text("Archive ${profile.character.name}") }
+        }
+        if (all.any { it.character.archived }) PlayerDisclosure("Archived sheets", initiallyOpen = active.isEmpty()) {
+            Text("Archived sheets keep all equipment, notes, source records and saved history. Restore a sheet to use it again.", color = RebuildPalette.Muted)
+            all.filter { it.character.archived }.forEach { profile ->
+                PlayerOutlinedButton(enabled = !busy, onClick = {
+                    action("Playable sheet restored") {
+                        local.setArchived(profile.character, false); selectProfile(profile.character.id); dialog = null
+                    }
+                }) { Text("Restore ${profile.character.name}") }
+            }
+        }
         legacyProfiles.filter { profile -> all.none { it.character.id == profile.id } }.forEach { profile -> PlayerEntry(profile.name.ifBlank { "Unnamed profile" }, "Review saved campaign profile", "History", {
             action("Profile ready for review") { adopting = local.readLegacyPreview(repository, profile.id); dialog = "Adopt" }
         }) }
         PlayerButton(onClick = { dialog = "Create" }) { Text("Create character or companion") }
+        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+    }
+    dialog?.takeIf { it.startsWith("ArchiveCharacter:") }?.substringAfter(':')?.let { id ->
+        all.firstOrNull { it.character.id == id && !it.character.archived }?.let { profile ->
+            val snapshot = requireNotNull(rememberReforgeSnapshot(profile.character))
+            PlayerSheet("Archive ${snapshot.name}?", { dialog = "Characters" }, actions = {
+                PlayerButton(enabled = !busy, onClick = {
+                    action("Playable sheet archived") { local.setArchived(snapshot, true); dialog = null }
+                }) { Text("Archive sheet") }
+            }) {
+                Text("Remove this sheet from daily play? All values, equipment, notes, source identities and saved history stay available in Archived sheets. Original campaign records are unchanged.", color = RebuildPalette.Muted)
+                if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+            }
+        }
     }
     if (character != null && projection != null) {
         when (dialog) {
@@ -470,6 +500,13 @@ import kotlinx.coroutines.flow.first
         }
         dialog?.takeIf { it.startsWith("Item:") }?.substringAfter(':')?.let { itemId ->
             ReforgeItemEditor(character, { dialog = null }, { change("Edit reviewed equipment", it) }, existingItemId = itemId)
+        }
+        dialog?.takeIf { it.startsWith("ManageItem:") }?.substringAfter(':')?.let { itemId ->
+            ReforgeItemManagementDialog(character, itemId, active, busy, error, { dialog = null },
+                onChange = { label, next -> dialog = null; proposedChange = label to next },
+                onTransfer = { from, to -> action("Item transferred on this device") {
+                    local.transferItem(from, to, itemId); dialog = null
+                } })
         }
         dialog?.takeIf { it.startsWith("Cast:") }?.substringAfter(':')?.let { spellId ->
             character.spells.firstOrNull { it.id == spellId }?.let { spell -> ReforgeCastDialog(character, projection, spell, { dialog = null }) { preview -> cast = preview; dialog = null } }

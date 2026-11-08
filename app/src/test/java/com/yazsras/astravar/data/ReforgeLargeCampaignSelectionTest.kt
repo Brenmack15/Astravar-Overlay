@@ -42,7 +42,9 @@ class ReforgeLargeCampaignSelectionTest {
             assertTrue("Preview cannot adopt without review", reforge.observeAll().first().isEmpty())
             assertFalse("Selection must not read retained campaign payloads", queries.any {
                 it.contains("campaign_archive_sources", true) || it.contains("campaign_import_backups", true) ||
-                    it.contains("ledger_events", true) || it.contains("campaign_audit", true)
+                    it.contains("ledger_events", true) ||
+                    (it.contains("campaign_audit", true) && !(it.trimStart().startsWith("SELECT * FROM campaign_links", true) &&
+                        it.contains("a.recordId=campaign_links.id", true) && it.contains("a.resultingRevision=campaign_links.revision", true)))
             })
             val saved = reforge.adopt(legacy, preview, commandId = "synthetic-reviewed-adoption")
             assertEquals("qa-zerg", saved.character.id)

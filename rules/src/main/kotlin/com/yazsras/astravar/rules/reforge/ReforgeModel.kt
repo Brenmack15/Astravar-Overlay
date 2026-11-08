@@ -116,7 +116,9 @@ import kotlinx.serialization.Serializable
     val resources: List<ResourcePool> = emptyList(), val conditions: Set<String> = emptySet(),
     val concentrationSpellId: String? = null, val activeStances: Set<String> = emptySet(),
     val gameSeconds: Long = 0, val turnNumber: Long = 0,
-    val usedEffectTurns: Map<String, Long> = emptyMap(), val turn: TurnEconomy = TurnEconomy()
+    val usedEffectTurns: Map<String, Long> = emptyMap(), val turn: TurnEconomy = TurnEconomy(),
+    /** Reversible removal from daily play; the row, source identity and complete history remain. */
+    val archived: Boolean = false
 )
 @Serializable data class CalculationContext(
     val targetCreatureType: String? = null, val damageType: DamageKind? = null,

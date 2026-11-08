@@ -29,15 +29,17 @@ class UpdatePreservationInstrumentationTest {
             if (preferLast) ui.ensurePrimaryTab(product, text)
             else ui.tapText(text, product, scrollAttempts = 14)
         }
-        fun captureArmor(name: String) = ui.captureStablePage(File(files, name), product, "Armor",
-            listOf(By.textStartsWith("Weapon profile ·").pkg(product), By.text("Ability scores").pkg(product)))
-        fun captureParty(name: String) = ui.captureStablePage(File(files, name), product, "Party",
+        fun captureArmor(name: String) {
+            find("Active element"); find("Core systems")
+            ui.captureStableDialog(File(files, name), product, "Armor systems",
+                listOf(By.text("Active element").pkg(product), By.text("Core systems").pkg(product)))
+        }
+        fun captureParty(name: String) = ui.captureStablePage(File(files, name), product, "Companions",
             listOf(By.text("Eek").pkg(product)))
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
         ui.awaitMainAfterSavedDialogs(product)
         assertTrue("The saved labeled demo survived", device.hasObject(By.text("DEMO").pkg(product)))
-        tap("Config", preferLast = true)
-        tap("Roll history")
+        ui.openTool(product, "Roll history")
         find("Recent rolls")
         val firstFormula = File(files, "saved-first-roll.txt").readText()
         val savedFormula = File(files, "saved-roll.txt").readText()
@@ -52,13 +54,12 @@ class UpdatePreservationInstrumentationTest {
         find(savedFormula)
         assertTrue(device.takeScreenshot(File(files, "same-key-update-history.png")))
         tap("Close")
-        tap("Campaign", preferLast = true)
-        tap("Inventory")
+        ui.campaignItems(product)
         tap("CI FICTIONAL update-preservation crystal")
         find("Unknown quantity · Unknown")
         assertTrue(device.takeScreenshot(File(files, "same-key-update-inventory.png")))
         tap("Close")
-        tap("Party", preferLast = true)
+        tap("Companions", preferLast = true)
         find("Party & family")
         listOf("Zerg Hasma", "Eek", "Korr", "Veyrath").forEach { find(it) }
         // Layout acceptance captures are native emulator output, not a physical Galaxy test.
@@ -66,9 +67,10 @@ class UpdatePreservationInstrumentationTest {
         for (scale in listOf("1.0", "1.3", "2.0")) {
             device.executeShellCommand("settings put system font_scale $scale")
             device.waitForIdle()
-            tap("Armor", preferLast = true)
+            ui.openTool(product, "Armor systems")
             captureArmor("armor-font-$scale.png")
-            tap("Party", preferLast = true)
+            tap("Close")
+            tap("Companions", preferLast = true)
             find("Eek")
             captureParty("party-font-$scale.png")
         }
@@ -83,7 +85,7 @@ class UpdatePreservationInstrumentationTest {
         for (width in listOf(1080, 972)) {
             device.executeShellCommand("wm size ${width}x2400")
             device.waitForIdle()
-            tap("Armor", preferLast = true)
+            ui.openTool(product, "Armor systems")
             captureArmor("element-width-$width-armor.png")
             device.dumpWindowHierarchy(File(files, "element-width-$width-armor.xml"))
             tap("Active element")
@@ -105,12 +107,12 @@ class UpdatePreservationInstrumentationTest {
                 device.wait(Until.gone(By.text("Choose an element").pkg(product)), 5000))
             assertTrue(device.takeScreenshot(File(files, "element-wheel-closed-width-$width.png")))
             device.dumpWindowHierarchy(File(files, "element-wheel-closed-width-$width.xml"))
+            tap("Close")
         }
         device.executeShellCommand("wm density reset")
         device.executeShellCommand("wm size reset")
         device.waitForIdle()
-        tap("Config", preferLast = true)
-        tap("ChatGPT")
+        ui.openTool(product, "ChatGPT Prompts")
         tap("Find a prompt")
         val query = ui.bounds(By.clazz("android.widget.EditText").focused(true).pkg(product), "focused ChatGPT prompt search", timeoutMs = 10_000)
         assertNotNull(query)

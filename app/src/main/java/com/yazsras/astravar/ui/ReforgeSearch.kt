@@ -33,7 +33,7 @@ import kotlinx.coroutines.withContext
             }
         }
         combine(legacy, reforge.observeAll()) { documents, characters ->
-            documents + characters.flatMap { saved ->
+            documents + characters.filterNot { it.character.archived }.flatMap { saved ->
                 val c = saved.character
                 buildList {
                     add(ReforgeSearchDocument(c.id, "Character workspace", c.name, "Level ${c.level}"))

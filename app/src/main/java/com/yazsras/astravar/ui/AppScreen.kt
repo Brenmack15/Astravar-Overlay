@@ -118,7 +118,26 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
             Column(Modifier.padding(insets).imePadding()) {
                 if(error!=null) Text(error!!,Modifier.padding(16.dp),color=MaterialTheme.colorScheme.error)
                 val current=s
-                if(current==null) {LinearProgressIndicator(Modifier.fillMaxWidth());return@Column}
+                if(current==null) {
+                    StorageRecoveryPanel(error, open = { tool = it })
+                    // Diagnostics and the independent stores must remain reachable
+                    // when the specialized weapon store cannot initialize.
+                    tool?.let { name -> RebuildToolSheet(name, { tool = null }) {
+                        when (name) {
+                            "Tools" -> Page {
+                                PlayerHeading("Recovery tools")
+                                PlayerEntry("Help & diagnostics", "Inspect this installation", "More", { tool = "Help & diagnostics" })
+                                PlayerEntry("Character backup", "Recover playable character records", "History", { tool = "Character backup" })
+                                PlayerEntry("Campaign backup", "Recover original campaign records", "History", { tool = "Campaign backup" })
+                            }
+                            "Character backup" -> ReforgeBackupPage(playableRepository)
+                            "Campaign backup" -> CampaignBackupPageV2(app.campaignLedger)
+                            "Global search" -> ReforgeGlobalSearch(app.campaignLedger)
+                            else -> HelpPage()
+                        }
+                    } }
+                    return@Column
+                }
                 if(actions.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (remoteTestEnabled) Row(Modifier.fillMaxWidth().background(RebuildPalette.Active).padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically) {
@@ -204,7 +223,8 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                             tool = null; requestedInventory = "Campaign items"; inventoryRoute++; tab = "Inventory"
                         }
                         "Character sources" -> Page { CharacterOverviewV2(app.campaignLedger, current) }
-                        "Armor systems" -> ArmorOverviewV2(current,app.campaignLedger,combat={tool="Armor weapon"},systems={tool="Spell reservoir"},eek={tool="Companions"},inventory={tool=null;tab="Inventory"},elements=prefs.elements,selectElement={elementPicker=true})
+                        "Armor systems" -> ArmorOverviewV2(current,app.campaignLedger,combat={tool="Armor weapon"},systems={tool="Spell reservoir"},eek={tool="Companions"},inventory={tool=null;tab="Inventory"},elements=prefs.elements,selectElement={elementPicker=true},
+                            openReferences={tool=null;tab="Campaign";campaignPage="Reference Library"})
                         else -> HelpPage()
                     }
                 }}

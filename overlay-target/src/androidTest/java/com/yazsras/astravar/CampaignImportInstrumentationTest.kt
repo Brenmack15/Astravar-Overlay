@@ -142,8 +142,10 @@ class CampaignImportInstrumentationTest {
     }
 
     private fun campaignEntry(name: String) {
+        if (name == "Inventory") { ui.campaignItems(product); return }
         ui.ensurePrimaryTab(product, "Campaign")
         if (device.hasObject(By.text("‹ Campaign").pkg(product))) tap("‹ Campaign")
+        if (name in listOf("Campaign import", "Reference Library")) tap("Library & source records")
         tap(name)
     }
 
@@ -743,30 +745,30 @@ class CampaignImportInstrumentationTest {
         tap("Confirm local import")
         awaitText("Import saved. Independent database readback passed.")
 
-        ui.ensurePrimaryTab(product, "Armor")
+        ui.openTool(product, "Armor systems")
         find("Fictional Mapped Operator")
         assertTrue("Armor must display the imported manual ability independently of weapon mechanics",
             device.wait(Until.hasObject(By.descContains("Intelligence score 14").pkg(product)), 10_000))
-        captureMapped("armor", "Armor", "Fictional Mapped Operator", "Ability scores")
+        captureMapped("armor", "Character", "Fictional Mapped Operator", "Ability scores", dialogTitle = "Armor systems")
         openMappedSourceEntry("Armor source references")
         find("1 of 1 references")
         observations.put(JSONObject().put("route", "armor-source-entry").put("primaryTab", "Campaign")
             .put("visibleMarker", "1 of 1 references"))
 
-        ui.ensurePrimaryTab(product, "Party")
+        ui.ensurePrimaryTab(product, "Companions")
         tap("Fictional Mapped Operator")
         find("Fictional Mapped Operator")
         if (!device.hasObject(By.text("Fictional archival operator").pkg(product))) tap("Identity & progression")
-        captureMapped("party", "Party", "Class / role", "Fictional archival operator")
+        captureMapped("party", "Companions", "Class / role", "Fictional archival operator")
         openTypedPartyTab("Equipment")
-        captureMapped("equipment", "Party", "Fictional Mapped Lens", "Carried · quantity unknown")
+        captureMapped("equipment", "Companions", "Fictional Mapped Lens", "Carried · quantity unknown")
         openTypedPartyTab("Currency")
-        captureMapped("currency", "Party", "Fictional Mapped Purse", "? cp · 2 sp · 7 gp · ? ep · ? pp")
+        captureMapped("currency", "Companions", "Fictional Mapped Purse", "? cp · 2 sp · 7 gp · ? ep · ? pp")
         tap("‹ Party")
         tap("Fictional Mapped Owl")
         observeMappedOwlHeader()
         if (!device.hasObject(By.text("Fictional archival owl").pkg(product))) tap("Identity & progression")
-        captureMapped("companion", "Party", "Class / role", "Fictional archival owl")
+        captureMapped("companion", "Companions", "Class / role", "Fictional archival owl")
         openMappedSourceEntry("Party source dossiers")
         find("1 of 1 references")
         observations.put(JSONObject().put("route", "party-source-entry").put("primaryTab", "Campaign")
@@ -774,8 +776,8 @@ class CampaignImportInstrumentationTest {
 
         campaignEntry("Inventory")
         tap("Fictional Mapped Lens")
-        captureMapped("inventory", "Campaign", "Unknown quantity · Carried", "Fictional lens description preserved.", dialogTitle = "Fictional Mapped Lens")
-        tap("Properties & Mechanics")
+        captureMapped("inventory", "Inventory", "Unknown quantity · Carried", "Fictional lens description preserved.", dialogTitle = "Fictional Mapped Lens")
+        tap("Properties & mechanics")
         find("Fictional optical property")
         find("Fictional optical note; no automatic bonus.")
         tap("Close")

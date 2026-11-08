@@ -199,8 +199,8 @@ python3 scripts/native-campaign-import-readback.py rolled-back --database valida
 # fixture failure cannot hide the primary backup/import/rollback acceptance.
 # Exercise the updated source without reseeding demo data or executing another
 # campaign action; the strict current-state/hash verification below still applies.
-run_class OverlayInstrumentationTest#bNotificationStop 1 validation/native-updated-notification-stop.txt
-run_class OverlayInstrumentationTest#cRollRestorationMainHistoryAndLivePermissionRecovery 1 validation/native-updated-overlay-recovery.txt
+run_class OverlayInstrumentationTest#bRetiredOverlayCannotRequestPermissionsOrStart 1 validation/native-updated-notification-stop.txt
+run_class OverlayInstrumentationTest#cRollRestorationMainHistoryAndPrimaryNavigation 1 validation/native-updated-overlay-recovery.txt
 timeout 15s adb shell am force-stop com.yazsras.astravar
 copy_combat_database validation/history-after
 python3 scripts/history-preservation-fixture.py verify --database validation/history-after/astravar.db --manifest validation/history-fixture.json --synthetic-demo | tee validation/history-verification-result.json

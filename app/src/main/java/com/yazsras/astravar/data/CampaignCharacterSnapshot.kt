@@ -42,10 +42,12 @@ abstract class CampaignCharacterDao {
     protected abstract suspend fun properties(profileId: String): List<ItemProperty>
 
     @Query("""SELECT * FROM campaign_links
-        WHERE (fromType = 'character-profile' AND fromId = :profileId)
-           OR (toType = 'character-profile' AND toId = :profileId)
+        WHERE ((fromType IN ('character-profile','companion') AND fromId = :profileId)
+           OR (toType IN ('character-profile','companion') AND toId = :profileId)
            OR (fromType = 'item' AND fromId IN $CHARACTER_ITEMS)
-           OR (toType = 'item' AND toId IN $CHARACTER_ITEMS) ORDER BY id""")
+           OR (toType = 'item' AND toId IN $CHARACTER_ITEMS))
+        AND NOT EXISTS (SELECT 1 FROM campaign_audit a WHERE a.recordType='link' AND a.recordId=campaign_links.id
+            AND a.kind='UNLINK' AND a.resultingRevision=campaign_links.revision) ORDER BY id""")
     protected abstract suspend fun links(profileId: String): List<CampaignLink>
 
     @Query("""SELECT * FROM external_record_references
