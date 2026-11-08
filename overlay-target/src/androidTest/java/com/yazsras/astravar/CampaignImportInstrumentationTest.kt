@@ -100,6 +100,7 @@ class CampaignImportInstrumentationTest {
         val deadline = SystemClock.uptimeMillis() + timeoutMillis
         var direction = Direction.DOWN
         var scrolls = 0
+        var unchangedSwipes = 0
         var nextScrollAt = 0L
         var visible = false
         var lastObserved = "No fresh status observation"
@@ -115,19 +116,26 @@ class CampaignImportInstrumentationTest {
                     visible = true
                     break
                 }
+                if (text == "Database readback matches every imported identity, relationship and content hash.") {
+                    val errors = device.findObjects(By.textStartsWith("Readback failed:").pkg(product)) +
+                        device.findObjects(By.textStartsWith("Review the database readback differences.").pkg(product))
+                    errors.lastOrNull { !it.visibleBounds.isEmpty }?.let {
+                        fail("Saved import verification reported an actual readback error: ${it.text}")
+                    }
+                }
                 // Completion text can follow the backup button below the sheet
                 // viewport, or precede receipts on the underlying import page.
                 // Scroll only to observe it; never retry a campaign action.
                 if (SystemClock.uptimeMillis() >= nextScrollAt && SystemClock.uptimeMillis() < deadline) {
-                    val scroll = device.findObjects(By.scrollable(true).pkg(product)).lastOrNull()
-                    if (scroll != null) {
-                        val viewport = scroll.visibleBounds
-                        val moved = scroll.scroll(direction, .6f)
+                    val changed = ui.scrollForObservation(product, direction)
+                    if (changed != null) {
                         scrolls++
-                        lastObserved += "; viewport=$viewport; $direction scroll $scrolls/18; moved=$moved"
-                        if (!moved || scrolls >= 18) {
+                        unchangedSwipes = if (changed) 0 else unchangedSwipes + 1
+                        lastObserved += "; $direction scroll $scrolls/18; changed=$changed; unchanged=$unchangedSwipes"
+                        if (unchangedSwipes >= 2 || scrolls >= 18) {
                             direction = if (direction == Direction.DOWN) Direction.UP else Direction.DOWN
                             scrolls = 0
+                            unchangedSwipes = 0
                         }
                     } else lastObserved += "; no product scrollable viewport"
                     nextScrollAt = SystemClock.uptimeMillis() + 500
@@ -463,7 +471,10 @@ class CampaignImportInstrumentationTest {
         awaitText("Import saved. Independent database readback passed.")
         assertTrue(device.takeScreenshot(File(files, "native-campaign-import-receipt.png")))
         tap("Verify saved import")
-        assertTrue(device.wait(Until.hasObject(By.text("Database readback matches every imported identity, relationship and content hash.").pkg(product)), 180_000))
+        // The global status is above the receipt we just touched. Observe it
+        // through native scrolling instead of waiting on an offscreen AX node.
+        awaitText("Database readback matches every imported identity, relationship and content hash.")
+        assertTrue(device.takeScreenshot(File(files, "native-campaign-verified-import.png")))
 
         campaignEntry("Reference Library")
         find("320 of 320 references")

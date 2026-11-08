@@ -70,6 +70,39 @@ class CampaignArchiveUiV21Test {
         } finally { activity.pause().stop().destroy(); database.close() }
     }
 
+    @Test fun savedReceiptShowsItsOwnVerificationAndReportsDifferencesWithoutChangingReceipts() {
+        val database = db(); val repo = CampaignLedgerRepository(database)
+        val receipt = import(repo, fixture(listOf(record("synthetic-verification", "Fictional verified record", "Original fictional text"))))
+        val originalReceipts = runBlocking { database.archiveDao().allReceipts() }
+        val originalReferences = runBlocking { database.archiveDao().allReferences() }
+        val tag = "campaign-import-receipt-${receipt.packageHash}"
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { CampaignArchiveTestThemeV21 { CampaignArchiveImportV21(repo) } }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Verify saved import").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Verify saved import").performScrollTo().performClick()
+            val success = "Database readback matches every imported identity, relationship and content hash."
+            compose.waitUntil(10_000) { compose.onAllNodesWithText(success).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(success).assert(hasAnyAncestor(hasTestTag(tag))).performScrollTo().assertIsDisplayed()
+            runBlocking {
+                assertEquals(originalReferences, database.archiveDao().allReferences())
+                assertEquals(originalReceipts, database.archiveDao().allReceipts())
+            }
+            // Deliberate corruption is confined to this isolated fictional fixture.
+            runBlocking { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                database.openHelper.writableDatabase.execSQL("UPDATE campaign_references SET body = ?", arrayOf("Deliberately altered fictional text"))
+            } }
+            compose.onNodeWithText("Verify saved import").performScrollTo().performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Review the database readback differences.", substring = true).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Review the database readback differences.", substring = true)
+                .assert(hasAnyAncestor(hasTestTag(tag))).performScrollTo().assertIsDisplayed()
+            runBlocking {
+                assertEquals(originalReceipts, database.archiveDao().allReceipts())
+                assertEquals("Deliberately altered fictional text", database.archiveDao().allReferences().single().body)
+            }
+        } finally { activity.pause().stop().destroy(); database.close() }
+    }
+
     @Test fun previewExposesCategoriesOriginalSourcesAndEveryConflictWithoutApplyingThem() {
         val rows = listOf(record("synthetic-character", "Synthetic character dossier", "HP Unknown", "Dossier"),
             record("synthetic-history", "Synthetic chronicle", "Historical purchase", "Chronicle"))

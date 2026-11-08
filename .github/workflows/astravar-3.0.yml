@@ -63,6 +63,7 @@ jobs:
             --tests 'com.yazsras.astravar.ui.PartyPlayerFirstTest' \
             --tests 'com.yazsras.astravar.ui.ConnectionsPageV2Test' \
             --tests 'com.yazsras.astravar.ui.CampaignBackupUiSafetyTest' \
+            --tests 'com.yazsras.astravar.ui.CampaignArchiveUiV21Test' \
             --tests 'com.yazsras.astravar.ui.StorageRecoveryPanelTest' \
             --tests 'com.yazsras.astravar.data.ReforgeItemTransferTest' \
             --tests 'com.yazsras.astravar.data.CompanionCreationTest' \

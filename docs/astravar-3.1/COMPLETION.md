@@ -27,6 +27,8 @@ This is a validation candidate, not a declaration of release acceptance.
 - [x] Keep focused fields visible after keyboard resizing and text changes;
   bound multiline editors without truncating their saved text.
 - [x] Restore armor-source reference navigation through Tools.
+- [x] Show import-verification progress, success and actual differences beside
+  the acted-on receipt, with accessibility announcements and read-only regression coverage.
 - [x] Wrap header actions at large text sizes, retaining full labels and touch targets.
 - [x] Keep alternate-form payloads local to the device and backups; exclude them from
   direct, scoped and chunked audit publication and reject unsupported remote form edits.

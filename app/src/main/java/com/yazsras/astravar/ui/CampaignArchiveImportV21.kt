@@ -15,6 +15,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
@@ -55,6 +56,8 @@ internal class CampaignOpenDocumentContractV21 : ActivityResultContracts.OpenDoc
     var rollbackReview by remember { mutableStateOf<CampaignImportReceipt?>(null) }
     var rollbackConsent by remember { mutableStateOf(false) }
     var receiptLimit by rememberSaveable { mutableIntStateOf(20) }
+    var verifyingReceipt by remember { mutableStateOf<String?>(null) }
+    var receiptVerification by remember { mutableStateOf<Triple<String, String, Boolean>?>(null) }
     var conflictAudit by remember { mutableStateOf<CampaignConflictAudit?>(null) }
 
     LaunchedEffect(Unit) {
@@ -202,26 +205,34 @@ internal class CampaignOpenDocumentContractV21 : ActivityResultContracts.OpenDoc
         if (receipts.isEmpty()) Text("No campaign archives have been imported on this device.", color = RebuildPalette.Muted)
         receipts.take(receiptLimit).forEach { receipt ->
             val rolledBack = receipts.any { it.packageHash == "rollback:${receipt.packageHash}" }
-            PlayerCard {
+            PlayerCard(Modifier.testTag("campaign-import-receipt-${receipt.packageHash}")) {
                 Text(receipt.title, style = MaterialTheme.typography.titleMedium)
                 Text("${receipt.recordCount} source records · ${receipt.relationCount} relations · ${if (rolledBack) "APPLIED, then rolled back" else receipt.state}", color = RebuildPalette.Ice)
                 Text(receipt.summary, style = MaterialTheme.typography.bodySmall)
                 SelectionContainer { Text("Package SHA-256\n${receipt.packageHash}", style = MaterialTheme.typography.bodySmall) }
                 if (receipt.state == "APPLIED" && !rolledBack) {
+                    receiptVerification?.takeIf { it.first == receipt.packageHash }?.let { result ->
+                        Text("Last verification", style = MaterialTheme.typography.labelSmall, color = RebuildPalette.Muted)
+                        Text(result.second, color = if (result.third) MaterialTheme.colorScheme.error else RebuildPalette.Ice,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                    }
                     PlayerOutlinedButton(onClick = {
                         if (!busy) {
-                            busy = true; failure = false
+                            busy = true; failure = false; status = ""
+                            verifyingReceipt = receipt.packageHash; receiptVerification = null
                             scope.launch {
                                 try {
                                     val result = importer.verify(receipt.packageHash)
-                                    failure = !result.valid
-                                    status = result.summary + if (result.errors.isEmpty()) "" else "\n" + result.errors.joinToString("\n")
+                                    val message = result.summary + if (result.errors.isEmpty()) "" else "\n" + result.errors.joinToString("\n")
+                                    receiptVerification = Triple(receipt.packageHash, message, !result.valid)
                                 } catch (e: CancellationException) { throw e }
-                                catch (e: Exception) { failure = true; status = "Readback failed: ${e.message}" }
-                                finally { busy = false }
+                                catch (e: Exception) { receiptVerification = Triple(receipt.packageHash, "Readback failed: ${e.message}", true) }
+                                finally { busy = false; verifyingReceipt = null }
                             }
                         }
-                    }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Verify saved import") }
+                    }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (verifyingReceipt == receipt.packageHash) "Verifying saved import…" else "Verify saved import")
+                    }
                     PlayerTextButton(onClick = { rollbackReview = receipt; rollbackConsent = false }, enabled = !busy) { Text("Review rollback") }
                 }
             }
