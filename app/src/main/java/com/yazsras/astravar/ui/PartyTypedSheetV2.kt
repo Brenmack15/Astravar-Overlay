@@ -24,7 +24,13 @@ private fun plus(value: Int?): String = value?.let { if (it >= 0) "+$it" else "$
 private fun lines(text: String) = text.lineSequence().map(String::trim).filter(String::isNotEmpty).toList()
 
 /** No review-only stat block is seeded here. Each accepted change has its own source and revision. */
-@Composable internal fun PartyTypedSheetV2(repository: CampaignLedgerRepository, memberId: String, memberName: String) {
+@Composable internal fun PartyTypedSheetV2(
+    repository: CampaignLedgerRepository,
+    memberId: String,
+    memberName: String,
+    openPlayable: ((String) -> Unit)? = null,
+    playableRepository: ReforgeRepository? = null
+) {
     val sheets by repository.party.sheets.collectAsState(initial = emptyList())
     val profiles by repository.records.characterProfiles.collectAsState(initial = emptyList())
     val companionResources by repository.records.companionResources.collectAsState(initial = emptyList())
@@ -43,7 +49,7 @@ private fun lines(text: String) = text.lineSequence().map(String::trim).filter(S
     }
     Text("Character & creature sheet", style = MaterialTheme.typography.titleLarge,
         modifier = Modifier.semantics { heading() })
-    if (memberId != "local-player") ReforgeCompanionAttackReviewButton(repository, memberId)
+    if (memberId != "local-player") ReforgeCompanionAttackReviewButton(repository, memberId, openPlayable, playableRepository)
     if (sheet.unresolvedConflicts.isNotEmpty()) PlayerCard {
         Text("Unresolved source conflicts", color = MaterialTheme.colorScheme.error,
             style = MaterialTheme.typography.titleMedium)

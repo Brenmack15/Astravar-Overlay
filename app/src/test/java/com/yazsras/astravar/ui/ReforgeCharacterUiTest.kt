@@ -65,25 +65,135 @@ class ReforgeCharacterUiTest {
         ))), items = listOf(ItemInstance("armor-instance", "armor-definition")))
 
     private fun withSheet(seed: Boolean = true, campaignSetup: (CampaignLedgerRepository) -> Unit = {},
-        character: ReforgeCharacter = fixture(), block: (ReforgeRepository) -> Unit) {
+        character: ReforgeCharacter = fixture(), localSetup: suspend (ReforgeRepository) -> Unit = {},
+        companionProfileId: String? = null, initialSection: String = "Sheet", onBackToCompanions: (() -> Unit)? = null,
+        block: (ReforgeRepository) -> Unit) {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val legacyDb = Room.inMemoryDatabaseBuilder(context, CampaignLedgerDb::class.java).build()
         val ledger = CampaignLedgerRepository(legacyDb)
         val localDb = Room.inMemoryDatabaseBuilder(context, ReforgeDb::class.java).build()
         val repository = ReforgeRepository(localDb)
-        if (seed) runBlocking { repository.create(character) }
+        runBlocking {
+            if (seed) repository.create(character)
+            localSetup(repository)
+        }
         campaignSetup(ledger)
         val previous = System.getProperty("robolectric.windowManager.useRequestedSize")
         System.setProperty("robolectric.windowManager.useRequestedSize", "true")
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             captureView = controller.get().window.decorView
-            controller.get().setContent { AstravarTheme { ReforgeCharacterSheet(ledger, repository) } }
+            controller.get().setContent {
+                AstravarTheme {
+                    ReforgeCharacterSheet(ledger, repository, initialSection = initialSection,
+                        companionProfileId = companionProfileId, onBackToCompanions = onBackToCompanions)
+                }
+            }
             block(repository)
         } finally {
             captureView = null
             controller.pause().stop().destroy(); localDb.close(); legacyDb.close()
             if (previous == null) System.clearProperty("robolectric.windowManager.useRequestedSize") else System.setProperty("robolectric.windowManager.useRequestedSize", previous)
+        }
+    }
+
+    private fun actorPreferences() = ReforgePreferences.open(ApplicationProvider.getApplicationContext())
+
+    @Test fun pinnedCompanionOpensCombatWithoutSwitchingTheMainActor() {
+        val main = fixture()
+        val companion = ReforgeCharacter("fictional-winged-ally", "Fictional winged ally", currentHp = 9,
+            attacks = listOf(AttackDefinition("pinion-strike", "Pinion strike", fixedAttackBonus = 4)))
+        var returned = false
+        withSheet(character = main, companionProfileId = companion.id, initialSection = "Combat",
+            onBackToCompanions = { returned = true }, localSetup = { repository ->
+                actorPreferences().selectProfile(main.id)
+                repository.create(companion)
+            }) { repository ->
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Pinion strike").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(companion.name).assertExists()
+            compose.onNodeWithText(main.name).assertDoesNotExist()
+            compose.onNodeWithText("Turn economy").assertExists()
+            compose.onNodeWithText("Switch character").assertDoesNotExist()
+            assertEquals(main.id, runBlocking { actorPreferences().activeProfileId.first() })
+            assertEquals(1L, runBlocking { repository.get(companion.id) }!!.revision)
+            compose.onNodeWithText("Back to companions").assertIsDisplayed().performClick()
+            assertTrue(returned)
+        }
+    }
+
+    @Test fun pinnedCompanionAdoptsOnlyItsExplicitlyReviewedSource() {
+        val main = fixture()
+        val source = CharacterProfile(id = "fictional-source-ally", name = "Fictional source ally", level = 2,
+            currentHp = 8, maximumHp = 12, armorClass = 13)
+        lateinit var campaign: CampaignLedgerRepository
+        withSheet(character = main, companionProfileId = source.id, localSetup = {
+            actorPreferences().selectProfile(main.id)
+        }, campaignSetup = { ledger ->
+            campaign = ledger
+            runBlocking {
+                ledger.records.saveProfile(source, source = "Synthetic companion profile")
+                ledger.records.saveProfile(CharacterProfile(id = "fictional-other-source", name = "Fictional other source"),
+                    source = "Synthetic unrelated profile")
+            }
+        }) { repository ->
+            compose.waitUntil(10_000) {
+                compose.onAllNodes(hasText("Review campaign profile") and hasClickAction()).fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithText(main.name).assertDoesNotExist()
+            compose.onNodeWithText("Fictional other source").assertDoesNotExist()
+            val original = runBlocking { campaign.readCharacterSnapshot(source.id) }
+            compose.onNode(hasText("Review campaign profile") and hasClickAction()).performScrollTo().performClick()
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithText("Review baselines & create sheet").fetchSemanticsNodes().isNotEmpty()
+            }
+            assertNull(runBlocking { repository.get(source.id) })
+            compose.onNodeWithText("Review baselines & create sheet").assertIsNotEnabled()
+            compose.onNodeWithText("I will review training, actions and current resources before relying on this sheet")
+                .performScrollTo().performClick()
+            compose.onNodeWithText("Review baselines & create sheet").performScrollTo().performClick()
+            compose.onNodeWithText("Save character").assertIsDisplayed().performClick()
+            compose.waitUntil(10_000) { runBlocking { repository.get(source.id) } != null }
+            val saved = runBlocking { repository.get(source.id) }!!
+            assertEquals(source.id, saved.origin.sourceProfileId)
+            assertEquals(source.currentHp, saved.character.currentHp)
+            assertEquals(original, runBlocking { campaign.readCharacterSnapshot(source.id) })
+            assertNull(runBlocking { repository.get("fictional-other-source") })
+            assertEquals(main.id, runBlocking { actorPreferences().activeProfileId.first() })
+        }
+    }
+
+    @Test fun missingPinnedCompanionDoesNotOpenTheMainActorOrOfferToCreateAReplacement() =
+        withSheet(companionProfileId = "fictional-missing-ally") { repository ->
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithText("Companion sheet unavailable").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithText(fixture().name).assertDoesNotExist()
+            compose.onNodeWithText("Review campaign profile").assertDoesNotExist()
+            compose.onNodeWithText("Create character").assertDoesNotExist()
+            assertEquals(fixture().id, runBlocking { repository.observeAll().first() }.single().character.id)
+        }
+
+    @Test fun archivedPinnedCompanionRequiresExplicitRestoreAndNeverFallsBack() {
+        val main = fixture()
+        val companion = ReforgeCharacter("fictional-archived-ally", "Fictional archived ally", currentHp = 7)
+        withSheet(character = main, companionProfileId = companion.id, localSetup = { repository ->
+            actorPreferences().selectProfile(main.id)
+            val saved = repository.create(companion)
+            repository.setArchived(saved.character, true)
+        }) { repository ->
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithText("Restore playable sheet").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithText(main.name).assertDoesNotExist()
+            compose.onNodeWithTag("reforge-STR").assertDoesNotExist()
+            assertTrue(runBlocking { repository.get(companion.id) }!!.character.archived)
+            compose.onNodeWithText("Restore playable sheet").performScrollTo().performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
+            val restored = runBlocking { repository.get(companion.id) }!!
+            assertEquals(3L, restored.revision)
+            assertFalse(restored.character.archived)
+            assertEquals(companion.currentHp, restored.character.currentHp)
+            assertEquals(main.id, runBlocking { actorPreferences().activeProfileId.first() })
         }
     }
 
