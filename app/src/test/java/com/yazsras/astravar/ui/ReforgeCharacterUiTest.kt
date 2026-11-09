@@ -65,13 +65,13 @@ class ReforgeCharacterUiTest {
         ))), items = listOf(ItemInstance("armor-instance", "armor-definition")))
 
     private fun withSheet(seed: Boolean = true, campaignSetup: (CampaignLedgerRepository) -> Unit = {},
-        block: (ReforgeRepository) -> Unit) {
+        character: ReforgeCharacter = fixture(), block: (ReforgeRepository) -> Unit) {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val legacyDb = Room.inMemoryDatabaseBuilder(context, CampaignLedgerDb::class.java).build()
         val ledger = CampaignLedgerRepository(legacyDb)
         val localDb = Room.inMemoryDatabaseBuilder(context, ReforgeDb::class.java).build()
         val repository = ReforgeRepository(localDb)
-        if (seed) runBlocking { repository.create(fixture()) }
+        if (seed) runBlocking { repository.create(character) }
         campaignSetup(ledger)
         val previous = System.getProperty("robolectric.windowManager.useRequestedSize")
         System.setProperty("robolectric.windowManager.useRequestedSize", "true")
@@ -105,6 +105,48 @@ class ReforgeCharacterUiTest {
         assertNull(character.baseMaxHp)
         assertTrue(character.baseAbilities.values.all { it == null })
         assertTrue(character.items.isEmpty())
+    }
+
+    @Test fun spellbookSearchAndFiltersPreserveTheReviewedCastingWorkflow() {
+        val character = fixture().copy(spellSlots = mapOf(1 to 2), spells = listOf(
+            SpellDefinition("veil", "Amber Veil", 1, SpellPreparation.ALWAYS_PREPARED,
+                concentration = true, duration = "Up to 1 minute"),
+            SpellDefinition("beacon", "Amber Beacon", 1, SpellPreparation.PREPARED),
+            SpellDefinition("lock", "Amber Lock", 1),
+            SpellDefinition("spark", "Quiet Spark", 0)
+        ))
+        withSheet(character = character) { repository ->
+            compose.waitUntil(10000) { compose.onAllNodesWithText("Spells").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Spells").performScrollTo().performClick()
+            compose.onNodeWithText("Quiet Spark").assertExists()
+            compose.onNodeWithText("Cantrips").performScrollTo().performClick()
+            compose.onNodeWithText("Quiet Spark").assertExists()
+            compose.onNodeWithText("Amber Veil").assertDoesNotExist()
+
+            compose.onNode(hasText("Prepared") and hasClickAction()).performScrollTo().performClick()
+            compose.onNodeWithText("Amber Beacon").assertExists()
+            compose.onNodeWithText("Amber Veil").assertExists()
+            compose.onNodeWithText("Amber Lock").assertDoesNotExist()
+
+            val search = compose.onNode(hasSetTextAction() and hasText("Find a spell by name"))
+            search.performScrollTo().performTextInput("  AMBER VEIL  ")
+            compose.onNodeWithText("Amber Beacon").assertDoesNotExist()
+            compose.onNodeWithText("Up to 1 minute", substring = true).assertExists()
+            compose.onNodeWithText("Cast", substring = false).performScrollTo().performClick()
+            compose.onNodeWithText("Cast Amber Veil").assertExists()
+            compose.onNodeWithText("Preview casting cost").performScrollTo().performClick()
+            compose.onNodeWithText("Amber Veil · consumes one level-1 slot · Concentration").assertExists()
+            assertEquals(2, runBlocking { repository.get(character.id) }!!.character.spellSlots[1])
+            compose.onNodeWithText("Cast & save").performClick()
+            compose.waitUntil(10000) { runBlocking { repository.get(character.id) }!!.character.spellSlots[1] == 1 }
+            assertEquals("veil", runBlocking { repository.get(character.id) }!!.character.concentrationSpellId)
+
+            search.performScrollTo().performTextReplacement("no such spell")
+            compose.onNodeWithText("No matching spells").assertExists()
+            compose.onNodeWithText("Show all spells").performScrollTo().performClick()
+            compose.onNodeWithText("Amber Lock").assertExists()
+            compose.onNodeWithText("Quiet Spark").assertExists()
+        }
     }
 
     @Test fun copyingCampaignItemIsExplicitAndKeepsOriginalIdentityWithoutMagic() {

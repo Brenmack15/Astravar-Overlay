@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -36,6 +37,16 @@ import kotlinx.coroutines.flow.first
 /** Decorative only; text is native, readable, selectable and responsive to font scaling. */
 @Composable private fun AstravarHeroBanner(title: String, subtitle: String) =
     PlayerArtBanner("THE ADVENTURER", title, subtitle, R.drawable.astravar_atlas_banner)
+
+private enum class SpellbookFilter(val label: String) {
+    ALL("All"), PREPARED("Prepared"), CANTRIPS("Cantrips");
+
+    fun includes(spell: SpellDefinition): Boolean = when (this) {
+        ALL -> true
+        PREPARED -> spell.level > 0 && spell.preparation != SpellPreparation.KNOWN
+        CANTRIPS -> spell.level == 0
+    }
+}
 
 /** A local-first playable sheet. Legacy campaign adoption is reviewed and never changes its source. */
 @OptIn(ExperimentalLayoutApi::class)
@@ -76,6 +87,8 @@ import kotlinx.coroutines.flow.first
     var savedRoll by remember { mutableStateOf<ReforgeRollRecord?>(null) }
     val expandedText = LocalDensity.current.fontScale >= 1.5f
     val chosenId = ReforgePreferences.chooseProfile(selectedId ?: actorSelection.second, active.map { it.character.id })
+    val (spellQuery, setSpellQuery) = key(chosenId) { rememberSaveable { mutableStateOf("") } }
+    val (spellFilter, setSpellFilter) = key(chosenId) { rememberSaveable { mutableStateOf(SpellbookFilter.ALL) } }
     val saved = active.firstOrNull { it.character.id == chosenId }
     val character = saved?.character
     val projection = character?.let { remember(it) { CharacterCalculator.calculate(it) } }
@@ -326,28 +339,77 @@ import kotlinx.coroutines.flow.first
                     PlayerCard {
                         Text("Spell attack ${reforgeSigned(projection.spellAttack.value)} · Save DC ${projection.spellSaveDc.value ?: "?"}", style = MaterialTheme.typography.titleMedium)
                         PlayerTextButton(enabled = projection.spellAttack.value != null, onClick = { projection.spellAttack.value?.let { requestRoll("Spell attack", it, RollKind.SPELL_ATTACK) } }) { Text("Roll spell attack") }
-                        Text("Prepared ${character.spells.count { it.preparation == SpellPreparation.PREPARED && it.level > 0 }} / ${projection.preparationLimit ?: "unconfigured"}", color = RebuildPalette.Muted)
-                        if (projection.slotMaxima.isEmpty()) Text("Configure your pinned class and slot capacity in Character setup.", color = RebuildPalette.GoldBright)
-                        projection.slotMaxima.forEach { (level, max) -> Text("Level $level slots · ${character.spellSlots[level] ?: "?"} / $max") }
-                        PlayerTextButton(onClick = { dialog = "Slots" }) { Text("Set current slots") }
+                        PlayerDisclosure("Spell slots & preparation") {
+                            Text("Prepared ${character.spells.count { it.preparation == SpellPreparation.PREPARED && it.level > 0 }} / ${projection.preparationLimit ?: "unconfigured"}", color = RebuildPalette.Muted)
+                            if (projection.slotMaxima.isEmpty()) Text("Configure your pinned class and slot capacity in Character setup.", color = RebuildPalette.GoldBright)
+                            projection.slotMaxima.forEach { (level, max) -> Text("Level $level slots · ${character.spellSlots[level] ?: "?"} / $max") }
+                            PlayerTextButton(onClick = { dialog = "Slots" }) { Text("Set current slots") }
+                        }
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) { Text("Spells", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge); PlayerTextButton(onClick = { dialog = "Spell" }) { Text("Add spell") } }
-                    character.spells.forEach { spell -> PlayerCard {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(spell.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                            PlayerTextButton(onClick = { dialog = "Spell:${spell.id}" }) { Text("Edit") }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Spellbook", Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge)
+                        PlayerTextButton(onClick = { dialog = "Spell" }) { Text("Add spell") }
+                    }
+                    if (character.spells.isEmpty()) {
+                        PlayerEmpty("No spells yet", "Add a spell to record its rules, prepare it, or cast it from this sheet.")
+                    } else {
+                        PlayerSearch(spellQuery, setSpellQuery, "Find a spell by name")
+                        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SpellbookFilter.entries.forEach { filter ->
+                                PlayerFilterChip(selected = spellFilter == filter, onClick = { setSpellFilter(filter) },
+                                    label = { Text(filter.label) })
+                            }
                         }
-                        Text("${if (spell.level == 0) "Cantrip" else "Level ${spell.level}"} · ${spell.preparation.name.lowercase().replace('_', ' ')}${if (spell.concentration) " · Concentration" else ""}", color = RebuildPalette.Ice)
-                        Text("${spell.castingTime} · ${spell.range} · ${spell.components}", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
-                        if (spell.description.isNotBlank()) PlayerDisclosure("Spell reference") { Text(spell.description) }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            PlayerButton(onClick = { dialog = "Cast:${spell.id}" }, modifier = Modifier.weight(1f)) { Text("Cast") }
-                            if (spell.preparation != SpellPreparation.ALWAYS_PREPARED && spell.level > 0) PlayerOutlinedButton(onClick = {
-                                try { change("Change spell preparation", GameplayRules.prepareSpell(character, spell.id, spell.preparation != SpellPreparation.PREPARED), false) }
-                                catch (e: Exception) { error = e.message ?: "Preparation unavailable" }
-                            }, modifier = Modifier.weight(1f)) { Text(if (spell.preparation == SpellPreparation.PREPARED) "Unprepare" else "Prepare") }
+                        val spellsByLevel = remember(character.spells, spellQuery, spellFilter) {
+                            val query = spellQuery.trim()
+                            character.spells
+                                .filter { spellFilter.includes(it) && it.name.contains(query, ignoreCase = true) }
+                                .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { spell: SpellDefinition -> spell.name })
+                                .groupBy { it.level }
+                                .toSortedMap()
                         }
-                    } }
+                        if (spellsByLevel.isEmpty()) {
+                            PlayerEmpty("No matching spells", "Try a different name or show all spells.")
+                            PlayerOutlinedButton(onClick = {
+                                setSpellQuery("")
+                                setSpellFilter(SpellbookFilter.ALL)
+                            }) { Text("Show all spells") }
+                        }
+                        spellsByLevel.forEach { (level, spells) ->
+                            Text(if (level == 0) "Level 0 · Cantrips" else "Level $level",
+                                Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+                            spells.forEach { spell -> key(spell.id) {
+                                PlayerCard {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(spell.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                                        PlayerTextButton(onClick = { dialog = "Spell:${spell.id}" }) { Text("Edit") }
+                                    }
+                                    val traits = buildList {
+                                        add(when (spell.preparation) {
+                                            SpellPreparation.KNOWN -> "Known"
+                                            SpellPreparation.PREPARED -> "Prepared"
+                                            SpellPreparation.ALWAYS_PREPARED -> "Always prepared"
+                                        })
+                                        if (spell.concentration) add("Concentration")
+                                        if (spell.ritual) add("Ritual")
+                                    }
+                                    Text(traits.joinToString(" · "), color = RebuildPalette.Ice)
+                                    val details = listOf(spell.castingTime, spell.range, spell.components, spell.duration)
+                                        .filter(String::isNotBlank)
+                                    if (details.isNotEmpty()) Text(details.joinToString(" · "), color = RebuildPalette.Muted,
+                                        style = MaterialTheme.typography.bodySmall)
+                                    if (spell.description.isNotBlank()) PlayerDisclosure("Spell reference") { Text(spell.description) }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        PlayerButton(onClick = { dialog = "Cast:${spell.id}" }, modifier = Modifier.weight(1f)) { Text("Cast") }
+                                        if (spell.preparation != SpellPreparation.ALWAYS_PREPARED && spell.level > 0) PlayerOutlinedButton(onClick = {
+                                            try { change("Change spell preparation", GameplayRules.prepareSpell(character, spell.id, spell.preparation != SpellPreparation.PREPARED), false) }
+                                            catch (e: Exception) { error = e.message ?: "Preparation unavailable" }
+                                        }, modifier = Modifier.weight(1f)) { Text(if (spell.preparation == SpellPreparation.PREPARED) "Unprepare" else "Prepare") }
+                                    }
+                                }
+                            } }
+                        }
+                    }
                 }
                 "Resources" -> {
                     PlayerButton(onClick = { dialog = "Rest" }) { Text("Rest & recovery") }
