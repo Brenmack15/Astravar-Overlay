@@ -1,5 +1,31 @@
 # Astravar evolution log
 
+## 3.1.0-rc4 · build 48 · Companion quick play
+
+Baseline: 3.1.0-rc3, build 47, at `45dbbf1` in draft PR #12.
+
+Open a companion in the Companions tab to review its campaign profile for
+play or go directly to its playable sheet or Combat. After confirming a
+sourced attack, the same page offers a shortcut to roll it in Combat. The
+companion view returns to the selected roster entry and preserves the default
+actor used by Character and My gear.
+
+The route uses the selected companion's exact ID. A missing local sheet
+requires explicit source review, and an archived one requires an explicit
+restore. It reuses the existing revision-checked adoption, archive, attack and
+gameplay transactions. Source records, Room schemas and accepted mechanics
+need no conversion. Alternate forms still require separate mechanical review.
+
+Room-backed UI coverage checks exact targeting, explicit adoption and restore,
+an unavailable ID, and preservation of the primary actor. The native journey
+reviews a fictional companion, opens Combat, heals its playable copy, then
+checks the untouched source HP and the saved playable HP after restart.
+GitHub Actions records candidate verification against the exact source commit.
+
+Future opportunities include surfacing turn controls before long attack lists,
+adding searchable playable gear, and supporting a complete backup and restore
+for campaigns above the current export limit.
+
 ## 3.1.0-rc3 · build 47 · Spellbook
 
 Baseline: 3.1.0-rc2, build 46, at `969ba38` in draft PR #11.

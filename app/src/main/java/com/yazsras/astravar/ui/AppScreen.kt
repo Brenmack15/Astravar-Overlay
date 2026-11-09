@@ -55,8 +55,14 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     var tool by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
     var requestedInventory by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("My gear") }
     var inventoryRoute by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
+    var companionPlayId by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    var companionPlaySection by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("Sheet") }
     LaunchedEffect(ownerConnectionRequest) {
-        if (ownerConnectionRequest > 0) { tab = "Character"; tool = "Owner connection" }
+        if (ownerConnectionRequest > 0) {
+            companionPlayId = null
+            tab = "Character"
+            tool = "Owner connection"
+        }
     }
     var elementPicker by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf(false)}
     val screenStates=androidx.compose.runtime.saveable.rememberSaveableStateHolder()
@@ -112,6 +118,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
             topBar={RebuildAppHeader(s?.demo==true, search = { tool = "Global search" }, tools = { tool = "Tools" })},
             bottomBar={RebuildPrimaryNavigation(tab) { next ->
                 if (next == "Inventory") { requestedInventory = "My gear"; inventoryRoute++ }
+                companionPlayId = null
                 tab = next
             }}
         ) {insets->
@@ -149,7 +156,15 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                         else { tool = null; remoteReviewId = next.commandId }
                     }) { Text(if (waitingRemote.isEmpty()) "Remote Updates" else "Review (${waitingRemote.size})") }
                 }
-                screenStates.SaveableStateProvider(tab) {
+                val playId = companionPlayId
+                if (tab == "Companions" && playId != null && !remoteTestEnabled) {
+                    key(playId, companionPlaySection) {
+                        androidx.activity.compose.BackHandler(enabled = tool == null) { companionPlayId = null }
+                        ReforgeCharacterSheet(app.campaignLedger, playableRepository,
+                            initialSection = companionPlaySection, companionProfileId = playId,
+                            onBackToCompanions = { companionPlayId = null })
+                    }
+                } else screenStates.SaveableStateProvider(tab) {
                     when(tab) {
                         "Character" -> if (remoteTestEnabled) Page { CharacterOverviewV2(app.campaignLedger, current, RemoteStatProtocol.PROFILE_ID) } else ReforgeCharacterSheet(app.campaignLedger)
                         "Armor" -> ArmorOverviewV2(current,app.campaignLedger,
@@ -166,7 +181,9 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                             requestedSection = requestedInventory, routeToken = inventoryRoute)
                         "Companions" -> if (remoteTestEnabled) Page { Text("Party records are isolated from the disposable Remote Stat Test. Disable Remote Updates to edit party records.") }
                             else PartyPageV2(app.campaignLedger, current,
-                                openReferences={tab="Campaign";campaignPage="Reference Library"}) {
+                                openReferences = { tab = "Campaign"; campaignPage = "Reference Library" },
+                                openPlayable = { id, section -> companionPlayId = id; companionPlaySection = section },
+                                playableRepository = playableRepository) {
                                     requestedInventory = "Campaign items"; inventoryRoute++; tab = "Inventory"
                                 }
                         "Party" -> if (remoteTestEnabled) Page { Text("Party records are isolated from the disposable Remote Stat Test. Disable Remote Updates to edit party records.") }

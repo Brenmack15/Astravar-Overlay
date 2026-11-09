@@ -51,7 +51,8 @@ private enum class SpellbookFilter(val label: String) {
 /** A local-first playable sheet. Legacy campaign adoption is reviewed and never changes its source. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable fun ReforgeCharacterSheet(repository: CampaignLedgerRepository, localRepository: ReforgeRepository? = null,
-    initialSection: String = "Sheet", sectionOnly: Boolean = false) {
+    initialSection: String = "Sheet", sectionOnly: Boolean = false,
+    companionProfileId: String? = null, onBackToCompanions: (() -> Unit)? = null) {
     val context = LocalContext.current.applicationContext
     val preferences = remember(context) { Preferences(context) }
     val preferencesState by preferences.flow.collectAsState(initial = OverlayPrefs())
@@ -86,7 +87,9 @@ private enum class SpellbookFilter(val label: String) {
     val rollNotice = remember { SnackbarHostState() }
     var savedRoll by remember { mutableStateOf<ReforgeRollRecord?>(null) }
     val expandedText = LocalDensity.current.fontScale >= 1.5f
-    val chosenId = ReforgePreferences.chooseProfile(selectedId ?: actorSelection.second, active.map { it.character.id })
+    // A roster shortcut must never fall through to another character or change the default actor.
+    val chosenId = companionProfileId
+        ?: ReforgePreferences.chooseProfile(selectedId ?: actorSelection.second, active.map { it.character.id })
     val (spellQuery, setSpellQuery) = key(chosenId) { rememberSaveable { mutableStateOf("") } }
     val (spellFilter, setSpellFilter) = key(chosenId) { rememberSaveable { mutableStateOf(SpellbookFilter.ALL) } }
     val saved = active.firstOrNull { it.character.id == chosenId }
@@ -107,6 +110,7 @@ private enum class SpellbookFilter(val label: String) {
         savedRoll = null
     }
     fun selectProfile(id: String) {
+        if (companionProfileId != null) return
         selectedId = id
         scope.launch {
             try { actorPreferences.selectProfile(id) }
@@ -140,9 +144,13 @@ private enum class SpellbookFilter(val label: String) {
     }
     fun requestRoll(label: String, modifier: Int, kind: RollKind = RollKind.CUSTOM, key: String = "") =
         openRoll(ReforgeRollRequest(label, DiceFormula(listOf(DiceTerm(1, 20)), modifier), kind, key))
+    fun reviewProfile(id: String) = action("Profile ready for review") {
+        adopting = local.readLegacyPreview(repository, id)
+        dialog = "Adopt"
+    }
 
-    ReforgeSheetPage("$chosenId:$section", rollNotice) {
-        if (!profilesState.first || !actorSelection.first) {
+    ReforgeSheetPage("$chosenId:$section", rollNotice, onBackToCompanions) {
+        if (!profilesState.first || (companionProfileId == null && !actorSelection.first)) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
             Text("Opening your saved character…", color = RebuildPalette.Muted)
             return@ReforgeSheetPage
@@ -151,6 +159,25 @@ private enum class SpellbookFilter(val label: String) {
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("reforge-error"))
         if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.labelMedium, color = RebuildPalette.Ice, modifier = Modifier.testTag("reforge-save-status"))
         if (character == null || projection == null) {
+            if (companionProfileId != null) {
+                val archived = all.firstOrNull { it.character.id == companionProfileId }?.character
+                val source = legacyProfiles.firstOrNull { it.id == companionProfileId }
+                PlayerHeading(archived?.name ?: source?.name?.takeIf(String::isNotBlank) ?: "Companion sheet")
+                when {
+                    archived != null -> {
+                        PlayerEmpty("Playable sheet archived", "Restore this companion's saved sheet to use it again.")
+                        PlayerButton(enabled = !busy, onClick = {
+                            action("Playable sheet restored") { local.setArchived(archived, false) }
+                        }) { Text("Restore playable sheet") }
+                    }
+                    source != null -> {
+                        PlayerEmpty("Ready for review", "Review this companion's saved campaign profile to create a playable sheet on this device.")
+                        PlayerButton(enabled = !busy, onClick = { reviewProfile(source.id) }) { Text("Review campaign profile") }
+                    }
+                    else -> PlayerEmpty("Companion sheet unavailable", "No saved profile was found for this companion.")
+                }
+                return@ReforgeSheetPage
+            }
             PlayerHeading("Your character")
             AstravarHeroBanner("Make your legend", "Your character, equipment and story. In one place.")
             PlayerButton(onClick = { dialog = "Create" }) { Text("Create character") }
@@ -159,7 +186,7 @@ private enum class SpellbookFilter(val label: String) {
                 Text("Saved campaign profiles", style = MaterialTheme.typography.titleMedium)
                 legacyProfiles.filter { profile -> all.none { it.character.id == profile.id } }.forEach { profile -> PlayerEntry(profile.name.ifBlank { "Unnamed character" },
                     "Review saved values · original record retained", "Emblem", {
-                        action("Profile ready for review") { adopting = local.readLegacyPreview(repository, profile.id); dialog = "Adopt" }
+                        reviewProfile(profile.id)
                     }) }
             }
             Text("Character sheets in Reforge are saved on this device. Existing campaign synchronization continues separately; these sheets are not synchronized yet.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
@@ -174,7 +201,9 @@ private enum class SpellbookFilter(val label: String) {
             } else {
                 AstravarHeroBanner(character.name, "Level ${character.level} · Proficiency +${projection.proficiencyBonus}")
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    PlayerOutlinedButton(onClick = { dialog = "Characters" }) { Text("Switch character") }
+                    if (companionProfileId == null) {
+                        PlayerOutlinedButton(onClick = { dialog = "Characters" }) { Text("Switch character") }
+                    }
                     PlayerTextButton(onClick = { dialog = "Setup" }) { Text("Character setup") }
                 }
                 PlayerTextButton(onClick = { dialog = "CampaignConnections" }) { Text("Campaign connections") }
@@ -474,7 +503,7 @@ private enum class SpellbookFilter(val label: String) {
             }
         }
         legacyProfiles.filter { profile -> all.none { it.character.id == profile.id } }.forEach { profile -> PlayerEntry(profile.name.ifBlank { "Unnamed profile" }, "Review saved campaign profile", "History", {
-            action("Profile ready for review") { adopting = local.readLegacyPreview(repository, profile.id); dialog = "Adopt" }
+            reviewProfile(profile.id)
         }) }
         PlayerButton(onClick = { dialog = "Create" }) { Text("Create character or companion") }
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
@@ -610,10 +639,18 @@ private enum class SpellbookFilter(val label: String) {
     }
 }
 
-@Composable private fun ReforgeSheetPage(resetKey: String, rollNotice: SnackbarHostState, content: @Composable ColumnScope.() -> Unit) {
-    Box(Modifier.fillMaxSize()) {
-        Page(resetKey = resetKey, content = content)
-        SnackbarHost(rollNotice, Modifier.align(Alignment.BottomCenter).widthIn(max = 600.dp))
+@Composable private fun ReforgeSheetPage(resetKey: String, rollNotice: SnackbarHostState,
+    onBackToCompanions: (() -> Unit)?, content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        if (onBackToCompanions != null) {
+            PlayerTextButton(onClick = onBackToCompanions, modifier = Modifier.padding(horizontal = 12.dp)) {
+                Text("Back to companions")
+            }
+        }
+        Box(Modifier.weight(1f)) {
+            Page(resetKey = resetKey, content = content)
+            SnackbarHost(rollNotice, Modifier.align(Alignment.BottomCenter).widthIn(max = 600.dp))
+        }
     }
 }
 
