@@ -15,6 +15,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.room.MultiInstanceInvalidationService
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -31,6 +32,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.android.controller.ActivityController
+import org.robolectric.android.controller.ServiceController
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.annotation.LooperMode
@@ -39,23 +41,29 @@ import org.robolectric.annotation.LooperMode
 @Config(sdk = [35], qualifiers = "w400dp-h1000dp")
 @LooperMode(LooperMode.Mode.PAUSED)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
+@OptIn(androidx.room.ExperimentalRoomApi::class)
 class RebirthNavigationStateTest {
     @get:Rule val compose = createAstravarComposeRule()
     private var oldRequestedSize: String? = null
+    private var invalidationService: ServiceController<MultiInstanceInvalidationService>? = null
 
     @Before fun configureNativeDialogsAndRoomBinding() {
         oldRequestedSize = System.getProperty("robolectric.windowManager.useRequestedSize")
         System.setProperty("robolectric.windowManager.useRequestedSize", "true")
         val app = ApplicationProvider.getApplicationContext<Application>()
         val intent = Intent(app, MultiInstanceInvalidationService::class.java)
-        val service = Robolectric.buildService(MultiInstanceInvalidationService::class.java).create().get()
+        val service = Robolectric.buildService(MultiInstanceInvalidationService::class.java).create()
+        invalidationService = service
         shadowOf(app).setComponentNameAndServiceForBindServiceForIntent(intent,
-            ComponentName(app, MultiInstanceInvalidationService::class.java), service.onBind(intent))
+            ComponentName(app, MultiInstanceInvalidationService::class.java), service.get().onBind(intent))
     }
 
     @After fun restoreDialogSize() {
-        oldRequestedSize?.let { System.setProperty("robolectric.windowManager.useRequestedSize", it) }
-            ?: System.clearProperty("robolectric.windowManager.useRequestedSize")
+        try { invalidationService?.destroy() } finally {
+            invalidationService = null
+            oldRequestedSize?.let { System.setProperty("robolectric.windowManager.useRequestedSize", it) }
+                ?: System.clearProperty("robolectric.windowManager.useRequestedSize")
+        }
     }
 
     private fun database() = Room.inMemoryDatabaseBuilder(
@@ -150,8 +158,7 @@ class RebirthNavigationStateTest {
             }
             compose.waitForIdle()
             compose.onNodeWithTag("section-History").assertIsSelected().assertIsDisplayed()
-            val visibleTab = compose.onNodeWithTag("section-History").fetchSemanticsNode()
-            assertTrue("Selected tab must retain at least its 48dp touch height", visibleTab.boundsInRoot.height >= 48f)
+            compose.onNodeWithTag("section-History").assertHeightIsAtLeast(48.dp)
         } finally { activity.pause().stop().destroy() }
     }
 }
