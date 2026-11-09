@@ -3,6 +3,8 @@ package com.yazsras.astravar.ui
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
+import com.yazsras.astravar.data.ReforgeRollComponent
+import com.yazsras.astravar.data.ReforgeRollDie
 import com.yazsras.astravar.data.ReforgeRollRecord
 import com.yazsras.astravar.rules.reforge.*
 import org.junit.Assert.*
@@ -69,7 +71,7 @@ class ReforgeDiceOutcomeUiTest {
         } finally { controller.pause().stop().destroy(); System.clearProperty("robolectric.windowManager.useRequestedSize") }
     }
 
-    @Test fun aRestoredRollCannotUseAnotherCharacterAtTheSameRevision() {
+    @Test fun pendingRollCannotUseAnotherCharacterAtTheSameRevision() {
         val source = character(false)
         val other = source.copy(id = "another-character")
         val request = ReforgeRollRequest("Custom roll", null, characterRevision = source.revision, profileId = source.id)
