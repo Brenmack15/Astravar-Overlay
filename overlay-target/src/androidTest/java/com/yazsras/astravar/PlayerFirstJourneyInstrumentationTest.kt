@@ -122,6 +122,26 @@ class PlayerFirstJourneyInstrumentationTest {
         ui.ensurePrimaryTab(product, "Character")
         stat("STR 8")
 
+        tap("Roll dice")
+        tap("Enter physical dice faces")
+        enter("Faces in order (comma separated)", "13")
+        tap("Validate entered dice")
+        find("13")
+        tap("Save roll")
+        assertTrue("Saving returns to the current sheet and confirms the committed roll",
+            device.wait(Until.hasObject(By.text("Roll saved · 13").pkg(product)), 10_000))
+        assertFalse("Saving a roll must not automatically navigate", device.hasObject(By.text("Roll history").pkg(product)))
+        capture("roll-saved-on-sheet")
+        tap("View history")
+        find("Roll history")
+        find("1d20 · Manual · Player")
+        tap("Dice details")
+        find("13 on d20 · Modifier +0")
+        capture("roll-history-breakdown")
+        instrumentation.sendStatus(0, Bundle().apply {
+            putString("stream", "\nCHECKPOINT: native manual roll saved without leaving the sheet; explicit history opens the saved formula, face and modifier\n")
+        })
+
         ui.ensurePrimaryTab(product, "Companions")
         tap("+ Add companion")
         enter("Companion name", "CI Native Ally")
