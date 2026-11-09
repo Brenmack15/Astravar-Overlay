@@ -18,7 +18,9 @@ change the view. This cycle requires no database migration or rules change.
 The Room-backed Compose regression covers filtering both preparation types,
 ignoring case and surrounding spaces, casting from filtered results, observing
 a single saved slot expenditure and concentration, and resetting an empty
-search. The exact commit's GitHub Actions runs record build and test outcomes.
+search. The native journey creates spells, filters and casts a fictional cantrip,
+and checks concentration after restart. GitHub Actions records build and test
+outcomes against the exact candidate commit.
 
 Remaining opportunities include complete oversized-campaign backup and
 restore, reviewed active companion forms, and faster editing of related spells

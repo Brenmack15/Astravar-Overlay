@@ -14,8 +14,8 @@ def main():
     parser.add_argument("--sdk", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--owner-signed", action="store_true")
-    parser.add_argument("--version-code", type=int, default=46)
-    parser.add_argument("--version-name", default="3.1.0-rc2")
+    parser.add_argument("--version-code", type=int, default=47)
+    parser.add_argument("--version-name", default="3.1.0-rc3")
     args = parser.parse_args()
     package = "com.yazsras.astravar" if args.owner_signed else "com.yazsras.astravar.v2uidebug"
     version = args.version_name if args.owner_signed else args.version_name + "-ui-rebuild"
