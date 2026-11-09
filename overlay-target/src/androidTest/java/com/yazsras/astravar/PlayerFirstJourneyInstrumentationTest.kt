@@ -233,7 +233,8 @@ class PlayerFirstJourneyInstrumentationTest {
         tap("Heal")
         find("Saved on this device")
         stat("HP 6 / 12")
-        assertTrue("System Back returns to the selected companion", device.pressBack())
+        // Compose returns to the roster in the same window. Verify the destination rather than a window change.
+        device.pressBack()
         find("Go to combat")
         find("HP 4 / 12")
 
