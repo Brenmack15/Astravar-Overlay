@@ -35,7 +35,7 @@ class UpdatePreservationInstrumentationTest {
                 listOf(By.text("Active element").pkg(product), By.text("Core systems").pkg(product)))
         }
         fun captureParty(name: String) = ui.captureStablePage(File(files, name), product, "Companions",
-            listOf(By.text("Eek").pkg(product)))
+            listOf(By.text("CI Native Ally").pkg(product)))
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
         ui.awaitMainAfterSavedDialogs(product)
         assertTrue("The saved labeled demo survived", device.hasObject(By.text("DEMO").pkg(product)))
@@ -61,8 +61,12 @@ class UpdatePreservationInstrumentationTest {
         tap("Close")
         tap("Companions", preferLast = true)
         if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
-        find("Party & family")
-        listOf("Zerg Hasma", "Eek", "Korr", "Veyrath").forEach { find(it) }
+        find("Companions")
+        // The previous native journey created this arbitrary companion through
+        // product controls. A new installation must not invent owner companions.
+        find("CI Native Ally")
+        assertNotNull("The arbitrary companion source HP survives the ordinary APK update",
+            ui.bounds(By.textContains("HP 4 / 12").pkg(product), "retained fictional companion HP"))
         // Layout acceptance captures are native emulator output, not a physical Galaxy test.
         device.executeShellCommand("wm size 1080x2400")
         for (scale in listOf("1.0", "1.3", "2.0")) {
@@ -72,12 +76,12 @@ class UpdatePreservationInstrumentationTest {
             captureArmor("armor-font-$scale.png")
             tap("Close")
             tap("Companions", preferLast = true)
-            find("Eek")
+            find("CI Native Ally")
             captureParty("party-font-$scale.png")
         }
         device.setOrientationLeft()
         device.waitForIdle()
-        find("Eek")
+        find("CI Native Ally")
         captureParty("party-landscape-large-font.png")
         device.setOrientationNatural()
         device.unfreezeRotation()

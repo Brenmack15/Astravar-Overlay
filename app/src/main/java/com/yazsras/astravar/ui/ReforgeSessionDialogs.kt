@@ -24,7 +24,8 @@ import com.yazsras.astravar.rules.reforge.*
         try { onSave(label, transform()) } catch (e: Exception) { error = e.message ?: "Check HP" }
     }
     PlayerSheet("Hit points", onDismiss) {
-        Text("HP ${projection.currentHp ?: "?"} / ${projection.maximumHp.value ?: "?"} · Temporary ${character.temporaryHp ?: "?"}", style = MaterialTheme.typography.titleLarge)
+        Text("${projection.currentHp ?: "Not set"} / ${projection.maximumHp.value ?: "Not set"}", style = MaterialTheme.typography.headlineLarge, color = RebuildPalette.Health)
+        Text("Hit points · Temporary ${character.temporaryHp ?: "Not set"}", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodyMedium)
         Field("Damage or healing amount", amount, { amount = it; pendingDamage = null })
         Choices("Damage interpretation", listOf("Final amount") + DamageKind.entries.map { it.name }, damageType,
             display = { if (it == "Final amount") "Already adjusted final amount" else it.lowercase().replaceFirstChar { c -> c.uppercase() } }) { damageType = it; pendingDamage = null }
@@ -151,15 +152,15 @@ import com.yazsras.astravar.rules.reforge.*
         Text("Calculated changes", style = MaterialTheme.typography.titleLarge)
         Stat.entries.forEach { stat ->
             val a = old.abilities.getValue(stat).effective.value; val b = new.abilities.getValue(stat).effective.value
-            if (a != b) Text("${stat.name}: ${a ?: "?"} → ${b ?: "?"}", color = RebuildPalette.Ice)
+            if (a != b) Text("${stat.name}: ${a ?: "Not set"} → ${b ?: "Not set"}", color = RebuildPalette.Ice)
         }
         listOf(Triple("Armor Class", old.armorClass.value, new.armorClass.value), Triple("Maximum HP", old.maximumHp.value, new.maximumHp.value),
             Triple("Current HP", old.currentHp, new.currentHp), Triple("Spell attack", old.spellAttack.value, new.spellAttack.value),
             Triple("Spell save DC", old.spellSaveDc.value, new.spellSaveDc.value)).forEach { (name, a, b) ->
-            Text("$name: ${a ?: "?"} → ${b ?: "?"}", color = if (a != b) RebuildPalette.Ice else RebuildPalette.Muted)
+            Text("$name: ${a ?: "Not set"} → ${b ?: "Not set"}", color = if (a != b) RebuildPalette.Ice else RebuildPalette.Muted)
         }
-        after.resources.forEach { pool -> val prior = before.resources.firstOrNull { it.id == pool.id }; if (prior?.current != pool.current) Text("${pool.name}: ${prior?.current ?: "?"} → ${pool.current ?: "?"}", color = RebuildPalette.Ice) }
-        old.slotMaxima.keys.plus(new.slotMaxima.keys).forEach { level -> if (before.spellSlots[level] != after.spellSlots[level]) Text("Level $level slots: ${before.spellSlots[level] ?: "?"} → ${after.spellSlots[level] ?: "?"}", color = RebuildPalette.Ice) }
+        after.resources.forEach { pool -> val prior = before.resources.firstOrNull { it.id == pool.id }; if (prior?.current != pool.current) Text("${pool.name}: ${prior?.current ?: "Not set"} → ${pool.current ?: "Not set"}", color = RebuildPalette.Ice) }
+        old.slotMaxima.keys.plus(new.slotMaxima.keys).forEach { level -> if (before.spellSlots[level] != after.spellSlots[level]) Text("Level $level slots: ${before.spellSlots[level] ?: "Not set"} → ${after.spellSlots[level] ?: "Not set"}", color = RebuildPalette.Ice) }
         Text("Outstanding damage is preserved when maximum HP changes. No completed rest or healing is inferred.", color = RebuildPalette.Muted)
     }
 }

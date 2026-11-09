@@ -69,20 +69,20 @@ fun PartyCompanionEditorV2(repository: CampaignLedgerRepository, memberId: Strin
         mode = "resource"
     }
 
-    PlayerEntry("Companion status", state?.condition ?: "Unknown · add a sourced status", "Emblem", ::editState)
+    PlayerEntry("Companion status", state?.condition?.takeUnless { it.equals("Unknown", true) } ?: "Not set · record a status", "Emblem", ::editState)
     if (!state?.notes.isNullOrBlank()) Text(state!!.notes, style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
     FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
         verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("Known resources", style = MaterialTheme.typography.titleMedium)
         PlayerTextButton(onClick = { editResource(null) }, enabled = state != null) { Text("Add resource") }
     }
-    if (resources.isEmpty()) Text("No resource values recorded. Unknown is not zero.", color = RebuildPalette.Muted)
+    if (resources.isEmpty()) Text(if (state == null) "Record a companion status to add tracked resources." else "No tracked resources yet.", color = RebuildPalette.Muted)
     else resources.forEach { row ->
-        PlayerEntry(row.name, "${row.current ?: "?"} / ${row.maximum ?: "?"}", "Core", onClick = { editResource(row) })
+        PlayerEntry(row.name, partyHealthLabel(row.current, row.maximum), "Core", onClick = { editResource(row) })
     }
     val itemLinks = links.filter { it.fromType == "item" || it.toType == "item" }
     if (itemLinks.isNotEmpty()) PlayerEntry("Historical equipment associations", "${itemLinks.size} relationship(s) · current possession is under Equipment", "Core", onClick = { mode = "links" })
-    PartyRelationshipsV31(repository, memberId, memberName)
+    PartyRelationshipsV31(repository, memberId, memberName, showSummary = true)
     if (mode == null) CompanionEditorFeedback(actions.message, actions.busy)
 
     if (mode == "state") PlayerSheet("Edit $memberName status", onDismiss = { mode = null },

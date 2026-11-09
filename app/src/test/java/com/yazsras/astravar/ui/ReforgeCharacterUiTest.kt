@@ -300,6 +300,43 @@ class ReforgeCharacterUiTest {
         assertEquals(8, character.baseAbilities[Stat.STR])
     }
 
+    @Test fun compactSheetShowsVitalsAndAllAbilitiesBeforeScrolling() = withSheet {
+        compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription("HP 40 / 66").assertIsDisplayed()
+        Stat.entries.forEach { compose.onNodeWithTag("reforge-${it.name}").assertIsDisplayed() }
+        capture("rebirth-character-overview")
+    }
+
+    @Test fun fullSkillRowStartsAReviewableRollWithoutOpeningADisclosure() = withSheet { repository ->
+        compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(hasText("Arcana") and hasClickAction()).performScrollTo().performClick()
+        compose.onNodeWithTag("reforge-roll-now").assertExists()
+        assertTrue(runBlocking { repository.rollHistory("synthetic-player").first() }.isEmpty())
+        assertEquals(1L, runBlocking { repository.get("synthetic-player") }!!.revision)
+    }
+
+    @Test fun gearSearchAndInspectionRetainTheExplicitEquipReview() {
+        val character = fixture().copy(
+            itemDefinitions = fixture().itemDefinitions + ItemDefinition("lantern", "Fixture lantern", description = "A plain lantern."),
+            items = fixture().items + ItemInstance("held-lantern", "lantern", state = ItemState.HELD))
+        withSheet(character = character, initialSection = "Equipment") { repository ->
+            compose.waitUntil(10000) { compose.onAllNodesWithText("Fixture lantern").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("section-Equipped").performScrollTo().performClick()
+            compose.onNodeWithText("Fixture lantern").assertExists()
+            compose.onNodeWithText("Synthetic armor").assertDoesNotExist()
+            compose.onNodeWithTag("section-All gear").performScrollTo().performClick()
+            compose.onNode(hasSetTextAction() and hasText("Find equipment")).performScrollTo().performTextInput("synthetic")
+            compose.onNodeWithText("Fixture lantern").assertDoesNotExist()
+            compose.onNode(hasText("Synthetic armor") and hasClickAction()).performScrollTo().performClick()
+            compose.onNodeWithText("Equipment effects").assertExists()
+            compose.onNodeWithText("Manage").assertExists()
+            compose.onNode(hasText("Equip", substring = false) and hasAnyAncestor(isDialog())).performScrollTo().performClick()
+            compose.onNodeWithText("Confirm change").assertExists()
+            assertEquals(1L, runBlocking { repository.get(character.id) }!!.revision)
+            assertEquals(ItemState.CARRIED, runBlocking { repository.get(character.id) }!!.character.items.first().state)
+        }
+    }
+
     @Test fun openingDiceDoesNotRollAndOnlyExplicitSavedRollPersists() = withSheet { repository ->
         compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("reforge-STR").performClick()
@@ -346,6 +383,7 @@ class ReforgeCharacterUiTest {
     @Test fun archiveRequiresConfirmationAndRestoreReturnsSameSavedSheet() = withSheet { repository ->
         compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Switch character").performScrollTo().performClick()
+        compose.onNodeWithText("Manage saved sheets").performScrollTo().performClick()
         compose.onNodeWithText("Archive Synthetic artificer").performScrollTo().performClick()
         assertFalse(runBlocking { repository.get("synthetic-player") }!!.character.archived)
         compose.onNodeWithText("Archive sheet").performClick()

@@ -39,10 +39,10 @@ fun elementTint(type: DamageType)=when(type) {
 @Composable fun AstravarTheme(content: @Composable ()->Unit) {
     MaterialTheme(colorScheme=darkColorScheme(primary=Brass,onPrimary=Color(0xFF251A17),secondary=RebuildPalette.Ice,
         primaryContainer=RebuildPalette.Active,onPrimaryContainer=Brass,secondaryContainer=RebuildPalette.BlueDeep,onSecondaryContainer=RebuildPalette.Ice,
-        tertiary=RebuildPalette.Purple,tertiaryContainer=RebuildPalette.Panel,surfaceTint=RebuildPalette.Purple,
+        tertiary=RebuildPalette.Purple,tertiaryContainer=RebuildPalette.Panel,surfaceTint=RebuildPalette.BlueAccent,
         background=RebuildPalette.Canvas,surface=RebuildPalette.Panel,surfaceVariant=RebuildPalette.Elevated,
-        onBackground=Frost,onSurface=Frost,onSurfaceVariant=Muted,outline=RebuildPalette.Outline,error=Color(0xFFFF8D9D)),
-        typography=arcaneTypography(),shapes=Shapes(small=androidx.compose.foundation.shape.RoundedCornerShape(8.dp),medium=androidx.compose.foundation.shape.RoundedCornerShape(14.dp),large=androidx.compose.foundation.shape.RoundedCornerShape(20.dp))) {
+        onBackground=Frost,onSurface=Frost,onSurfaceVariant=Muted,outline=RebuildPalette.Outline,error=RebuildPalette.Danger, errorContainer=Color(0xFF50242C), onErrorContainer=Color(0xFFFFDAD8)),
+        typography=arcaneTypography(),shapes=Shapes(small=androidx.compose.foundation.shape.RoundedCornerShape(8.dp),medium=androidx.compose.foundation.shape.RoundedCornerShape(10.dp),large=androidx.compose.foundation.shape.RoundedCornerShape(14.dp))) {
         // Custom navy containers have no Material color-pair lookup. Supply the
         // reading color at the root so ordinary Text never inherits black.
         CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface, content = content)
@@ -83,7 +83,7 @@ class Actions(val repo: Repository,private val scope: CoroutineScope) {
     OutlinedTextField(value,change,enabled=enabled,label={ Text(label) },
         modifier=modifier.fillMaxWidth().bringIntoViewRequester(visibility).onFocusChanged { focused = it.hasFocus },
         singleLine=single,maxLines=if(single) 1 else 8,
-        shape=androidx.compose.foundation.shape.RoundedCornerShape(12.dp),colors=OutlinedTextFieldDefaults.colors(focusedBorderColor=RebuildPalette.BlueAccent,unfocusedBorderColor=RebuildPalette.BlueDeep,focusedContainerColor=RebuildPalette.Elevated,unfocusedContainerColor=RebuildPalette.Elevated))
+        shape=androidx.compose.foundation.shape.RoundedCornerShape(8.dp),textStyle=MaterialTheme.typography.bodyLarge,colors=OutlinedTextFieldDefaults.colors(focusedBorderColor=RebuildPalette.BlueAccent,unfocusedBorderColor=RebuildPalette.BlueDeep,focusedContainerColor=RebuildPalette.Elevated,unfocusedContainerColor=RebuildPalette.Elevated))
 }
 @Composable fun Toggle(label: String,value: Boolean,enabled: Boolean=true,change: (Boolean)->Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min=48.dp).toggleable(value=value,enabled=enabled,role=Role.Switch,onValueChange=change),

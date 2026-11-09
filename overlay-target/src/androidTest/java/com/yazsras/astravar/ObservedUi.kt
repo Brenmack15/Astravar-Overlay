@@ -179,6 +179,33 @@ internal class ObservedUi(private val device: UiDevice) {
     fun tapText(text: String, packageName: String, scrollAttempts: Int = 12, preferLast: Boolean = false) =
         touch(textBounds(text, packageName, scrollAttempts, interactive = true, preferLast = preferLast), text)
 
+    /** A saved statistic may be above a newly expanded skill list; reacquire it visibly. */
+    fun descriptionBounds(prefix: String, packageName: String): Rect {
+        val selector = By.descStartsWith(prefix).pkg(packageName)
+        val deadline = SystemClock.uptimeMillis() + 30_000
+        for (direction in listOf(Direction.UP, Direction.DOWN)) {
+            var unchanged = 0
+            for (attempt in 0 until 18) {
+                check(SystemClock.uptimeMillis() < deadline) { "Missing visible statistic: $prefix" }
+                try {
+                    clearObservationCache()
+                    device.wait(Until.hasObject(selector), 250)
+                    val found = device.findObjects(selector).map { Rect(it.visibleBounds) }.firstOrNull {
+                        !it.isEmpty && it.left >= 0 && it.top >= 0 &&
+                            it.right <= device.displayWidth && it.bottom <= device.displayHeight
+                    }
+                    if (found != null) return found
+                    if (unchanged >= 2) break
+                    val changed = scrollForObservation(packageName, direction)
+                    unchanged = if (changed == false) unchanged + 1 else 0
+                } catch (_: StaleObjectException) {
+                    // Retry observations only; no product action is repeated.
+                }
+            }
+        }
+        error("Missing visible statistic: $prefix")
+    }
+
     fun texts(selector: BySelector, description: String): List<String> =
         snapshot(selector, description) { device.findObjects(selector).map { node -> node.text } }
 
@@ -240,6 +267,54 @@ internal class ObservedUi(private val device: UiDevice) {
     fun campaignItems(packageName: String) {
         ensurePrimaryTab(packageName, "Inventory")
         tapText("Campaign items", packageName)
+    }
+
+    /** Discover a flat section strip through native scrolling, then activate its tab once. */
+    fun selectSection(packageName: String, label: String) {
+        require(label in listOf("Sheet", "Combat", "Equipment", "Spells", "Resources", "History", "Currency"))
+        val deadline = SystemClock.uptimeMillis() + 30_000
+        val stripSelector = By.clazz("android.widget.HorizontalScrollView").pkg(packageName)
+        val labelSelector = By.text(label).pkg(packageName)
+        val sectionLabels = By.text(Pattern.compile("Sheet|Combat|Equipment|Spells|Resources|History|Currency")).pkg(packageName)
+        fun sectionStrip() = device.findObjects(stripSelector).firstOrNull {
+            !it.visibleBounds.isEmpty && it.findObjects(sectionLabels).isNotEmpty()
+        }
+        val minimumTap = (48 * InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density).toInt()
+        var lastObserved = "No section strip observed"
+        for (direction in listOf(Direction.LEFT, Direction.RIGHT)) {
+            repeat(8) {
+                check(SystemClock.uptimeMillis() < deadline) { "Section $label exceeded its discovery budget: $lastObserved" }
+                clearObservationCache()
+                val strip = sectionStrip()
+                if (strip == null) {
+                    lastObserved = "Section strip outside vertical viewport"
+                    scrollForObservation(packageName, Direction.UP)
+                } else {
+                    val viewport = Rect(strip.visibleBounds)
+                    val state = strip.findObjects(labelSelector).firstNotNullOfOrNull(::primaryTabState)
+                    lastObserved = "strip=$viewport; $label=$state; direction=$direction"
+                    if (state != null && state.enabled && viewport.contains(state.bounds) &&
+                        state.bounds.width() >= minimumTap && state.bounds.height() >= minimumTap) {
+                        if (!state.selected) {
+                            assertTrue("An unselected section exposes its click action: $label", state.clickable)
+                            touch(state.bounds, "$label section", idleTimeoutMs = 1_000)
+                        }
+                        snapshot(labelSelector, "selected $label section", timeoutMs = (deadline - SystemClock.uptimeMillis()).coerceAtLeast(1), refreshCache = true) {
+                            sectionStrip()?.findObjects(labelSelector)?.firstNotNullOfOrNull(::selectedTabBounds)
+                        }
+                        return
+                    }
+                    val inset = maxOf(8, viewport.width() / 8)
+                    val left = viewport.left + inset
+                    val right = viewport.right - inset - 1
+                    assertTrue("Discover $label with one native horizontal swipe",
+                        device.swipe(if (direction == Direction.RIGHT) right else left, viewport.centerY(),
+                            if (direction == Direction.RIGHT) left else right, viewport.centerY(), 35))
+                    device.waitForIdle(1_000)
+                }
+            }
+        }
+        error("Missing enabled section $label: $lastObserved")
     }
 
     fun captureStablePage(file: File, packageName: String, tab: String, markers: List<BySelector>) {

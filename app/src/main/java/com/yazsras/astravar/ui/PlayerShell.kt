@@ -30,7 +30,7 @@ val rebuildDestinations = listOf("Character", "Inventory", "Companions", "Campai
 @Composable fun RebuildAppHeader(demo: Boolean, search: (() -> Unit)? = null, tools: (() -> Unit)? = null) {
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
-    val brandStyle = androidx.compose.ui.text.TextStyle(fontFamily = DisplayFace, fontSize = 18.sp, letterSpacing = 1.2.sp)
+    val brandStyle = androidx.compose.ui.text.TextStyle(fontFamily = DisplayFace, fontSize = 16.sp, letterSpacing = 1.6.sp)
     val actionStyle = MaterialTheme.typography.labelLarge
     val actions = listOfNotNull(search?.let { "Find" to it }, tools?.let { "Tools" to it })
     val widths = actions.associate { (name, _) -> name to with(density) {
@@ -63,7 +63,7 @@ val rebuildDestinations = listOf("Character", "Inventory", "Companions", "Campai
         }
     }
     BoxWithConstraints(Modifier.fillMaxWidth().background(RebuildPalette.Void).statusBarsPadding()
-        .padding(horizontal = 16.dp, vertical = 8.dp)) {
+        .padding(horizontal = 16.dp, vertical = 2.dp)) {
         if (brandWidth + actionWidth + 8.dp <= maxWidth) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically) { brand(); controls() }
@@ -92,21 +92,22 @@ val rebuildDestinations = listOf("Character", "Inventory", "Companions", "Campai
             ?: (3 downTo 1).map { rebuildDestinations.chunked(it) }.firstOrNull(::fits)
             ?: rebuildDestinations.map { listOf(it) }
         Column {
+            HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .4f))
             rows.forEach { row ->
                 Row(Modifier.fillMaxWidth()) {
                     row.forEach { name ->
                         val active = name == selected
-                        Column(Modifier.weight(1f).heightIn(min = 68.dp).testTag("navigation-$name").semantics { this.selected = active }
+                        Column(Modifier.weight(1f).heightIn(min = 62.dp).testTag("navigation-$name").semantics { this.selected = active }
                             .clickable(role = Role.Tab) { change(name) }.padding(horizontal = 2.dp, vertical = 8.dp),
                             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Box(Modifier.width(56.dp).height(28.dp).background(if (active) RebuildPalette.Active else Color.Transparent,
-                                RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
-                                ArcaneIcon(when (name) { "Character" -> "Emblem"; "Inventory" -> "Core"; "Companions" -> "More"; else -> "History" },
+                            Box(Modifier.width(56.dp).height(26.dp), contentAlignment = Alignment.Center) {
+                                ArcaneIcon(when (name) { "Character" -> "Emblem"; "Inventory" -> "Bag"; "Companions" -> "People"; else -> "Journal" },
                                     Modifier.size(24.dp), if (active) RebuildPalette.GoldBright else Muted)
                             }
                             Text(name, Modifier.fillMaxWidth(), style = labelStyle,
-                                color = if (active) Frost else Muted, textAlign = TextAlign.Center,
+                                color = if (active) RebuildPalette.GoldBright else Muted, textAlign = TextAlign.Center,
                                 maxLines = 1, softWrap = false)
+                            Box(Modifier.width(24.dp).height(2.dp).background(if (active) RebuildPalette.Gold else Color.Transparent))
                         }
                     }
                 }
@@ -118,16 +119,13 @@ val rebuildDestinations = listOf("Character", "Inventory", "Companions", "Campai
 /** The playable gear and original campaign ledger are different stores. Keep both discoverable. */
 @Composable fun RebuildInventoryHub(repository: CampaignLedgerRepository, openReferences: () -> Unit,
     requestedSection: String = "My gear", routeToken: Int = 0) {
-    var section by rememberSaveable { mutableStateOf("My gear") }
-    LaunchedEffect(routeToken) { section = requestedSection }
+    var section by rememberSaveable { mutableStateOf(requestedSection) }
+    var consumedRoute by rememberSaveable { mutableIntStateOf(routeToken) }
+    LaunchedEffect(routeToken) {
+        if (consumedRoute != routeToken) { section = requestedSection; consumedRoute = routeToken }
+    }
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("My gear", "Campaign items").forEach { name ->
-                PlayerFilterChip(selected = section == name, onClick = { section = name },
-                    modifier = Modifier.weight(1f), label = { Text(name) })
-            }
-        }
+        PlayerTabs(listOf("My gear", "Campaign items"), section, { section = it }, Modifier.padding(horizontal = 16.dp))
         Box(Modifier.weight(1f)) {
             if (section == "My gear") ReforgeCharacterSheet(repository, initialSection = "Equipment", sectionOnly = true)
             else CampaignLedgerPage(repository, openReferences)
@@ -135,23 +133,8 @@ val rebuildDestinations = listOf("Character", "Inventory", "Companions", "Campai
     }
 }
 
-@Composable fun RebuildCampaignHub(open: (String) -> Unit) {
-    Page {
-        PlayerHeading("Campaign")
-        PlayerArtBanner("YOUR CHRONICLE", "The living world", "Keep the story connected.", R.drawable.astravar_atlas_banner)
-        Text("Your people, projects, and story in one place.", color = RebuildPalette.Muted)
-        listOf(Triple("Search everything", "Find anything in your campaign", "History"),
-            Triple("Connections", "People, groups and relationships", "Emblem"),
-            Triple("Inventions", "Builds, blueprints and progress", "Settings"),
-            Triple("Checkpoints", "Session progress and unresolved choices", "History")).forEach { (name, detail, icon) ->
-            PlayerCard(onClick = { open(name) }) { PlayerEntry(name, detail, icon, { open(name) }) }
-        }
-        PlayerDisclosure("Library & source records") {
-            PlayerEntry("Reference Library", "Imported records and original source history", "History", { open("Reference Library") })
-            PlayerEntry("Campaign import", "Review an imported archive", "Settings", { open("Campaign import") })
-        }
-    }
-}
+@Composable fun RebuildCampaignHub(repository: CampaignLedgerRepository, open: (String) -> Unit) =
+    RebirthCampaignJournal(repository, open)
 
 @Composable fun RebuildConfigHub(open: (String) -> Unit) {
     Page {
@@ -188,12 +171,13 @@ val rebuildDestinations = listOf("Character", "Inventory", "Companions", "Campai
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(8.dp), contentAlignment = Alignment.Center) {
             Surface(Modifier.widthIn(max = 720.dp).fillMaxWidth().fillMaxHeight(.96f),
-                color = RebuildPalette.Canvas, contentColor = MaterialTheme.colorScheme.onSurface, shape = RoundedCornerShape(24.dp)) {
+                color = RebuildPalette.Canvas, contentColor = MaterialTheme.colorScheme.onSurface, shape = RoundedCornerShape(12.dp)) {
                 Column {
                     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontFamily = DisplayFace)
                         PlayerTextButton(onClick = onDismiss) { Text("Close") }
                     }
+                    HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .45f))
                     Box(Modifier.weight(1f)) { CompositionLocalProvider(LocalPlayerToolTitle provides title) { content() } }
                 }
             }

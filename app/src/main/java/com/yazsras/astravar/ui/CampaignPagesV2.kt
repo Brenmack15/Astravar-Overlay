@@ -64,17 +64,17 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
     PlayerDisclosure("Sources (optional)") { Field("Source / resolved scene / checkpoint", value, change, single = false, enabled = enabled) }
 }
 
-@Composable fun InventionsPageV2(repository: CampaignLedgerRepository) {
+@Composable fun InventionsPageV2(repository: CampaignLedgerRepository, initialProjectId: String? = null) {
     val records = repository.records
     val projects by records.projects.collectAsState(initial = emptyList())
     val items by repository.items.collectAsState(initial = emptyList())
     val links by records.links.collectAsState(initial = emptyList())
     val audit by records.audit.collectAsState(initial = emptyList())
     val actions = rememberLocalRecordActions()
-    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedId by rememberSaveable(initialProjectId) { mutableStateOf(initialProjectId) }
     var projectDraftId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
     var projectCommandId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
-    var mode by rememberSaveable { mutableStateOf("") }
+    var mode by rememberSaveable(initialProjectId) { mutableStateOf(if (initialProjectId == null) "" else "detail") }
     val projectDraft = rememberUiDraftText()
     var projectSnapshot by projectDraft
     val stageDraft = rememberUiDraftText()

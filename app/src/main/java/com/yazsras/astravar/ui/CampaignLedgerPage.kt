@@ -8,6 +8,9 @@ import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
@@ -17,6 +20,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -195,39 +201,66 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (()
         (query.isBlank() || "${it.title} ${it.category} ${it.owner} ${it.description}".contains(query, true)) }
     Page {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) { Text("Inventory", style = MaterialTheme.typography.headlineMedium); Text("${items.size} items", color = Muted, style = MaterialTheme.typography.bodySmall) }
+            Column(Modifier.weight(1f)) {
+                Text("Inventory", style = MaterialTheme.typography.headlineMedium)
+                Text("Equipment, treasures & discoveries", color = Muted, style = MaterialTheme.typography.bodyMedium)
+            }
             PlayerButton(onClick = { load(null); mode = "create" }, enabled = !busy) { Text("Add Item") }
         }
+        Row(Modifier.fillMaxWidth().background(RebuildPalette.Panel, RoundedCornerShape(12.dp)).padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+            LedgerSummary("Items", items.size.toString(), Modifier.weight(1f))
+            LedgerSummary("Equipped", items.count { item -> (placements.firstOrNull { it.itemId == item.id }?.state ?: item.itemState) == "Equipped" }.toString(), Modifier.weight(1f))
+            LedgerSummary("Categories", items.map { it.category }.distinct().size.toString(), Modifier.weight(1f))
+        }
         PlayerSearch(query, { query = it }, "Search inventory")
-        if (openReferences != null) PlayerEntry("Inventory source archive", "Original descriptions, acquisitions and historical records", "History", openReferences)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             (listOf("All") + items.map { it.category }.distinct().sorted()).forEach { name ->
                 PlayerFilterChip(selected = filter == name, onClick = { filter = name }, label = { Text(name) })
             }
         }
         if (message.isNotBlank() && mode.isBlank()) Text(message, color = Frost, style = MaterialTheme.typography.bodySmall)
-        if (visibleItems.isEmpty()) PlayerCard {
-            Text(if (items.isEmpty()) "Your inventory is ready" else "No matching items", style = MaterialTheme.typography.titleMedium)
-            Text(if (items.isEmpty()) "Add equipment, materials or a discovery." else "Try another name or category.", color = Muted)
-        }
-        visibleItems.forEach { item ->
-            PlayerCard(onClick = { load(item); mode = "detail" }) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    LedgerIcon(item.imageBase64, Modifier.size(48.dp))
-                    Column(Modifier.weight(1f)) {
+        if (visibleItems.isEmpty()) PlayerEmpty(
+            if (items.isEmpty()) "Your inventory is ready" else "No matching items",
+            if (items.isEmpty()) "Add equipment, materials or a discovery." else "Try another name or category.", "Core")
+        Column(Modifier.fillMaxWidth()) {
+            visibleItems.forEach { item ->
+                val placement = placements.firstOrNull { it.itemId == item.id }
+                val holderName = if (placement == null) null else profiles.firstOrNull { it.id == placement.holderProfileId }?.name ?: "Unknown holder"
+                val state = placement?.state ?: item.itemState
+                Row(Modifier.fillMaxWidth().heightIn(min = 88.dp)
+                    .clickable(role = Role.Button) { load(item); mode = "detail" }.padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LedgerCategoryArtwork(item, Modifier.size(44.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(item.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(listOf(item.category, item.itemState.takeUnless { it == "Unknown" }, item.owner.takeUnless { it == "Unknown" }).filterNotNull().joinToString(" · "), color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(listOf(item.category, state.takeUnless { it == "Unknown" }).filterNotNull().joinToString(" · "),
+                            color = if (state == "Equipped") RebuildPalette.Ice else Muted, style = MaterialTheme.typography.bodySmall)
+                        (holderName ?: item.owner.takeUnless { it == "Unknown" })?.let {
+                            Text(it, color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        Text(item.quantity?.toString() ?: "—", color = Frost, style = MaterialTheme.typography.titleLarge)
-                        Text("qty", color = Muted, style = MaterialTheme.typography.labelSmall)
+                        Text(item.quantity?.let { "×$it" } ?: "Unknown", color = RebuildPalette.Silver,
+                            style = if (item.quantity != null) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodySmall)
+                        Text("quantity", color = Muted, style = MaterialTheme.typography.labelSmall)
                     }
+                    Text("›", color = Muted, style = MaterialTheme.typography.titleLarge)
                 }
+                HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .4f))
             }
         }
-        PlayerTextButton(onClick = { exportPicker.launch("astravar-campaign-items.json") }, enabled = !busy) { Text("Export JSON") }
+        PlayerDisclosure("Inventory records & backup") {
+            if (openReferences != null) PlayerEntry("Inventory source archive", "Original descriptions and acquisition history", "History", openReferences)
+            PlayerTextButton(onClick = { exportPicker.launch("astravar-campaign-items.json") }, enabled = !busy) { Text("Export JSON") }
+        }
     }
-    if (mode.isNotBlank()) {
+    if (mode == "move" && selectedId != null) {
+        PartyEquipmentMoveV2(repository, structuredPlacement?.holderProfileId.orEmpty(), selectedId,
+            onDismiss = { mode = "detail" })
+    } else if (mode == "quantity" && selectedId != null) {
+        PartyQuantityEditorV21(repository, selectedId!!, onDismiss = { mode = "detail" })
+    } else if (mode.isNotBlank()) {
         val sheetTitle = when(mode) { "create" -> "Add Item"; "edit" -> "Edit item"; "handling" -> "Weight & handling"; "property" -> if (loadedProperty == null) "Add property" else "Edit property"; "link" -> "Connect record"; "research" -> "Add discovery"; "event" -> "History entry"; else -> selected?.title ?: "Item" }
         PlayerSheet(sheetTitle, onDismiss = { if (!busy) mode = "" }, dirty = dirty, actions = {
             if (mode in setOf("create", "edit")) PlayerButton(onClick = ::saveProfile, enabled = !busy && profileDraftValid && !stale && title.isNotBlank()) { Text(if (mode == "create") "Save new item" else "Save item changes") }
@@ -262,72 +295,88 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (()
                 "create", "edit" -> {
                     if (stale) Text("This item changed elsewhere. Your draft is preserved. Close and reopen it to load the latest revision.", color = Frost)
                     Field("Item name", title, { title = it }, enabled = !busy)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(Modifier.weight(1f)) { Choices("Category", listOf("Armor", "Weapon", "Tool", "Component", "Material", "Magic Item", "Consumable", "Treasure", "Other"), category, enabled = !busy) { category = it } }
-                        Box(Modifier.weight(1f)) { Field("Quantity", quantity, { quantity = it }, enabled = !busy && structuredPlacement == null) }
-                    }
-                    Text(if (structuredPlacement == null) "Blank quantity means unknown" else "Party → Equipment records ownership and quantity changes atomically. These fields are read-only here.", style = MaterialTheme.typography.labelSmall, color = Muted)
+                    Choices("Category", listOf("Armor", "Weapon", "Tool", "Component", "Material", "Magic Item", "Consumable", "Treasure", "Other"), category, enabled = !busy) { category = it }
+                    Field("Quantity", quantity, { quantity = it }, enabled = !busy && structuredPlacement == null)
+                    Text(if (structuredPlacement == null) "Blank quantity means unknown" else "Use Equip or transfer and Record quantity from this item to update assigned equipment.", style = MaterialTheme.typography.labelSmall, color = Muted)
                     Field("Description / appearance", description, { description = it }, single = false, enabled = !busy)
-                    ExpandableRecordSection("Ownership & location") {
+                    PlayerDisclosure("Ownership & location") {
                         Field("Owner / holder label", owner, { owner = it }, enabled = !busy && structuredPlacement == null)
                         Choices("Current state", listOf("Unknown", "Carried", "Equipped", "Installed", "Stored", "Consumed", "Sold", "Lost"), itemState, enabled = !busy && structuredPlacement == null) { itemState = it }
                         Field("Specific location / container (optional)", location, { location = it }, enabled = !busy && structuredPlacement == null)
                     }
-                    ExpandableRecordSection("Properties & research notes") {
+                    PlayerDisclosure("Properties & research notes") {
                         Field("Known properties / legacy notes", known, { known = it }, single = false, enabled = !busy)
                         Field("Possible uses (not active mechanics)", potential, { potential = it }, single = false, enabled = !busy)
                         Field("Known limits", limitations, { limitations = it }, single = false, enabled = !busy)
                     }
-                    ExpandableRecordSection("Artwork & provenance") {
+                    PlayerDisclosure("Artwork") {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             LedgerIcon(iconData, Modifier.size(64.dp))
                             PlayerTextButton(onClick = { imageTarget = selectedId; imageToken = draftToken; imagePicker.launch("image/*") }, enabled = !busy) { Text("Choose item image") }
                         }
                         if (iconData != null) PlayerTextButton(onClick = { iconData = null }, enabled = !busy) { Text("Remove image") }
-                        Choices("Evidence", listOf("Unverified", "Confirmed", "Proposed", "Disputed"), evidence, enabled = !busy) { evidence = it }
-                        Field("Notion item page ID or URL (optional)", notionId, { notionId = it }, enabled = !busy)
                     }
                     PlayerDisclosure("Sources & advanced details") {
+                        Choices("Evidence", listOf("Unverified", "Confirmed", "Proposed", "Disputed"), evidence, enabled = !busy) { evidence = it }
+                        Field("Notion item page ID or URL (optional)", notionId, { notionId = it }, enabled = !busy)
                         Field("Source / checkpoint (optional)", source, { source = it }, single = false, enabled = !busy)
                         Text("Local edits are attributed automatically. Existing source text is preserved.", color = Muted, style = MaterialTheme.typography.bodySmall)
                     }
-                    if (loadedItem != null) ExpandableRecordSection("Archive") { Toggle("Archive this entry (keep history)", archived, enabled = !busy) { archived = it } }
+                    if (loadedItem != null) PlayerDisclosure("Archive") { Toggle("Archive this entry (keep history)", archived, enabled = !busy) { archived = it } }
                 }
                 "detail" -> selected?.let { item ->
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        LedgerIcon(item.imageBase64, Modifier.size(64.dp))
-                        Column { Text(item.category, color = Frost, style = MaterialTheme.typography.labelLarge); Text("${item.quantity?.toString() ?: "Unknown"} quantity · ${item.itemState}", color = Muted) }
-                    }
-                    ExpandableRecordSection("Overview", true) {
-                        if (item.description.isNotBlank()) ReforgeRichText(item.description)
-                        RecordValue("Owner", item.owner); RecordValue("Location", item.location); RecordValue("Evidence", item.evidenceStatus)
-                    }
-                    ExpandableRecordSection("Properties & mechanics", true) {
-                        if (item.knownProperties.isNotBlank()) ReforgeRichText(item.knownProperties)
-                        if (item.limitations.isNotBlank()) RecordValue("Limits", item.limitations)
-                        val value = itemDetails.firstOrNull { it.itemId == item.id }
-                        RecordValue("Weight per item", value?.weightGrams?.let { "$it g" } ?: "Unknown")
-                        if (value?.notes?.isNotBlank() == true) ReforgeRichText(value.notes)
-                        PlayerTextButton(onClick = { detailsSnapshot = value?.let { Json.encodeToString(it) }; weight = value?.weightGrams?.toString().orEmpty(); notes = value?.notes.orEmpty(); source = item.source; baselineSource = source; mode = "handling" }) { Text("Edit weight & handling") }
-                        itemProperties.filter { it.itemId == item.id }.forEach { property ->
-                            PlayerTextButton(onClick = { propertySnapshot = Json.encodeToString(property); propertyLabel = property.label; propertyValue = property.value; propertyEvidence = property.evidenceStatus; source = property.source; baselineSource = source; mode = "property" }) { Column(Modifier.fillMaxWidth()) { Text(property.label); Text(property.value, color = Muted, style = MaterialTheme.typography.bodySmall) } }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        LedgerCategoryArtwork(item, Modifier.size(64.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(item.category, color = RebuildPalette.Gold, style = MaterialTheme.typography.labelLarge)
+                            Text(item.quantity?.let { "Quantity $it" } ?: "Quantity not set", style = MaterialTheme.typography.titleMedium)
+                            Text(structuredPlacement?.state ?: item.itemState.takeUnless { it == "Unknown" } ?: "Status not set", color = Muted)
                         }
+                    }
+                    Text("Overview", style = MaterialTheme.typography.titleMedium)
+                    if (item.description.isNotBlank()) ReforgeRichText(item.description)
+                    val holderName = if (structuredPlacement == null) null else profiles.firstOrNull { it.id == structuredPlacement.holderProfileId }?.name ?: "Unknown holder"
+                    Row(Modifier.fillMaxWidth().background(RebuildPalette.Elevated, RoundedCornerShape(10.dp)).padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Column(Modifier.weight(1f)) { RecordValue("Held by", holderName ?: item.owner.takeUnless { it == "Unknown" } ?: "Not assigned") }
+                        Column(Modifier.weight(1f)) { RecordValue("Location", structuredPlacement?.containerItemId?.let { id -> items.firstOrNull { it.id == id }?.title }
+                            ?: item.location.takeUnless { it == "Unknown" } ?: "Not set") }
+                    }
+                    PlayerButton(onClick = { mode = "move" }, modifier = Modifier.fillMaxWidth(),
+                        enabled = !busy && item.itemState !in setOf("Consumed", "Sold", "Lost") && item.quantity != 0) { Text("Equip or transfer") }
+                    if (structuredPlacement != null) PlayerTextButton(onClick = { mode = "quantity" }) { Text("Record quantity") }
+                    if (item.knownProperties.isNotBlank()) {
+                        Text("Properties", style = MaterialTheme.typography.titleMedium)
+                        ReforgeRichText(item.knownProperties)
+                    }
+                    if (item.limitations.isNotBlank()) RecordValue("Limits", item.limitations)
+                    val value = itemDetails.firstOrNull { it.itemId == item.id }
+                    if (value?.weightGrams != null) RecordValue("Weight per item", "${value.weightGrams} g")
+                    if (value?.notes?.isNotBlank() == true) ReforgeRichText(value.notes)
+                    itemProperties.filter { it.itemId == item.id }.forEach { property ->
+                        PlayerTextButton(onClick = { propertySnapshot = Json.encodeToString(property); propertyLabel = property.label; propertyValue = property.value; propertyEvidence = property.evidenceStatus; source = property.source; baselineSource = source; mode = "property" }) {
+                            Column(Modifier.fillMaxWidth()) { Text(property.label); Text(property.value, color = Muted, style = MaterialTheme.typography.bodyMedium) }
+                        }
+                    }
+                    PlayerDisclosure("Item details & properties") {
+                        PlayerTextButton(onClick = { detailsSnapshot = value?.let { Json.encodeToString(it) }; weight = value?.weightGrams?.toString().orEmpty(); notes = value?.notes.orEmpty(); source = item.source; baselineSource = source; mode = "handling" }) { Text("Edit weight & handling") }
                         PlayerTextButton(onClick = { propertySnapshot = null; propertyLabel = ""; propertyValue = ""; propertyEvidence = "Unverified"; source = item.source; baselineSource = source; mode = "property" }) { Text("Add property") }
                     }
                     PlayerDisclosure("Sources & record details") {
+                        RecordValue("Evidence", item.evidenceStatus)
                         if (item.source.isNotBlank()) ReforgeRichText(item.source)
                         RecordValue("Record identity", item.id)
                         item.notionPageId?.let { RecordValue("Linked source", it) }
                         RecordValue("Saved revision", item.revision.toString())
                     }
-                    ExpandableRecordSection("Research") {
+                    PlayerDisclosure("Research") {
                         if (item.possibleUses.isNotBlank()) RecordValue("Possible uses", item.possibleUses)
                         val discoveries = events.filter { it.kind == "DISCOVER" || it.kind.contains("DISCOVER", true) }
                         if (discoveries.isEmpty()) Text("No discoveries recorded", color = Muted)
                         discoveries.take(5).forEach { ReforgeRichText(it.detail) }
                         PlayerTextButton(onClick = { discoveryText = ""; discoverySource = ""; mode = "research" }) { Text("Add discovery") }
                     }
-                    ExpandableRecordSection("Connected Records") {
+                    PlayerDisclosure("Connected Records") {
                         val related = links.filter { (it.fromType == "item" && it.fromId == item.id) || (it.toType == "item" && it.toId == item.id) }
                         if (related.isEmpty()) Text("No connected records", color = Muted)
                         related.forEach { link ->
@@ -345,7 +394,7 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (()
                         }
                         PlayerTextButton(onClick = { relatedType = "companion"; relatedId = null; relationLabel = "Equipment"; source = item.source; baselineSource = source; mode = "link" }) { Text("Connect record") }
                     }
-                    ExpandableRecordSection("History") {
+                    PlayerDisclosure("History") {
                         if (events.isEmpty()) Text("No history recorded", color = Muted)
                         events.take(historyLimit).forEach { entry ->
                             PlayerTextButton(onClick = { eventId = entry.commandId; mode = "event" }) { Column(Modifier.fillMaxWidth()) { Text(entry.kind.replace('_', ' '), color = Frost); Text(entry.detail, color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis) } }
@@ -405,6 +454,31 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (()
                     RecordValue("Revision", "${entry.priorRevision} → ${entry.resultingRevision}")
                 }
             }
+        }
+    }
+}
+
+@Composable private fun LedgerSummary(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(value, color = RebuildPalette.Gold, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text(label, color = Muted, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+@Composable internal fun LedgerCategoryArtwork(item: LedgerItem, modifier: Modifier) {
+    if (item.imageBase64 != null) LedgerIcon(item.imageBase64, modifier, "${item.title} artwork")
+    else {
+        val (icon, tint) = when (item.category.lowercase()) {
+            "weapon" -> "Weapon" to Color(0xFFEDAF91)
+            "armor" -> "Emblem" to RebuildPalette.Ice
+            "consumable" -> "Payload" to Color(0xFF9FD3AE)
+            "magic item" -> "Radiant" to RebuildPalette.Purple
+            "tool", "component" -> "Settings" to RebuildPalette.Gold
+            "treasure" -> "Core" to RebuildPalette.GoldBright
+            else -> "Core" to RebuildPalette.Muted
+        }
+        Box(modifier.background(tint.copy(alpha = .10f), RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
+            ArcaneIcon(icon, Modifier.size(28.dp), tint)
         }
     }
 }

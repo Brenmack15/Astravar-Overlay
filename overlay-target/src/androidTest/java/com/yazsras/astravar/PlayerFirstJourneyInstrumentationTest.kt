@@ -36,7 +36,7 @@ class PlayerFirstJourneyInstrumentationTest {
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
         ui.awaitMainAfterSavedDialogs(product)
     }
-    private fun stat(prefix: String) = ui.bounds(By.descStartsWith(prefix).pkg(product), "calculated $prefix", refreshCache = true)
+    private fun stat(prefix: String) = ui.descriptionBounds(prefix, product)
 
     @Test fun characterAdvancementReviewedEquipmentCompanionAndRestart() {
         assertEquals("Fictional destructive fixtures require an emulator", "1", device.executeShellCommand("getprop ro.kernel.qemu").trim())
@@ -58,6 +58,11 @@ class PlayerFirstJourneyInstrumentationTest {
         find("CI Native Hero")
         stat("STR 8")
         capture("created-sheet")
+        tap("Switch character")
+        find("Characters & companions")
+        ui.captureStableDialog(File(files, "player-first-character-selection.png"), product,
+            "Characters & companions", listOf(By.text("CI Native Hero").pkg(product)))
+        tap("Close")
         tap("Character setup")
         enter("Name", "CI Native Hero Revised")
         tap("Save character")
@@ -96,6 +101,8 @@ class PlayerFirstJourneyInstrumentationTest {
         tap("Save reviewed item")
         find("CI Native Strength Band")
         find("Carried · Quantity 1")
+        ui.captureStablePage(File(files, "player-first-inventory.png"), product, "Inventory",
+            listOf(By.text("CI Native Strength Band").pkg(product), By.text("Carried · Quantity 1").pkg(product)))
         tap("Equip")
         find("STR: 8 → 19")
         capture("equipment-review")
@@ -142,7 +149,7 @@ class PlayerFirstJourneyInstrumentationTest {
             putString("stream", "\nCHECKPOINT: native manual roll saved without leaving the sheet; explicit history opens the saved formula, face and modifier\n")
         })
 
-        tap("Spells")
+        ui.selectSection(product, "Spells")
         tap("Add spell")
         enter("Name", "CI Native Barrier")
         enter("Level (0 = cantrip)", "1")
@@ -166,7 +173,7 @@ class PlayerFirstJourneyInstrumentationTest {
         find("Saved on this device")
         restart()
         ui.ensurePrimaryTab(product, "Character")
-        tap("Combat")
+        ui.selectSection(product, "Combat")
         find("CI Native Signal")
         capture("spellbook-concentration-after-restart")
         instrumentation.sendStatus(0, Bundle().apply {
@@ -182,7 +189,7 @@ class PlayerFirstJourneyInstrumentationTest {
         enter("Current HP (blank = unknown)", "4")
         enter("Maximum HP (blank = unknown)", "12")
         tap("Save character status")
-        find("HP 4 / 12")
+        find("4 / 12")
         capture("generic-companion")
         tap("Relationships")
         tap("Add relationship")
@@ -198,7 +205,7 @@ class PlayerFirstJourneyInstrumentationTest {
         // Saved navigation may retain the member; return to the roster before finding it again.
         if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
         tap("CI Native Ally")
-        find("HP 4 / 12")
+        find("4 / 12")
         tap("Relationships")
         find("character profile · Fictional native journey partner")
         tap("Edit relationship")
@@ -230,13 +237,15 @@ class PlayerFirstJourneyInstrumentationTest {
         capture("companion-direct-combat")
         tap("Damage / healing")
         enter("Damage or healing amount", "2")
+        ui.captureStableDialog(File(files, "player-first-health-dialog.png"), product, "Hit points",
+            listOf(By.text("Heal").pkg(product), By.text("Take damage").pkg(product)))
         tap("Heal")
         find("Saved on this device")
         stat("HP 6 / 12")
         // Compose returns to the roster in the same window. Verify the destination rather than a window change.
         device.pressBack()
         find("Go to combat")
-        find("HP 4 / 12")
+        find("4 / 12")
 
         restart()
         ui.ensurePrimaryTab(product, "Character")

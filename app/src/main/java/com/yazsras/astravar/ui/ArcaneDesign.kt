@@ -35,26 +35,24 @@ import kotlin.math.*
 val DisplayFace=FontFamily(Font(R.font.cinzel),Font(R.font.cinzel_semibold,FontWeight.SemiBold))
 val InterfaceFace=FontFamily(Font(R.font.inter),Font(R.font.inter_medium,FontWeight.Medium),Font(R.font.inter_semibold,FontWeight.SemiBold))
 fun arcaneTypography() = Typography(
-    headlineLarge=TextStyle(fontFamily=InterfaceFace,fontSize=32.sp,lineHeight=40.sp),
-    headlineMedium=TextStyle(fontFamily=InterfaceFace,fontSize=26.sp,lineHeight=32.sp),
+    headlineLarge=TextStyle(fontFamily=DisplayFace,fontSize=32.sp,lineHeight=40.sp),
+    headlineMedium=TextStyle(fontFamily=DisplayFace,fontSize=26.sp,lineHeight=32.sp),
     headlineSmall=TextStyle(fontFamily=InterfaceFace,fontSize=24.sp,lineHeight=30.sp),
     titleLarge=TextStyle(fontFamily=InterfaceFace,fontSize=21.sp,lineHeight=28.sp),
     titleMedium=TextStyle(fontFamily=InterfaceFace,fontSize=16.sp,lineHeight=24.sp,fontWeight=FontWeight.SemiBold),
     bodyLarge=TextStyle(fontFamily=InterfaceFace,fontSize=16.sp,lineHeight=24.sp),
-    bodyMedium=TextStyle(fontFamily=InterfaceFace,fontSize=14.sp,lineHeight=21.sp),
+    bodyMedium=TextStyle(fontFamily=InterfaceFace,fontSize=15.sp,lineHeight=22.sp),
     bodySmall=TextStyle(fontFamily=InterfaceFace,fontSize=13.sp,lineHeight=19.sp),
-    labelLarge=TextStyle(fontFamily=InterfaceFace,fontSize=13.sp,lineHeight=18.sp,fontWeight=FontWeight.Medium),
+    labelLarge=TextStyle(fontFamily=InterfaceFace,fontSize=14.sp,lineHeight=20.sp,fontWeight=FontWeight.Medium),
     labelMedium=TextStyle(fontFamily=InterfaceFace,fontSize=12.sp,lineHeight=17.sp,fontWeight=FontWeight.Medium),
     labelSmall=TextStyle(fontFamily=InterfaceFace,fontSize=12.sp,lineHeight=16.sp,letterSpacing=.4.sp)
 )
 
 /** One small repeating texture; geometry and brushes are cached per measured surface. */
 @Composable fun Modifier.instrumentSurface():Modifier {
-    val grain=ImageBitmap.imageResource(R.drawable.graphite_texture)
     return drawWithCache {
-        val texture=ShaderBrush(ImageShader(grain,TileMode.Repeated,TileMode.Repeated))
-        val light=Brush.radialGradient(listOf(Frost.copy(alpha=.07f),Color.Transparent),Offset(size.width*.8f,0f),size.height.coerceAtLeast(1f)*.75f)
-        onDrawBehind {drawRect(RebuildPalette.Canvas);drawRect(texture,alpha=.04f);drawRect(light)}
+        val light=Brush.verticalGradient(listOf(RebuildPalette.BlueDeep.copy(alpha=.15f),Color.Transparent), endY=480.dp.toPx())
+        onDrawBehind { drawRect(RebuildPalette.Canvas); drawRect(light) }
     }
 }
 private fun framePath(w:Float,h:Float,inset:Float,cut:Float)=Path().apply {
@@ -71,6 +69,7 @@ private fun framePath(w:Float,h:Float,inset:Float,cut:Float)=Path().apply {
 
 @Composable fun ArcaneIcon(kind:String,modifier:Modifier=Modifier,tint:Color=Brass) {
     val resource=when(kind.lowercase()) {
+        "inventory","bag"->R.drawable.ic_rebirth_bag;"companions","people"->R.drawable.ic_rebirth_people;"campaign","journal"->R.drawable.ic_rebirth_journal;"search"->R.drawable.ic_rebirth_search;"spells"->R.drawable.ic_rebirth_spell;"armor"->R.drawable.ic_rebirth_armor;"location"->R.drawable.ic_rebirth_location;
         "weapon"->R.drawable.ic_weapon;"history"->R.drawable.ic_history;"payload"->R.drawable.ic_payload
         "settings"->R.drawable.ic_settings;"more"->R.drawable.ic_more;"roll","d20"->R.drawable.ic_d20
         "acid"->R.drawable.ic_acid;"cold"->R.drawable.ic_cold;"fire"->R.drawable.ic_fire

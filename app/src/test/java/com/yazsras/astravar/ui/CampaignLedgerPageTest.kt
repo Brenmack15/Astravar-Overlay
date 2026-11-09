@@ -15,6 +15,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.data.CampaignLedgerDb
 import com.yazsras.astravar.data.CampaignLedgerRepository
 import com.yazsras.astravar.data.LedgerDraft
+import com.yazsras.astravar.data.CharacterProfile
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -181,6 +182,44 @@ class CampaignLedgerPageTest {
                 assertEquals(original.id, db.ledgerDao().allItems().single().id)
                 assertEquals(largeImage, db.ledgerDao().allItems().single().imageBase64)
                 assertEquals(1, db.ledgerDao().allEvents().size)
+            }
+        } finally { activity.pause().stop().destroy(); db.close() }
+    }
+
+    @Test fun inventoryDetailEquipsExistingItemForCompanionOnlyAfterReviewedCommit() {
+        val db = database()
+        val repo = CampaignLedgerRepository(db)
+        val item = runBlocking {
+            repo.records.saveProfile(CharacterProfile(id = "synthetic-ally", name = "Fictional scout"), source = "Synthetic inventory journey")
+            repo.create(LedgerDraft(title = "Fictional silver harness", category = "Armor", quantity = null, source = "Synthetic inventory journey"))
+        }
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { AstravarTheme { CampaignLedgerPage(repo) } }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText(item.title).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Export JSON").assertDoesNotExist()
+            compose.onNodeWithText(item.title).performClick()
+            compose.onNodeWithText("Equip or transfer").performScrollTo().performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Commit equipment move").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Commit equipment move").assertIsNotEnabled()
+            compose.onNodeWithText("Unknown holder ▾").performScrollTo().performClick()
+            compose.onNodeWithText("Fictional scout", useUnmergedTree = true).performClick()
+            compose.onNodeWithText("Carried ▾").performScrollTo().performClick()
+            compose.onNodeWithText("Equipped", useUnmergedTree = true).performClick()
+            runBlocking { assertNull(db.partyDao().placement(item.id)); assertEquals(item, db.ledgerDao().getItem(item.id)) }
+            compose.onNodeWithText("Confirmed transfer / equipment event source").performScrollTo().performTextInput("Fictional reviewed equip event")
+            compose.onNodeWithText("Commit equipment move").assertIsEnabled().performClick()
+            compose.waitUntil(10_000) { runBlocking { db.partyDao().placement(item.id)?.state == "Equipped" } }
+            compose.onNodeWithText("Close").performClick()
+            compose.onNodeWithText(item.title).performClick()
+            compose.onNodeWithText("Fictional scout").assertExists()
+            compose.onNodeWithText("Record quantity").assertExists()
+            runBlocking {
+                assertEquals(1, db.ledgerDao().allItems().size)
+                assertNull(db.ledgerDao().getItem(item.id)!!.quantity)
+                assertEquals("synthetic-ally", db.partyDao().placement(item.id)!!.holderProfileId)
+                val audit = db.recordsDao().allAudit().single { it.recordType == "item-placement" }
+                assertNotNull(db.recordsDao().receipt(audit.commandId))
             }
         } finally { activity.pause().stop().destroy(); db.close() }
     }

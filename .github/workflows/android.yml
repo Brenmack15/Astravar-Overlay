@@ -27,7 +27,7 @@ jobs:
     # historical branch checks available without running the legacy test path twice.
     if: github.head_ref != 'feat/astravar-2.1-player-first' && github.ref_name != 'feat/astravar-2.1-player-first' && github.head_ref != 'feat/astravar-3.0-reforge' && github.ref_name != 'feat/astravar-3.0-reforge'
     runs-on: ubuntu-latest
-    timeout-minutes: 130
+    timeout-minutes: 150
     env:
       REUSE_RUN_ID: ${{ inputs.reuse_run_id || '0' }}
       # The Reforge workflow is the exact-head full rules/debug/release/lint gate.
@@ -116,7 +116,7 @@ jobs:
           fi
           timeout -k 10s 2640s ./gradlew --no-daemon --console=plain "${regression_tasks[@]}" :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
           mkdir -p validation
-          python3 scripts/inspect_release_apk.py app/build/outputs/apk/release/app-release.apk --sdk "$ANDROID_HOME" --package com.yazsras.astravar --version-name 3.1.0-rc4 --version-code 48 --output validation/ci-release-package.json
+          python3 scripts/inspect_release_apk.py app/build/outputs/apk/release/app-release.apk --sdk "$ANDROID_HOME" --package com.yazsras.astravar --version-name 3.2.0-rc1 --version-code 49 --output validation/ci-release-package.json
           printf '%s\n' 'Optimized release variant, disposable CI signer only. Not compatible with the original owner installation.' > validation/CI-RELEASE-ONLY.txt
       - name: Reuse verified product and build current overlay tests
         if: env.REUSE_RUN_ID != '0'
@@ -143,7 +143,7 @@ jobs:
         env:
           ASTRAVAR_TEST_APK: app/build/outputs/apk/release/app-release.apk
           ASTRAVAR_TEST_PACKAGE: com.yazsras.astravar
-        run: timeout -k 10s 3840s bash scripts/ci-emulator.sh
+        run: timeout -k 10s 5100s bash scripts/ci-emulator.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

@@ -98,17 +98,38 @@ class PartyPlayerFirstTest {
         } finally { activity.pause().stop().destroy(); db.close() }
     }
 
-    @Test fun partyRosterOpensFourStableIdentitiesWithoutImportingPrivateStats() {
+    @Test fun emptyRosterDoesNotInventCampaignIdentitiesOrStatistics() {
         val db = database()
         val repo = CampaignLedgerRepository(db)
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { PartyTestTheme { PartyPageV2(repo, null) {} } }
+            compose.onNodeWithText("Every story needs allies").assertExists()
             listOf("Zerg Hasma", "Eek", "Korr", "Veyrath").forEach {
-                compose.onNodeWithText(it).performScrollTo().assertExists()
+                compose.onNodeWithText(it).assertDoesNotExist()
             }
+            runBlocking {
+                assertTrue(db.recordsDao().allCharacterProfiles().isEmpty())
+                assertTrue(db.recordsDao().allCharacterAbilities().isEmpty())
+                assertTrue(db.partyDao().allSheets().isEmpty())
+                assertTrue(db.recordsDao().allAudit().isEmpty())
+            }
+        } finally { activity.pause().stop().destroy(); db.close() }
+    }
+
+    @Test fun arbitrarySavedCompanionOpensWithoutInferringUnknownStatistics() {
+        val db = database()
+        val repo = CampaignLedgerRepository(db)
+        val id = runBlocking { repo.records.createCompanion("Fictional Willow") }
+        val profilesBefore = runBlocking { db.recordsDao().allCharacterProfiles() }
+        val statesBefore = runBlocking { db.recordsDao().allCompanionStates() }
+        val auditBefore = runBlocking { db.recordsDao().allAudit() }
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { PartyTestTheme { PartyPageV2(repo, null) {} } }
+            waitForText("Fictional Willow")
             capture("party-roster-400", activity.get())
-            compose.onNodeWithText("Korr").performClick()
+            compose.onNodeWithText("Fictional Willow").performScrollTo().performClick()
             capture("party-unknown-sheet-400", activity.get())
             compose.onNodeWithTag("ability-STR").performScrollTo()
                 .assert(hasContentDescription("Strength score unknown", substring = true))
@@ -117,10 +138,12 @@ class PartyPlayerFirstTest {
             compose.onNodeWithText("Save sheet").assertIsNotEnabled()
             compose.onNodeWithText("Close").performClick()
             runBlocking {
-                assertTrue(db.recordsDao().allCharacterProfiles().isEmpty())
+                assertEquals(profilesBefore, db.recordsDao().allCharacterProfiles())
+                assertEquals(statesBefore, db.recordsDao().allCompanionStates())
+                assertEquals(auditBefore, db.recordsDao().allAudit())
                 assertTrue(db.recordsDao().allCharacterAbilities().isEmpty())
                 assertTrue(db.partyDao().allSheets().isEmpty())
-                assertTrue(db.recordsDao().allAudit().isEmpty())
+                assertNull(db.recordsDao().allCharacterProfiles().single { it.id == id }.currentHp)
             }
         } finally { activity.pause().stop().destroy(); db.close() }
     }
