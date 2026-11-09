@@ -116,7 +116,7 @@ jobs:
           fi
           timeout -k 10s 2640s ./gradlew --no-daemon --console=plain "${regression_tasks[@]}" :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
           mkdir -p validation
-          python3 scripts/inspect_release_apk.py app/build/outputs/apk/release/app-release.apk --sdk "$ANDROID_HOME" --package com.yazsras.astravar --version-name 3.1.0-rc1 --version-code 45 --output validation/ci-release-package.json
+          python3 scripts/inspect_release_apk.py app/build/outputs/apk/release/app-release.apk --sdk "$ANDROID_HOME" --package com.yazsras.astravar --version-name 3.1.0-rc2 --version-code 46 --output validation/ci-release-package.json
           printf '%s\n' 'Optimized release variant, disposable CI signer only. Not compatible with the original owner installation.' > validation/CI-RELEASE-ONLY.txt
       - name: Reuse verified product and build current overlay tests
         if: env.REUSE_RUN_ID != '0'

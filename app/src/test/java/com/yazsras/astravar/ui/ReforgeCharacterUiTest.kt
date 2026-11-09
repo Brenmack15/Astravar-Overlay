@@ -164,6 +164,13 @@ class ReforgeCharacterUiTest {
         assertEquals(-1, roll.components.single().modifier)
         assertTrue(roll.components.single().dice.single().face in 1..20)
         assertEquals(1L, runBlocking { repository.get("synthetic-player") }!!.revision)
+        compose.waitUntil(10000) { compose.onAllNodesWithText("View history").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("reforge-STR").assertExists()
+        compose.onNodeWithText("Roll history").assertDoesNotExist()
+        capture("reforge-native-roll-saved-on-sheet")
+        compose.onNodeWithText("View history").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Roll history").assertExists()
+        compose.onNodeWithText("Dice details").assertExists()
     }
     @Test fun nameOnlySetupEditKeepsEquippedHpBaselineAndOutstandingDamage() = withSheet { repository ->
         runBlocking {

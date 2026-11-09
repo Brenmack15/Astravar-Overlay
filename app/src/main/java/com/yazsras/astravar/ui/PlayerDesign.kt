@@ -124,10 +124,11 @@ val LocalPlayerDismiss = staticCompositionLocalOf<() -> Unit> { {} }
 @OptIn(ExperimentalLayoutApi::class)
 @Composable fun PlayerSheet(
     title: String, onDismiss: () -> Unit, dirty: Boolean = false, showCancel: Boolean = dirty,
+    dismissEnabled: Boolean = true,
     actions: @Composable RowScope.() -> Unit = {}, content: @Composable ColumnScope.() -> Unit
 ) {
     var discard by rememberSaveable { mutableStateOf(false) }
-    val close = { if (dirty) discard = true else onDismiss() }
+    val close = { if (dismissEnabled) { if (dirty) discard = true else onDismiss() } }
     Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false,
         decorFitsSystemWindows = false)) {
         CompositionLocalProvider(LocalPlayerDismiss provides close) {
@@ -139,14 +140,14 @@ val LocalPlayerDismiss = staticCompositionLocalOf<() -> Unit> { {} }
                             verticalAlignment = Alignment.CenterVertically) {
                             Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.SemiBold)
-                            PlayerTextButton(onClick = close, modifier = Modifier.heightIn(min = 48.dp)) { Text("Close") }
+                            PlayerTextButton(onClick = close, enabled = dismissEnabled, modifier = Modifier.heightIn(min = 48.dp)) { Text("Close") }
                         }
                         key(title) { Box(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(20.dp)) {
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
                         } }
                         FlowRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.End) {
-                            if (showCancel) PlayerTextButton(onClick = close) { Text("Cancel") }
+                            if (showCancel) PlayerTextButton(onClick = close, enabled = dismissEnabled) { Text("Cancel") }
                             actions()
                         }
                     }

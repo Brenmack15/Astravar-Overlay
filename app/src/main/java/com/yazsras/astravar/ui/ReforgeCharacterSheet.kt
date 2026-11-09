@@ -72,12 +72,27 @@ import kotlinx.coroutines.flow.first
     )) { mutableStateOf<ReforgeRollRequest?>(null) }
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
+    val rollNotice = remember { SnackbarHostState() }
+    var savedRoll by remember { mutableStateOf<ReforgeRollRecord?>(null) }
     val expandedText = LocalDensity.current.fontScale >= 1.5f
     val chosenId = ReforgePreferences.chooseProfile(selectedId ?: actorSelection.second, active.map { it.character.id })
     val saved = active.firstOrNull { it.character.id == chosenId }
     val character = saved?.character
     val projection = character?.let { remember(it) { CharacterCalculator.calculate(it) } }
     LaunchedEffect(actorSelection) { if (actorSelection.first && selectedId == actorSelection.second) selectedId = null }
+    LaunchedEffect(savedRoll, chosenId) {
+        val roll = savedRoll ?: return@LaunchedEffect
+        if (roll.profileId != chosenId) {
+            savedRoll = null
+            return@LaunchedEffect
+        }
+        if (rollNotice.showSnackbar("Roll saved · ${roll.displayTotal}", "View history",
+                withDismissAction = true, duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) {
+            section = "History"
+            extraSections = false
+        }
+        savedRoll = null
+    }
     fun selectProfile(id: String) {
         selectedId = id
         scope.launch {
@@ -103,11 +118,17 @@ import kotlinx.coroutines.flow.first
             if (close) { dialog = null; inspecting = null; proposedChange = null; cast = null }
         }
     }
-    fun requestRoll(label: String, modifier: Int, kind: RollKind = RollKind.CUSTOM, key: String = "") {
+    fun openRoll(request: ReforgeRollRequest) {
+        val snapshot = saved ?: return
         inspecting = null
-        rollRequest = ReforgeRollRequest(label, DiceFormula(listOf(DiceTerm(1, 20)), modifier), kind, key, characterRevision = saved?.revision)
+        error = ""
+        savedRoll = null
+        rollRequest = request.copy(profileId = snapshot.character.id, characterRevision = snapshot.revision)
     }
-    Page(resetKey = "$chosenId:$section") {
+    fun requestRoll(label: String, modifier: Int, kind: RollKind = RollKind.CUSTOM, key: String = "") =
+        openRoll(ReforgeRollRequest(label, DiceFormula(listOf(DiceTerm(1, 20)), modifier), kind, key))
+
+    ReforgeSheetPage("$chosenId:$section", rollNotice) {
         if (!profilesState.first || !actorSelection.first) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
             Text("Opening your saved character…", color = RebuildPalette.Muted)
@@ -193,7 +214,7 @@ import kotlinx.coroutines.flow.first
                         }
                     } }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        PlayerButton(onClick = { rollRequest = ReforgeRollRequest("Custom roll", null, characterRevision = saved!!.revision) }, modifier = Modifier.weight(1f)) { Text("Roll dice") }
+                        PlayerButton(onClick = { openRoll(ReforgeRollRequest("Custom roll", null)) }, modifier = Modifier.weight(1f)) { Text("Roll dice") }
                         PlayerOutlinedButton(onClick = { dialog = "Training" }, modifier = Modifier.weight(1f)) { Text("Training") }
                     }
                     PlayerDisclosure("Saving throws") {
@@ -263,7 +284,7 @@ import kotlinx.coroutines.flow.first
                             PlayerTextButton(onClick = { dialog = "Attack:${attack.id}" }) { Text("Edit") }
                         }
                         Text("${attack.actionType} · ${attack.range} · ${attack.damage.joinToString(" + ") { "${SecureDice.format(it.formula)} ${it.type.name.lowercase()}" }}", color = RebuildPalette.Muted)
-                        PlayerButton(onClick = { rollRequest = ReforgeRollRequest(attack.name, null, RollKind.ATTACK, attack.id, attack.id, saved!!.revision) }) { Text("Roll attack & damage") }
+                        PlayerButton(onClick = { openRoll(ReforgeRollRequest(attack.name, null, RollKind.ATTACK, attack.id, attack.id)) }) { Text("Roll attack & damage") }
                     } }
                     PlayerOutlinedButton(onClick = { change("Confirmed next turn", GameplayRules.nextTurn(character), false) }) { Text("My next turn") }
                     Text("Next turn clears per-turn effect use. It does not complete a rest or advance game time.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
@@ -349,11 +370,7 @@ import kotlinx.coroutines.flow.first
                     val changes by remember(local, character.id) { local.historySummaries(character.id) }.collectAsState(initial = emptyList())
                     PlayerHeading("Roll history")
                     if (rolls.isEmpty()) Text("No rolls yet. Rolls occur only when you tap Roll or enter a manual result.", color = RebuildPalette.Muted)
-                    rolls.forEach { roll -> PlayerCard {
-                        Row { Text(roll.label, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium); Text(if (roll.components.any { it.damageType != null }) roll.components.first().total.toString() else roll.total.toString(), color = RebuildPalette.GoldBright, fontSize = 28.sp) }
-                        Text("${roll.formula} · ${if (roll.manual) "Manual" else "Random"} · ${roll.ownership}", color = RebuildPalette.Muted)
-                        roll.components.forEach { component -> Text("${component.label}: ${component.dice.joinToString { if (it.kept) "${it.face}" else "(${it.face} discarded)" }} ${reforgeSigned(component.modifier)}${component.damageType?.let { " $it" } ?: ""}", style = MaterialTheme.typography.bodySmall) }
-                    } }
+                    rolls.forEach { roll -> key(roll.id) { ReforgeSavedRollCard(roll) } }
                     PlayerDisclosure("Changes & saved revisions") { changes.take(30).forEach { Text("${it.operation} · revision ${it.priorRevision} → ${it.resultingRevision}", color = RebuildPalette.Muted) } }
                     PlayerDisclosure("Original sources & advanced details") {
                         Text(saved!!.origin.label)
@@ -517,12 +534,24 @@ import kotlinx.coroutines.flow.first
             try { change("Cast spell", GameplayRules.commitCast(character, preview)) } catch (e: Exception) { error = e.message ?: "Casting preview changed" }
         } }
         proposedChange?.let { (label, next) -> ReforgeEquipmentPreview(label, character, next, { proposedChange = null }) { change(label, next) } }
-        rollRequest?.let { request -> ReforgeRollDialog(character, saved!!.revision, request, { rollRequest = null }) { record, next ->
-            action("Roll saved on this device") {
-                if (next == null) local.appendRoll(record) else local.commitRoll(character.id, saved!!.revision, next, "Resolved ${record.label}", record)
-                if (preferencesState.haptics) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); rollRequest = null; section = "History"
+        rollRequest?.takeIf { profilesState.first && actorSelection.first }?.let { request ->
+            ReforgeRollDialog(character, saved!!.revision, request, { rollRequest = null }, saving = busy, saveError = error) { record, next ->
+                action("Roll saved on this device") {
+                    savedRoll = if (next == null) local.appendRoll(record) else {
+                        local.commitRoll(record.profileId, record.characterRevision, next, "Resolved ${record.label}", record).roll
+                    }
+                    rollRequest = null
+                    if (preferencesState.haptics) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                }
             }
-        } }
+        }
+    }
+}
+
+@Composable private fun ReforgeSheetPage(resetKey: String, rollNotice: SnackbarHostState, content: @Composable ColumnScope.() -> Unit) {
+    Box(Modifier.fillMaxSize()) {
+        Page(resetKey = resetKey, content = content)
+        SnackbarHost(rollNotice, Modifier.align(Alignment.BottomCenter).widthIn(max = 600.dp))
     }
 }
 
