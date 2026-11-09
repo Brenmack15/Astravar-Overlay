@@ -179,6 +179,32 @@ internal class ObservedUi(private val device: UiDevice) {
     fun tapText(text: String, packageName: String, scrollAttempts: Int = 12, preferLast: Boolean = false) =
         touch(textBounds(text, packageName, scrollAttempts, interactive = true, preferLast = preferLast), text)
 
+    /** A visible summary is not evidence that its saved disclosure is expanded. */
+    fun expandDisclosure(packageName: String, title: String) {
+        textBounds(title, packageName, scrollAttempts = 18, interactive = true)
+        fun observed(): Pair<Rect, Boolean>? {
+            val root = InstrumentationRegistry.getInstrumentation().uiAutomation.rootInActiveWindow ?: return null
+            for (label in root.findAccessibilityNodeInfosByText(title)) {
+                if (label.packageName?.toString() != packageName || label.text?.toString() != title) continue
+                var current: android.view.accessibility.AccessibilityNodeInfo? = label
+                repeat(12) {
+                    val node = current ?: return@repeat
+                    val state = node.stateDescription?.toString()
+                    if (node.isEnabled && node.isClickable && state in listOf("Expanded", "Collapsed")) {
+                        val bounds = Rect().also(node::getBoundsInScreen)
+                        if (!bounds.isEmpty) return bounds to (state == "Expanded")
+                    }
+                    current = node.parent
+                }
+            }
+            return null
+        }
+        val selector = By.text(title).pkg(packageName)
+        val before = snapshot(selector, "observed disclosure state: $title", refreshCache = true) { observed() }
+        if (!before.second) touch(before.first, "Expand $title", idleTimeoutMs = 1_000)
+        snapshot(selector, "expanded disclosure: $title", refreshCache = true) { observed()?.takeIf { it.second } }
+    }
+
     /** A saved statistic may be above a newly expanded skill list; reacquire it visibly. */
     fun descriptionBounds(prefix: String, packageName: String): Rect {
         val selector = By.descStartsWith(prefix).pkg(packageName)
