@@ -81,7 +81,7 @@ val rebuildDestinations = listOf("Character", "Inventory", "Companions", "Campai
         textMeasurer.measure(name, style = labelStyle, softWrap = false, maxLines = 1).size.width
     }
     BoxWithConstraints(Modifier.fillMaxWidth().background(RebuildPalette.Void)
-        .navigationBarsPadding().padding(horizontal = 8.dp)) {
+        .navigationBarsPadding()) {
         val iconWidth = with(density) { 56.dp.toPx() }
         val labelPadding = with(density) { 4.dp.toPx() }
         fun fits(rows: List<List<String>>) = rows.all { row ->

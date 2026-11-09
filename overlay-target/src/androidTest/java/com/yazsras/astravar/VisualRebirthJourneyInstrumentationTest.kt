@@ -48,6 +48,13 @@ class VisualRebirthJourneyInstrumentationTest {
         ui.ensurePrimaryTab(product, "Campaign")
         if (device.hasObject(By.text("‹ Campaign").pkg(product))) tap("‹ Campaign")
     }
+    private fun companionRoster() {
+        ui.ensurePrimaryTab(product, "Companions")
+        // A process restart can restore the exact playable companion route.
+        // Use its real Back action before returning from profile to roster.
+        if (device.hasObject(By.text("Back to companions").pkg(product))) tap("Back to companions")
+        if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
+    }
 
     @Test fun resourcesCompanionGearJournalAndLargeText() {
         assertEquals("Fictional write fixtures require an emulator", "1",
@@ -66,18 +73,20 @@ class VisualRebirthJourneyInstrumentationTest {
         enter("Current uses (blank = unknown)", "2")
         tap("Save resource")
         find("CI Native Charges")
-        find("2 / 3 · none")
+        find("2 / 3")
+        find("none")
         tap("Use one")
-        find("1 / 3 · none")
+        find("1 / 3")
         restart()
         ui.ensurePrimaryTab(product, "Character")
         ui.selectSection(product, "Resources")
-        capture("resource-persistence", "Character", "1 / 3 · none")
+        find("CI Native Charges")
+        find("none")
+        capture("resource-persistence", "Character", "1 / 3")
 
         // Gear belongs to the exact reviewed companion sheet, independently of
         // its original source record and the selected main character.
-        ui.ensurePrimaryTab(product, "Companions")
-        if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
+        companionRoster()
         capture("companion-selection", "Companions", "CI Native Ally")
         tap("CI Native Ally")
         tap("Open playable sheet")
@@ -90,8 +99,7 @@ class VisualRebirthJourneyInstrumentationTest {
         tap("Confirm change")
         find("Worn · Quantity 1")
         restart()
-        ui.ensurePrimaryTab(product, "Companions")
-        if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
+        companionRoster()
         tap("CI Native Ally")
         find("4 / 12")
         tap("Open playable sheet")

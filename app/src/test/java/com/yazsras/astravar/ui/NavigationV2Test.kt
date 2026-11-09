@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.test.*
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.AstravarApp
+import com.yazsras.astravar.data.CharacterProfile
 import com.yazsras.astravar.savePresentationCapture
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -56,6 +57,8 @@ class NavigationV2Test {
         shadowOf(app).setComponentNameAndServiceForBindServiceForIntent(invalidationIntent,
             ComponentName(app, MultiInstanceInvalidationService::class.java), invalidationService.get().onBind(invalidationIntent))
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        runBlocking { app.campaignLedger.records.saveProfile(CharacterProfile(id = "eek", name = "Fictional owl"), source = "Synthetic navigation fixture") }
+        val beforeRecords = runBlocking { Json.parseToJsonElement(app.campaignLedger.export()).jsonObject.getValue("records") }
         var overlayStarts = 0
         var permissionRequests = 0
         var overlayStops = 0
@@ -90,9 +93,11 @@ class NavigationV2Test {
             compose.onNodeWithText("Add Invention").assertExists()
             compose.onNodeWithText("‹ Campaign").performClick()
             compose.onNodeWithTag("navigation-Companions").performClick()
-            listOf("Zerg Hasma", "Eek", "Korr", "Veyrath").forEach { compose.onNodeWithText(it).assertExists() }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Fictional owl").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Fictional owl").assertExists()
+            listOf("Zerg Hasma", "Korr", "Veyrath").forEach { compose.onNodeWithText(it).assertDoesNotExist() }
             capture("v2-party", activity.get())
-            compose.onNodeWithText("Eek").performClick()
+            compose.onNodeWithText("Fictional owl").performClick()
             capture("v2-eek-sheet", activity.get())
             compose.onNodeWithText("Eek's specialized companion tools").performScrollTo().performClick()
             compose.onNodeWithText("Condition unknown").assertExists()
@@ -126,7 +131,7 @@ class NavigationV2Test {
             assertTrue(records.getValue("companionStates").jsonArray.isEmpty())
             assertTrue(records.getValue("projects").jsonArray.isEmpty())
             assertTrue(records.getValue("entities").jsonArray.isEmpty())
-            assertTrue(records.getValue("characterProfiles").jsonArray.isEmpty())
+            assertEquals(beforeRecords, exported.getValue("records"))
             assertTrue(records.getValue("partySheets").jsonArray.isEmpty())
         } finally { activity.pause().stop().destroy(); invalidationService.destroy() }
     }

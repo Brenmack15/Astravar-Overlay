@@ -24,6 +24,14 @@ import org.robolectric.annotation.LooperMode
 class RebirthCampaignJournalTest {
     @get:Rule val compose = createAstravarComposeRule()
 
+    private fun capture(name: String, activity: ComponentActivity) {
+        if (System.getProperty("astravar.screenshots") == null) return
+        compose.runOnIdle { invalidateNativeCaptureWindows() }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.runOnIdle { captureNativeTestWindows(name, activity, false) }
+    }
+
     @Test fun journalShowsSavedSceneAndRoutesToExactRecordsWithoutChangingThem() {
         val db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), CampaignLedgerDb::class.java).build()
         val repo = CampaignLedgerRepository(db)
@@ -42,7 +50,9 @@ class RebirthCampaignJournalTest {
         try {
             activity.get().setContent { AstravarTheme { RebirthCampaignJournal(repo, opened::add) } }
             compose.waitUntil(10_000) { compose.onAllNodesWithText("At the old observatory").fetchSemanticsNodes().isNotEmpty() }
+            capture("rebirth-campaign-journal-400", activity.get())
             compose.onNodeWithText("No roll has been made").performScrollTo().assertExists()
+            capture("rebirth-campaign-checkpoint-400", activity.get())
             compose.onNodeWithText(contact.name).performScrollTo().performClick()
             compose.onNodeWithText(project.title).performScrollTo().performClick()
             assertEquals(listOf("Connections:${contact.id}", "Inventions:${project.id}"), opened)

@@ -52,7 +52,7 @@ private fun lines(text: String) = text.lineSequence().map(String::trim).filter(S
     }
     Text("Abilities & story", style = MaterialTheme.typography.titleLarge,
         modifier = Modifier.semantics { heading() })
-    if (memberId != "local-player") ReforgeCompanionAttackReviewButton(repository, memberId, openPlayable, playableRepository)
+    if (memberId != "local-player" && sheet.attacks.isNotEmpty()) ReforgeCompanionAttackReviewButton(repository, memberId, openPlayable, playableRepository)
     if (sheet.unresolvedConflicts.isNotEmpty()) PlayerCard {
         Text("Unresolved source conflicts", color = MaterialTheme.colorScheme.error,
             style = MaterialTheme.typography.titleMedium)

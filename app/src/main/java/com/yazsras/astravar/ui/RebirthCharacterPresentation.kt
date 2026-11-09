@@ -97,20 +97,23 @@ import com.yazsras.astravar.rules.reforge.*
 @Composable internal fun RebirthAbilities(projection: CharacterProjection, onInspect: (Stat) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Stat.entries.chunked(if (LocalDensity.current.fontScale >= 1.5f) 2 else 3).forEach { stats ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 stats.forEach { stat ->
                     val ability = projection.abilities.getValue(stat)
-                    Column(Modifier.weight(1f).testTag("reforge-${stat.name}")
+                    Column(Modifier.weight(1f).fillMaxHeight().heightIn(min = 80.dp).testTag("reforge-${stat.name}")
                         .clip(RoundedCornerShape(8.dp)).border(1.dp, RebuildPalette.Outline, RoundedCornerShape(8.dp))
                         .clickable(role = Role.Button) { onInspect(stat) }.padding(vertical = 10.dp, horizontal = 8.dp)
                         .semantics(mergeDescendants = true) {
-                            contentDescription = "${stat.name} ${ability.effective.value ?: "Not set"} ${reforgeSigned(ability.modifier)}"
-                        }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            contentDescription = if (ability.effective.value == null) "${stat.name} Not set"
+                                else "${stat.name} ${ability.effective.value} ${reforgeSigned(ability.modifier)}"
+                        }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically)) {
                         Text(stat.name, style = MaterialTheme.typography.labelMedium, color = RebuildPalette.Muted)
                         Text(reforgeSigned(ability.modifier), color = RebuildPalette.GoldBright,
                             style = if (ability.modifier == null) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.SemiBold)
-                        Text("Score ${ability.effective.value ?: "not set"}", style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Silver)
+                        ability.effective.value?.let { score ->
+                            Text("Score $score", style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Silver)
+                        }
                     }
                 }
             }

@@ -171,7 +171,7 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository, initialEntityId: Str
             PlayerButton(onClick = { edit(null) }, enabled = !actions.busy,
                 modifier = Modifier.semantics { contentDescription = "Add connection" }) { Text("Add") }
         }
-        PlayerSearch(query, { query = it }, "Search names, aliases and known notes")
+        PlayerSearch(query, { query = it }, "Search connections")
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("All", "Person", "Group", "Faction", "Being", "Location", "Other").forEach { kind ->
                 PlayerFilterChip(selected = kindFilter == kind, onClick = { kindFilter = kind }, enabled = !actions.busy,
@@ -410,7 +410,7 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository, initialEntityId: Str
                         SectionCaption("Overview")
                         ReforgeRichText(profile.overview)
                     }
-                    ExpandableRecordSection("Known Information", true) {
+                    PlayerDisclosure("Known Information", initiallyOpen = true) {
                         val known = facts.filter { it.entityId == entity.id }
                         if (profile.facts.isNotBlank()) ReforgeRichText(profile.facts)
                         if (known.isEmpty() && profile.facts.isBlank()) Text("No learned information yet.", color = RebuildPalette.Muted)
@@ -420,10 +420,10 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository, initialEntityId: Str
                         }
                         PlayerTextButton(onClick = { append("fact") }) { Text("Add learned information") }
                     }
-                    if (profile.openThreads.isNotBlank()) ExpandableRecordSection("Open threads", true) {
+                    if (profile.openThreads.isNotBlank()) PlayerDisclosure("Open threads", initiallyOpen = true) {
                         ReforgeRichText(profile.openThreads)
                     }
-                    ExpandableRecordSection("Meaningful milestones") {
+                    PlayerDisclosure("Meaningful milestones") {
                         val meaningful = milestones.filter { it.entityId == entity.id }.sortedBy { it.updatedAt }
                         if (meaningful.isEmpty()) Text("No milestones recorded.", color = RebuildPalette.Muted)
                         meaningful.forEach { milestone ->

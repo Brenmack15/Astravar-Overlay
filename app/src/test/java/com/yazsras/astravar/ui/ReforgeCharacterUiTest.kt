@@ -1,14 +1,9 @@
 package com.yazsras.astravar.ui
 
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.view.View
-import android.view.WindowManager
-import android.view.inspector.WindowInspector
-import com.yazsras.astravar.savePresentationCapture
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
+import androidx.compose.ui.unit.dp
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.data.*
@@ -31,29 +26,13 @@ import org.robolectric.annotation.LooperMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ReforgeCharacterUiTest {
     @get:Rule val compose = createAstravarComposeRule()
-    private var captureView: View? = null
+    private var captureActivity: ComponentActivity? = null
     private fun capture(name: String) {
         if (System.getProperty("astravar.screenshots") == null) return
-        compose.runOnIdle {
-            val view = requireNotNull(captureView)
-            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
-            try {
-                val windows = WindowInspector.getGlobalWindowViews().filter { it.visibility == View.VISIBLE && it.width > 0 && it.height > 0 }
-                val base = IntArray(2).also { view.getLocationOnScreen(it) }
-                repeat(2) {
-                    val canvas = Canvas(bitmap); view.draw(canvas)
-                    windows.filter { it !== view }.forEach { window ->
-                        val position = IntArray(2).also { window.getLocationOnScreen(it) }
-                        val parameters = window.layoutParams as? WindowManager.LayoutParams
-                        if (parameters != null && parameters.flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND != 0)
-                            canvas.drawColor(android.graphics.Color.argb((parameters.dimAmount * 255).toInt().coerceIn(0, 255), 0, 0, 0))
-                        canvas.save(); canvas.translate((position[0] - base[0]).toFloat(), (position[1] - base[1]).toFloat())
-                        window.draw(canvas); canvas.restore()
-                    }
-                }
-                savePresentationCapture(bitmap, name)
-            } finally { bitmap.recycle() }
-        }
+        compose.runOnIdle { invalidateNativeCaptureWindows() }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.runOnIdle { captureNativeTestWindows(name, requireNotNull(captureActivity)) }
     }
     private fun fixture() = ReforgeCharacter("synthetic-player", "Synthetic artificer", level = 9,
         baseAbilities = mapOf(Stat.STR to 8, Stat.DEX to 15, Stat.CON to 14, Stat.INT to 21, Stat.WIS to 11, Stat.CHA to 12),
@@ -82,7 +61,7 @@ class ReforgeCharacterUiTest {
         System.setProperty("robolectric.windowManager.useRequestedSize", "true")
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
-            captureView = controller.get().window.decorView
+            captureActivity = controller.get()
             controller.get().setContent {
                 AstravarTheme {
                     ReforgeCharacterSheet(ledger, repository, initialSection = initialSection,
@@ -91,7 +70,7 @@ class ReforgeCharacterUiTest {
             }
             block(repository)
         } finally {
-            captureView = null
+            captureActivity = null
             controller.pause().stop().destroy(); localDb.close(); legacyDb.close()
             if (previous == null) System.clearProperty("robolectric.windowManager.useRequestedSize") else System.setProperty("robolectric.windowManager.useRequestedSize", previous)
         }
@@ -313,6 +292,21 @@ class ReforgeCharacterUiTest {
         compose.onNodeWithTag("reforge-roll-now").assertExists()
         assertTrue(runBlocking { repository.rollHistory("synthetic-player").first() }.isEmpty())
         assertEquals(1L, runBlocking { repository.get("synthetic-player") }!!.revision)
+    }
+
+    @Test fun unknownAbilitiesStayConciseAndUnknownSavesUseReadableFullWidthRows() {
+        val unknown = fixture().copy(baseAbilities = emptyMap())
+        withSheet(character = unknown) { repository ->
+            compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("reforge-STR").assertContentDescriptionEquals("STR Not set")
+            compose.onNodeWithText("Score not set").assertDoesNotExist()
+            capture("rebirth-character-unknown-stats")
+            compose.onNodeWithTag("reforge-save-STR").performScrollTo().assertWidthIsAtLeast(300.dp).assertIsNotEnabled()
+            compose.onNodeWithTag("reforge-save-DEX").performScrollTo().assertWidthIsAtLeast(300.dp).assertIsNotEnabled()
+            capture("rebirth-character-unknown-saves")
+            assertTrue(runBlocking { repository.rollHistory(unknown.id).first() }.isEmpty())
+            assertTrue(runBlocking { repository.get(unknown.id) }!!.character.baseAbilities.isEmpty())
+        }
     }
 
     @Test fun gearSearchAndInspectionRetainTheExplicitEquipReview() {

@@ -2,8 +2,8 @@ package com.yazsras.astravar.ui
 
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.selected
@@ -22,7 +22,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -143,6 +146,7 @@ val LocalPlayerDismiss = staticCompositionLocalOf<() -> Unit> { {} }
     actions: @Composable RowScope.() -> Unit = {}, content: @Composable ColumnScope.() -> Unit
 ) {
     var discard by rememberSaveable { mutableStateOf(false) }
+    var titleOverflows by remember(title) { mutableStateOf(false) }
     val close = { if (dismissEnabled) { if (dirty) discard = true else onDismiss() } }
     Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false,
         decorFitsSystemWindows = false)) {
@@ -154,13 +158,20 @@ val LocalPlayerDismiss = staticCompositionLocalOf<() -> Unit> { {} }
                         Box(Modifier.fillMaxWidth().height(2.dp).background(Brush.horizontalGradient(listOf(RebuildPalette.Gold, RebuildPalette.Gold.copy(alpha = .06f)))))
                         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp),
                             verticalAlignment = Alignment.CenterVertically) {
-                            Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.SemiBold, fontFamily = DisplayFace)
+                            Text(title, Modifier.weight(1f).then(if (titleOverflows) Modifier.clearAndSetSemantics {
+                                contentDescription = title; heading()
+                            } else Modifier.semantics { heading() }), style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold, fontFamily = DisplayFace, maxLines = 2,
+                                overflow = TextOverflow.Ellipsis, onTextLayout = { titleOverflows = it.hasVisualOverflow })
                             PlayerTextButton(onClick = close, enabled = dismissEnabled, modifier = Modifier.heightIn(min = 48.dp)) { Text("Close") }
                         }
                         HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .4f))
                         key(title) { Box(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(20.dp)) {
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                // Keep long names readable without consuming the fixed header or hiding actions.
+                                if (titleOverflows) Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+                                content()
+                            }
                         } }
                         FlowRow(Modifier.fillMaxWidth().background(RebuildPalette.Void.copy(alpha = .45f)).padding(horizontal = 12.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.End) {
@@ -214,16 +225,42 @@ val LocalPlayerDismiss = staticCompositionLocalOf<() -> Unit> { {} }
 /** One visible level of section navigation. Horizontal scrolling preserves scaled labels. */
 @Composable fun PlayerTabs(labels: List<String>, selected: String, onSelect: (String) -> Unit,
     modifier: Modifier = Modifier) {
+    val scroll = rememberScrollState()
+    val direction = LocalLayoutDirection.current
+    val positions = remember(labels) { mutableStateMapOf<String, Pair<Float, Float>>() }
+    var viewport by remember { mutableStateOf<Pair<Float, Float>?>(null) }
+    // Reveal the selected label on this horizontal axis only. A nested filter must
+    // never pull its surrounding character sheet vertically when it first appears.
+    val selectedWidth = positions[selected]?.let { it.second - it.first }
+    val viewportWidth = viewport?.let { it.second - it.first }
+    LaunchedEffect(selected, selectedWidth, viewportWidth, scroll.maxValue, direction) {
+        val bounds = positions[selected]
+        val window = viewport
+        if (bounds != null && window != null) {
+            val delta = when {
+                bounds.second - bounds.first >= window.second - window.first -> bounds.first - window.first
+                bounds.first < window.first -> bounds.first - window.first
+                bounds.second > window.second -> bounds.second - window.second
+                else -> 0f
+            }
+            if (kotlin.math.abs(delta) >= 1f) {
+                val logicalDelta = if (direction == LayoutDirection.Rtl) -delta else delta
+                scroll.scrollTo((scroll.value + logicalDelta.toInt()).coerceIn(0, scroll.maxValue))
+            }
+        }
+    }
     Column(modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth().onGloballyPositioned {
+            val left = it.positionInRoot().x
+            viewport = left to (left + it.size.width)
+        }.horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             labels.forEach { label ->
                 val active = selected == label
-                val visibility = remember { BringIntoViewRequester() }
-                LaunchedEffect(active) {
-                    if (active) { withFrameNanos { }; visibility.bringIntoView() }
-                }
                 val tint by animateColorAsState(if (active) RebuildPalette.GoldBright else RebuildPalette.Muted, label = "Section selection")
-                Column(Modifier.width(IntrinsicSize.Max).bringIntoViewRequester(visibility).testTag("section-$label").semantics { this.selected = active }
+                Column(Modifier.width(IntrinsicSize.Max).onGloballyPositioned {
+                    val left = it.positionInRoot().x
+                    positions[label] = left to (left + it.size.width)
+                }.testTag("section-$label").semantics { this.selected = active }
                     .clickable(role = Role.Tab) { onSelect(label) }.heightIn(min = 48.dp)
                     .padding(horizontal = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(Modifier.heightIn(min = 46.dp), contentAlignment = Alignment.Center) {

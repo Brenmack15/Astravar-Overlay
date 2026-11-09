@@ -358,6 +358,9 @@ class PartyPlayerFirstTest {
     fun eekToolsFromPartyHaveBoundedScrollableViewportAtLargeFontWithoutWrites() {
         val db = database()
         val repo = CampaignLedgerRepository(db)
+        runBlocking { repo.records.saveProfile(CharacterProfile(id = "eek", name = "Fictional owl"), source = "Synthetic tool fixture") }
+        val profilesBefore = runBlocking { db.recordsDao().allCharacterProfiles() }
+        val auditBefore = runBlocking { db.recordsDao().allAudit() }
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent {
@@ -367,7 +370,8 @@ class PartyPlayerFirstTest {
                     PartyTestTheme { PartyPageV2(repo, null) {} }
                 }
             }
-            compose.onNodeWithText("Eek").performScrollTo().performClick()
+            waitForText("Fictional owl")
+            compose.onNodeWithText("Fictional owl").performScrollTo().performClick()
             compose.onNode(hasText("Eek's specialized companion tools") and hasClickAction())
                 .performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
             compose.onNodeWithText("Condition unknown").performScrollTo().assertIsDisplayed()
@@ -380,9 +384,9 @@ class PartyPlayerFirstTest {
             runBlocking {
                 assertTrue(db.recordsDao().allCompanionStates().isEmpty())
                 assertTrue(db.recordsDao().allCompanionResources().isEmpty())
-                assertTrue(db.recordsDao().allCharacterProfiles().isEmpty())
+                assertEquals(profilesBefore, db.recordsDao().allCharacterProfiles())
                 assertTrue(db.partyDao().allSheets().isEmpty())
-                assertTrue(db.recordsDao().allAudit().isEmpty())
+                assertEquals(auditBefore, db.recordsDao().allAudit())
             }
         } finally { activity.pause().stop().destroy(); db.close() }
     }

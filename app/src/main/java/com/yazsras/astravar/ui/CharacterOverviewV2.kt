@@ -231,7 +231,7 @@ private fun AbilityTile(key: String, label: String, score: Int?, modifierValue: 
             Text(score?.toString() ?: "Not set", modifier = Modifier.padding(vertical = 2.dp), color = RebuildPalette.Gold,
                 fontFamily = InterfaceFace, fontSize = if (score == null) 14.sp else 23.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
         }
-        Surface(shape = RoundedCornerShape(50), color = RebuildPalette.Active,
+        if (score != null || modifierValue != null) Surface(shape = RoundedCornerShape(50), color = RebuildPalette.Active,
             border = BorderStroke(.7.dp, RebuildPalette.Cyan.copy(alpha = .5f))) {
             Text(modifierValue?.let { signedModifier(it) } ?: "Not set", color = RebuildPalette.Ice, modifier = Modifier.padding(horizontal = 18.dp, vertical = 3.dp),
                 fontSize = 16.sp, fontWeight = FontWeight.SemiBold)

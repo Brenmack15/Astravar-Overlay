@@ -194,26 +194,28 @@ class CampaignLedgerPageTest {
             repo.create(LedgerDraft(title = "Fictional silver harness", category = "Armor", quantity = null, source = "Synthetic inventory journey"))
         }
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        fun dialogText(text: String) = compose.onNode(hasText(text) and hasAnyAncestor(isDialog()))
+        fun dialogButton(text: String) = compose.onNode(hasText(text) and hasClickAction() and hasAnyAncestor(isDialog()))
         try {
             activity.get().setContent { AstravarTheme { CampaignLedgerPage(repo) } }
             compose.waitUntil(10_000) { compose.onAllNodesWithText(item.title).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Export JSON").assertDoesNotExist()
-            compose.onNodeWithText(item.title).performClick()
-            compose.onNodeWithText("Equip or transfer").performScrollTo().performClick()
+            compose.onNode(hasText(item.title) and hasClickAction()).performClick()
+            dialogButton("Equip or transfer").performScrollTo().performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithText("Commit equipment move").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("Commit equipment move").assertIsNotEnabled()
-            compose.onNodeWithText("Unknown holder ▾").performScrollTo().performClick()
-            compose.onNodeWithText("Fictional scout", useUnmergedTree = true).performClick()
-            compose.onNodeWithText("Carried ▾").performScrollTo().performClick()
-            compose.onNodeWithText("Equipped", useUnmergedTree = true).performClick()
+            dialogButton("Commit equipment move").assertIsNotEnabled()
+            dialogButton("Unknown holder ▾").performScrollTo().performClick()
+            compose.onNode(hasText("Fictional scout") and hasClickAction()).performClick()
+            dialogButton("Carried ▾").performScrollTo().performClick()
+            compose.onNode(hasText("Equipped") and hasClickAction()).performClick()
             runBlocking { assertNull(db.partyDao().placement(item.id)); assertEquals(item, db.ledgerDao().getItem(item.id)) }
-            compose.onNodeWithText("Confirmed transfer / equipment event source").performScrollTo().performTextInput("Fictional reviewed equip event")
-            compose.onNodeWithText("Commit equipment move").assertIsEnabled().performClick()
+            dialogText("Confirmed transfer / equipment event source").performScrollTo().performTextInput("Fictional reviewed equip event")
+            dialogButton("Commit equipment move").assertIsEnabled().performClick()
             compose.waitUntil(10_000) { runBlocking { db.partyDao().placement(item.id)?.state == "Equipped" } }
-            compose.onNodeWithText("Close").performClick()
-            compose.onNodeWithText(item.title).performClick()
-            compose.onNodeWithText("Fictional scout").assertExists()
-            compose.onNodeWithText("Record quantity").assertExists()
+            dialogButton("Close").performClick()
+            compose.onNode(hasText(item.title) and hasClickAction()).performClick()
+            dialogText("Fictional scout").assertExists()
+            dialogButton("Record quantity").assertExists()
             runBlocking {
                 assertEquals(1, db.ledgerDao().allItems().size)
                 assertNull(db.ledgerDao().getItem(item.id)!!.quantity)

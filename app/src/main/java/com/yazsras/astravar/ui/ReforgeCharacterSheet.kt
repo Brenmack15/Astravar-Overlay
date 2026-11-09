@@ -85,7 +85,6 @@ private enum class SpellbookFilter(val label: String) {
     val haptics = LocalHapticFeedback.current
     val rollNotice = remember { SnackbarHostState() }
     var savedRoll by remember { mutableStateOf<ReforgeRollRecord?>(null) }
-    val expandedText = LocalDensity.current.fontScale >= 1.5f
     // A roster shortcut must never fall through to another character or change the default actor.
     val chosenId = companionProfileId
         ?: ReforgePreferences.chooseProfile(selectedId ?: actorSelection.second, active.map { it.character.id })
@@ -216,13 +215,20 @@ private enum class SpellbookFilter(val label: String) {
                     RebirthSectionLabel("Saving throws") {
                         PlayerTextButton(onClick = { dialog = "Training" }) { Text("Training") }
                     }
-                    Stat.entries.chunked(if (expandedText) 1 else 2).forEach { stats ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                            stats.forEach { stat ->
-                                Column(Modifier.weight(1f)) {
-                                    val value = projection.saves[stat]?.value
-                                    RebirthCheckRow("${stat.name} save", if (stat in character.saveProficiencies) "Proficient" else "", value) {
-                                        value?.let { requestRoll("${stat.name} save", it, RollKind.SAVE, stat.name) }
+                    BoxWithConstraints(Modifier.fillMaxWidth()) {
+                        val columns = if (maxWidth >= 360.dp && LocalDensity.current.fontScale < 1.25f &&
+                            Stat.entries.all { projection.saves[it]?.value != null }) 2 else 1
+                        Column {
+                            Stat.entries.chunked(columns).forEach { stats ->
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                                    stats.forEach { stat ->
+                                        Column(Modifier.weight(1f)) {
+                                            val value = projection.saves[stat]?.value
+                                            RebirthCheckRow("${stat.name} save", if (stat in character.saveProficiencies) "Proficient" else "", value,
+                                                modifier = Modifier.testTag("reforge-save-${stat.name}")) {
+                                                value?.let { requestRoll("${stat.name} save", it, RollKind.SAVE, stat.name) }
+                                            }
+                                        }
                                     }
                                 }
                             }

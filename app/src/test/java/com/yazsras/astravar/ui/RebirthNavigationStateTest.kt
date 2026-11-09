@@ -7,10 +7,17 @@ import android.os.Bundle
 import android.os.Parcel
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.text.TextLayoutResult
@@ -159,6 +166,52 @@ class RebirthNavigationStateTest {
             compose.waitForIdle()
             compose.onNodeWithTag("section-History").assertIsSelected().assertIsDisplayed()
             compose.onNodeWithTag("section-History").assertHeightIsAtLeast(48.dp)
+        } finally { activity.pause().stop().destroy() }
+    }
+
+    @Test fun revealingNestedSelectedTabNeverMovesTheSurroundingSheetVertically() {
+        val selected = mutableStateOf("My gear")
+        val verticalScroll = ScrollState(initial = 120)
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { AstravarTheme {
+                Column(Modifier.height(320.dp).verticalScroll(verticalScroll)) {
+                    Spacer(Modifier.height(600.dp))
+                    PlayerTabs(listOf("My gear", "Campaign items", "Equipment", "Spellbook", "History"),
+                        selected.value, { selected.value = it })
+                    Spacer(Modifier.height(600.dp))
+                }
+            } }
+            compose.waitForIdle()
+            compose.runOnIdle {
+                assertEquals("Initial nested tab must not pull the sheet below its header", 120, verticalScroll.value)
+                selected.value = "History"
+            }
+            compose.waitForIdle()
+            compose.onNodeWithTag("section-History").assertIsSelected()
+            compose.runOnIdle {
+                assertEquals("Programmatic horizontal selection must preserve the sheet's reading position", 120, verticalScroll.value)
+            }
+        } finally { activity.pause().stop().destroy() }
+    }
+
+    @Test fun browsingTheTabStripDoesNotSnapBackToTheSelectedTab() {
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { AstravarTheme {
+                val density = LocalDensity.current
+                CompositionLocalProvider(LocalDensity provides Density(density.density, 1.6f)) {
+                    PlayerTabs(listOf("My gear", "Campaign items", "Equipment", "Spellbook", "History"), "My gear", {})
+                }
+            } }
+            val strip = compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.HorizontalScrollAxisRange))
+            strip.performSemanticsAction(SemanticsActions.ScrollBy) { scrollBy -> assertTrue(scrollBy(600f, 0f)) }
+            compose.waitForIdle()
+            val range = strip.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange]
+            compose.runOnIdle {
+                assertTrue("Users must be able to browse unselected tabs without automatic snapback", range.value() > 0f)
+            }
+            compose.onNodeWithTag("section-My gear").assertIsSelected()
         } finally { activity.pause().stop().destroy() }
     }
 }

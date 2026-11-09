@@ -133,7 +133,7 @@ class ConnectionsPageV2Test {
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithText("Synthetic Venn").fetchSemanticsNodes().isNotEmpty()
             }
-            compose.onNodeWithText("Search names, aliases and known notes").performScrollTo().performTextInput("ashKEEPER")
+            compose.onNodeWithText("Search connections").performScrollTo().performTextInput("ashKEEPER")
             compose.onNodeWithText("Synthetic Mira").assertExists()
             compose.onNodeWithText("Synthetic Venn").assertDoesNotExist()
             runBlocking {
