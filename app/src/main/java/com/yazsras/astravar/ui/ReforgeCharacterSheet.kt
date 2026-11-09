@@ -132,7 +132,7 @@ import kotlinx.coroutines.flow.first
         if (!profilesState.first || !actorSelection.first) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
             Text("Opening your saved character…", color = RebuildPalette.Muted)
-            return@Page
+            return@ReforgeSheetPage
         }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("reforge-error"))
