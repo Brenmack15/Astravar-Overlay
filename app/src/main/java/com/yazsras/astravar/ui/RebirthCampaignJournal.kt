@@ -25,7 +25,7 @@ import com.yazsras.astravar.data.CampaignLedgerRepository
     val entities by repository.records.entities.collectAsState(initial = emptyList())
     val projects by repository.records.projects.collectAsState(initial = emptyList())
     val latest = checkpoints.maxByOrNull { it.updatedAt }
-    val expandedText = LocalDensity.current.fontScale >= 1.5f
+    val expandedText = LocalDensity.current.fontScale > 1.15f
     Page {
         PlayerHeading("Campaign") {
             if (!expandedText) PlayerTextButton(onClick = { open("Search everything") }) { Text("Search everything") }

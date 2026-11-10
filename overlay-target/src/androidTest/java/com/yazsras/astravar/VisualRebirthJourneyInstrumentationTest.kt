@@ -185,6 +185,18 @@ class VisualRebirthJourneyInstrumentationTest {
                 for (section in listOf("Equipment", "Combat", "Resources", "History", "Sheet")) {
                     ui.selectSection(product, section)
                 }
+                // Read-only primary-destination captures retain their upper
+                // headings and actions for the same enlarged-text review.
+                ui.ensurePrimaryTab(product, "Inventory")
+                ui.selectSection(product, "Campaign items")
+                capture("inventory-font-$scale", "Inventory", "Equipment, treasures & discoveries")
+                campaignHome()
+                capture("campaign-font-$scale", "Campaign", "Your living world")
+                ui.ensurePrimaryTab(product, "Character")
+                ui.selectSection(product, "Sheet")
+                find("CI Native Hero Revised")
+                ui.bounds(hp, "main-character health retained after read-only destination visits at font scale $scale",
+                    refreshCache = true)
             }
         } catch (error: Throwable) {
             // Preserve the exact failing density/font/viewport before cleanup can
@@ -205,7 +217,7 @@ class VisualRebirthJourneyInstrumentationTest {
             device.unfreezeRotation()
         }
         instrumentation.sendStatus(0, Bundle().apply {
-            putString("stream", "\nCHECKPOINT: explicit fictional resource spending, exact companion equipment, and edited campaign NPC survived restart; primary sheet, actions, spellbook and all direct sections exercised at 1.0, 1.3 and 2.0 font scales with stable native screenshots and visible 48dp roll targets\n")
+            putString("stream", "\nCHECKPOINT: explicit fictional resource spending, exact companion equipment, and edited campaign NPC survived restart; primary sheet, actions, spellbook, inventory, campaign and all direct sections exercised at 1.0, 1.3 and 2.0 font scales with stable native screenshots and visible 48dp roll targets\n")
         })
     }
 }

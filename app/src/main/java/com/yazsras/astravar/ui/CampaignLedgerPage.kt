@@ -27,6 +27,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import com.yazsras.astravar.data.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +39,7 @@ import java.io.ByteArrayOutputStream
 import java.util.UUID
 
 /** Presentation only: stable identities, revisions, events and transactions remain repository-owned. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (() -> Unit)? = null) {
     val context = LocalContext.current
@@ -199,19 +201,23 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (()
     }
     val visibleItems = items.filter { (filter == "All" || it.category == filter) &&
         (query.isBlank() || "${it.title} ${it.category} ${it.owner} ${it.description}".contains(query, true)) }
+    val expandedText = LocalDensity.current.fontScale >= 1.5f
     Page {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.spacedBy(8.dp), maxItemsInEachRow = if (expandedText) 1 else 2) {
             Column(Modifier.weight(1f)) {
                 Text("Inventory", style = MaterialTheme.typography.headlineMedium)
                 Text("Equipment, treasures & discoveries", color = Muted, style = MaterialTheme.typography.bodyMedium)
             }
-            PlayerButton(onClick = { load(null); mode = "create" }, enabled = !busy) { Text("Add Item") }
+            PlayerButton(onClick = { load(null); mode = "create" }, enabled = !busy,
+                modifier = Modifier.align(Alignment.CenterVertically)) { Text("Add Item") }
         }
-        Row(Modifier.fillMaxWidth().background(RebuildPalette.Panel, RoundedCornerShape(12.dp)).padding(14.dp),
-            horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-            LedgerSummary("Items", items.size.toString(), Modifier.weight(1f))
-            LedgerSummary("Equipped", items.count { item -> (placements.firstOrNull { it.itemId == item.id }?.state ?: item.itemState) == "Equipped" }.toString(), Modifier.weight(1f))
-            LedgerSummary("Categories", items.map { it.category }.distinct().size.toString(), Modifier.weight(1f))
+        FlowRow(Modifier.fillMaxWidth().background(RebuildPalette.Panel, RoundedCornerShape(12.dp)).padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
+            maxItemsInEachRow = if (expandedText) 1 else 3) {
+            LedgerSummary("Items", items.size.toString(), Modifier.weight(1f), horizontal = expandedText)
+            LedgerSummary("Equipped", items.count { item -> (placements.firstOrNull { it.itemId == item.id }?.state ?: item.itemState) == "Equipped" }.toString(), Modifier.weight(1f), horizontal = expandedText)
+            LedgerSummary("Categories", items.map { it.category }.distinct().size.toString(), Modifier.weight(1f), horizontal = expandedText)
         }
         PlayerSearch(query, { query = it }, "Search inventory")
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -458,10 +464,17 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (()
     }
 }
 
-@Composable private fun LedgerSummary(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+@Composable private fun LedgerSummary(label: String, value: String, modifier: Modifier = Modifier, horizontal: Boolean = false) {
+    val valueText: @Composable () -> Unit = {
         Text(value, color = RebuildPalette.Gold, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        Text(label, color = Muted, style = MaterialTheme.typography.labelMedium)
+    }
+    val labelText: @Composable () -> Unit = { Text(label, color = Muted, style = MaterialTheme.typography.labelMedium) }
+    if (horizontal) Row(modifier, horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        labelText()
+        valueText()
+    } else Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        valueText()
+        labelText()
     }
 }
 

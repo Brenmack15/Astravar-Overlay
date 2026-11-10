@@ -1,6 +1,7 @@
 package com.yazsras.astravar.ui
 
 import android.content.Context
+import android.content.res.Configuration
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
@@ -8,8 +9,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.dp
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.data.CampaignLedgerDb
@@ -226,4 +230,86 @@ class CampaignLedgerPageTest {
         } finally { activity.pause().stop().destroy(); db.close() }
     }
 
+    @Test
+    @Config(qualifiers = "w360dp-h780dp-xhdpi")
+    fun narrowInventoryKeepsWholeLabelsAtLargerText() = verifyInventoryLabels(1.3f, "inventory-360-font130")
+
+    @Test
+    @Config(qualifiers = "w400dp-h860dp-xhdpi")
+    fun wideInventoryKeepsWholeLabelsAtLargerText() = verifyInventoryLabels(1.3f, "inventory-400-font130")
+
+    @Test
+    @Config(qualifiers = "w360dp-h780dp-xhdpi")
+    fun narrowInventoryKeepsWholeLabelsAtDoubleText() = verifyInventoryLabels(2f, "inventory-360-font200")
+
+    @Test
+    @Config(qualifiers = "w400dp-h860dp-xhdpi")
+    fun wideInventoryKeepsWholeLabelsAtDoubleText() = verifyInventoryLabels(2f, "inventory-400-font200")
+
+    @Suppress("DEPRECATION")
+    private fun verifyInventoryLabels(fontScale: Float, captureName: String) {
+        val db = database()
+        val repository = CampaignLedgerRepository(db)
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        val resources = activity.get().resources
+        val original = Configuration(resources.configuration)
+        val defects = mutableListOf<String>()
+        fun capture(suffix: String, modal: Boolean = false) {
+            compose.runOnIdle { invalidateNativeCaptureWindows() }
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+            compose.runOnIdle { captureNativeTestWindows("$captureName-$suffix", activity.get(), modal) }
+        }
+        fun checkLabel(label: String, singleLine: Boolean) {
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithText(label, useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+            val layout = layouts.single()
+            if (kotlin.math.abs(layout.layoutInput.density.fontScale - fontScale) > .01f)
+                defects += "$label uses ${layout.layoutInput.density.fontScale}x instead of ${fontScale}x"
+            for (line in 0 until layout.lineCount) {
+                if (layout.isLineEllipsized(line) || layout.getLineLeft(line) < -.5f ||
+                    layout.getLineRight(line) > layout.size.width + .5f ||
+                    layout.getLineBottom(line) > layout.size.height + .5f)
+                    defects += "$label has clipped or ellipsized line $line"
+            }
+            if (singleLine && layout.lineCount != 1)
+                defects += "$label breaks its word across ${layout.lineCount} lines at ${layout.size.width}px"
+            for (line in 0 until layout.lineCount - 1) {
+                val boundary = layout.getLineEnd(line)
+                if (boundary in 1 until label.length && !label[boundary - 1].isWhitespace() && !label[boundary].isWhitespace())
+                    defects += "$label has a mid-word line break at offset $boundary"
+            }
+        }
+        try {
+            resources.updateConfiguration(Configuration(original).apply { this.fontScale = fontScale }, resources.displayMetrics)
+            activity.get().setContent { AstravarTheme { CampaignLedgerPage(repository) } }
+            compose.onNodeWithText("Inventory").assertIsDisplayed()
+            capture("header")
+            for (label in listOf("Inventory", "Items", "Equipped", "Categories")) checkLabel(label, singleLine = true)
+            val add = compose.onNode(hasText("Add Item") and hasClickAction())
+                .assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+            checkLabel("Add Item", singleLine = false)
+            assertTrue("Inventory overview label defects: ${defects.joinToString("; ")}", defects.isEmpty())
+            add.performClick()
+            compose.onNodeWithText("Item name").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Save new item").assertIsDisplayed().assertIsNotEnabled()
+                .assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+            // A pristine form intentionally has Close and a disabled Save; Cancel
+            // appears only for a dirty draft. Exercise the real initial form contract.
+            compose.onNode(hasText("Close") and hasClickAction()).assertIsDisplayed()
+                .assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+            for (label in listOf("Item name", "Save new item", "Close")) checkLabel(label, singleLine = false)
+            capture("editor", modal = true)
+            compose.onNode(hasText("Close") and hasClickAction()).performClick()
+            compose.onNodeWithText("Item name").assertDoesNotExist()
+            assertTrue("Opening and dismissing Add must not create an item", runBlocking { db.ledgerDao().allItems().isEmpty() })
+            assertTrue("Opening and dismissing Add must not create an event", runBlocking { db.ledgerDao().allEvents().isEmpty() })
+            assertTrue("Inventory label defects: ${defects.joinToString("; ")}", defects.isEmpty())
+        } finally {
+            resources.updateConfiguration(original, resources.displayMetrics)
+            activity.pause().stop().destroy()
+            db.close()
+        }
+    }
 }

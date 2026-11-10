@@ -65,6 +65,7 @@ val campaignDestinationsV2 = listOf("Astravar", "Inventory", "Campaign", "More")
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable fun ArmorOverviewV2(
     state: Campaign, ledger: CampaignLedgerRepository, combat: () -> Unit, systems: () -> Unit,
     eek: () -> Unit, inventory: () -> Unit, elements: List<DamageType> = emptyList(), selectElement: () -> Unit = combat,
@@ -78,7 +79,10 @@ val campaignDestinationsV2 = listOf("Astravar", "Inventory", "Campaign", "More")
         if (openReferences != null) PlayerEntry("Armor source references", "Accepted mechanics, dossiers and unresolved source details", "History", openReferences)
         val largeText = androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.15f
         val systemCard = if (largeText) Modifier.heightIn(min = 148.dp) else Modifier.height(132.dp)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        FlowRow(Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            maxItemsInEachRow = if (largeText) 1 else 2) {
             PlayerCard(modifier = Modifier.weight(1f).then(systemCard), onClick = selectElement, padding = 10.dp, spacing = 0.dp) {
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Active element", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelLarge,

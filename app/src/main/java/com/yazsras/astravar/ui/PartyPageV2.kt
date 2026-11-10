@@ -17,7 +17,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -85,15 +84,13 @@ fun PartyPageV2(
     var creating by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val current = roster.firstOrNull { it.id == selected }
-    val expandedText = LocalDensity.current.fontScale >= 1.5f
     BackHandler(enabled = current != null && !detailsOpen) { selected = null }
     Page(resetKey = selected) {
         PlayerHeading(if (current == null) "Companions" else "Companion sheet") {
             if (current != null) PlayerTextButton(onClick = { selected = null }) { Text("‹ Party") }
-            else if (!expandedText) PlayerButton(onClick = { newName = ""; creationError = ""; adding = true }) { Text("+ Add companion") }
         }
         if (current == null) {
-            if (expandedText) PlayerButton(onClick = { newName = ""; creationError = ""; adding = true }) { Text("+ Add companion") }
+            PlayerButton(onClick = { newName = ""; creationError = ""; adding = true }) { Text("+ Add companion") }
             Text("Your companions, ready for the next chapter.", color = RebuildPalette.Muted)
             if (roster.isNotEmpty()) PlayerSearch(query, { query = it }, "Find a companion")
             val visibleRoster = roster.filter { member ->

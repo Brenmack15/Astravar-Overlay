@@ -620,8 +620,13 @@ class CampaignImportInstrumentationTest {
         var previous: Pair<Rect, Rect>? = null
         var stableSince: Long? = null
         var lastObserved = "No fresh typed source entry observation: $label"
-        for (direction in listOf(Direction.UP, Direction.DOWN)) {
-            val searchDeadline = if (direction == Direction.UP) deadline - 15_000 else deadline
+        // Party/inventory entries are directly below the disclosure just opened.
+        // Reveal that content first; searching upward spent the stability budget
+        // travelling away from the target and back. Armor keeps its original order.
+        val directions = if (label == "Armor source references") listOf(Direction.UP, Direction.DOWN)
+            else listOf(Direction.DOWN, Direction.UP)
+        for ((leg, direction) in directions.withIndex()) {
+            val searchDeadline = if (leg == 0) deadline - 15_000 else deadline
             var scrolls = 0
             var lastScrollResult: Boolean? = null
             while (SystemClock.uptimeMillis() < searchDeadline) {

@@ -18,16 +18,18 @@ controls. Its configuration changes are reset in `finally`.
 | Character statistics | `rebirth-character-statistics.png` |
 | Combat | `player-first-companion-direct-combat.png`, `player-first-spellbook-concentration-after-restart.png` |
 | Spellbook | `player-first-spellbook-filtered.png`, `rebirth-spellbook-font-1.0.png` |
-| Inventory | `player-first-inventory.png`, `same-key-update-inventory.png` |
+| Inventory | `player-first-inventory.png`, `same-key-update-inventory.png`, `rebirth-inventory-font-1.0.png`, `rebirth-inventory-font-1.3.png`, `rebirth-inventory-font-2.0.png` |
 | Equipment management | `player-first-equipment-review.png`, `rebirth-companion-equipped-after-restart.png` |
 | Companion selection | `rebirth-companion-selection.png` |
 | Companion profile | `player-first-generic-companion.png` |
-| Campaign dashboard | `rebirth-campaign-dashboard.png` |
+| Campaign dashboard | `rebirth-campaign-dashboard.png`, `rebirth-campaign-font-1.0.png`, `rebirth-campaign-font-1.3.png`, `rebirth-campaign-font-2.0.png` |
 | Relationships | `player-first-companion-relationship.png`, `player-first-reopened-companion.png` |
 | Forms and dialogs | `player-first-health-dialog.png`, `player-first-advancement-preview.png`, `rebirth-campaign-npc-after-restart.png` |
 
 Additional captures use font scales 1.3 and 2.0 at 1080 × 2400 pixels / 432 dpi
-(400dp width) for the character sheet, gameplay actions and spellbook. Native
+(400dp width) for the character sheet, gameplay actions, spellbook, campaign-item
+inventory and campaign journal. The inventory and journal visits are read-only;
+they return to the same character sheet and recheck its health. Native
 assertions require an on-screen 48dp Roll dice target and access to all six flat
 character sections. Existing acceptance retains landscape, keyboard, legacy
 armor, same-key update, large archive, duplicate, stale and rollback checks.
