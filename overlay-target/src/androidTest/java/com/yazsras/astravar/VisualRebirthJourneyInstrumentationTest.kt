@@ -155,6 +155,17 @@ class VisualRebirthJourneyInstrumentationTest {
                     ui.selectSection(product, section)
                 }
             }
+        } catch (error: Throwable) {
+            // Preserve the exact failing density/font/viewport before cleanup can
+            // recreate the activity and make its later failure XML misleading.
+            runCatching { device.takeScreenshot(File(files, "rebirth-failure-before-display-reset.png")) }
+            runCatching { device.dumpWindowHierarchy(File(files, "rebirth-failure-before-display-reset.xml")) }
+            runCatching {
+                File(files, "rebirth-failure-before-display-reset.txt").writeText(
+                    device.executeShellCommand("wm size") + device.executeShellCommand("wm density") +
+                        "font_scale=" + device.executeShellCommand("settings get system font_scale"))
+            }
+            throw error
         } finally {
             device.executeShellCommand("settings put system font_scale 1.0")
             device.executeShellCommand("wm density reset")

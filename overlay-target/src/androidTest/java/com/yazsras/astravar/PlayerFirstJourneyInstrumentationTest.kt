@@ -1,6 +1,7 @@
 package com.yazsras.astravar
 
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.*
@@ -248,6 +249,13 @@ class PlayerFirstJourneyInstrumentationTest {
         capture("companion-direct-combat")
         tap("Damage / healing")
         enter("Damage or healing amount", "2")
+        // Native keyboard focus navigation leaves the entered amount intact and
+        // stops the edit caret blinking during the unchanged full-frame capture.
+        assertTrue("Move focus once without applying damage or healing", device.pressKeyCode(KeyEvent.KEYCODE_TAB))
+        ui.snapshot(By.clazz("android.widget.EditText").text("2").pkg(product),
+            "Entered healing amount remains 2 after focus leaves the field", refreshCache = true) { field ->
+            true.takeIf { !field.isFocused && field.text == "2" }
+        }
         ui.captureStableDialog(File(files, "player-first-health-dialog.png"), product, "Hit points",
             listOf(By.text("Heal").pkg(product), By.text("Take damage").pkg(product)))
         tap("Heal")

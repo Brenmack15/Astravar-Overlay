@@ -321,7 +321,7 @@ internal class ObservedUi(private val device: UiDevice) {
         val minimumTap = (48 * InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density).toInt()
         var lastObserved = "No section strip observed"
         for (direction in listOf(Direction.LEFT, Direction.RIGHT)) {
-            repeat(8) {
+            repeat(8) discovery@ {
                 check(SystemClock.uptimeMillis() < deadline) { "Section $label exceeded its discovery budget: $lastObserved" }
                 clearObservationCache()
                 val strip = sectionStrip()
@@ -332,6 +332,35 @@ internal class ObservedUi(private val device: UiDevice) {
                     val viewport = Rect(strip.visibleBounds)
                     val state = matchingNodes(strip, labelPattern).firstNotNullOfOrNull(::primaryTabState)
                     lastObserved = "strip=$viewport; $label=$state; direction=$direction"
+                    val visibleHeight = minOf(viewport.height(), state?.bounds?.height() ?: viewport.height())
+                    if (visibleHeight < minimumTap) {
+                        // A visible strip may still be clipped under the fixed
+                        // app header. Reveal it in its observed vertical parent
+                        // before testing the full 48dp tab or scrolling sideways.
+                        var ancestor = strip.parent
+                        var vertical: Rect? = null
+                        repeat(12) ancestry@ {
+                            val node = ancestor ?: return@ancestry
+                            if (vertical == null && node.className == "android.widget.ScrollView") {
+                                vertical = Rect(node.visibleBounds)
+                            }
+                            ancestor = node.parent
+                        }
+                        val parent = vertical
+                        val clippedAtTop = parent != null && viewport.top <= parent.top
+                        val clippedAtBottom = parent != null && viewport.bottom >= parent.bottom
+                        if (parent != null && !parent.isEmpty && (clippedAtTop || clippedAtBottom)) {
+                            val distance = minimumTap - visibleHeight + minimumTap / 2
+                            val start = parent.centerY()
+                            val end = (start + if (clippedAtTop) distance else -distance)
+                                .coerceIn(parent.top + 4, parent.bottom - 5)
+                            lastObserved += "; reveal clipped strip inside vertical parent=$parent"
+                            assertTrue("Reveal the full $label touch target with one observed vertical swipe",
+                                device.swipe(parent.centerX(), start, parent.centerX(), end, 20))
+                            device.waitForIdle(1_000)
+                            return@discovery
+                        }
+                    }
                     if (state != null && state.enabled && viewport.contains(state.bounds) &&
                         state.bounds.width() >= minimumTap && state.bounds.height() >= minimumTap) {
                         if (!state.selected) {
