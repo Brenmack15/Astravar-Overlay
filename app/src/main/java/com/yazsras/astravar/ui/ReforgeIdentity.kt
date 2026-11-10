@@ -52,7 +52,7 @@ import kotlinx.serialization.json.Json
     if (character.notes.isNotBlank()) PlayerDisclosure("Character notes") { ReforgeRichText(character.notes) }
 }
 
-@Composable private fun ReforgePortrait(reference: String?) {
+@Composable internal fun ReforgePortrait(reference: String?, modifier: Modifier = Modifier.size(72.dp)) {
     val context = LocalContext.current
     val bitmap by produceState<ImageBitmap?>(null, reference) {
         value = withContext(Dispatchers.IO) {
@@ -78,8 +78,10 @@ import kotlinx.serialization.json.Json
             }.getOrNull()
         }
     }
-    if (bitmap != null) Image(bitmap!!, contentDescription = "Character portrait", modifier = Modifier.size(72.dp), contentScale = ContentScale.Crop)
-    else ArcaneIcon("Emblem", Modifier.size(56.dp), RebuildPalette.Ice)
+    if (bitmap != null) Image(bitmap!!, contentDescription = "Character portrait", modifier = modifier, contentScale = ContentScale.Crop)
+    else Box(modifier, contentAlignment = androidx.compose.ui.Alignment.Center) {
+        ArcaneIcon("Emblem", Modifier.fillMaxSize().padding(6.dp), RebuildPalette.GoldBright)
+    }
 }
 
 @Composable internal fun ReforgeIdentityEditor(latestCharacter: ReforgeCharacter, onDismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit) {

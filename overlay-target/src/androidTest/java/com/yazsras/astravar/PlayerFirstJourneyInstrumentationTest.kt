@@ -1,6 +1,7 @@
 package com.yazsras.astravar
 
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.*
@@ -36,7 +37,7 @@ class PlayerFirstJourneyInstrumentationTest {
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
         ui.awaitMainAfterSavedDialogs(product)
     }
-    private fun stat(prefix: String) = ui.bounds(By.descStartsWith(prefix).pkg(product), "calculated $prefix", refreshCache = true)
+    private fun stat(prefix: String) = ui.descriptionBounds(prefix, product)
 
     @Test fun characterAdvancementReviewedEquipmentCompanionAndRestart() {
         assertEquals("Fictional destructive fixtures require an emulator", "1", device.executeShellCommand("getprop ro.kernel.qemu").trim())
@@ -58,6 +59,11 @@ class PlayerFirstJourneyInstrumentationTest {
         find("CI Native Hero")
         stat("STR 8")
         capture("created-sheet")
+        tap("Switch character")
+        find("Characters & companions")
+        ui.captureStableDialog(File(files, "player-first-character-selection.png"), product,
+            "Characters & companions", listOf(By.text("CI Native Hero").pkg(product)))
+        tap("Close")
         tap("Character setup")
         enter("Name", "CI Native Hero Revised")
         tap("Save character")
@@ -68,7 +74,9 @@ class PlayerFirstJourneyInstrumentationTest {
         find("Level 4 → 5\nProficiency +2 → +3\nMaximum HP 30 → 37\nCurrent HP 24 → 31")
         capture("advancement-preview")
         tap("Confirm level 5")
-        find("Level 5 · Proficiency +3")
+        // The level-up action is below the sheet; its saved level is in the
+        // header above it. Search that direction within the original deadline.
+        ui.textBounds("Level 5 · Proficiency +3", product, scrollAttempts = 18, firstDirection = Direction.UP)
         stat("HP 31 / 37")
         restart()
         ui.ensurePrimaryTab(product, "Character")
@@ -84,7 +92,15 @@ class PlayerFirstJourneyInstrumentationTest {
         tap("Close")
 
         ui.ensurePrimaryTab(product, "Inventory")
-        tap("My gear")
+        // Verify the already selected route, then exercise a real tab round trip
+        // before any inventory write. Selected Compose tabs omit the click action.
+        ui.selectSection(product, "My gear")
+        find("Add item")
+        ui.selectSection(product, "Campaign items")
+        find("Equipment, treasures & discoveries")
+        ui.selectSection(product, "Campaign items")
+        ui.selectSection(product, "My gear")
+        find("Add item")
         tap("Add item")
         enter("Item name", "CI Native Strength Band")
         tap("Magic & mechanical effects")
@@ -96,6 +112,8 @@ class PlayerFirstJourneyInstrumentationTest {
         tap("Save reviewed item")
         find("CI Native Strength Band")
         find("Carried · Quantity 1")
+        ui.captureStablePage(File(files, "player-first-inventory.png"), product, "Inventory",
+            listOf(By.text("CI Native Strength Band").pkg(product), By.text("Carried · Quantity 1").pkg(product)))
         tap("Equip")
         find("STR: 8 → 19")
         capture("equipment-review")
@@ -108,7 +126,7 @@ class PlayerFirstJourneyInstrumentationTest {
         ui.ensurePrimaryTab(product, "Character")
         stat("STR 19")
         ui.ensurePrimaryTab(product, "Inventory")
-        tap("My gear")
+        ui.selectSection(product, "My gear")
         find("CI Native Strength Band")
         tap("Unequip")
         find("STR: 19 → 8")
@@ -116,7 +134,7 @@ class PlayerFirstJourneyInstrumentationTest {
         find("Carried · Quantity 1")
         restart()
         ui.ensurePrimaryTab(product, "Inventory")
-        tap("My gear")
+        ui.selectSection(product, "My gear")
         find("CI Native Strength Band")
         find("Carried · Quantity 1")
         ui.ensurePrimaryTab(product, "Character")
@@ -142,7 +160,7 @@ class PlayerFirstJourneyInstrumentationTest {
             putString("stream", "\nCHECKPOINT: native manual roll saved without leaving the sheet; explicit history opens the saved formula, face and modifier\n")
         })
 
-        tap("Spells")
+        ui.selectSection(product, "Spells")
         tap("Add spell")
         enter("Name", "CI Native Barrier")
         enter("Level (0 = cantrip)", "1")
@@ -154,7 +172,7 @@ class PlayerFirstJourneyInstrumentationTest {
         tap("Concentration")
         tap("Save spell")
         find("CI Native Signal")
-        tap("Cantrips")
+        ui.selectSection(product, "Cantrips")
         enter("Find a spell by name", "signal")
         find("CI Native Signal")
         assertFalse(device.hasObject(By.text("CI Native Barrier").pkg(product)))
@@ -166,7 +184,7 @@ class PlayerFirstJourneyInstrumentationTest {
         find("Saved on this device")
         restart()
         ui.ensurePrimaryTab(product, "Character")
-        tap("Combat")
+        ui.selectSection(product, "Combat")
         find("CI Native Signal")
         capture("spellbook-concentration-after-restart")
         instrumentation.sendStatus(0, Bundle().apply {
@@ -182,29 +200,32 @@ class PlayerFirstJourneyInstrumentationTest {
         enter("Current HP (blank = unknown)", "4")
         enter("Maximum HP (blank = unknown)", "12")
         tap("Save character status")
-        find("HP 4 / 12")
+        find("4 / 12")
         capture("generic-companion")
-        tap("Relationships")
+        ui.expandDisclosure(product, "Relationships")
         tap("Add relationship")
         // The initial target type is Character, verified by the typed target label.
         tap("Choose an existing record")
         tap("CI Native Hero Revised · Character")
         enter("Relationship to this record", "Fictional native journey partner")
         tap("Save relationship")
-        find("character profile · Fictional native journey partner")
+        find("CI Native Hero Revised")
+        find("Fictional native journey partner")
         capture("companion-relationship")
         restart()
         ui.ensurePrimaryTab(product, "Companions")
         // Saved navigation may retain the member; return to the roster before finding it again.
         if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
         tap("CI Native Ally")
-        find("HP 4 / 12")
-        tap("Relationships")
-        find("character profile · Fictional native journey partner")
+        find("4 / 12")
+        ui.expandDisclosure(product, "Relationships")
+        find("CI Native Hero Revised")
+        find("Fictional native journey partner")
         tap("Edit relationship")
         enter("Relationship to this record", "Fictional native verified partner")
         tap("Save relationship")
-        find("character profile · Fictional native verified partner")
+        find("CI Native Hero Revised")
+        find("Fictional native verified partner")
         capture("reopened-companion")
         tap("Remove relationship")
         // The confirmation title and action share text; select the actual final control.
@@ -230,13 +251,22 @@ class PlayerFirstJourneyInstrumentationTest {
         capture("companion-direct-combat")
         tap("Damage / healing")
         enter("Damage or healing amount", "2")
+        // Native keyboard focus navigation leaves the entered amount intact and
+        // stops the edit caret blinking during the unchanged full-frame capture.
+        assertTrue("Move focus once without applying damage or healing", device.pressKeyCode(KeyEvent.KEYCODE_TAB))
+        ui.snapshot(By.clazz("android.widget.EditText").text("2").pkg(product),
+            "Entered healing amount remains 2 after focus leaves the field", refreshCache = true) { field ->
+            true.takeIf { !field.isFocused && field.text == "2" }
+        }
+        ui.captureStableDialog(File(files, "player-first-health-dialog.png"), product, "Hit points",
+            listOf(By.text("Heal").pkg(product), By.text("Take damage").pkg(product)))
         tap("Heal")
         find("Saved on this device")
         stat("HP 6 / 12")
         // Compose returns to the roster in the same window. Verify the destination rather than a window change.
         device.pressBack()
         find("Go to combat")
-        find("HP 4 / 12")
+        find("4 / 12")
 
         restart()
         ui.ensurePrimaryTab(product, "Character")

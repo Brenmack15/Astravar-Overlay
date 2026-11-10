@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -36,6 +37,7 @@ import com.yazsras.astravar.data.CampaignLedgerRepository
 import com.yazsras.astravar.data.CampaignRecordsRepository
 import com.yazsras.astravar.data.CharacterAbility
 import com.yazsras.astravar.data.CharacterProfile
+import com.yazsras.astravar.data.PartySheetData
 import com.yazsras.astravar.rules.Campaign
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -52,8 +54,9 @@ private fun optionalNumber(text: String, label: String): Int? = text.trim().take
 /** The manual character record remains separate from the accepted weapon engine. */
 @Composable
 fun CharacterOverviewV2(repository: CampaignLedgerRepository, campaign: Campaign? = null,
-    profileId: String = "local-player", onEditorVisibilityChanged: (Boolean) -> Unit = {}) {
+    profileId: String = "local-player", companionSheet: PartySheetData? = null, onEditorVisibilityChanged: (Boolean) -> Unit = {}) {
     val records = repository.records
+    val expandedText = LocalDensity.current.fontScale >= 1.5f
     val profiles by records.characterProfiles.collectAsState(initial = emptyList())
     val abilities by records.characterAbilities.collectAsState(initial = emptyList())
     val profile = profiles.firstOrNull { it.id == profileId }
@@ -83,6 +86,51 @@ fun CharacterOverviewV2(repository: CampaignLedgerRepository, campaign: Campaign
     }
     SideEffect { onEditorVisibilityChanged(profileEditorOpen || abilityEditorKey != null) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (companionSheet != null) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                PartyPortrait(companionSheet.portraitBase64, name, 76.dp)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(name, style = MaterialTheme.typography.headlineSmall, fontFamily = DisplayFace,
+                        color = RebuildPalette.Silver, fontWeight = FontWeight.SemiBold)
+                    val identity = listOfNotNull(companionSheet.role.takeIf(String::isNotBlank),
+                        companionSheet.creatureType.takeIf(String::isNotBlank), level?.let { "Level $it" })
+                    if (identity.isNotEmpty()) Text(identity.joinToString(" · "), color = RebuildPalette.Muted,
+                        style = MaterialTheme.typography.bodyMedium)
+                    PlayerTextButton(onClick = { profileSnapshotJson = profile?.let { Json.encodeToString(it) }; profileEditorOpen = true }) { Text("Edit status") }
+                }
+            }
+            Surface(color = RebuildPalette.Elevated, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClickLabel = "Edit hit points") {
+                    profileSnapshotJson = profile?.let { Json.encodeToString(it) }; profileEditorOpen = true
+                }) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("HIT POINTS", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelMedium)
+                            Text(partyHealthLabel(profile?.currentHp, profile?.maximumHp), color = RebuildPalette.Ice,
+                                style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                        }
+                        profile?.temporaryHp?.let { Text("$it temp", color = RebuildPalette.GoldBright,
+                            style = MaterialTheme.typography.titleMedium) }
+                    }
+                    val currentHp = profile?.currentHp
+                    val maximumHp = profile?.maximumHp
+                    if (currentHp != null && maximumHp != null && maximumHp > 0) LinearProgressIndicator(
+                        progress = { (currentHp.toFloat() / maximumHp).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().height(5.dp), color = RebuildPalette.Cyan,
+                        trackColor = RebuildPalette.Outline)
+                }
+            }
+            val statistics = listOf("Armor Class" to (profile?.armorClass?.toString() ?: "Not set"),
+                "Initiative" to (companionSheet.initiative?.let { signedModifier(it) } ?: "Not set"),
+                "Proficiency" to (companionSheet.proficiencyBonus?.let { signedModifier(it) } ?: "Not set"))
+            statistics.chunked(if (expandedText) 1 else 3).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { (label, value) -> CharacterSummaryTile(label, value, Modifier.weight(1f)) }
+                }
+            }
+        } else {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.size(56.dp, 64.dp).clip(CutCornerShape(12.dp)).background(RebuildPalette.Panel),
@@ -115,6 +163,7 @@ fun CharacterOverviewV2(repository: CampaignLedgerRepository, campaign: Campaign
             CharacterSummaryTile(if(profileId == "local-player" || profileId == "remote-stat-test-v1") "Astravar ATK" else "Attack Bonus", signedModifier(confirmedWeapon?.attack), Modifier.weight(1f))
             CharacterSummaryTile("Spell Save DC", confirmedWeapon?.saveDc?.toString() ?: "?", Modifier.weight(1f))
         }
+        }
         // One compact read-only line; independent of the editable character sheet.
         if (confirmedWeapon != null) Text(
             "Weapon profile · Artificer ${confirmedWeapon.level} · INT ${signedModifier(confirmedWeapon.intelligence)} · PB +${confirmedWeapon.proficiency} · DC ${confirmedWeapon.saveDc}",
@@ -125,7 +174,7 @@ fun CharacterOverviewV2(repository: CampaignLedgerRepository, campaign: Campaign
             modifier = Modifier.testTag("character-weapon-conflict"))
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Ability scores", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelLarge)
-            abilityNames.entries.chunked(3).forEach { row ->
+            abilityNames.entries.chunked(if (expandedText) 2 else 3).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     row.forEach { (key, fullName) ->
                         val ability = abilities.firstOrNull { it.profileId == profileId && it.key == key }
@@ -160,7 +209,7 @@ private fun CharacterSummaryTile(label: String, value: String, modifier: Modifie
     Surface(modifier = modifier, color = RebuildPalette.Panel, shape = CutCornerShape(10.dp)) {
         Column(Modifier.padding(horizontal = 6.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(value, fontFamily = InterfaceFace, fontWeight = FontWeight.SemiBold, fontSize = 25.sp,
+            Text(value, fontFamily = InterfaceFace, fontWeight = FontWeight.SemiBold, fontSize = if (value == "Not set") 15.sp else 25.sp,
                 color = RebuildPalette.Gold, textAlign = TextAlign.Center)
             Text(label, color = RebuildPalette.Muted, style = MaterialTheme.typography.labelMedium,
                 textAlign = TextAlign.Center)
@@ -179,12 +228,12 @@ private fun AbilityTile(key: String, label: String, score: Int?, modifierValue: 
             Text(key, color = RebuildPalette.Ice, style = MaterialTheme.typography.labelLarge)
         }
         Surface(color = RebuildPalette.Elevated, shape = RoundedCornerShape(4.dp), modifier = Modifier.fillMaxWidth()) {
-            Text(score?.toString() ?: "?", modifier = Modifier.padding(vertical = 2.dp), color = RebuildPalette.Gold,
-                fontFamily = InterfaceFace, fontSize = 23.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+            Text(score?.toString() ?: "Not set", modifier = Modifier.padding(vertical = 2.dp), color = RebuildPalette.Gold,
+                fontFamily = InterfaceFace, fontSize = if (score == null) 14.sp else 23.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
         }
-        Surface(shape = RoundedCornerShape(50), color = RebuildPalette.Active,
+        if (score != null || modifierValue != null) Surface(shape = RoundedCornerShape(50), color = RebuildPalette.Active,
             border = BorderStroke(.7.dp, RebuildPalette.Cyan.copy(alpha = .5f))) {
-            Text(signedModifier(modifierValue), color = RebuildPalette.Ice, modifier = Modifier.padding(horizontal = 18.dp, vertical = 3.dp),
+            Text(modifierValue?.let { signedModifier(it) } ?: "Not set", color = RebuildPalette.Ice, modifier = Modifier.padding(horizontal = 18.dp, vertical = 3.dp),
                 fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         }
     }

@@ -1,6 +1,13 @@
 package com.yazsras.astravar.ui
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -15,7 +22,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -29,25 +39,28 @@ import androidx.compose.ui.window.DialogProperties
 
 /** Astravar 3.1: calm, legible fantasy UI. Art is a supporting detail, never a control. */
 object RebuildPalette {
-    val Void = Color(0xFF0F0C16)
-    val Canvas = Color(0xFF15121F)
-    val Panel = Color(0xFF1C1829)
-    val Elevated = Color(0xFF252033)
-    val Active = Color(0xFF383046)
-    val Outline = Color(0xFF504558)
-    val Purple = Color(0xFFC7AEDB)
-    val Silver = Color(0xFFF1EDF3)
-    val GoldShadow = Color(0xFF5D4737)
-    val GoldBurnished = Color(0xFFAE8861)
-    val Gold = Color(0xFFD7B486)
-    val GoldBright = Color(0xFFE9CAA0)
-    val GoldGlint = Color(0xFFF6DCB3)
-    val BlueDeep = Color(0xFF363049)
-    val BlueVivid = Color(0xFF6E6087)
-    val BlueAccent = Color(0xFFBD9CD6)
-    val Cyan = Color(0xFF99CEC1)
-    val Ice = Color(0xFFC4E3D9)
-    val Muted = Color(0xFFB5AFBE)
+    val Void = Color(0xFF080F18)
+    val Canvas = Color(0xFF0C1521)
+    val Panel = Color(0xFF142130)
+    val Elevated = Color(0xFF1B2B3D)
+    val Active = Color(0xFF263B50)
+    val Outline = Color(0xFF41556B)
+    val Purple = Color(0xFFC4B2E7)
+    val Silver = Color(0xFFF1F3F5)
+    val GoldShadow = Color(0xFF4B3826)
+    val GoldBurnished = Color(0xFFAC8354)
+    val Gold = Color(0xFFDEBA7E)
+    val GoldBright = Color(0xFFECD1A1)
+    val GoldGlint = Color(0xFFFFE4B5)
+    val BlueDeep = Color(0xFF243D57)
+    val BlueVivid = Color(0xFF437CA7)
+    val BlueAccent = Color(0xFF9ACBFA)
+    val Cyan = Color(0xFF88D7BE)
+    val Ice = Color(0xFFBADEF5)
+    val Muted = Color(0xFFABBAC9)
+    val Health = Color(0xFF88D7BE)
+    val Spell = Color(0xFF9ACBFA)
+    val Danger = Color(0xFFFFA4A4)
 }
 
 object PlayerSpace {
@@ -55,7 +68,7 @@ object PlayerSpace {
     val Gap = 12.dp
     val Screen = 16.dp
     val Touch = 48.dp
-    val Radius = 20.dp
+    val Radius = 10.dp
 }
 
 @Composable fun PlayerCard(
@@ -63,7 +76,7 @@ object PlayerSpace {
     content: @Composable ColumnScope.() -> Unit
 ) {
     val shape = RoundedCornerShape(PlayerSpace.Radius)
-    Column(modifier.fillMaxWidth().clip(shape).background(RebuildPalette.Panel).border(1.dp, RebuildPalette.Outline.copy(alpha = .55f), shape)
+    Column(modifier.fillMaxWidth().clip(shape).background(RebuildPalette.Panel).border(1.dp, RebuildPalette.Outline.copy(alpha = .28f), shape)
         .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
         .padding(padding), verticalArrangement = Arrangement.spacedBy(spacing), content = content)
 }
@@ -71,19 +84,22 @@ object PlayerSpace {
 @Composable fun PlayerEntry(
     title: String, detail: String, icon: String, onClick: () -> Unit, trailing: String? = null
 ) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 72.dp).clip(RoundedCornerShape(14.dp))
-        .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Box(Modifier.size(44.dp).background(RebuildPalette.Active, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-            ArcaneIcon(icon, Modifier.size(24.dp), RebuildPalette.Ice)
+    Column {
+        Row(Modifier.fillMaxWidth().heightIn(min = 68.dp)
+            .clickable(role = Role.Button, onClick = onClick).padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Box(Modifier.size(40.dp).background(RebuildPalette.Gold.copy(alpha = .08f), RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
+                ArcaneIcon(icon, Modifier.size(23.dp), RebuildPalette.Gold)
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (detail.isNotBlank()) Text(detail, color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            if (trailing != null) Text(trailing, color = RebuildPalette.Ice, style = MaterialTheme.typography.labelLarge)
+            Text("›", color = RebuildPalette.Gold, fontSize = 23.sp)
         }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            if (detail.isNotBlank()) Text(detail, color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall,
-                maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
-        if (trailing != null) Text(trailing, color = RebuildPalette.Ice, style = MaterialTheme.typography.labelLarge)
-        Text("›", color = RebuildPalette.Muted, fontSize = 24.sp)
+        HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .35f))
     }
 }
 
@@ -95,16 +111,18 @@ val LocalPlayerToolTitle = staticCompositionLocalOf<String?> { null }
     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
         if (titleInToolbar) Spacer(Modifier.weight(1f))
         else Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.SemiBold)
+            fontWeight = FontWeight.SemiBold, fontFamily = DisplayFace)
         action?.invoke()
     }
 }
 
 @Composable fun PlayerSearch(value: String, onValueChange: (String) -> Unit, placeholder: String) {
     OutlinedTextField(value, onValueChange, singleLine = true, modifier = Modifier.fillMaxWidth(),
-        label = { Text(placeholder) }, shape = RoundedCornerShape(14.dp),
+        label = { Text(placeholder) }, shape = RoundedCornerShape(8.dp),
+        leadingIcon = { ArcaneIcon("Search", tint = RebuildPalette.Muted) },
+        textStyle = MaterialTheme.typography.bodyLarge,
         trailingIcon = { if (value.isNotEmpty()) IconButton(onClick = { onValueChange("") }, modifier = Modifier.semantics { contentDescription = "Clear search" }) { Text("×", style = MaterialTheme.typography.titleLarge) } },
-        colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Color.Transparent,
+        colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = RebuildPalette.Outline.copy(alpha = .5f),
             focusedBorderColor = RebuildPalette.BlueAccent,
             unfocusedContainerColor = RebuildPalette.Elevated, focusedContainerColor = RebuildPalette.Elevated))
 }
@@ -128,24 +146,34 @@ val LocalPlayerDismiss = staticCompositionLocalOf<() -> Unit> { {} }
     actions: @Composable RowScope.() -> Unit = {}, content: @Composable ColumnScope.() -> Unit
 ) {
     var discard by rememberSaveable { mutableStateOf(false) }
+    var titleOverflows by remember(title) { mutableStateOf(false) }
     val close = { if (dismissEnabled) { if (dirty) discard = true else onDismiss() } }
     Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false,
         decorFitsSystemWindows = false)) {
         CompositionLocalProvider(LocalPlayerDismiss provides close) {
             Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(12.dp), contentAlignment = Alignment.Center) {
-                Surface(Modifier.widthIn(max = 600.dp).fillMaxWidth(), shape = RoundedCornerShape(24.dp),
+                Surface(Modifier.widthIn(max = 600.dp).fillMaxWidth(), shape = RoundedCornerShape(14.dp),
                     color = RebuildPalette.Panel, contentColor = MaterialTheme.colorScheme.onSurface, tonalElevation = 0.dp) {
-                    Column(Modifier.heightIn(max = (LocalConfiguration.current.screenHeightDp * .88f).dp)) {
+                    Column(Modifier.heightIn(max = (LocalConfiguration.current.screenHeightDp * .92f).dp)) {
+                        Box(Modifier.fillMaxWidth().height(2.dp).background(Brush.horizontalGradient(listOf(RebuildPalette.Gold, RebuildPalette.Gold.copy(alpha = .06f)))))
                         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp),
                             verticalAlignment = Alignment.CenterVertically) {
-                            Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.SemiBold)
+                            Text(title, Modifier.weight(1f).then(if (titleOverflows) Modifier.clearAndSetSemantics {
+                                contentDescription = title; heading()
+                            } else Modifier.semantics { heading() }), style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold, fontFamily = DisplayFace, maxLines = 2,
+                                overflow = TextOverflow.Ellipsis, onTextLayout = { titleOverflows = it.hasVisualOverflow })
                             PlayerTextButton(onClick = close, enabled = dismissEnabled, modifier = Modifier.heightIn(min = 48.dp)) { Text("Close") }
                         }
+                        HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .4f))
                         key(title) { Box(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(20.dp)) {
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                // Keep long names readable without consuming the fixed header or hiding actions.
+                                if (titleOverflows) Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+                                content()
+                            }
                         } }
-                        FlowRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                        FlowRow(Modifier.fillMaxWidth().background(RebuildPalette.Void.copy(alpha = .45f)).padding(horizontal = 12.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.End) {
                             if (showCancel) PlayerTextButton(onClick = close, enabled = dismissEnabled) { Text("Cancel") }
                             actions()
@@ -183,13 +211,65 @@ val LocalPlayerDismiss = staticCompositionLocalOf<() -> Unit> { {} }
 
 @Composable fun PlayerButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true,
     content: @Composable RowScope.() -> Unit) {
-    androidx.compose.material3.Button(onClick = onClick, modifier = modifier.heightIn(min = 48.dp), enabled = enabled, content = content)
+    androidx.compose.material3.Button(onClick = onClick, modifier = modifier.heightIn(min = 48.dp), enabled = enabled, shape = RoundedCornerShape(8.dp), content = content)
 }
 @Composable fun PlayerOutlinedButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true,
     content: @Composable RowScope.() -> Unit) {
-    androidx.compose.material3.OutlinedButton(onClick = onClick, modifier = modifier.heightIn(min = 48.dp), enabled = enabled, content = content)
+    androidx.compose.material3.OutlinedButton(onClick = onClick, modifier = modifier.heightIn(min = 48.dp), enabled = enabled, shape = RoundedCornerShape(8.dp), content = content)
 }
 @Composable fun PlayerFilterChip(selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier,
     label: @Composable () -> Unit, enabled: Boolean = true) {
     androidx.compose.material3.FilterChip(selected = selected, onClick = onClick, modifier = modifier.heightIn(min = 48.dp), enabled = enabled, label = label)
+}
+
+/** One visible level of section navigation. Horizontal scrolling preserves scaled labels. */
+@Composable fun PlayerTabs(labels: List<String>, selected: String, onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier) {
+    val scroll = rememberScrollState()
+    val direction = LocalLayoutDirection.current
+    val positions = remember(labels) { mutableStateMapOf<String, Pair<Float, Float>>() }
+    var viewport by remember { mutableStateOf<Pair<Float, Float>?>(null) }
+    // Reveal the selected label on this horizontal axis only. A nested filter must
+    // never pull its surrounding character sheet vertically when it first appears.
+    val selectedWidth = positions[selected]?.let { it.second - it.first }
+    val viewportWidth = viewport?.let { it.second - it.first }
+    LaunchedEffect(selected, selectedWidth, viewportWidth, scroll.maxValue, direction) {
+        val bounds = positions[selected]
+        val window = viewport
+        if (bounds != null && window != null) {
+            val delta = when {
+                bounds.second - bounds.first >= window.second - window.first -> bounds.first - window.first
+                bounds.first < window.first -> bounds.first - window.first
+                bounds.second > window.second -> bounds.second - window.second
+                else -> 0f
+            }
+            if (kotlin.math.abs(delta) >= 1f) {
+                val logicalDelta = if (direction == LayoutDirection.Rtl) -delta else delta
+                scroll.scrollTo((scroll.value + logicalDelta.toInt()).coerceIn(0, scroll.maxValue))
+            }
+        }
+    }
+    Column(modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().onGloballyPositioned {
+            val left = it.positionInRoot().x
+            viewport = left to (left + it.size.width)
+        }.horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            labels.forEach { label ->
+                val active = selected == label
+                val tint by animateColorAsState(if (active) RebuildPalette.GoldBright else RebuildPalette.Muted, label = "Section selection")
+                Column(Modifier.width(IntrinsicSize.Max).onGloballyPositioned {
+                    val left = it.positionInRoot().x
+                    positions[label] = left to (left + it.size.width)
+                }.testTag("section-$label").semantics { this.selected = active }
+                    .clickable(role = Role.Tab) { onSelect(label) }.heightIn(min = 48.dp)
+                    .padding(horizontal = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.heightIn(min = 46.dp), contentAlignment = Alignment.Center) {
+                        Text(label, color = tint, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
+                    }
+                    Box(Modifier.fillMaxWidth().height(2.dp).background(if (active) RebuildPalette.Gold else Color.Transparent))
+                }
+            }
+        }
+        HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .45f))
+    }
 }

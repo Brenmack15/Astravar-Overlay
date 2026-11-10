@@ -5,6 +5,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.data.*
 import kotlinx.serialization.encodeToString
@@ -13,7 +16,7 @@ import java.util.UUID
 
 /** Associations use original identities and never move equipment or rewrite source profiles. */
 @Composable
-internal fun PartyRelationshipsV31(repository: CampaignLedgerRepository, memberId: String, memberName: String) {
+internal fun PartyRelationshipsV31(repository: CampaignLedgerRepository, memberId: String, memberName: String, showSummary: Boolean = false) {
     val records = repository.records
     val links by records.links.collectAsState(initial = emptyList())
     val profiles by records.characterProfiles.collectAsState(initial = emptyList())
@@ -49,15 +52,28 @@ internal fun PartyRelationshipsV31(repository: CampaignLedgerRepository, memberI
         else -> null
     } ?: "Unavailable $type"
 
+    if (showSummary && related.isNotEmpty()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Bonds", Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleMedium,
+                color = RebuildPalette.GoldBright)
+            Text("${related.size}", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelLarge)
+        }
+        related.take(3).forEach { link ->
+            val outgoing = link.fromId == memberId && link.fromType in setOf("character-profile", "companion")
+            val type = if (outgoing) link.toType else link.fromType
+            val id = if (outgoing) link.toId else link.fromId
+            PlayerEntry(targetName(type, id), link.label, "Emblem", { open(link) })
+        }
+    }
     PlayerDisclosure("Relationships") {
         if (related.isEmpty()) Text("No relationships recorded. Link a character, ally or campaign record.", color = RebuildPalette.Muted)
         related.forEach { link ->
             val outgoing = link.fromId == memberId && link.fromType in setOf("character-profile", "companion")
             val type = if (outgoing) link.toType else link.fromType
             val id = if (outgoing) link.toId else link.fromId
-            PlayerCard(padding = 12.dp) {
+            Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(targetName(type, id), style = MaterialTheme.typography.titleMedium)
-                Text("${type.replace('-', ' ')} · ${link.label}", color = RebuildPalette.Muted)
+                Text(link.label, color = RebuildPalette.Ice)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     PlayerTextButton(onClick = { open(link) }, enabled = !actions.busy) { Text("Edit relationship") }
                     PlayerTextButton(onClick = { open(link, remove = true) }, enabled = !actions.busy) { Text("Remove relationship") }

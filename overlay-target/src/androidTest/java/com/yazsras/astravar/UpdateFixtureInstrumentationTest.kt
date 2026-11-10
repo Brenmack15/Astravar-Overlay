@@ -56,6 +56,7 @@ class UpdateFixtureInstrumentationTest {
         tap("Save new item")
         assertTrue(device.wait(Until.hasObject(By.text("Item saved").pkg(product)), 15000))
         // The default blank quantity deliberately remains unknown through upgrade.
-        find("Unknown quantity · Unknown")
+        find("Quantity not set")
+        find("Status not set")
     }
 }

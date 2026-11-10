@@ -540,76 +540,10 @@ class CampaignImportInstrumentationTest {
         instrumentation.sendStatus(0, Bundle().apply { putString("stream", "\nCHECKPOINT: separate player consent recovered the verified pre-import snapshot; imported references removed and immutable receipts retained\n") })
     }
 
-    /** The Party section strip is above the identity details captured by the typed sweep. */
+    /** The flat strip exposes every typed Party section through native horizontal scrolling. */
     private fun openTypedPartyTab(label: String) {
-        require(label == "Equipment" || label == "Currency") { "Only the two typed Party tabs use this observation helper." }
-        val deadline = SystemClock.uptimeMillis() + 30_000
-        val selector = By.text(label).pkg(product)
-        val minimumTap = (48 * instrumentation.targetContext.resources.displayMetrics.density).toInt()
-        var previous: Pair<Rect, Rect>? = null
-        var stableSince: Long? = null
-        var lastObserved = "No fresh typed Party tab observation: $label"
-        for (direction in listOf(Direction.UP, Direction.DOWN)) {
-            val searchDeadline = if (direction == Direction.UP) deadline - 15_000 else deadline
-            var scrolls = 0
-            var lastScrollResult: Boolean? = null
-            while (SystemClock.uptimeMillis() < deadline) {
-                var observed: Pair<Rect, Rect>? = null
-                try {
-                    assertTrue("Typed Party tab observations require a fresh accessibility cache",
-                        instrumentation.uiAutomation.clearCache())
-                    val labels = device.findObjects(selector)
-                    val scroll = device.findObjects(By.clazz("android.widget.ScrollView").pkg(product)).singleOrNull()
-                    val viewport = scroll?.let { Rect(it.visibleBounds) }
-                    lastObserved = "direction=$direction scrolls=$scrolls/18; scrollResult=$lastScrollResult; labels=${labels.size}; viewport=$viewport"
-                    if (labels.size == 1 && viewport != null) {
-                        var action: UiObject2? = labels.single()
-                        var depth = 0
-                        while (action != null && !action.isScrollable && depth++ < 12) {
-                            if (action.isClickable) {
-                                val bounds = Rect(action.visibleBounds)
-                                lastObserved += "; enabled=${action.isEnabled}; $label=$bounds"
-                                if (action.isEnabled && bounds.width() >= minimumTap && bounds.height() >= minimumTap &&
-                                    viewport.contains(bounds) && bounds.left >= 0 && bounds.top >= 0 &&
-                                    bounds.right <= device.displayWidth && bounds.bottom <= device.displayHeight) {
-                                    observed = bounds to viewport
-                                }
-                                break
-                            }
-                            action = action.parent
-                        }
-                    }
-                    if (observed != null) {
-                        val now = SystemClock.uptimeMillis()
-                        stableSince = if (previous == observed) stableSince ?: now else now
-                        previous = observed
-                        if (now - requireNotNull(stableSince) >= 1_000) {
-                            val bounds = observed.first
-                            assertTrue("Typed Party tab '$label' must be observed before its original deadline", SystemClock.uptimeMillis() < deadline)
-                            assertTrue("Dispatch the observed typed Party tab '$label' once", device.click(bounds.centerX(), bounds.centerY()))
-                            val remaining = deadline - SystemClock.uptimeMillis()
-                            if (remaining > 0) device.waitForIdle(minOf(1_000L, remaining))
-                            return
-                        }
-                    } else {
-                        previous = null; stableSince = null
-                        if (SystemClock.uptimeMillis() >= searchDeadline || scrolls >= 18 || SystemClock.uptimeMillis() >= deadline) break
-                        if (scroll != null && scroll.isScrollable) {
-                            scrolls++
-                            // False can mean that no accessibility event arrived;
-                            // it is diagnostic and never establishes a page edge.
-                            lastScrollResult = scroll.scroll(direction, .6f)
-                        }
-                    }
-                } catch (_: StaleObjectException) {
-                    previous = null; stableSince = null
-                    lastObserved = "Party window changed during typed Party tab observation or read-only scroll"
-                }
-                val remaining = deadline - SystemClock.uptimeMillis()
-                if (remaining > 0) SystemClock.sleep(minOf(100L, remaining))
-            }
-        }
-        error("Missing enabled typed Party tab '$label' within its original 30s budget; $lastObserved")
+        require(label == "Equipment" || label == "Currency")
+        ui.selectSection(product, label)
     }
 
     /** Read-only header reacquisition after the single fictional Owl navigation. */
@@ -676,14 +610,23 @@ class CampaignImportInstrumentationTest {
         require(label in listOf("Armor source references", "Party source dossiers", "Inventory source archive")) {
             "Only the three exact typed source entry points use this observation helper."
         }
+        when (label) {
+            "Party source dossiers" -> tap("Sources & history")
+            "Inventory source archive" -> tap("Inventory records & backup")
+        }
         val deadline = SystemClock.uptimeMillis() + 30_000
         val selector = By.text(label).pkg(product)
         val minimumTap = (48 * instrumentation.targetContext.resources.displayMetrics.density).toInt()
         var previous: Pair<Rect, Rect>? = null
         var stableSince: Long? = null
         var lastObserved = "No fresh typed source entry observation: $label"
-        for (direction in listOf(Direction.UP, Direction.DOWN)) {
-            val searchDeadline = if (direction == Direction.UP) deadline - 15_000 else deadline
+        // Party/inventory entries are directly below the disclosure just opened.
+        // Reveal that content first; searching upward spent the stability budget
+        // travelling away from the target and back. Armor keeps its original order.
+        val directions = if (label == "Armor source references") listOf(Direction.UP, Direction.DOWN)
+            else listOf(Direction.DOWN, Direction.UP)
+        for ((leg, direction) in directions.withIndex()) {
+            val searchDeadline = if (leg == 0) deadline - 15_000 else deadline
             var scrolls = 0
             var lastScrollResult: Boolean? = null
             while (SystemClock.uptimeMillis() < searchDeadline) {
@@ -797,16 +740,16 @@ class CampaignImportInstrumentationTest {
         ui.ensurePrimaryTab(product, "Companions")
         tap("Fictional Mapped Operator")
         find("Fictional Mapped Operator")
-        if (!device.hasObject(By.text("Fictional archival operator").pkg(product))) tap("Identity & progression")
+        ui.expandDisclosure(product, "Identity & progression")
         captureMapped("party", "Companions", "Class / role", "Fictional archival operator")
         openTypedPartyTab("Equipment")
-        captureMapped("equipment", "Companions", "Fictional Mapped Lens", "Carried · quantity unknown")
+        captureMapped("equipment", "Companions", "Fictional Mapped Lens", "Carried", "Unknown")
         openTypedPartyTab("Currency")
         captureMapped("currency", "Companions", "Fictional Mapped Purse", "? cp · 2 sp · 7 gp · ? ep · ? pp")
         tap("‹ Party")
         tap("Fictional Mapped Owl")
         observeMappedOwlHeader()
-        if (!device.hasObject(By.text("Fictional archival owl").pkg(product))) tap("Identity & progression")
+        ui.expandDisclosure(product, "Identity & progression")
         captureMapped("companion", "Companions", "Class / role", "Fictional archival owl")
         openMappedSourceEntry("Party source dossiers")
         find("1 of 1 references")
@@ -815,10 +758,10 @@ class CampaignImportInstrumentationTest {
 
         campaignEntry("Inventory")
         tap("Fictional Mapped Lens")
-        captureMapped("inventory", "Inventory", "Unknown quantity · Carried", "Fictional lens description preserved.", dialogTitle = "Fictional Mapped Lens")
+        captureMapped("inventory", "Inventory", "Quantity not set", "Carried", "Fictional lens description preserved.", dialogTitle = "Fictional Mapped Lens")
         // Item details open this section by default; toggling would hide the
         // original property records immediately before their readback checks.
-        find("Properties & mechanics")
+        find("Properties")
         find("Fictional optical property")
         find("Fictional optical note; no automatic bonus.")
         tap("Close")

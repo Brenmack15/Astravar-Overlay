@@ -1,6 +1,10 @@
 package com.yazsras.astravar.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
@@ -58,17 +62,25 @@ import kotlinx.coroutines.withContext
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PlayerHeading("Search everything")
         PlayerSearch(query, { query = it.take(300) }, "Items, people, places, spells…")
-        Text(if (query.isBlank()) "Search ${documents.size} local records" else "${hits.size} matches · local records",
+        Text(if (query.isBlank()) "Search ${documents.size} saved entries" else "${hits.size} matches",
             color = RebuildPalette.Muted, style = MaterialTheme.typography.labelLarge)
         if (query.isBlank()) Text("Search a name or combine words. Your campaign stays on this device.", color = RebuildPalette.Muted)
         if (query.isNotBlank() && hits.isEmpty()) PlayerEmpty("No matching records", "Try fewer words or a different name.", "History")
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
             items(hits, key = { "${it.document.kind}:${it.document.id}" }) { hit ->
-                PlayerCard(onClick = { selectedKey = "${hit.document.kind}:${hit.document.id}" }) {
-                    Text(hit.document.kind, color = RebuildPalette.Ice, style = MaterialTheme.typography.labelSmall)
-                    Text(hit.document.title, style = MaterialTheme.typography.titleMedium)
-                    // Rich preview preserves mention labels and never launches executable markup.
-                    ReforgeRichText(hit.excerpt)
+                Column(Modifier.fillMaxWidth().clickable(role = Role.Button) { selectedKey = "${hit.document.kind}:${hit.document.id}" }
+                    .padding(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ArcaneIcon(when (hit.document.kind) { "Item", "Equipment definition" -> "Bag"; "Spell" -> "Spells"; "Location" -> "Location"; "Character", "Character workspace" -> "People"; else -> "Journal" }, tint = RebuildPalette.Gold)
+                        Column(Modifier.weight(1f)) {
+                            Text(hit.document.kind, color = RebuildPalette.Ice, style = MaterialTheme.typography.labelSmall)
+                            Text(hit.document.title, style = MaterialTheme.typography.titleMedium)
+                        }
+                        Text("›", color = RebuildPalette.Gold, style = MaterialTheme.typography.titleLarge)
+                    }
+                    Text(remember(hit.excerpt) { reforgeSearchSnippet(hit.excerpt) }, color = RebuildPalette.Muted, style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .4f))
                 }
             }
         }
@@ -81,4 +93,13 @@ import kotlinx.coroutines.withContext
             })
         }
     }
+}
+
+/** Display-only excerpt. Keep imported markup intact in storage and show readable labels here. */
+internal fun reforgeSearchSnippet(raw: String): String {
+    val normalized = RecordPresentation.normalize(raw)
+    val links = Regex("""!?\[([^\]]*)]\([^)]+\)""").replace(normalized) { it.groupValues[1] }
+    return links.replace(Regex("""(?m)^\s{0,3}(?:#{1,6}\s+|>\s*|[-*+]\s+)"""), "")
+        .replace("**", "").replace("__", "").replace("`", "")
+        .replace(Regex("""\s+"""), " ").trim()
 }

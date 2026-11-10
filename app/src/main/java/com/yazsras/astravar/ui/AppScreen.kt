@@ -191,7 +191,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                                 openReferences={tab="Campaign";campaignPage="Reference Library"}) {tab="Campaign";campaignPage="Inventory"}
                         "Campaign" -> {
                             val page=campaignPage
-                            if(page==null) RebuildCampaignHub {campaignPage=it}
+                            if(page==null) RebuildCampaignHub(app.campaignLedger) {campaignPage=it}
                             else Column(Modifier.fillMaxSize()) {
                                 Row(Modifier.fillMaxWidth().padding(horizontal=8.dp),verticalAlignment=Alignment.CenterVertically) {
                                     PlayerTextButton(onClick={campaignPage=null}) {Text("‹ Campaign")}
@@ -206,7 +206,11 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                                         "Eek" -> EekPageV2(app.campaignLedger)
                                         "Reference Library" -> CampaignReferenceLibraryV21(app.campaignLedger)
                                         "Campaign import" -> CampaignArchiveImportV21(app.campaignLedger)
-                                        else -> ConnectionsPageV2(app.campaignLedger)
+                                        else -> when {
+                                            page.startsWith("Connections:") -> ConnectionsPageV2(app.campaignLedger, initialEntityId = page.removePrefix("Connections:"))
+                                            page.startsWith("Inventions:") -> InventionsPageV2(app.campaignLedger, initialProjectId = page.removePrefix("Inventions:"))
+                                            else -> ConnectionsPageV2(app.campaignLedger)
+                                        }
                                     }
                                 }}
                             }

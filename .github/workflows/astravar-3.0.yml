@@ -28,7 +28,7 @@ jobs:
       - name: Authenticated bridge protocol regression
         run: node --test backend/owner-bridge/*.test.mjs
       - name: Install pinned Android build tools
-        timeout-minutes: 8
+        timeout-minutes: 9
         run: |
           export ANDROID_HOME="$RUNNER_TEMP/astravar-30-sdk"
           mkdir -p "$ANDROID_HOME/cmdline-tools"
@@ -37,7 +37,7 @@ jobs:
           unzip -q "$RUNNER_TEMP/astravar-30-sdk.zip" -d "$ANDROID_HOME/cmdline-tools"
           mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/19.0"
           export PATH="$ANDROID_HOME/cmdline-tools/19.0/bin:$ANDROID_HOME/platform-tools:$PATH"
-          printf 'y\n%.0s' {1..100} | timeout -k 5s 60s sdkmanager --licenses >/dev/null
+          printf 'y\n%.0s' {1..100} | timeout -k 5s 120s sdkmanager --licenses >/dev/null
           timeout -k 10s 300s sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
@@ -77,7 +77,7 @@ jobs:
       - name: Inspect actual QA package
         run: |
           mkdir -p validation
-          python3 scripts/reforge_inspect_apk.py app/build/outputs/apk/debug/app-debug.apk --sdk "$ANDROID_HOME" --output validation/reforge-debug-package.json
+          python3 scripts/reforge_inspect_apk.py app/build/outputs/apk/debug/app-debug.apk --sdk "$ANDROID_HOME" --version-code 49 --version-name 3.2.0-rc1 --output validation/reforge-debug-package.json
           printf '%s\n' 'DEBUG QA ARTIFACT. This is not an owner-signed in-place update. No production release, signing rotation or physical phone installation occurred.' > validation/QA-ONLY.txt
       - name: Index executed evidence even on failure
         if: always()

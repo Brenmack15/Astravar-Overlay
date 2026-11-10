@@ -1,6 +1,10 @@
 package com.yazsras.astravar.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -21,28 +25,33 @@ import java.util.UUID
     var quantityId by rememberSaveable(memberId) { mutableStateOf<String?>(null) }
     var exchangeOpen by rememberSaveable(memberId) { mutableStateOf(false) }
     PlayerHeading("Equipment")
-    Text("One persistent inventory item keeps its identity when given, taken, equipped, installed or stored. Moving an item never duplicates it or assumes a quantity.",
-        color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+    Text("${held.size} held items · choose an item to equip or transfer it", color = RebuildPalette.Muted,
+        style = MaterialTheme.typography.bodyMedium)
     if (profiles.none { it.id == memberId }) Text("Save this character's sourced status before assigning equipment.", color = RebuildPalette.Ice)
     PlayerButton(onClick = { itemId = null; moveOpen = true }, enabled = profiles.any { it.id == memberId }) { Text("Give / take / move item") }
     PlayerOutlinedButton(onClick = { exchangeOpen = true }, enabled = profiles.any { it.id == memberId }) { Text("Item & currency exchange") }
     PlayerTextButton(onClick = openInventory) { Text("Open full inventory") }
-    if (held.isEmpty()) PlayerEmpty("No confirmed held items", "Older item owner notes remain in Inventory. Assigning an existing item records its structured possession without creating another copy.")
+    if (held.isEmpty()) PlayerEmpty("No confirmed held items", "Choose an existing inventory item to assign it to this companion.")
     held.forEach { placement ->
         val item = items.firstOrNull { it.id == placement.itemId }
-        PlayerCard(onClick = { itemId = placement.itemId; moveOpen = true }) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                LedgerIcon(item?.imageBase64, Modifier.size(48.dp), "${item?.title ?: "Inventory item"} artwork")
+        Column(Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 80.dp).clickable(role = Role.Button) { itemId = placement.itemId; moveOpen = true }
+                .padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (item != null) LedgerCategoryArtwork(item, Modifier.size(44.dp))
+                else ArcaneIcon("Core", Modifier.size(44.dp), RebuildPalette.Muted)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(item?.title ?: "Item not in current inventory view", style = MaterialTheme.typography.titleMedium)
-                    Text("${placement.state} · quantity ${item?.quantity ?: "unknown"}", color = RebuildPalette.Ice)
-                    placement.containerItemId?.let { id -> Text("Container: ${items.firstOrNull { it.id == id }?.title ?: id}", color = RebuildPalette.Muted) }
-                    placement.installedProjectId?.let { Text("Installed project: $it", color = RebuildPalette.Muted) }
-                    Text("Item revision ${item?.revision ?: "?"} · placement ${placement.revision}", color = RebuildPalette.Muted,
-                        style = MaterialTheme.typography.bodySmall)
+                    Text(item?.title ?: "Item not in current inventory view", style = MaterialTheme.typography.titleMedium,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(placement.state, color = if (placement.state == "Equipped") RebuildPalette.Ice else RebuildPalette.Muted)
+                    placement.containerItemId?.let { id -> Text("In ${items.firstOrNull { it.id == id }?.title ?: "saved container"}", color = RebuildPalette.Muted,
+                        style = MaterialTheme.typography.bodySmall) }
+                    if (placement.installedProjectId != null) Text("Attached to an invention", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
                 }
+                Text(item?.quantity?.let { "×$it" } ?: "Unknown", color = RebuildPalette.Silver, style = MaterialTheme.typography.bodyMedium)
+                Text("›", color = RebuildPalette.Muted, style = MaterialTheme.typography.titleLarge)
             }
             if (item != null) PlayerTextButton(onClick = { quantityId = item.id }) { Text("Record gained / spent quantity") }
+            HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .4f))
         }
     }
     if (exchangeOpen) PartyExchangeV21(repository, memberId, onDismiss = { exchangeOpen = false })
@@ -50,7 +59,7 @@ import java.util.UUID
     if (moveOpen) PartyEquipmentMoveV2(repository, memberId, itemId, onDismiss = { moveOpen = false })
 }
 
-@Composable private fun PartyEquipmentMoveV2(repository: CampaignLedgerRepository, defaultHolder: String,
+@Composable internal fun PartyEquipmentMoveV2(repository: CampaignLedgerRepository, defaultHolder: String,
     initialItemId: String?, onDismiss: () -> Unit) {
     val items by repository.items.collectAsState(initial = emptyList())
     val placements by repository.party.placements.collectAsState(initial = emptyList())
@@ -113,8 +122,14 @@ import java.util.UUID
             if (filtered.size > 80) Text("Refine the search to show more matching items.", color = RebuildPalette.Muted)
         } else {
             Text(snapshot.title, style = MaterialTheme.typography.titleLarge)
-            Text("Current holder: ${partyMemberName(placementSnapshot?.holderProfileId, profiles)}\nCurrent state: ${placementSnapshot?.state ?: snapshot.itemState}\nQuantity: ${snapshot.quantity ?: "unknown"} · item ID: ${snapshot.id}",
-                color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                LedgerCategoryArtwork(snapshot, Modifier.size(48.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(partyMemberName(placementSnapshot?.holderProfileId, profiles), style = MaterialTheme.typography.titleMedium)
+                    Text("${placementSnapshot?.state ?: snapshot.itemState} · quantity ${snapshot.quantity ?: "unknown"}",
+                        color = RebuildPalette.Muted, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
             if (stale) Text("This item or its possession changed. Close and reopen to review the latest revision.", color = MaterialTheme.colorScheme.error)
             PartySelection("Destination holder", partyMemberName(holder.takeIf(String::isNotBlank), profiles),
                 listOf("" to "Unknown holder") + profiles.map { it.id to it.name.ifBlank { partyMemberName(it.id, profiles) } }) { holder = it }
@@ -129,8 +144,12 @@ import java.util.UUID
             Text("Review: ${snapshot.title} → ${partyMemberName(holder.takeIf(String::isNotBlank), profiles)} · $state${container?.let { " · in ${items.firstOrNull { item -> item.id == it }?.title ?: it}" }.orEmpty()}${project?.let { " · attached to ${projects.firstOrNull { row -> row.id == it }?.title ?: it}" }.orEmpty()}.",
                 color = RebuildPalette.Ice)
             Field("Confirmed transfer / equipment event source", source, { source = it }, single = false, enabled = !actions.busy)
-            Text("The entire existing item entry moves. Unknown quantities stay unknown. Containers cannot cycle; container contents must be reconciled before changing their holder. A revision conflict saves nothing.",
-                color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+            PlayerDisclosure("Move details & safeguards") {
+                Text("This moves the entire item entry. Quantity and history stay intact. Container contents must be reconciled before changing their holder.",
+                    color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                Text("Item ${snapshot.id} · revision ${snapshot.revision}", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                Text("A revision conflict saves nothing.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+            }
             PlayerTextButton(onClick = { snapshotItemJson = null; snapshotPlacementJson = null; selected = null }) { Text("Choose a different item") }
         }
         LocalRecordStatus(actions.message, actions.busy)

@@ -125,12 +125,14 @@ internal class ObservedUi(private val device: UiDevice) {
         return changed
     }
 
-    fun textBounds(text: String, packageName: String, scrollAttempts: Int = 12, interactive: Boolean = false, preferLast: Boolean = false): Rect {
+    fun textBounds(text: String, packageName: String, scrollAttempts: Int = 12, interactive: Boolean = false, preferLast: Boolean = false, firstDirection: Direction = Direction.DOWN): Rect {
+        require(firstDirection == Direction.DOWN || firstDirection == Direction.UP)
         val selector = By.text(text).pkg(packageName)
         val deadline = SystemClock.uptimeMillis() + 30_000
         var lastObserved = "No accessibility observation yet"
         fun missing(): Nothing = error("Missing product control: $text; last observation: $lastObserved")
-        for (direction in listOf(Direction.DOWN, Direction.UP)) {
+        val directions = if (firstDirection == Direction.UP) listOf(Direction.UP, Direction.DOWN) else listOf(Direction.DOWN, Direction.UP)
+        for (direction in directions) {
             var scrolls = 0
             var unchangedSwipes = 0
             while (scrolls < scrollAttempts) {
@@ -178,6 +180,62 @@ internal class ObservedUi(private val device: UiDevice) {
 
     fun tapText(text: String, packageName: String, scrollAttempts: Int = 12, preferLast: Boolean = false) =
         touch(textBounds(text, packageName, scrollAttempts, interactive = true, preferLast = preferLast), text)
+
+    /** A visible summary is not evidence that its saved disclosure is expanded. */
+    fun expandDisclosure(packageName: String, title: String) {
+        textBounds(title, packageName, scrollAttempts = 18, interactive = true)
+        fun observed(label: UiObject2): Pair<Rect, Boolean>? {
+            var current: UiObject2? = label
+            repeat(12) {
+                val row = current ?: return null
+                if (row.isEnabled && row.isClickable) {
+                    // The actual API36 tree exports the visible +/− children,
+                    // while the platform text/state lookup did not resolve this
+                    // Compose virtual disclosure. Read only this title's row;
+                    // summary content elsewhere must never imply expansion.
+                    val indicators = row.findObjects(By.text(Pattern.compile("[+−]")).pkg(packageName))
+                    val indicator = indicators.singleOrNull() ?: return null
+                    val bounds = Rect(row.visibleBounds)
+                    val indicatorBounds = Rect(indicator.visibleBounds)
+                    if (bounds.isEmpty || indicatorBounds.isEmpty || !bounds.contains(indicatorBounds)) return null
+                    return bounds to (indicator.text == "−")
+                }
+                current = row.parent
+            }
+            return null
+        }
+        val selector = By.text(title).pkg(packageName)
+        val before = snapshot(selector, "observed disclosure state: $title", refreshCache = true) { observed(it) }
+        if (!before.second) touch(before.first, "Expand $title", idleTimeoutMs = 1_000)
+        snapshot(selector, "expanded disclosure: $title", refreshCache = true) { observed(it)?.takeIf { state -> state.second } }
+    }
+
+    /** A saved statistic may be above a newly expanded skill list; reacquire it visibly. */
+    fun descriptionBounds(prefix: String, packageName: String): Rect {
+        val selector = By.descStartsWith(prefix).pkg(packageName)
+        val deadline = SystemClock.uptimeMillis() + 30_000
+        for (direction in listOf(Direction.UP, Direction.DOWN)) {
+            var unchanged = 0
+            for (attempt in 0 until 18) {
+                check(SystemClock.uptimeMillis() < deadline) { "Missing visible statistic: $prefix" }
+                try {
+                    clearObservationCache()
+                    device.wait(Until.hasObject(selector), 250)
+                    val found = device.findObjects(selector).map { Rect(it.visibleBounds) }.firstOrNull {
+                        !it.isEmpty && it.left >= 0 && it.top >= 0 &&
+                            it.right <= device.displayWidth && it.bottom <= device.displayHeight
+                    }
+                    if (found != null) return found
+                    if (unchanged >= 2) break
+                    val changed = scrollForObservation(packageName, direction)
+                    unchanged = if (changed == false) unchanged + 1 else 0
+                } catch (_: StaleObjectException) {
+                    // Retry observations only; no product action is repeated.
+                }
+            }
+        }
+        error("Missing visible statistic: $prefix")
+    }
 
     fun texts(selector: BySelector, description: String): List<String> =
         snapshot(selector, description) { device.findObjects(selector).map { node -> node.text } }
@@ -239,7 +297,99 @@ internal class ObservedUi(private val device: UiDevice) {
 
     fun campaignItems(packageName: String) {
         ensurePrimaryTab(packageName, "Inventory")
-        tapText("Campaign items", packageName)
+        selectSection(packageName, "Campaign items")
+    }
+
+    /** Discover a flat section strip through native scrolling, then activate its tab once. */
+    fun selectSection(packageName: String, label: String) {
+        // Restrict observation to the requested tab family inside its actual
+        // horizontal strip. A body heading or unrelated filter is never a tab.
+        val families = listOf(
+            listOf("Sheet", "Combat", "Equipment", "Spells", "Resources", "History", "Currency"),
+            listOf("My gear", "Campaign items"),
+            listOf("All gear", "Equipped", "Attuned"),
+            listOf("All", "Prepared", "Cantrips")
+        )
+        val family = families.singleOrNull { label in it } ?: error("Unknown tab family for $label")
+        val deadline = SystemClock.uptimeMillis() + 30_000
+        val stripSelector = By.clazz("android.widget.HorizontalScrollView").pkg(packageName)
+        val familyPattern = Pattern.compile(family.joinToString("|", transform = Pattern::quote))
+        fun matchingNodes(strip: UiObject2, pattern: Pattern): List<UiObject2> =
+            strip.findObjects(By.text(pattern).pkg(packageName)) + strip.findObjects(By.desc(pattern).pkg(packageName))
+        val labelPattern = Pattern.compile(Pattern.quote(label))
+        fun sectionStrip() = device.findObjects(stripSelector).firstOrNull {
+            !it.visibleBounds.isEmpty && matchingNodes(it, familyPattern).any { node -> primaryTabState(node) != null }
+        }
+        val minimumTap = (48 * InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density).toInt()
+        var lastObserved = "No section strip observed"
+        for (direction in listOf(Direction.LEFT, Direction.RIGHT)) {
+            repeat(8) discovery@ {
+                check(SystemClock.uptimeMillis() < deadline) { "Section $label exceeded its discovery budget: $lastObserved" }
+                clearObservationCache()
+                val strip = sectionStrip()
+                if (strip == null) {
+                    lastObserved = "Section strip outside vertical viewport"
+                    scrollForObservation(packageName, Direction.UP)
+                } else {
+                    val viewport = Rect(strip.visibleBounds)
+                    val state = matchingNodes(strip, labelPattern).firstNotNullOfOrNull(::primaryTabState)
+                    lastObserved = "strip=$viewport; $label=$state; direction=$direction"
+                    val visibleHeight = minOf(viewport.height(), state?.bounds?.height() ?: viewport.height())
+                    if (visibleHeight < minimumTap) {
+                        // A visible strip may still be clipped under the fixed
+                        // app header. Reveal it in its observed vertical parent
+                        // before testing the full 48dp tab or scrolling sideways.
+                        var ancestor = strip.parent
+                        var vertical: Rect? = null
+                        repeat(12) ancestry@ {
+                            val node = ancestor ?: return@ancestry
+                            if (vertical == null && node.className == "android.widget.ScrollView") {
+                                vertical = Rect(node.visibleBounds)
+                            }
+                            ancestor = node.parent
+                        }
+                        val parent = vertical
+                        val clippedAtTop = parent != null && viewport.top <= parent.top
+                        val clippedAtBottom = parent != null && viewport.bottom >= parent.bottom
+                        if (parent != null && !parent.isEmpty && (clippedAtTop || clippedAtBottom)) {
+                            val distance = minimumTap - visibleHeight + minimumTap / 2
+                            val start = parent.centerY()
+                            val end = (start + if (clippedAtTop) distance else -distance)
+                                .coerceIn(parent.top + 4, parent.bottom - 5)
+                            lastObserved += "; reveal clipped strip inside vertical parent=$parent"
+                            assertTrue("Reveal the full $label touch target with one observed vertical swipe",
+                                device.swipe(parent.centerX(), start, parent.centerX(), end, 20))
+                            device.waitForIdle(1_000)
+                            return@discovery
+                        }
+                    }
+                    if (state != null && state.enabled && viewport.contains(state.bounds) &&
+                        state.bounds.width() >= minimumTap && state.bounds.height() >= minimumTap) {
+                        if (!state.selected) {
+                            assertTrue("An unselected section exposes its click action: $label", state.clickable)
+                            touch(state.bounds, "$label section", idleTimeoutMs = 1_000)
+                        }
+                        snapshot(stripSelector, "selected $label section", timeoutMs = (deadline - SystemClock.uptimeMillis()).coerceAtLeast(1), refreshCache = true) {
+                            sectionStrip()?.let { selectedStrip ->
+                                val selectedViewport = Rect(selectedStrip.visibleBounds)
+                                matchingNodes(selectedStrip, labelPattern).firstNotNullOfOrNull(::selectedTabBounds)
+                                    ?.takeIf { bounds -> selectedViewport.contains(bounds) &&
+                                        bounds.width() >= minimumTap && bounds.height() >= minimumTap }
+                            }
+                        }
+                        return
+                    }
+                    val inset = maxOf(8, viewport.width() / 8)
+                    val left = viewport.left + inset
+                    val right = viewport.right - inset - 1
+                    assertTrue("Discover $label with one native horizontal swipe",
+                        device.swipe(if (direction == Direction.RIGHT) right else left, viewport.centerY(),
+                            if (direction == Direction.RIGHT) left else right, viewport.centerY(), 35))
+                    device.waitForIdle(1_000)
+                }
+            }
+        }
+        error("Missing enabled section $label: $lastObserved")
     }
 
     fun captureStablePage(file: File, packageName: String, tab: String, markers: List<BySelector>) {

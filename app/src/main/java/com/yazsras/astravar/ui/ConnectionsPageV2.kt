@@ -3,6 +3,12 @@ package com.yazsras.astravar.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -54,7 +60,7 @@ internal fun connectionHistoryLinkIds(links: List<CampaignLink>, audit: List<Cam
 
 /** A directory first. All record inspection and editing stays in one focused sheet. */
 @Composable
-fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
+fun ConnectionsPageV2(repository: CampaignLedgerRepository, initialEntityId: String? = null) {
     val records = repository.records
     val context = LocalContext.current
     val entities by records.entities.collectAsState(initial = emptyList())
@@ -69,11 +75,11 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
     val actions = rememberLocalRecordActions()
     var query by rememberSaveable { mutableStateOf("") }
     var kindFilter by rememberSaveable { mutableStateOf("All") }
-    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedId by rememberSaveable(initialEntityId) { mutableStateOf(initialEntityId) }
     // Keep this context across detail/edit/remove sheets. State belongs to the
     // selected directory record, so opening another connection starts collapsed.
     var connectedRecordsOpen by rememberSaveable(selectedId) { mutableStateOf(false) }
-    var mode by rememberSaveable { mutableStateOf<String?>(null) }
+    var mode by rememberSaveable(initialEntityId) { mutableStateOf(if (initialEntityId == null) null else "detail") }
     val baselineDraft = rememberUiDraftText()
     var baseJson by baselineDraft
     var draftId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
@@ -165,8 +171,13 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
             PlayerButton(onClick = { edit(null) }, enabled = !actions.busy,
                 modifier = Modifier.semantics { contentDescription = "Add connection" }) { Text("Add") }
         }
-        PlayerSearch(query, { query = it }, "Search names, aliases and known notes")
-        ConnectionChoice("Directory type", listOf("All", "Person", "Group", "Faction", "Being", "Location", "Other"), kindFilter, !actions.busy) { kindFilter = it }
+        PlayerSearch(query, { query = it }, "Search connections")
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("All", "Person", "Group", "Faction", "Being", "Location", "Other").forEach { kind ->
+                PlayerFilterChip(selected = kindFilter == kind, onClick = { kindFilter = kind }, enabled = !actions.busy,
+                    label = { Text(kind) })
+            }
+        }
         if (mode == null) {
             ConnectionSaveStatus(actions)
             baselineDraft.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -178,17 +189,23 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
         }
         filtered.take(directoryLimit).forEach { entity ->
             val latestMilestone = milestones.filter { it.entityId == entity.id }.maxByOrNull { it.updatedAt }
-            PlayerCard(onClick = { selectedId = entity.id; mode = "detail"; actions.message = "" }) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    LedgerIcon(entity.imageBase64, Modifier.size(48.dp), "Portrait for ${entity.name}")
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(entity.name, style = MaterialTheme.typography.titleMedium)
-                        Text(entity.relationship.ifBlank { connectionKindLabel(entity.kind) }, color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
-                        latestMilestone?.let { Text(it.title, color = RebuildPalette.Ice, style = MaterialTheme.typography.bodySmall, maxLines = 2) }
-                    }
-                    Text("›", color = RebuildPalette.Cyan, style = MaterialTheme.typography.titleLarge)
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                .clickable(role = Role.Button) { selectedId = entity.id; mode = "detail"; actions.message = "" }
+                .padding(vertical = 14.dp, horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                PartyPortrait(entity.imageBase64, entity.name, 56.dp)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(entity.name, style = MaterialTheme.typography.titleMedium)
+                    Text(connectionKindLabel(entity.kind).uppercase(), color = RebuildPalette.GoldBright,
+                        style = MaterialTheme.typography.labelMedium)
+                    if (entity.relationship.isNotBlank()) Text(entity.relationship, color = RebuildPalette.Muted,
+                        style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    latestMilestone?.let { Text(it.title, color = RebuildPalette.Ice, style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis) }
                 }
+                Text("›", color = RebuildPalette.GoldBright, style = MaterialTheme.typography.titleLarge)
             }
+            HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .45f))
         }
         if (filtered.size > directoryLimit) PlayerTextButton(onClick = { directoryLimit += 40 }) { Text("Show more connections") }
     }
@@ -361,7 +378,7 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                         }
                         "character-profile" -> characterProfiles.firstOrNull { it.id == recordId }?.let { profile ->
                             Text(profile.name.ifBlank { "Unnamed character" }, style = MaterialTheme.typography.titleLarge)
-                            Text("Level ${profile.level ?: "unknown"} · HP ${profile.currentHp ?: "?"} / ${profile.maximumHp ?: "?"}", color = RebuildPalette.Ice)
+                            Text("Level ${profile.level ?: "Not set"} · HP ${partyHealthLabel(profile.currentHp, profile.maximumHp)}", color = RebuildPalette.Ice)
                             PlayerDisclosure("Sources & record details") {
                                 Text("Record ${profile.id} · revision ${profile.revision}", color = RebuildPalette.Muted)
                                 ReforgeRichText(profile.source)
@@ -378,7 +395,7 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                 }
                 else -> selected?.let { entity ->
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        LedgerIcon(entity.imageBase64, Modifier.size(64.dp), "Portrait for ${entity.name}")
+                        PartyPortrait(entity.imageBase64, entity.name, 72.dp)
                         Column(Modifier.weight(1f)) {
                             Text(connectionKindLabel(entity.kind), color = RebuildPalette.Ice, style = MaterialTheme.typography.labelLarge)
                             if (entity.aliases.isNotBlank()) Text(entity.aliases, color = RebuildPalette.Muted)
@@ -393,7 +410,7 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                         SectionCaption("Overview")
                         ReforgeRichText(profile.overview)
                     }
-                    ExpandableRecordSection("Known Information", true) {
+                    PlayerDisclosure("Known Information", initiallyOpen = true) {
                         val known = facts.filter { it.entityId == entity.id }
                         if (profile.facts.isNotBlank()) ReforgeRichText(profile.facts)
                         if (known.isEmpty() && profile.facts.isBlank()) Text("No learned information yet.", color = RebuildPalette.Muted)
@@ -403,10 +420,10 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
                         }
                         PlayerTextButton(onClick = { append("fact") }) { Text("Add learned information") }
                     }
-                    if (profile.openThreads.isNotBlank()) ExpandableRecordSection("Open threads", true) {
+                    if (profile.openThreads.isNotBlank()) PlayerDisclosure("Open threads", initiallyOpen = true) {
                         ReforgeRichText(profile.openThreads)
                     }
-                    ExpandableRecordSection("Meaningful milestones") {
+                    PlayerDisclosure("Meaningful milestones") {
                         val meaningful = milestones.filter { it.entityId == entity.id }.sortedBy { it.updatedAt }
                         if (meaningful.isEmpty()) Text("No milestones recorded.", color = RebuildPalette.Muted)
                         meaningful.forEach { milestone ->
@@ -465,7 +482,8 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository) {
 /** Controlled by the directory, which outlives the nested relationship editor. */
 @Composable private fun ConnectionRecordsSection(expanded: Boolean, onExpandedChange: (Boolean) -> Unit,
     content: @Composable ColumnScope.() -> Unit) {
-    PlayerCard {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .45f))
         PlayerTextButton(onClick = { onExpandedChange(!expanded) }, modifier = Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Connected Records", Modifier.weight(1f), color = RebuildPalette.Gold,

@@ -111,7 +111,8 @@ else
   printf 'FAIL\tReforgeLargeCampaignSelectionNativeTest\tnative-large-campaign-selection.txt\n' >>validation/native-stages.tsv
   astravar_prerequisites_ok=0
 fi
-run_stage PlayerFirstJourneyInstrumentationTest 1 900 native-player-first.txt || astravar_prerequisites_ok=0
+run_stage PlayerFirstJourneyInstrumentationTest 1 1050 native-player-first.txt || astravar_prerequisites_ok=0
+run_stage VisualRebirthJourneyInstrumentationTest 1 900 native-visual-rebirth.txt || astravar_prerequisites_ok=0
 test "$astravar_prerequisites_ok" = 1
 run_stage UpdateFixtureInstrumentationTest 1 120 native-update-fixture.txt
 stop_product
@@ -149,4 +150,4 @@ run_stage CampaignImportInstrumentationTest#dMappedCampaignRecordsRollbackAfterR
 stop_product
 copy_campaign_database validation/campaign-mapped-rolled-back
 verify_mapped validation/campaign-mapped-rolled-back/astravar-campaign-ledger.db validation/campaign-mapped-before.json validation/native-mapped-fixture.json rollback validation/native-mapped-rollback-readback.json
-printf '%s\n' 'PASS: 12 native tests in 9 explicitly ordered stages. Standalone weapon rolls, retired overlay contract, character advancement, reviewed gear, generic companion relationships and direct companion combat passed. Companion-only healing survived restart, with source HP and the default character preserved. Same-version reinstall preserved persisted bytes. Native readback retained rolls and inventory. Large and typed imports and separately consented rollback passed independent host SQLite verification. Native QA SQLite fixtures verified scoped selection above the complete-export ceiling, duplicate and stale rejection, interrupted-write rollback, same-command recovery and backup restore after reopen. Disposable CI signer and emulator only. Physical owner phone acceptance remains pending.' >validation/RELEASE-UI-RESULT.txt
+printf '%s\n' 'PASS: 13 native tests in 10 explicitly ordered stages. Visual Rebirth captured the primary destinations and forms, checked resource persistence, companion equipment, journal edits and 400dp layouts at three font scales. Standalone weapon rolls, retired overlay contract, character advancement, reviewed gear, generic companion relationships and direct companion combat passed. Companion-only healing survived restart, with source HP and the default character preserved. Same-version reinstall preserved persisted bytes. Native readback retained rolls and inventory. Large and typed imports and separately consented rollback passed independent host SQLite verification. Native QA SQLite fixtures verified scoped selection above the complete-export ceiling, duplicate and stale rejection, interrupted-write rollback, same-command recovery and backup restore after reopen. Disposable CI signer and emulator only. Physical owner phone acceptance remains pending.' >validation/RELEASE-UI-RESULT.txt

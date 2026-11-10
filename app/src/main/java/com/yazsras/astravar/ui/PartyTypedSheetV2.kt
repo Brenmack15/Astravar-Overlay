@@ -7,6 +7,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -19,8 +21,8 @@ import kotlinx.serialization.json.Json
 import java.util.UUID
 
 private val partyUiJson = Json { encodeDefaults = true }
-private fun known(text: String): String = text.ifBlank { "Unknown" }
-private fun plus(value: Int?): String = value?.let { if (it >= 0) "+$it" else "$it" } ?: "?"
+private fun known(text: String): String = text.ifBlank { "Not set" }
+private fun plus(value: Int?): String = value?.let { if (it >= 0) "+$it" else "$it" } ?: "Not set"
 private fun lines(text: String) = text.lineSequence().map(String::trim).filter(String::isNotEmpty).toList()
 
 /** No review-only stat block is seeded here. Each accepted change has its own source and revision. */
@@ -29,7 +31,8 @@ private fun lines(text: String) = text.lineSequence().map(String::trim).filter(S
     memberId: String,
     memberName: String,
     openPlayable: ((String) -> Unit)? = null,
-    playableRepository: ReforgeRepository? = null
+    playableRepository: ReforgeRepository? = null,
+    expandedDetails: Boolean = false
 ) {
     val sheets by repository.party.sheets.collectAsState(initial = emptyList())
     val profiles by repository.records.characterProfiles.collectAsState(initial = emptyList())
@@ -47,9 +50,9 @@ private fun lines(text: String) = text.lineSequence().map(String::trim).filter(S
         snapshotSource = record?.source.orEmpty()
         editing = section
     }
-    Text("Character & creature sheet", style = MaterialTheme.typography.titleLarge,
+    Text("Abilities & story", style = MaterialTheme.typography.titleLarge,
         modifier = Modifier.semantics { heading() })
-    if (memberId != "local-player") ReforgeCompanionAttackReviewButton(repository, memberId, openPlayable, playableRepository)
+    if (memberId != "local-player" && sheet.attacks.isNotEmpty()) ReforgeCompanionAttackReviewButton(repository, memberId, openPlayable, playableRepository)
     if (sheet.unresolvedConflicts.isNotEmpty()) PlayerCard {
         Text("Unresolved source conflicts", color = MaterialTheme.colorScheme.error,
             style = MaterialTheme.typography.titleMedium)
@@ -65,20 +68,20 @@ private fun lines(text: String) = text.lineSequence().map(String::trim).filter(S
         RecordValue("Proficiency / initiative", "${plus(sheet.proficiencyBonus)} / ${plus(sheet.initiative)}")
         RecordValue("Armor Class sources", known(sheet.armorClassSources))
     }
-    PartySheetSection("Movement & senses", { edit("Movement") }) {
+    PartySheetSection("Movement & senses", { edit("Movement") }, inline = expandedDetails && (sheet.movement.isNotEmpty() || sheet.senses.isNotBlank() || sheet.languages.isNotBlank())) {
         if (sheet.movement.isEmpty()) Text("Movement unknown", color = RebuildPalette.Muted)
         sheet.movement.forEach { Text("${it.type}: ${it.feet?.let { feet -> "$feet ft" } ?: "unknown"}${it.notes.takeIf(String::isNotBlank)?.let { note -> " · $note" }.orEmpty()}") }
         RecordValue("Senses", known(sheet.senses)); RecordValue("Languages", known(sheet.languages))
     }
-    PartySheetSection("Saving throws & skills", { edit("Proficiencies") }) {
+    PartySheetSection("Saving throws & skills", { edit("Proficiencies") }, inline = expandedDetails && (sheet.savingThrows.isNotEmpty() || sheet.skills.isNotEmpty())) {
         RecordValue("Saving throws", sheet.savingThrows.takeIf(List<SheetModifier>::isNotEmpty)?.joinToString("\n") { modifierDescription(it) } ?: "Unknown")
         RecordValue("Skills / tool & other proficiencies", sheet.skills.takeIf(List<SheetModifier>::isNotEmpty)?.joinToString("\n") { modifierDescription(it) } ?: "Unknown")
     }
-    PartySheetSection("Defences & conditions", { edit("Defences") }) {
+    PartySheetSection("Defences & conditions", { edit("Defences") }, inline = expandedDetails && (sheet.resistances.isNotBlank() || sheet.immunities.isNotBlank() || sheet.vulnerabilities.isNotBlank() || sheet.conditions.isNotBlank())) {
         RecordValue("Resistances", known(sheet.resistances)); RecordValue("Immunities", known(sheet.immunities))
         RecordValue("Vulnerabilities", known(sheet.vulnerabilities)); RecordValue("Conditions", known(sheet.conditions))
     }
-    PartySheetSection("Features, actions & capabilities", { edit("Capabilities") }) {
+    PartySheetSection("Features, actions & capabilities", { edit("Capabilities") }, inline = expandedDetails && (sheet.capabilities.isNotEmpty())) {
         if (sheet.capabilities.isEmpty()) Text("No sourced features recorded.", color = RebuildPalette.Muted)
         sheet.capabilities.forEach { capability ->
             PlayerCard(padding = 12.dp) {
@@ -90,7 +93,7 @@ private fun lines(text: String) = text.lineSequence().map(String::trim).filter(S
             }
         }
     }
-    PartySheetSection("Attacks & multiattacks", { edit("Attacks") }) {
+    PartySheetSection("Attacks & multiattacks", { edit("Attacks") }, inline = expandedDetails && (sheet.attacks.isNotEmpty())) {
         if (sheet.attacks.isEmpty()) Text("No attack mechanics recorded. Nothing is inferred from level.", color = RebuildPalette.Muted)
         sheet.attacks.forEach { attack ->
             PlayerCard(padding = 12.dp) {
@@ -108,13 +111,13 @@ private fun lines(text: String) = text.lineSequence().map(String::trim).filter(S
         Text("These sourced sheet entries do not automatically execute Astravar's weapon engine or spend a turn.",
             color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
     }
-    PartySheetSection("Spellcasting & resources", { edit("Spellcasting") }) {
+    PartySheetSection("Spellcasting & resources", { edit("Spellcasting") }, inline = expandedDetails && (sheet.spellcasting.isNotBlank() || sheet.resources.isNotEmpty())) {
         RecordValue("Spellcasting, known spells & accepted slot rules", known(sheet.spellcasting))
         if (sheet.resources.isNotEmpty()) Text("Manual sheet resource references", style = MaterialTheme.typography.labelLarge, color = RebuildPalette.Ice)
         sheet.resources.forEach { resource ->
-            RecordValue(resource.name, "${resource.current ?: "?"} / ${resource.maximum ?: "?"}${resource.notes.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty()}")
+            RecordValue(resource.name, "${resource.current ?: "Not set"} / ${resource.maximum ?: "Not set"}${resource.notes.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty()}")
             companionResources.firstOrNull { it.companionId == memberId && it.name.trim().equals(resource.name.trim(), true) }?.let { counter ->
-                Text("A tracked companion counter also exists: ${counter.current ?: "?"} / ${counter.maximum ?: "?"}. Its value below remains authoritative; reconcile this sheet reference before play.",
+                Text("A tracked companion counter also exists: ${counter.current ?: "Not set"} / ${counter.maximum ?: "Not set"}. Its value below remains authoritative; reconcile this sheet reference before play.",
                     color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
         }
@@ -122,12 +125,12 @@ private fun lines(text: String) = text.lineSequence().map(String::trim).filter(S
         Text("Companion-specific counters below retain their existing records. Editing a sheet never refills them.",
             color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
     }
-    if (memberId != "local-player" || sheet.forms.isNotEmpty()) PartySheetSection("Forms & transformations", { edit("Forms") }) {
+    if (memberId != "local-player" || sheet.forms.isNotEmpty()) PartySheetSection("Forms & transformations", { edit("Forms") }, inline = expandedDetails && (sheet.forms.isNotEmpty())) {
         if (sheet.forms.isEmpty()) Text("Add alternate forms, such as a mechanical body or warform. Unknown statistics stay blank.", color = RebuildPalette.Muted)
         sheet.forms.forEach { form ->
             PlayerCard(padding = 12.dp) {
                 Text(form.name, style = MaterialTheme.typography.titleMedium)
-                Text("${form.evidenceStatus} · HP ${form.currentHp ?: "?"} / ${form.maximumHp ?: "?"} · AC ${form.armorClass ?: "?"}", color = RebuildPalette.Ice)
+                Text("${form.evidenceStatus} · HP ${form.currentHp ?: "Not set"} / ${form.maximumHp ?: "Not set"} · AC ${form.armorClass ?: "Not set"}", color = RebuildPalette.Ice)
                 if (form.statBlock.isNotBlank()) ReforgeRichText(form.statBlock)
                 if (form.source.isNotBlank()) PlayerDisclosure("Form source") { ReforgeRichText(form.source) }
             }
@@ -157,8 +160,17 @@ private fun modifierDescription(value: SheetModifier): String =
         true -> " · proficient"; false -> " · not proficient"; null -> " · proficiency unknown"
     } + value.notes.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty()
 
-@Composable private fun PartySheetSection(title: String, edit: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    PlayerDisclosure(title) {
+@Composable private fun PartySheetSection(title: String, edit: () -> Unit, inline: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit) {
+    if (inline) Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleMedium,
+                color = RebuildPalette.GoldBright)
+            PlayerTextButton(onClick = edit, modifier = Modifier.semantics { contentDescription = "Edit $title" }) { Text("Edit") }
+        }
+        content()
+        HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .45f))
+    } else PlayerDisclosure(title) {
         content()
         PlayerTextButton(onClick = edit) { Text("Edit $title") }
     }

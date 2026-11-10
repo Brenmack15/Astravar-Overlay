@@ -357,8 +357,10 @@ class RebuildVisualAcceptanceTest {
         Fixture().use { fixture ->
             fixture.render(destination = "Combat") { combat() }
             compose.onNodeWithText("Advantage").performClick()
-            settleUntil { runBlocking { fixture.preferences.flow.first().advantage } }
-            compose.onNodeWithText("Roll attack").performClick()
+            // DataStore can emit the saved preference before Actions.run clears
+            // busy. Dispatch the next action only after its real UI is enabled.
+            settleUntil { runBlocking { fixture.preferences.flow.first().advantage } && !fixture.actions.busy }
+            compose.onNodeWithText("Roll attack").assertIsEnabled().performClick()
             settleUntil { fixture.repository.state.value?.pending?.lastOrNull()?.rolled != null && !fixture.actions.busy }
             val saved = fixture.repository.state.value!!.pending.single()
             val rolled = requireNotNull(saved.rolled)
@@ -394,6 +396,7 @@ class RebuildVisualAcceptanceTest {
             listOf("Normal", "Advantage", "Disadvantage").forEach {
                 compose.onNodeWithContentDescription(it).assertIsDisplayed().assertHeightIsAtLeast(48.dp)
             }
+            capture("rebuild-combat-360-font130-before-result-assert", fixture.activity.get())
             compose.onNodeWithText("Latest result").assertIsDisplayed()
             capture("rebuild-combat-360-font130", fixture.activity.get())
             listOf("Normal", "Adv.", "Disadv.").forEach { assertTextFullyVisible(it, singleLine = true) }

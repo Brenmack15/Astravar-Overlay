@@ -463,44 +463,38 @@ private class WeaponBackupPageLifetime { var active = true }
     }
     Page {
         PlayerHeading("Appearance & feedback")
-        Text("Astravar is a standalone character workspace.", color = RebuildPalette.Muted)
-        PlayerEntry("Feedback & advanced controls", "Haptics ${if (prefs.haptics) "on" else "off"} · manual dice ${if (prefs.manualOverrides) "on" else "off"}", "Settings", { a.message = ""; mode = "feedback" })
-        PlayerEntry("Artwork", if (prefs.image.isBlank()) "Included Astravar artwork" else "Personal image selected", "Weapon", { a.message = ""; mode = "artwork" })
+        Text("Make your table feel like yours.", color = RebuildPalette.Muted)
+        PlayerHeading("Feedback")
+        Toggle("Haptic feedback", prefs.haptics, !a.busy) { value -> a.run("Feedback updated") { app.preferences.haptics(value) } }
+        Text("Screen transitions follow the system animation scale. Text follows your Android font size.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+        HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .4f))
+        PlayerHeading("Artwork")
+        Text(if (prefs.image.isBlank()) "Included Astravar artwork is active." else "A personal image is selected.", color = RebuildPalette.Muted)
+        PlayerButton(enabled = !a.busy, onClick = { image.launch(arrayOf("image/*")) }) { Text("Choose personal artwork") }
+        PlayerOutlinedButton(enabled = !a.busy, onClick = { a.run("Original artwork restored") { app.preferences.image("") } }) { Text("Use included Astravar artwork") }
+        PlayerDisclosure("Advanced dice controls") {
+            Toggle("Advanced: manual roll override", prefs.manualOverrides, !a.busy) { value -> a.run("Manual override updated") { app.preferences.manualOverrides(value) } }
+            Text("External dice become available in weapon shot options and are recorded separately from Astravar's rolls.", color = RebuildPalette.Muted)
+        }
         if (s.demo) PlayerEntry("Leave demo", "Begin an empty campaign after review", "More", { a.message = ""; mode = "demo" })
         if (a.message.isNotBlank()) Text(a.message, color = RebuildPalette.Ice)
     }
-    mode?.let { currentMode ->
-        PlayerSheet(when (currentMode) { "feedback" -> "Feedback & advanced controls"; "artwork" -> "Artwork"; else -> "End demo?" },
-            onDismiss = { if (!a.busy) mode = null }, dirty = false, showCancel = false,
-            actions = {
-                val close = LocalPlayerDismiss.current
-                if (currentMode == "demo") {
-                    PlayerTextButton(onClick = close, enabled = !a.busy) { Text("Cancel") }
-                    PlayerButton(enabled = !a.busy, onClick = {
-                        a.run("Left labeled demo; empty real campaign") {
-                            a.repo.mutate(label = "Left labeled demo; empty real campaign") { current ->
-                                check(current.demo) { "Demo is no longer active. Your campaign was kept." }
-                                Campaign()
-                            }; mode = null
-                        }
-                    }) { Text("End demo") }
+    if (mode == "demo") PlayerSheet("End demo?",
+        onDismiss = { if (!a.busy) mode = null }, dirty = false, showCancel = false,
+        actions = {
+            val close = LocalPlayerDismiss.current
+            PlayerTextButton(onClick = close, enabled = !a.busy) { Text("Cancel") }
+            PlayerButton(enabled = !a.busy, onClick = {
+                a.run("Left labeled demo; empty real campaign") {
+                    a.repo.mutate(label = "Left labeled demo; empty real campaign") { current ->
+                        check(current.demo) { "Demo is no longer active. Your campaign was kept." }
+                        Campaign()
+                    }; mode = null
                 }
-            }) {
-            when (currentMode) {
-                "feedback" -> {
-                    Toggle("Haptic feedback", prefs.haptics, !a.busy) { value -> a.run("Feedback updated") { app.preferences.haptics(value) } }
-                    Toggle("Advanced: manual roll override", prefs.manualOverrides, !a.busy) { value -> a.run("Manual override updated") { app.preferences.manualOverrides(value) } }
-                    if (prefs.manualOverrides) Text("External dice become available in weapon shot options and are recorded separately from Astravar's rolls.", color = RebuildPalette.Muted)
-                }
-                "artwork" -> {
-                    Text(if (prefs.image.isBlank()) "Included Astravar artwork is active." else "A personal image is selected.", color = RebuildPalette.Muted)
-                    Action("Choose personal artwork", !a.busy) { image.launch(arrayOf("image/*")) }
-                    PlayerOutlinedButton(enabled = !a.busy, onClick = { a.run("Original artwork restored") { app.preferences.image("") } }) { Text("Use included Astravar artwork") }
-                }
-                "demo" -> Text("Remove labeled demo resources and return to profile confirmation. Export the demo first if you want to keep it. No real resources will be assumed; correction history remains available.", color = RebuildPalette.Muted)
-            }
-            if (a.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            if (a.message.isNotBlank()) Text(a.message, color = RebuildPalette.Ice)
-        }
+            }) { Text("End demo") }
+        }) {
+        Text("Remove labeled demo resources and return to profile confirmation. Export the demo first if you want to keep it. No real resources will be assumed; correction history remains available.", color = RebuildPalette.Muted)
+        if (a.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (a.message.isNotBlank()) Text(a.message, color = RebuildPalette.Ice)
     }
 }

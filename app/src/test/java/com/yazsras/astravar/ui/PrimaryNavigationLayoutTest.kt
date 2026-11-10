@@ -36,6 +36,8 @@ class PrimaryNavigationLayoutTest {
 
     @Test fun normalTextKeepsAllFourReadableDestinationsInOneRow() = verifyNavigation(1f, 1)
 
+    @Test fun largerTextKeepsBalancedNavigationPairs() = verifyNavigation(1.3f, 2)
+
     // Four destinations require two rows at 360 dp with doubled text. Keep
     // complete labels and the requested font size rather than squeezing a row.
     @Test fun doubleTextKeepsCompleteSingleLineLabelsAndSelectedNavigationInTwoRows() = verifyNavigation(2f, 2)
@@ -110,6 +112,8 @@ class PrimaryNavigationLayoutTest {
             }
             assertEquals("Navigation should add rows only when scaled labels require it", expectedRows,
                 controlBounds.map { it.top }.distinct().size)
+            if (expectedRows == 2) assertEquals("Each row should contain a balanced pair of destinations",
+                listOf(2, 2), controlBounds.groupBy { it.top }.values.map { it.size })
             for (name in rebuildDestinations) {
                 compose.onNode(hasText(name) and hasClickAction()).performClick().assertIsSelected()
                 for (other in rebuildDestinations.filterNot { it == name })

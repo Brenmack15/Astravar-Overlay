@@ -17,6 +17,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
 import android.content.res.Configuration
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -79,6 +81,71 @@ class PartyPlayerFirstTest {
     private fun database() = Room.inMemoryDatabaseBuilder(
         ApplicationProvider.getApplicationContext(), CampaignLedgerDb::class.java).build()
 
+    @Test @Config(qualifiers = "w360dp-h1000dp-xhdpi")
+    fun rosterHeadingAndCreationActionFitAt360Font100() = verifyRosterHeadingAndAction(360, 1f)
+
+    @Test @Config(qualifiers = "w400dp-h1000dp-xhdpi")
+    fun rosterHeadingAndCreationActionFitAt400Font100() = verifyRosterHeadingAndAction(400, 1f)
+
+    @Test @Config(qualifiers = "w360dp-h1000dp-xhdpi")
+    fun rosterHeadingAndCreationActionFitAt360Font130() = verifyRosterHeadingAndAction(360, 1.3f)
+
+    @Test @Config(qualifiers = "w400dp-h1000dp-xhdpi")
+    fun rosterHeadingAndCreationActionFitAt400Font130() = verifyRosterHeadingAndAction(400, 1.3f)
+
+    @Test @Config(qualifiers = "w360dp-h1000dp-xhdpi")
+    fun rosterHeadingAndCreationActionFitAt360Font200() = verifyRosterHeadingAndAction(360, 2f)
+
+    @Test @Config(qualifiers = "w400dp-h1000dp-xhdpi")
+    fun rosterHeadingAndCreationActionFitAt400Font200() = verifyRosterHeadingAndAction(400, 2f)
+
+    @Suppress("DEPRECATION")
+    private fun verifyRosterHeadingAndAction(width: Int, requestedFontScale: Float) {
+        val db = database()
+        val repo = CampaignLedgerRepository(db)
+        runBlocking { repo.records.createCompanion("Synthetic roster ally") }
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        val resources = activity.get().resources
+        val originalConfiguration = Configuration(resources.configuration)
+        try {
+            // The creation dialog owns a separate window; carry the requested
+            // font setting into the Activity as well as the page composition.
+            resources.updateConfiguration(Configuration(originalConfiguration).apply { fontScale = requestedFontScale }, resources.displayMetrics)
+            activity.get().setContent {
+                CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, requestedFontScale)) {
+                    PartyTestTheme { PartyPageV2(repo, null) {} }
+                }
+            }
+            waitForText("Synthetic roster ally")
+            val heading = compose.onNodeWithText("Companions", useUnmergedTree = true).assertIsDisplayed()
+            val layouts = mutableListOf<TextLayoutResult>()
+            heading.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+            val titleLayout = layouts.single()
+            assertEquals("Roster title must retain the requested font scale", requestedFontScale,
+                titleLayout.layoutInput.density.fontScale, .01f)
+            assertEquals("Companions must remain one complete word", 1, titleLayout.lineCount)
+            assertFalse("Roster title must not be ellipsized", titleLayout.isLineEllipsized(0))
+            assertFalse("Roster title must not overflow horizontally", titleLayout.didOverflowWidth)
+            assertFalse("Roster title must not overflow vertically", titleLayout.didOverflowHeight)
+            val titleBounds = heading.fetchSemanticsNode().boundsInRoot
+            assertTrue("Roster title ink must fit its visible parent", titleBounds.width + 1f >= titleLayout.size.width &&
+                titleBounds.height + 1f >= titleLayout.size.height)
+            val add = compose.onNode(hasText("+ Add companion") and hasClickAction())
+                .assertIsDisplayed().assertIsEnabled().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+            assertTrue("Creation action must not compress or overlap the title",
+                add.fetchSemanticsNode().boundsInRoot.top >= titleBounds.bottom)
+            capture("rebirth-roster-${width}-font${(requestedFontScale * 100).toInt()}", activity.get())
+            add.performClick()
+            compose.onNodeWithText("Add companion").assertIsDisplayed()
+            compose.onNode(hasSetTextAction() and hasText("Companion name")).performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Create companion").assertIsNotEnabled()
+            runBlocking { assertEquals("Opening the form must not create an extra record", 1, db.recordsDao().allCompanionStates().size) }
+        } finally {
+            resources.updateConfiguration(originalConfiguration, resources.displayMetrics)
+            activity.pause().stop().destroy(); db.close()
+        }
+    }
+
     @Test fun addingCompanionFromRosterOpensNewSheetAndPreservesUnknownStats() {
         val db = database()
         val repo = CampaignLedgerRepository(db)
@@ -98,17 +165,38 @@ class PartyPlayerFirstTest {
         } finally { activity.pause().stop().destroy(); db.close() }
     }
 
-    @Test fun partyRosterOpensFourStableIdentitiesWithoutImportingPrivateStats() {
+    @Test fun emptyRosterDoesNotInventCampaignIdentitiesOrStatistics() {
         val db = database()
         val repo = CampaignLedgerRepository(db)
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { PartyTestTheme { PartyPageV2(repo, null) {} } }
+            compose.onNodeWithText("Every story needs allies").assertExists()
             listOf("Zerg Hasma", "Eek", "Korr", "Veyrath").forEach {
-                compose.onNodeWithText(it).performScrollTo().assertExists()
+                compose.onNodeWithText(it).assertDoesNotExist()
             }
+            runBlocking {
+                assertTrue(db.recordsDao().allCharacterProfiles().isEmpty())
+                assertTrue(db.recordsDao().allCharacterAbilities().isEmpty())
+                assertTrue(db.partyDao().allSheets().isEmpty())
+                assertTrue(db.recordsDao().allAudit().isEmpty())
+            }
+        } finally { activity.pause().stop().destroy(); db.close() }
+    }
+
+    @Test fun arbitrarySavedCompanionOpensWithoutInferringUnknownStatistics() {
+        val db = database()
+        val repo = CampaignLedgerRepository(db)
+        val id = runBlocking { repo.records.createCompanion("Fictional Willow") }
+        val profilesBefore = runBlocking { db.recordsDao().allCharacterProfiles() }
+        val statesBefore = runBlocking { db.recordsDao().allCompanionStates() }
+        val auditBefore = runBlocking { db.recordsDao().allAudit() }
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { PartyTestTheme { PartyPageV2(repo, null) {} } }
+            waitForText("Fictional Willow")
             capture("party-roster-400", activity.get())
-            compose.onNodeWithText("Korr").performClick()
+            compose.onNodeWithText("Fictional Willow").performScrollTo().performClick()
             capture("party-unknown-sheet-400", activity.get())
             compose.onNodeWithTag("ability-STR").performScrollTo()
                 .assert(hasContentDescription("Strength score unknown", substring = true))
@@ -117,10 +205,12 @@ class PartyPlayerFirstTest {
             compose.onNodeWithText("Save sheet").assertIsNotEnabled()
             compose.onNodeWithText("Close").performClick()
             runBlocking {
-                assertTrue(db.recordsDao().allCharacterProfiles().isEmpty())
+                assertEquals(profilesBefore, db.recordsDao().allCharacterProfiles())
+                assertEquals(statesBefore, db.recordsDao().allCompanionStates())
+                assertEquals(auditBefore, db.recordsDao().allAudit())
                 assertTrue(db.recordsDao().allCharacterAbilities().isEmpty())
                 assertTrue(db.partyDao().allSheets().isEmpty())
-                assertTrue(db.recordsDao().allAudit().isEmpty())
+                assertNull(db.recordsDao().allCharacterProfiles().single { it.id == id }.currentHp)
             }
         } finally { activity.pause().stop().destroy(); db.close() }
     }
@@ -335,6 +425,9 @@ class PartyPlayerFirstTest {
     fun eekToolsFromPartyHaveBoundedScrollableViewportAtLargeFontWithoutWrites() {
         val db = database()
         val repo = CampaignLedgerRepository(db)
+        runBlocking { repo.records.saveProfile(CharacterProfile(id = "eek", name = "Fictional owl"), source = "Synthetic tool fixture") }
+        val profilesBefore = runBlocking { db.recordsDao().allCharacterProfiles() }
+        val auditBefore = runBlocking { db.recordsDao().allAudit() }
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent {
@@ -344,7 +437,8 @@ class PartyPlayerFirstTest {
                     PartyTestTheme { PartyPageV2(repo, null) {} }
                 }
             }
-            compose.onNodeWithText("Eek").performScrollTo().performClick()
+            waitForText("Fictional owl")
+            compose.onNodeWithText("Fictional owl").performScrollTo().performClick()
             compose.onNode(hasText("Eek's specialized companion tools") and hasClickAction())
                 .performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
             compose.onNodeWithText("Condition unknown").performScrollTo().assertIsDisplayed()
@@ -357,9 +451,9 @@ class PartyPlayerFirstTest {
             runBlocking {
                 assertTrue(db.recordsDao().allCompanionStates().isEmpty())
                 assertTrue(db.recordsDao().allCompanionResources().isEmpty())
-                assertTrue(db.recordsDao().allCharacterProfiles().isEmpty())
+                assertEquals(profilesBefore, db.recordsDao().allCharacterProfiles())
                 assertTrue(db.partyDao().allSheets().isEmpty())
-                assertTrue(db.recordsDao().allAudit().isEmpty())
+                assertEquals(auditBefore, db.recordsDao().allAudit())
             }
         } finally { activity.pause().stop().destroy(); db.close() }
     }

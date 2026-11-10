@@ -29,7 +29,7 @@ internal val reforgeSkills = linkedMapOf(
     return opened?.copy(revision = if (revision >= 0) revision else opened.revision)
 }
 
-internal fun reforgeSigned(value: Int?): String = value?.let { if (it >= 0) "+$it" else "$it" } ?: "?"
+internal fun reforgeSigned(value: Int?): String = value?.let { if (it >= 0) "+$it" else "$it" } ?: "Not set"
 internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 1000): Int? =
     value.trim().takeIf { it.isNotEmpty() }?.let { text ->
         (text.toIntOrNull() ?: error("$label must be a whole number")).also {
