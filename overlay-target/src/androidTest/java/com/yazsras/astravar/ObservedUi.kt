@@ -125,12 +125,14 @@ internal class ObservedUi(private val device: UiDevice) {
         return changed
     }
 
-    fun textBounds(text: String, packageName: String, scrollAttempts: Int = 12, interactive: Boolean = false, preferLast: Boolean = false): Rect {
+    fun textBounds(text: String, packageName: String, scrollAttempts: Int = 12, interactive: Boolean = false, preferLast: Boolean = false, firstDirection: Direction = Direction.DOWN): Rect {
+        require(firstDirection == Direction.DOWN || firstDirection == Direction.UP)
         val selector = By.text(text).pkg(packageName)
         val deadline = SystemClock.uptimeMillis() + 30_000
         var lastObserved = "No accessibility observation yet"
         fun missing(): Nothing = error("Missing product control: $text; last observation: $lastObserved")
-        for (direction in listOf(Direction.DOWN, Direction.UP)) {
+        val directions = if (firstDirection == Direction.UP) listOf(Direction.UP, Direction.DOWN) else listOf(Direction.DOWN, Direction.UP)
+        for (direction in directions) {
             var scrolls = 0
             var unchangedSwipes = 0
             while (scrolls < scrollAttempts) {

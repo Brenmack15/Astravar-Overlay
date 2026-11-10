@@ -74,7 +74,9 @@ class PlayerFirstJourneyInstrumentationTest {
         find("Level 4 → 5\nProficiency +2 → +3\nMaximum HP 30 → 37\nCurrent HP 24 → 31")
         capture("advancement-preview")
         tap("Confirm level 5")
-        find("Level 5 · Proficiency +3")
+        // The level-up action is below the sheet; its saved level is in the
+        // header above it. Search that direction within the original deadline.
+        ui.textBounds("Level 5 · Proficiency +3", product, scrollAttempts = 18, firstDirection = Direction.UP)
         stat("HP 31 / 37")
         restart()
         ui.ensurePrimaryTab(product, "Character")
