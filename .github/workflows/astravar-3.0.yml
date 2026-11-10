@@ -77,7 +77,7 @@ jobs:
       - name: Inspect actual QA package
         run: |
           mkdir -p validation
-          python3 scripts/reforge_inspect_apk.py app/build/outputs/apk/debug/app-debug.apk --sdk "$ANDROID_HOME" --output validation/reforge-debug-package.json
+          python3 scripts/reforge_inspect_apk.py app/build/outputs/apk/debug/app-debug.apk --sdk "$ANDROID_HOME" --version-code 49 --version-name 3.2.0-rc1 --output validation/reforge-debug-package.json
           printf '%s\n' 'DEBUG QA ARTIFACT. This is not an owner-signed in-place update. No production release, signing rotation or physical phone installation occurred.' > validation/QA-ONLY.txt
       - name: Index executed evidence even on failure
         if: always()
