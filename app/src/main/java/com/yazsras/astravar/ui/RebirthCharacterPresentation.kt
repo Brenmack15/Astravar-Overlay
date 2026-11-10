@@ -12,35 +12,55 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.rules.reforge.*
 
 /** Presentation only. Values and action availability always come from the saved sheet and engine. */
 @Composable internal fun RebirthCharacterHeader(character: ReforgeCharacter, projection: CharacterProjection,
     onSwitch: (() -> Unit)?) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        ReforgePortrait(character.portraitRef, Modifier.size(52.dp).clip(RoundedCornerShape(8.dp)))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(character.name, style = MaterialTheme.typography.headlineSmall,
-                color = RebuildPalette.Silver, modifier = Modifier.semantics { heading() })
-            Text("Level ${character.level} · Proficiency +${projection.proficiencyBonus}",
-                style = MaterialTheme.typography.bodySmall, color = RebuildPalette.GoldBright)
-            val identity = listOf(character.species, character.className).filter(String::isNotBlank).joinToString(" · ")
-            if (identity.isNotBlank()) Text(identity, style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
+    val density = LocalDensity.current
+    val direction = LocalLayoutDirection.current
+    val measurer = rememberTextMeasurer()
+    val actionStyle = MaterialTheme.typography.labelLarge
+    val actionLabel = "Switch character"
+    val padding = ButtonDefaults.TextButtonContentPadding
+    val requiredWordWidth = with(density) {
+        actionLabel.split(' ').maxOf { word ->
+            measurer.measure(word, style = actionStyle, softWrap = false, maxLines = 1).size.width
+        }.toDp()
+    } + padding.calculateLeftPadding(direction) + padding.calculateRightPadding(direction) + 2.dp
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        // The compact slot may wrap between words, never through "character".
+        // Leave a useful name column; move the action below when either cannot fit.
+        val inline = requiredWordWidth <= 96.dp && maxWidth >= 52.dp + 24.dp + 96.dp + 144.dp * density.fontScale
+        Column(Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ReforgePortrait(character.portraitRef, Modifier.size(52.dp).clip(RoundedCornerShape(8.dp)))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(character.name, style = MaterialTheme.typography.headlineSmall,
+                        color = RebuildPalette.Silver, modifier = Modifier.semantics { heading() })
+                    Text("Level ${character.level} · Proficiency +${projection.proficiencyBonus}",
+                        style = MaterialTheme.typography.bodySmall, color = RebuildPalette.GoldBright)
+                    val identity = listOf(character.species, character.className).filter(String::isNotBlank).joinToString(" · ")
+                    if (identity.isNotBlank()) Text(identity, style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
+                }
+                if (onSwitch != null && inline) {
+                    PlayerTextButton(onClick = onSwitch, modifier = Modifier.width(96.dp)) { Text(actionLabel, style = actionStyle) }
+                }
+            }
+            if (onSwitch != null && !inline) {
+                PlayerTextButton(onClick = onSwitch) { Text(actionLabel, style = actionStyle) }
+            }
         }
-        if (onSwitch != null && LocalDensity.current.fontScale < 1.5f) {
-            PlayerTextButton(onClick = onSwitch, modifier = Modifier.widthIn(max = 96.dp)) { Text("Switch character") }
-        }
-    }
-    if (onSwitch != null && LocalDensity.current.fontScale >= 1.5f) {
-        PlayerTextButton(onClick = onSwitch) { Text("Switch character") }
     }
 }
 

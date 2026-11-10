@@ -2,7 +2,12 @@ package com.yazsras.astravar.ui
 
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -46,6 +51,7 @@ class ReforgeCharacterUiTest {
     private fun withSheet(seed: Boolean = true, campaignSetup: (CampaignLedgerRepository) -> Unit = {},
         character: ReforgeCharacter = fixture(), localSetup: suspend (ReforgeRepository) -> Unit = {},
         companionProfileId: String? = null, initialSection: String = "Sheet", onBackToCompanions: (() -> Unit)? = null,
+        fontScale: Float = 1f,
         block: (ReforgeRepository) -> Unit) {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val legacyDb = Room.inMemoryDatabaseBuilder(context, CampaignLedgerDb::class.java).build()
@@ -63,9 +69,11 @@ class ReforgeCharacterUiTest {
         try {
             captureActivity = controller.get()
             controller.get().setContent {
-                AstravarTheme {
-                    ReforgeCharacterSheet(ledger, repository, initialSection = initialSection,
-                        companionProfileId = companionProfileId, onBackToCompanions = onBackToCompanions)
+                CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
+                    AstravarTheme {
+                        ReforgeCharacterSheet(ledger, repository, initialSection = initialSection,
+                            companionProfileId = companionProfileId, onBackToCompanions = onBackToCompanions)
+                    }
                 }
             }
             block(repository)
@@ -284,6 +292,52 @@ class ReforgeCharacterUiTest {
         compose.onNodeWithContentDescription("HP 40 / 66").assertIsDisplayed()
         Stat.entries.forEach { compose.onNodeWithTag("reforge-${it.name}").assertIsDisplayed() }
         capture("rebirth-character-overview")
+    }
+
+    @Test @Config(qualifiers = "w360dp-h1000dp-xhdpi")
+    fun scaledSheetKeepsWholeActionWordsAt360Font130() = verifyScaledSheetActions(360, 1.3f)
+
+    @Test @Config(qualifiers = "w400dp-h1000dp-xhdpi")
+    fun scaledSheetKeepsWholeActionWordsAt400Font130() = verifyScaledSheetActions(400, 1.3f)
+
+    @Test @Config(qualifiers = "w360dp-h1000dp-xhdpi")
+    fun scaledSheetKeepsWholeActionWordsAt360Font200() = verifyScaledSheetActions(360, 2f)
+
+    @Test @Config(qualifiers = "w400dp-h1000dp-xhdpi")
+    fun scaledSheetKeepsWholeActionWordsAt400Font200() = verifyScaledSheetActions(400, 2f)
+
+    private fun verifyScaledSheetActions(width: Int, fontScale: Float) {
+        withSheet(character = fixture().copy(name = "Alexandria Moonwhisper of Silver Keep"), fontScale = fontScale) {
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
+            val captureName = "rebirth-sheet-${width}-font${(fontScale * 100).toInt()}"
+            capture("$captureName-overview")
+            compose.onNodeWithText("Character setup").performScrollTo()
+            capture("$captureName-actions")
+            listOf("Roll dice", "Character setup", "Switch character").forEach { label ->
+                compose.onNode(hasText(label) and hasClickAction()).performScrollTo()
+                    .assertIsDisplayed().assertIsEnabled().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+                val text = compose.onNodeWithText(label, useUnmergedTree = true)
+                val layouts = mutableListOf<TextLayoutResult>()
+                text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+                val layout = layouts.single()
+                assertEquals("$label must retain the requested font scale", fontScale, layout.layoutInput.density.fontScale, .01f)
+                assertFalse("$label must not omit lines", layout.multiParagraph.didExceedMaxLines)
+                assertFalse("$label must not overflow vertically", layout.didOverflowHeight)
+                for (line in 0 until layout.lineCount) {
+                    assertFalse("$label must not be ellipsized", layout.isLineEllipsized(line))
+                    assertTrue("$label ink must fit the measured line", layout.getLineLeft(line) >= -1f &&
+                        layout.getLineRight(line) <= layout.size.width + 1f)
+                    if (line > 0) {
+                        val start = layout.getLineStart(line)
+                        assertTrue("$label must wrap between whole words, not inside a word", start == 0 ||
+                            label[start - 1].isWhitespace() || label.getOrNull(start)?.isWhitespace() == true)
+                    }
+                }
+                val bounds = text.fetchSemanticsNode().boundsInRoot
+                assertTrue("$label must not be clipped by its parent", bounds.height + 1f >= layout.size.height &&
+                    bounds.width + 1f >= layout.size.width)
+            }
+        }
     }
 
     @Test fun fullSkillRowStartsAReviewableRollWithoutOpeningADisclosure() = withSheet { repository ->

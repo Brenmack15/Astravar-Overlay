@@ -1,6 +1,7 @@
 package com.yazsras.astravar
 
 import android.os.Bundle
+import android.graphics.Rect
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
@@ -33,16 +34,47 @@ class VisualRebirthJourneyInstrumentationTest {
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
         ui.awaitMainAfterSavedDialogs(product)
     }
-    private fun capture(name: String, tab: String, marker: String) {
-        find(marker)
+    private fun capture(name: String, tab: String, marker: String, interactiveMarker: Boolean = false) {
+        // Interactive captures measure only a fully revealed native target.
+        // Static text retains the existing rendered-marker acceptance checks.
+        if (interactiveMarker) assertTouch(marker) else find(marker)
         ui.captureStablePage(File(files, "rebirth-$name.png"), product, tab, listOf(By.text(marker).pkg(product)))
     }
     private fun assertTouch(text: String) {
-        val bounds = ui.textBounds(text, product, scrollAttempts = 18, interactive = true)
         val minimum = (48 * instrumentation.targetContext.resources.displayMetrics.density).toInt()
-        assertTrue("$text retains a 48dp visible target", bounds.width() >= minimum && bounds.height() >= minimum)
-        assertTrue("$text stays inside the native screen", bounds.left >= 0 && bounds.top >= 0 &&
-            bounds.right <= device.displayWidth && bounds.bottom <= device.displayHeight)
+        ui.textBounds(text, product, scrollAttempts = 18, interactive = true)
+        repeat(6) { attempt ->
+            // Accessibility can expose only the top of a button at the bottom
+            // scroll edge. Detach its real target and containing viewport, then
+            // reveal it before measuring; an undersized full target still fails.
+            val (bounds, viewport) = ui.snapshot(By.text(text).pkg(product),
+                "fresh touch target and vertical viewport for $text", refreshCache = true) { label ->
+                val action = generateSequence(label) { it.parent }.take(12)
+                    .firstOrNull { it.isEnabled && it.isClickable } ?: return@snapshot null
+                val scroll = generateSequence(action.parent) { it.parent }.take(12)
+                    .firstOrNull { it.className == "android.widget.ScrollView" }
+                Rect(action.visibleBounds) to scroll?.let { Rect(it.visibleBounds) }
+            }
+            val fullTarget = bounds.width() >= minimum && bounds.height() >= minimum &&
+                (viewport == null || viewport.contains(bounds))
+            val atTop = viewport != null && bounds.top <= viewport.top
+            val atBottom = viewport != null && bounds.bottom >= viewport.bottom
+            if (!fullTarget && viewport != null && !viewport.isEmpty && (atTop || atBottom) && attempt < 5) {
+                val distance = (minimum - bounds.height()).coerceAtLeast(0) + minimum / 2
+                val start = viewport.centerY()
+                val end = (start + if (atTop) distance else -distance)
+                    .coerceIn(viewport.top + 4, viewport.bottom - 5)
+                assertTrue("Reveal $text inside its observed vertical viewport",
+                    device.swipe(viewport.centerX(), start, viewport.centerX(), end, 20))
+                device.waitForIdle(1_000)
+            } else {
+                assertTrue("$text retains a 48dp visible target: bounds=$bounds viewport=$viewport minimum=$minimum",
+                    fullTarget)
+                assertTrue("$text stays inside the native screen", bounds.left >= 0 && bounds.top >= 0 &&
+                    bounds.right <= device.displayWidth && bounds.bottom <= device.displayHeight)
+                return
+            }
+        }
     }
     private fun campaignHome() {
         ui.ensurePrimaryTab(product, "Campaign")
@@ -145,8 +177,7 @@ class VisualRebirthJourneyInstrumentationTest {
                 val hp = By.descStartsWith("HP 31 / 37").pkg(product)
                 ui.bounds(hp, "unchanged main-character health at font scale $scale", refreshCache = true)
                 ui.captureStablePage(File(files, "rebirth-character-font-$scale.png"), product, "Character", listOf(hp))
-                assertTouch("Roll dice")
-                capture("character-actions-font-$scale", "Character", "Roll dice")
+                capture("character-actions-font-$scale", "Character", "Roll dice", interactiveMarker = true)
                 ui.selectSection(product, "Spells")
                 capture("spellbook-font-$scale", "Character", "CI Native Signal")
                 // Traversing every direct section also verifies that horizontal
