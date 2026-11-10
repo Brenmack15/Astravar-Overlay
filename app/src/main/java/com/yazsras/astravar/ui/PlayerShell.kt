@@ -87,9 +87,10 @@ val rebuildDestinations = listOf("Character", "Inventory", "Companions", "Campai
         fun fits(rows: List<List<String>>) = rows.all { row ->
             row.all { name -> maxOf(iconWidth, labelWidths.getValue(name).toFloat()) + labelPadding <= constraints.maxWidth.toFloat() / row.size }
         }
-        // Large-font layouts wrap while retaining 48dp touch targets and whole labels.
+        // Four destinations stay in one row or balanced pairs as text grows.
+        // Keep 48dp touch targets and complete labels instead of a 3-plus-1 layout.
         val rows = listOf(rebuildDestinations).takeIf(::fits)
-            ?: (3 downTo 1).map { rebuildDestinations.chunked(it) }.firstOrNull(::fits)
+            ?: listOf(2, 1).map { rebuildDestinations.chunked(it) }.firstOrNull(::fits)
             ?: rebuildDestinations.map { listOf(it) }
         Column {
             HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .4f))

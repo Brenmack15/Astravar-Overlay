@@ -182,27 +182,30 @@ internal class ObservedUi(private val device: UiDevice) {
     /** A visible summary is not evidence that its saved disclosure is expanded. */
     fun expandDisclosure(packageName: String, title: String) {
         textBounds(title, packageName, scrollAttempts = 18, interactive = true)
-        fun observed(): Pair<Rect, Boolean>? {
-            val root = InstrumentationRegistry.getInstrumentation().uiAutomation.rootInActiveWindow ?: return null
-            for (label in root.findAccessibilityNodeInfosByText(title)) {
-                if (label.packageName?.toString() != packageName || label.text?.toString() != title) continue
-                var current: android.view.accessibility.AccessibilityNodeInfo? = label
-                repeat(12) {
-                    val node = current ?: return@repeat
-                    val state = node.stateDescription?.toString()
-                    if (node.isEnabled && node.isClickable && state in listOf("Expanded", "Collapsed")) {
-                        val bounds = Rect().also(node::getBoundsInScreen)
-                        if (!bounds.isEmpty) return bounds to (state == "Expanded")
-                    }
-                    current = node.parent
+        fun observed(label: UiObject2): Pair<Rect, Boolean>? {
+            var current: UiObject2? = label
+            repeat(12) {
+                val row = current ?: return null
+                if (row.isEnabled && row.isClickable) {
+                    // The actual API36 tree exports the visible +/− children,
+                    // while the platform text/state lookup did not resolve this
+                    // Compose virtual disclosure. Read only this title's row;
+                    // summary content elsewhere must never imply expansion.
+                    val indicators = row.findObjects(By.text(Pattern.compile("[+−]")).pkg(packageName))
+                    val indicator = indicators.singleOrNull() ?: return null
+                    val bounds = Rect(row.visibleBounds)
+                    val indicatorBounds = Rect(indicator.visibleBounds)
+                    if (bounds.isEmpty || indicatorBounds.isEmpty || !bounds.contains(indicatorBounds)) return null
+                    return bounds to (indicator.text == "−")
                 }
+                current = row.parent
             }
             return null
         }
         val selector = By.text(title).pkg(packageName)
-        val before = snapshot(selector, "observed disclosure state: $title", refreshCache = true) { observed() }
+        val before = snapshot(selector, "observed disclosure state: $title", refreshCache = true) { observed(it) }
         if (!before.second) touch(before.first, "Expand $title", idleTimeoutMs = 1_000)
-        snapshot(selector, "expanded disclosure: $title", refreshCache = true) { observed()?.takeIf { it.second } }
+        snapshot(selector, "expanded disclosure: $title", refreshCache = true) { observed(it)?.takeIf { state -> state.second } }
     }
 
     /** A saved statistic may be above a newly expanded skill list; reacquire it visibly. */

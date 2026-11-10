@@ -394,6 +394,7 @@ class RebuildVisualAcceptanceTest {
             listOf("Normal", "Advantage", "Disadvantage").forEach {
                 compose.onNodeWithContentDescription(it).assertIsDisplayed().assertHeightIsAtLeast(48.dp)
             }
+            capture("rebuild-combat-360-font130-before-result-assert", fixture.activity.get())
             compose.onNodeWithText("Latest result").assertIsDisplayed()
             capture("rebuild-combat-360-font130", fixture.activity.get())
             listOf("Normal", "Adv.", "Disadv.").forEach { assertTextFullyVisible(it, singleLine = true) }

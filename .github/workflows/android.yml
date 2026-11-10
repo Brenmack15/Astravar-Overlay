@@ -55,7 +55,7 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Install SDK
-        timeout-minutes: 7
+        timeout-minutes: 9
         run: |
           export ANDROID_HOME="$RUNNER_TEMP/android-sdk"
           mkdir -p "$ANDROID_HOME/cmdline-tools"
@@ -64,7 +64,7 @@ jobs:
           unzip -q "$RUNNER_TEMP/android-cli.zip" -d "$ANDROID_HOME/cmdline-tools"
           mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/19.0"
           export PATH="$ANDROID_HOME/cmdline-tools/19.0/bin:$ANDROID_HOME/platform-tools:$PATH"
-          printf 'y\n%.0s' {1..100} | timeout -k 5s 60s sdkmanager --licenses >/dev/null
+          printf 'y\n%.0s' {1..100} | timeout -k 5s 120s sdkmanager --licenses >/dev/null
           if [[ "$INVENTORY_BETA" == 'true' ]]; then
             timeout -k 10s 240s sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
           else

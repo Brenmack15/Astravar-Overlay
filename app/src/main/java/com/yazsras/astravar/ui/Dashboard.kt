@@ -105,6 +105,11 @@ import kotlinx.serialization.encodeToString
                     PlayerTextButton(onClick={overlay="Attacks"}) {Text("Change")}
                 }
             }
+            if(last!=null) RollResultCard(last) else PlayerCard {
+                Text("Latest result",color=Muted,style=MaterialTheme.typography.bodySmall)
+                Text("No rolls yet",style=MaterialTheme.typography.titleMedium)
+            }
+            if(unresolved!=null) PlayerTextButton(onClick={overlay="Resolve"}) {Text("Complete saved ${unresolved.plan.ability.title.lowercase()}")}
             if(ability==Ability.ELEMENTAL || ability==Ability.GAUNTLET || blast) {
                 PlayerCard(onClick={overlay="Element"}) {
                     Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -142,11 +147,6 @@ import kotlinx.serialization.encodeToString
                 if(s.profile.melee?.chargedDamageType==null) Text("Charged bonus damage type needs an accepted ruling in Gauntlet configuration.", style=MaterialTheme.typography.bodySmall, color=Frost)
             }
             if(s.turn.spellShots>0 || s.turn.bonus || s.gauntletCharge!=null) PlayerTextButton(onClick={a.change("Player confirmed next weapon turn") {Engine.resetWeaponActions(it)}},enabled=!a.busy) {Text("My next turn · reset weapon actions")}
-            if(last!=null) RollResultCard(last) else PlayerCard {
-                Text("Latest result",color=Muted,style=MaterialTheme.typography.bodySmall)
-                Text("No rolls yet",style=MaterialTheme.typography.titleMedium)
-            }
-            if(unresolved!=null) PlayerTextButton(onClick={overlay="Resolve"}) {Text("Complete saved ${unresolved.plan.ability.title.lowercase()}")}
             if(!s.attuned) Action("Confirm attunement",!a.busy) {a.change("Attunement confirmed by player") {it.copy(attuned=true)}}
             Text("Internal core · ${s.installed?.readiness(s.gameSeconds) ?: "Not configured"}",
                 style=MaterialTheme.typography.bodySmall,color=Muted)
