@@ -292,18 +292,28 @@ internal class ObservedUi(private val device: UiDevice) {
 
     fun campaignItems(packageName: String) {
         ensurePrimaryTab(packageName, "Inventory")
-        tapText("Campaign items", packageName)
+        selectSection(packageName, "Campaign items")
     }
 
     /** Discover a flat section strip through native scrolling, then activate its tab once. */
     fun selectSection(packageName: String, label: String) {
-        require(label in listOf("Sheet", "Combat", "Equipment", "Spells", "Resources", "History", "Currency"))
+        // Restrict observation to the requested tab family inside its actual
+        // horizontal strip. A body heading or unrelated filter is never a tab.
+        val families = listOf(
+            listOf("Sheet", "Combat", "Equipment", "Spells", "Resources", "History", "Currency"),
+            listOf("My gear", "Campaign items"),
+            listOf("All gear", "Equipped", "Attuned"),
+            listOf("All", "Prepared", "Cantrips")
+        )
+        val family = families.singleOrNull { label in it } ?: error("Unknown tab family for $label")
         val deadline = SystemClock.uptimeMillis() + 30_000
         val stripSelector = By.clazz("android.widget.HorizontalScrollView").pkg(packageName)
-        val labelSelector = By.text(label).pkg(packageName)
-        val sectionLabels = By.text(Pattern.compile("Sheet|Combat|Equipment|Spells|Resources|History|Currency")).pkg(packageName)
+        val familyPattern = Pattern.compile(family.joinToString("|", transform = Pattern::quote))
+        fun matchingNodes(strip: UiObject2, pattern: Pattern): List<UiObject2> =
+            strip.findObjects(By.text(pattern).pkg(packageName)) + strip.findObjects(By.desc(pattern).pkg(packageName))
+        val labelPattern = Pattern.compile(Pattern.quote(label))
         fun sectionStrip() = device.findObjects(stripSelector).firstOrNull {
-            !it.visibleBounds.isEmpty && it.findObjects(sectionLabels).isNotEmpty()
+            !it.visibleBounds.isEmpty && matchingNodes(it, familyPattern).any { node -> primaryTabState(node) != null }
         }
         val minimumTap = (48 * InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density).toInt()
         var lastObserved = "No section strip observed"
@@ -317,7 +327,7 @@ internal class ObservedUi(private val device: UiDevice) {
                     scrollForObservation(packageName, Direction.UP)
                 } else {
                     val viewport = Rect(strip.visibleBounds)
-                    val state = strip.findObjects(labelSelector).firstNotNullOfOrNull(::primaryTabState)
+                    val state = matchingNodes(strip, labelPattern).firstNotNullOfOrNull(::primaryTabState)
                     lastObserved = "strip=$viewport; $label=$state; direction=$direction"
                     if (state != null && state.enabled && viewport.contains(state.bounds) &&
                         state.bounds.width() >= minimumTap && state.bounds.height() >= minimumTap) {
@@ -325,8 +335,13 @@ internal class ObservedUi(private val device: UiDevice) {
                             assertTrue("An unselected section exposes its click action: $label", state.clickable)
                             touch(state.bounds, "$label section", idleTimeoutMs = 1_000)
                         }
-                        snapshot(labelSelector, "selected $label section", timeoutMs = (deadline - SystemClock.uptimeMillis()).coerceAtLeast(1), refreshCache = true) {
-                            sectionStrip()?.findObjects(labelSelector)?.firstNotNullOfOrNull(::selectedTabBounds)
+                        snapshot(stripSelector, "selected $label section", timeoutMs = (deadline - SystemClock.uptimeMillis()).coerceAtLeast(1), refreshCache = true) {
+                            sectionStrip()?.let { selectedStrip ->
+                                val selectedViewport = Rect(selectedStrip.visibleBounds)
+                                matchingNodes(selectedStrip, labelPattern).firstNotNullOfOrNull(::selectedTabBounds)
+                                    ?.takeIf { bounds -> selectedViewport.contains(bounds) &&
+                                        bounds.width() >= minimumTap && bounds.height() >= minimumTap }
+                            }
                         }
                         return
                     }
