@@ -72,11 +72,25 @@ class GenesisCharacterRoutingTest {
         assertEquals(1L, runBlocking { playable.get(other.id) }!!.revision)
     }
 
-    @Test fun staleDetailRouteReportsTheMissingItemAndKeepsPagingUsable() = withRecords { ledger, playable, _, activity ->
+    @Test fun staleDetailRouteReportsTheMissingItemAndKeepsPagingUsable() = withRecords { ledger, playable, prefs, activity ->
+        val route = mutableStateOf<GenesisCharacterRoute?>(null)
         activity.setContent { AstravarTheme { ReforgeCharacterSheet(ledger, playable,
-            navigationRequest = GenesisCharacterRoute(other.id, "Equipment", "InspectItem:no-longer-present", 9)) } }
-        compose.waitUntil(10_000) { compose.onAllNodesWithText("That record is no longer available. Its character is open.").fetchSemanticsNodes().isNotEmpty() }
+            navigationRequest = route.value) } }
+        // A search selection arrives after the sheet has observed its initial records.
+        // Cold-start routes remain covered by the exact-item and companion tests above.
+        compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("HP 13 / Not set").fetchSemanticsNodes().isNotEmpty() }
+        compose.runOnIdle {
+            route.value = GenesisCharacterRoute(other.id, "Equipment", "InspectItem:no-longer-present", 9)
+        }
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("That record is no longer available. Its character is open.").fetchSemanticsNodes().isNotEmpty() &&
+                runBlocking { prefs.activeProfileId.first() } == other.id
+        }
         compose.onNodeWithText("That record is no longer available. Its character is open.").assertIsDisplayed()
+        compose.onNodeWithContentDescription("HP 7 / Not set").assertIsDisplayed()
+        assertEquals(other.id, runBlocking { prefs.activeProfileId.first() })
+        assertEquals(1L, runBlocking { playable.get(other.id) }!!.revision)
+        assertEquals(1L, runBlocking { playable.get(main.id) }!!.revision)
         compose.onNodeWithTag("section-Equipment").assertIsSelected()
         compose.onNodeWithTag("genesis-character-pager").performTouchInput { swipeLeft() }
         compose.waitForIdle()
