@@ -132,9 +132,13 @@ interface LedgerDao {
     PartyWallet::class, CampaignCheckpoint::class, ExternalRecordReference::class,
     CampaignReferenceRecord::class, CampaignReferenceRelation::class, CampaignImportReceipt::class,
     CampaignImportBackup::class, CampaignArchiveSource::class,
-    ChatGptPrompt::class, ChatGptPromptCatalogState::class], version = 6, exportSchema = true)
-@TypeConverters(PartyConverters::class)
+    ChatGptPrompt::class, ChatGptPromptCatalogState::class,
+    ReforgeCharacterRow::class, ReforgeChange::class, ReforgeRollRecord::class, ReforgeNoteDraft::class,
+    GenesisStorageReceipt::class], version = 7, exportSchema = true)
+@TypeConverters(PartyConverters::class, ReforgeConverters::class)
 abstract class CampaignLedgerDb : RoomDatabase() {
+    abstract fun reforgeDao(): ReforgeDao
+    abstract fun genesisStorageDao(): GenesisStorageDao
     abstract fun ledgerDao(): LedgerDao
     abstract fun recordsDao(): CampaignRecordsDao
     abstract fun partyDao(): PartyRecordsDao
@@ -145,12 +149,13 @@ abstract class CampaignLedgerDb : RoomDatabase() {
     companion object {
         fun open(context: Context): CampaignLedgerDb = Room.databaseBuilder(
             context.applicationContext, CampaignLedgerDb::class.java, "astravar-campaign-ledger.db"
-        ).enableMultiInstanceInvalidation()
-            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4, CAMPAIGN_MIGRATION_4_5, CAMPAIGN_MIGRATION_5_6).build() // NEVER fallbackToDestructiveMigration()
+        ).openHelperFactory(GenesisNonDestructiveOpenHelperFactory()).enableMultiInstanceInvalidation()
+            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4, CAMPAIGN_MIGRATION_4_5, CAMPAIGN_MIGRATION_5_6, CAMPAIGN_MIGRATION_6_7).build() // NEVER fallbackToDestructiveMigration()
     }
 }
 
 class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
+    internal val transactionDatabase: CampaignLedgerDb get() = db
     /** Selection is scoped and transactional; complete backup limits never govern character reads. */
     suspend fun readCharacterSnapshot(profileId: String): ReforgeLegacySnapshot {
         checkId(profileId)

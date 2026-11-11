@@ -163,19 +163,19 @@ suspend fun ReforgeRepository.reviewCampaignItem(campaign: CampaignLedgerReposit
 }
 
 /**
- * Single local transaction with an immutable source proof. Source is rechecked before local commit;
- * there is no cross-database atomicity or continuous campaign synchronization claim.
+ * Shared production storage checks the source and writes the immutable receipt in one transaction.
+ * Isolated legacy repositories retain their explicit source recheck; this is not continuous sync.
  */
 suspend fun ReforgeRepository.acceptCampaignItem(campaign: CampaignLedgerRepository, review: GenesisInventoryReview,
-    commandId: String = UUID.randomUUID().toString()): ReforgeSavedCharacter {
+    commandId: String = UUID.randomUUID().toString()): ReforgeSavedCharacter = withCampaignSnapshot(campaign) {
     validateGenesisInventoryReview(review)
     val fingerprint = genesisInventoryRequestFingerprint(review)
-    commandReceipt(commandId)?.let { return genesisInventoryRetry(it, fingerprint).character }
+    commandReceipt(commandId)?.let { return@withCampaignSnapshot genesisInventoryRetry(it, fingerprint).character }
     val source = campaignItemSource(campaign, review.profileId, review.source.item.id)
     check(source == review.source && reforgeHash(reforgeJson.encodeToString(source)) == review.sourceFingerprint) {
         "The campaign item or its assignment changed after review. Review the latest source before adding it."
     }
-    return commitReviewedCampaignItem(review, commandId).character
+    commitReviewedCampaignItem(review, commandId).character
 }
 
 internal fun validateGenesisInventoryReview(review: GenesisInventoryReview) {

@@ -33,6 +33,13 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
 }.getOrDefault("Unavailable")
 
 @Composable fun AstravarScreen(app: AstravarApp,startOverlay: ()->Unit,grantOverlay: ()->Unit,stopOverlay: ()->Unit, ownerConnectionRequest: Long = 0L) {
+    val storageStatus by app.genesisStorage.status.collectAsState()
+    if (storageStatus != com.yazsras.astravar.data.GenesisStorageStatus.Ready) {
+        AstravarTheme {
+            Surface(Modifier.fillMaxSize(), color = RebuildPalette.Canvas) { GenesisStorageRecovery(app, storageStatus) }
+        }
+        return
+    }
     val s by app.repository.state.collectAsState()
     val error by app.repository.error.collectAsState()
     val history by app.repository.history.collectAsState()

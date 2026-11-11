@@ -256,14 +256,14 @@ class ChatGptPromptRepositoryTest {
         old.version = 5
         old.close()
         db = Room.databaseBuilder(context, CampaignLedgerDb::class.java, fileName).allowMainThreadQueries()
-            .addMigrations(CAMPAIGN_MIGRATION_5_6).build()
+            .addMigrations(CAMPAIGN_MIGRATION_5_6, CAMPAIGN_MIGRATION_6_7).build()
         prompts = ChatGptPromptRepository(db) { now }
         assertEquals(item, db.ledgerDao().getItem(item.id))
         assertEquals(character, db.recordsDao().allCharacterProfiles().single())
         assertEquals(wallet, db.partyDao().wallet(wallet.id))
         assertEquals(source, db.archiveDao().source(source.packageHash))
         assertEquals(receipt, db.archiveDao().receipt(receipt.packageHash))
-        assertEquals(6, db.openHelper.readableDatabase.version)
+        assertEquals(7, db.openHelper.readableDatabase.version)
         assertTrue(db.promptDao().all().isEmpty())
         prompts.initialize(loadChatGptPromptSeeds(context))
         assertEquals(11, db.promptDao().all().size)
