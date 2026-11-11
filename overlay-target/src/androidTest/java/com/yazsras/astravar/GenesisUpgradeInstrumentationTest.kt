@@ -128,4 +128,28 @@ class GenesisUpgradeInstrumentationTest {
         ui.selectSection(product, "Sheet")
         ui.descriptionBounds("HP 17 / 32", product)
     }
+
+    /** Runs only after host comparison proves the untouched schema6→7 cutover. */
+    @Test fun canonicalWriteSurvivesRestart() {
+        launch()
+        assertTrue("Canonical write proof requires the candidate build",
+            device.executeShellCommand("dumpsys package $product").contains("versionCode=50 "))
+        ui.ensurePrimaryTab(product, "Character")
+        find("Genesis Legacy Retention Actor")
+        ui.descriptionBounds("HP 17 / 32", product)
+        ui.tap(By.desc("HP 17 / 32").pkg(product), "Open retained actor hit points")
+        enter("Damage or healing amount", "1")
+        tap("Heal")
+        ui.descriptionBounds("HP 18 / 32", product)
+        device.executeShellCommand("am force-stop $product")
+        launch()
+        ui.ensurePrimaryTab(product, "Character")
+        find("Genesis Legacy Retention Actor")
+        ui.descriptionBounds("HP 18 / 32", product)
+        find("Temp HP 3")
+        ui.captureStablePage(File(files, "genesis-canonical-write-after-restart.png"), product, "Character",
+            listOf(By.text("Genesis Legacy Retention Actor").pkg(product), By.desc("HP 18 / 32").pkg(product)))
+        // The host reads all three stopped stores next: exactly this revision
+        // and its receipt must be canonical; the original file must be intact.
+    }
 }
