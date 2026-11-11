@@ -15,6 +15,7 @@ private val Context.reforgePlayerPreferences: DataStore<Preferences> by preferen
 class ReforgePreferences(private val store: DataStore<Preferences>) {
     companion object {
         private val ACTIVE_PROFILE = stringPreferencesKey("active_profile_id")
+        private val SELECTED_CAMPAIGN = stringPreferencesKey("selected_campaign_id")
         val QUICK_ACTIONS = listOf("health", "attack", "spells", "inventory", "conditions", "rest", "resources", "dice")
         val DEFAULT_QUICK_ACTIONS = listOf("health", "attack", "spells", "inventory")
         const val MAX_QUICK_ACTIONS = 4
@@ -32,6 +33,16 @@ class ReforgePreferences(private val store: DataStore<Preferences>) {
         }
     }
     val activeProfileId: Flow<String?> = store.data.map { it[ACTIVE_PROFILE] }
+    val selectedCampaignId: Flow<String?> = store.data.map { it[SELECTED_CAMPAIGN] }
+
+    /** Navigation context only: selecting a campaign never assigns an actor to it. */
+    suspend fun selectCampaign(id: String?) {
+        id?.let(::checkId)
+        store.edit { preferences ->
+            if (id == null) preferences.remove(SELECTED_CAMPAIGN)
+            else preferences[SELECTED_CAMPAIGN] = id
+        }
+    }
 
     suspend fun selectProfile(profileId: String) {
         checkId(profileId)

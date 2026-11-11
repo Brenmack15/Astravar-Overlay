@@ -97,9 +97,21 @@ class LiveHpConnectionClient internal constructor(private val context: Context, 
     }
     private suspend fun campaignFor(profileId: String): String {
         OwnerSyncProtocol.id(profileId); require(profileId != OwnerConnectionProtocol.PROFILE) { "Select a campaign character, not a connection fixture." }; requireNotNull(profile(profileId)) { "Select an existing character." }
+        campaignDb.genesisAuthorityDao().actor(profileId)?.let { association ->
+            val campaignId = requireNotNull(association.campaignId) { "Assign this actor to a campaign before pairing HP access." }
+            val campaign = requireNotNull(campaignDb.genesisAuthorityDao().campaign(campaignId)) { "Review the actor's campaign identity before pairing HP access." }
+            require(!campaign.archived && campaignId != OwnerConnectionProtocol.CAMPAIGN) { "Choose an active campaign before pairing HP access." }
+            OwnerSyncProtocol.id(campaignId)
+            return campaignId
+        }
         val campaigns = campaignDb.partyDao().allSheets().filter { it.profileId == profileId }.map { it.campaignId }.distinct()
         return campaigns.singleOrNull()?.takeIf { it != OwnerConnectionProtocol.CAMPAIGN && runCatching { OwnerSyncProtocol.id(it) }.isSuccess }
             ?: "astravar-live-${OwnerSyncProtocol.hash(profileId).take(32)}"
+    }
+    private suspend fun membershipMatches(value: LiveHpSettings): Boolean {
+        val association = campaignDb.genesisAuthorityDao().actor(value.profileId) ?: return true
+        if (association.campaignId != value.campaignId) return false
+        return campaignDb.genesisAuthorityDao().campaign(value.campaignId)?.archived == false
     }
     private suspend fun credential(value: LiveHpSettings) = (vault.credential(value.origin, value.campaignId)
         ?: throw OwnerSyncFailure("AUTHENTICATION_REQUIRED")).also { if (it.credentialId == "pairing-pending") throw OwnerSyncFailure("PAIRING_PENDING") }
@@ -201,7 +213,10 @@ class LiveHpConnectionClient internal constructor(private val context: Context, 
             put("lastSyncAt", value.lastSyncAt); put("lastDeviceSyncAt", value.lastDeviceSyncAt); put("revokePending", value.revokePending)
             put("profiles", buildJsonArray { campaignDb.recordsDao().allCharacterProfiles().forEach { p ->
                 if (runCatching { OwnerSyncProtocol.id(p.id) }.isSuccess && p.id != OwnerConnectionProtocol.PROFILE) add(buildJsonObject {
-                    put("id", p.id); put("name", p.name); put("revision", p.revision); put("campaignId", campaignFor(p.id))
+                    val pairingCampaign = runCatching { campaignFor(p.id) }.onFailure { if (it is CancellationException) throw it }
+                    put("id", p.id); put("name", p.name); put("revision", p.revision)
+                    put("campaignId", pairingCampaign.getOrNull()?.let(::JsonPrimitive) ?: JsonNull)
+                    put("pairingIssue", pairingCampaign.exceptionOrNull()?.message?.let(::JsonPrimitive) ?: JsonNull)
                     put("currentHp", p.currentHp?.let(::JsonPrimitive) ?: JsonNull); put("maximumHp", p.maximumHp?.let(::JsonPrimitive) ?: JsonNull); put("temporaryHp", p.temporaryHp?.let(::JsonPrimitive) ?: JsonNull)
                 })
             } })
@@ -257,6 +272,10 @@ class LiveHpConnectionClient internal constructor(private val context: Context, 
         for (p in dao.commands().filter { belongs(it, value) && it.state == "APPROVING" }) finishLocal(p)
         for (p in dao.commands().filter { belongs(it, value) && it.state == "DECISION_CONFLICT" && it.receiptJson == null }) quarantineDecision(value, p)
         for (p in dao.commands().filter { belongs(it, value) && it.state in setOf("APPLIED_PENDING", "REJECTED_PENDING") }) flushDecision(value, p)
+        if (!membershipMatches(value)) {
+            dao.settings(setting().copy(status = "Campaign membership changed · revoke and pair again before publishing current HP"))
+            return
+        }
         // Read proposals before publishing: a restored approval receipt must be recovered before any publication.
         val pending = request(value, base(value) + "/pending")
         for (p in pending.getValue("proposals").jsonArray) ingest(value, p.jsonObject)
@@ -298,6 +317,7 @@ class LiveHpConnectionClient internal constructor(private val context: Context, 
             status = if (blocked) "Authenticated HP read succeeded · conflict requires review" else if (matching) "Selected character HP and revision verified" else "Authenticated HP read succeeded · local and remote differ"))
     }
     private suspend fun heartbeat(value: LiveHpSettings, local: CharacterProfile) {
+        require(membershipMatches(value)) { "Campaign membership changed. Re-pair before publishing current HP." }
         // A fresh phone-authenticated exact snapshot proves freshness; reads never advance this timestamp.
         if (value.lastDeviceSyncAt > 0 && now() - value.lastDeviceSyncAt < 60_000) return
         val command = UUID.randomUUID().toString()
@@ -317,6 +337,7 @@ class LiveHpConnectionClient internal constructor(private val context: Context, 
             val p = requireNotNull(dao.publication(id)); require(p.body == body); dao.update(p.copy(state = state)) }
     }
     private suspend fun flushPublication(value: LiveHpSettings, body: String) {
+        require(membershipMatches(value)) { "Campaign membership changed. Re-pair before publishing current HP." }
         val sent = Json.parseToJsonElement(body).jsonObject; val id = sent.getValue("commandId").jsonPrimitive.content
         val receipt = try { request(value, base(value) + "/characters", body).getValue("receipt").jsonObject }
         catch (e: OwnerSyncFailure) { if (e.code !in setOf("REVISION_CONFLICT", "COMMAND_ID_REUSED")) throw e
@@ -413,13 +434,14 @@ class LiveHpConnectionClient internal constructor(private val context: Context, 
             else {
                 val current = profile(p.profileId)
                 if (current != frozen) return@withTransaction null
+                if (!membershipMatches(LiveHpSettings(profileId = p.profileId, campaignId = p.campaignId))) return@withTransaction null
                 requireAutomaticAllowed()
                 val committed = records.saveProfile(frozen.copy(currentHp = p.proposedHp), p.expectedRevision, LiveHpConnectionProtocol.source(p.commandId, p.source), localId)
                 requireAutomaticAllowed()
                 committed
             }
         }
-        if (receipt == null) { dao.update(p.copy(state = "CONFLICT", message = "Local profile changed before commit · nothing applied")); return }
+        if (receipt == null) { dao.update(p.copy(state = "CONFLICT", message = "Local profile or campaign changed before commit · nothing applied")); return }
         afterLocalCommit()
         dao.update(p.copy(state = "APPLIED_PENDING", decisionBody = decisionBody(p, true, receipt), message = "HP saved locally · server confirmation pending"))
     }

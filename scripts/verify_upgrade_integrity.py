@@ -15,6 +15,7 @@ IMMUTABLE_SCHEMAS = {
     "com.yazsras.astravar.data.CampaignLedgerDb/4.json": "076ebbba19127c09137b7095d84cc89bc9fb64c25ab74951677b9d2537cd3c5f",
     "com.yazsras.astravar.data.CampaignLedgerDb/5.json": "055d82545e23397ef2a785aceb6856534b3d1b50ad918cd4e74e2ef87abf7349",
     "com.yazsras.astravar.data.CampaignLedgerDb/6.json": "e6a8c8388f27cf5188d3574206afe2a91645d9843832d0a8e0d6c57b5917faac",
+    "com.yazsras.astravar.data.CampaignLedgerDb/7.json": "e72a80deed9cdea4465cc29c5cde44aab50787653585f982e316d53b58ca7470",
     "com.yazsras.astravar.data.ReforgeDb/1.json": "8a289404aa8073ef7cfdf40147cd7bc033ab36f1b73bcd0fab12de70ad471719",
     "com.yazsras.astravar.data.SandboxSyncDb/1.json": "23de63787037f830e1295ba7cd7efbc7d62cf18e3ba836c4e511bec8fd6cef03",
 }
@@ -71,6 +72,15 @@ for table, entity in (prompt_tables | playable_tables).items():
 assert {field["columnName"] for field in genesis_tables["genesis_storage_receipt"]["fields"]} == {
     "id", "sourceVersion", "sourceDigest", "countsJson", "completedAt", "authority"}
 
+# Connected authority is additive and starts empty; historical source/playable/installation rows retain exact schema.
+authority_schema = json.loads((ROOT / "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/8.json").read_text())["database"]
+assert authority_schema["version"] == 8
+authority_tables = {entity["tableName"]: entity for entity in authority_schema["entities"]}
+assert authority_tables.keys() - genesis_tables.keys() == {"genesis_campaigns", "genesis_actor_authority", "genesis_item_authority", "genesis_authority_receipts"}
+assert genesis_tables.keys() <= authority_tables.keys()
+for table, entity in genesis_tables.items():
+    assert authority_tables[table] == entity, f"Historical table changed during explicit authority upgrade: {table}"
+
 tracked = subprocess.check_output(["git", "-C", str(ROOT), "ls-files", "-z"], text=True).split("\0")
 for name in filter(None, tracked):
     assert not re.search(r"\.(?:jks|keystore|p12|apk|aab|pdf|mht|zip)$", name, re.I), f"Private/distribution artifact in source: {name}"
@@ -82,4 +92,4 @@ for suffix in (".v2uidebug", ".v2statdebug"):
     assert f'applicationIdSuffix = "{suffix}"' in gradle
 manifest = (ROOT / "app/src/main/AndroidManifest.xml").read_text()
 assert 'android:allowBackup="false"' in manifest and 'android:usesCleartextTraffic="false"' in manifest
-print("Verified ten immutable historical schemas, additive wallet/prompt/Genesis migrations, unchanged campaign and playable tables, package boundaries and private-artifact exclusion")
+print("Verified eleven immutable historical schemas, additive wallet/prompt/Genesis migrations, unchanged campaign and playable tables, package boundaries and private-artifact exclusion")

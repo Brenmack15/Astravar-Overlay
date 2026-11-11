@@ -134,9 +134,11 @@ interface LedgerDao {
     CampaignImportBackup::class, CampaignArchiveSource::class,
     ChatGptPrompt::class, ChatGptPromptCatalogState::class,
     ReforgeCharacterRow::class, ReforgeChange::class, ReforgeRollRecord::class, ReforgeNoteDraft::class,
-    GenesisStorageReceipt::class], version = 7, exportSchema = true)
-@TypeConverters(PartyConverters::class, ReforgeConverters::class)
+    GenesisStorageReceipt::class, GenesisCampaignRecord::class, GenesisActorAuthority::class,
+    GenesisItemAuthority::class, GenesisAuthorityReceipt::class], version = 8, exportSchema = true)
+@TypeConverters(PartyConverters::class, ReforgeConverters::class, GenesisAuthorityConverters::class)
 abstract class CampaignLedgerDb : RoomDatabase() {
+    abstract fun genesisAuthorityDao(): GenesisAuthorityDao
     abstract fun reforgeDao(): ReforgeDao
     abstract fun genesisStorageDao(): GenesisStorageDao
     abstract fun ledgerDao(): LedgerDao
@@ -150,7 +152,7 @@ abstract class CampaignLedgerDb : RoomDatabase() {
         fun open(context: Context): CampaignLedgerDb = Room.databaseBuilder(
             context.applicationContext, CampaignLedgerDb::class.java, "astravar-campaign-ledger.db"
         ).openHelperFactory(GenesisNonDestructiveOpenHelperFactory()).enableMultiInstanceInvalidation()
-            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4, CAMPAIGN_MIGRATION_4_5, CAMPAIGN_MIGRATION_5_6, CAMPAIGN_MIGRATION_6_7).build() // NEVER fallbackToDestructiveMigration()
+            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4, CAMPAIGN_MIGRATION_4_5, CAMPAIGN_MIGRATION_5_6, CAMPAIGN_MIGRATION_6_7, CAMPAIGN_MIGRATION_7_8).build() // NEVER fallbackToDestructiveMigration()
     }
 }
 
@@ -254,6 +256,12 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
         require(db.recordsDao().receipt(commandId) == null) { "Command ID collision; edit rejected." }
         val before = dao.getItem(itemId) ?: error("This item no longer exists.")
         check(before.revision == expectedRevision) { "Item changed since editing began. Reopen it before saving." }
+        if (!genesisProjectionActive(db) && readGenesisAuthorityItem(db, itemId) != null) {
+            require(clean.title == before.title && clean.description == before.description && clean.archived == before.archived &&
+                clean.owner == before.owner && clean.itemState == before.itemState && clean.location == before.location && clean.quantity == before.quantity) {
+                "This physical item is connected. Edit its name, mechanics and description in the owner's equipment, and use transfer or quantity actions for ownership and stock."
+            }
+        }
         db.partyDao().placement(itemId)?.let {
             require(clean.owner == before.owner && clean.itemState == before.itemState && clean.location == before.location && clean.quantity == before.quantity) {
                 "This item has structured ownership. Use equipment transfer or quantity commands to change its owner, state, location or amount."
@@ -321,6 +329,7 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
 
     /** Player-controlled JSON export includes compact embedded item icons and the full audit history. */
     suspend fun export(): String = db.withTransaction {
+        genesisRequirePartialBackupAllowed(db)
         campaignBackupJson(LedgerExport(exportedAt = System.currentTimeMillis(),
             items = dao.allItems(), events = dao.allEvents(), records = records.snapshot(), archive = archive.snapshot()))
     }
@@ -328,6 +337,7 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
     /** Text and proof come from one consistent read, never a second potentially newer snapshot. */
     suspend fun exportWithProof(): CampaignExportSnapshot = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
         db.withTransaction {
+            genesisRequirePartialBackupAllowed(db)
             val current = CampaignBackup(db).snapshot()
             val text = campaignBackupJson(current.copy(exportedAt = System.currentTimeMillis()))
             CampaignExportSnapshot(text, campaignSerializedHash(LedgerExport.serializer(), current))
@@ -336,6 +346,7 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
 
     /** Historical compatibility export only: does not include new inventions/connections/companion records. */
     suspend fun exportLegacy(): String = db.withTransaction {
+        genesisRequirePartialBackupAllowed(db)
         val value = LedgerExport(schema = 1, exportedAt = System.currentTimeMillis(), items = dao.allItems(), events = dao.allEvents())
         val objectValue = json.encodeToJsonElement(LedgerExport.serializer(), value) as kotlinx.serialization.json.JsonObject
         supportedCampaignBackup(kotlinx.serialization.json.JsonObject(objectValue.filterKeys { it != "records" && it != "archive" }).toString())
@@ -351,6 +362,7 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
             ?: error("Original command outcome is unavailable. Review history before retrying.")
 
     private suspend fun recordReceipt(commandId: String, kind: String, fp: String, before: LedgerItem?, after: LedgerItem, source: String) {
+        genesisRejectAuthorityCommandReuse(db, commandId)
         val out = json.encodeToString(after)
         db.recordsDao().insert(CommandReceipt(commandId, fp, kind, after.id, after.revision, after.updatedAt, outcomeJson = out))
         db.recordsDao().insert(CampaignAudit(commandId, commandId, "item", after.id, kind, source,

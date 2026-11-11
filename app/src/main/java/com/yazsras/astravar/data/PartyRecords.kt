@@ -190,6 +190,7 @@ class PartyRecordsRepository(private val db: CampaignLedgerDb) {
             require(it.fingerprint == fingerprint) { "Command ID collision. No records changed." }
             return it
         }
+        genesisRejectAuthorityCommandReuse(db, commandId)
         require(inventory.event(commandId) == null) { "Command ID belongs to another inventory command." }
         return null
     }
@@ -199,12 +200,14 @@ class PartyRecordsRepository(private val db: CampaignLedgerDb) {
         revision: Long, source: String, now: Long, before: String?, after: String,
         auditId: String = commandId, kind: String = if (priorRevision == 0L) "CREATE" else "UPDATE"
     ): CommandReceipt {
+        genesisRejectAuthorityCommandReuse(db, commandId, auditId)
         records.insert(CampaignAudit(auditId, commandId, type, id, kind, source, priorRevision, revision, now, before, after))
         return CommandReceipt(commandId, fingerprint, type, id, revision, now, outcomeJson = after)
     }
 
     suspend fun saveSheet(profileId: String, sheet: PartySheetData, expectedRevision: Long? = null, source: String,
         commandId: String = UUID.randomUUID().toString()): CommandReceipt = db.withTransaction {
+        routeManagedSheet(db, profileId, sheet, expectedRevision, source, commandId)?.let { return@withTransaction it }
         checkId(profileId); checkSource(source); validateSheet(sheet)
         val payload = campaignJson.encodeToString(sheet)
         val fp = campaignHash(campaignJson.encodeToString(listOf("party-sheet-v1", profileId, expectedRevision?.toString(), payload, source)))
@@ -221,6 +224,7 @@ class PartyRecordsRepository(private val db: CampaignLedgerDb) {
 
     /** A transfer never clones the item or changes its quantity. A whole stack moves as one identity. */
     suspend fun moveItem(command: ItemMoveCommand): CommandReceipt = db.withTransaction {
+        routeManagedMove(db, command)?.let { return@withTransaction it }
         checkId(command.itemId); checkSource(command.source)
         val fp = campaignHash(campaignJson.encodeToString(command.copy(commandId = "")))
         retry(command.commandId, fp)?.let { return@withTransaction it }
@@ -258,6 +262,7 @@ class PartyRecordsRepository(private val db: CampaignLedgerDb) {
 
     /** Acquisition/expense only after resolution. Unknown stock cannot be spent or inferred from a delta. */
     suspend fun changeQuantity(command: QuantityCommand): CommandReceipt = db.withTransaction {
+        routeManagedQuantity(db, command)?.let { return@withTransaction it }
         checkId(command.itemId); checkSource(command.source); require(command.delta != 0)
         val fp = campaignHash(campaignJson.encodeToString(command.copy(commandId = "")))
         retry(command.commandId, fp)?.let { return@withTransaction it }
@@ -288,6 +293,7 @@ class PartyRecordsRepository(private val db: CampaignLedgerDb) {
 
     /** Establish/correct a sourced baseline explicitly; a delta can never establish an unknown baseline. */
     suspend fun confirmQuantity(command: QuantityConfirmationCommand): CommandReceipt = db.withTransaction {
+        routeManagedQuantityConfirmation(db, command)?.let { return@withTransaction it }
         checkId(command.itemId); checkSource(command.source)
         require(command.quantity == null || command.quantity in 0..1_000_000)
         val fp = campaignHash(campaignJson.encodeToString(command.copy(commandId = "")))

@@ -255,6 +255,8 @@ class GenesisApplicationStorage private constructor(private val context: Context
     private val db = CampaignLedgerDb.open(context)
     val campaign = CampaignLedgerRepository(db)
     val playable = ReforgeRepository(db, ready = ::awaitReady)
+    val authority = GenesisAuthorityRepository(db, ready = ::awaitReady)
+    val backup get() = authority.backup
     init { retry() }
 
     fun retry() { scope.launch { runCatching { awaitReady() } } }
