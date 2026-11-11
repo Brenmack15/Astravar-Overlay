@@ -107,4 +107,20 @@ Before a newly accepted campaign item can commit, the complete prospective Refor
 
 `GenesisInventoryTest` adds targeted proof for context/ownership, stale reads, unapproved effect rejection, exact retry, concurrent acquisition, legacy conflict handling, cross-view projection, backup validation, forced receipt-insert rollback and actual database close/reopen. Execution results must be recorded from the test run; the presence of these tests is not a passing result.
 
-**Still incomplete:** campaign and playable writes remain separate. The new projection is not a database cutover, global atomic source lock, automatic source reconciliation, backend synchronization, or a completed unified item-write model. The source can change after its final recheck; the immutable receipt identifies exactly the reviewed version used. Full unification must execute the lossless table migration and explicit authority/reconciliation steps above, then route all writes through the resulting single transaction boundary.
+### Storage cutover A supersedes the physical-store limitation
+
+The initial projection/acquisition implementation above preceded storage cutover A.
+Current production now uses campaign schema 7 and a shared Room instance for the
+campaign and playable repositories. All four playable table definitions and raw
+values are copied without JSON rewriting; a durable installation receipt prevents
+replay of the retained original over later edits. Source validation and reviewed
+acquisition now occur in the same production transaction, closing the earlier
+cross-store race. Read `STORAGE_CUTOVER.md` for recovery, backup boundaries and
+executed migration evidence.
+
+**Still incomplete:** shared storage does not make legacy campaign fields and
+playable fields one authority. Their independent edit paths, differing values and
+source provenance still require explicit reconciliation, authoritative command
+routing and portable authority-aware recovery. Owner synchronization and new
+campaign/actor/item creation must be connected through that layer before claiming
+the full unified item/actor lifecycle.

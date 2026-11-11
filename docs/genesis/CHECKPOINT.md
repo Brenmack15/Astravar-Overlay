@@ -32,6 +32,7 @@ Branch: `feat/astravar-project-genesis`. Draft PR: https://github.com/Brenmack15
 | `ba0ed2d39d54a70f22bdb8eab4aebb1e49319261` | Physical-item ownership guards, reviewed source proofs, backup recovery guard, atomic companion ownership |
 | `7100f86f2c8129bb8a0277e8f5998882f2ab247a` | Native pager, compact header, Features page, customizable quick actions, guided editors, consolidated inventory, exact-record search routes |
 | `a3f35400e911690fa70e37c6c72dc209172d4581` | Native gesture journeys, frozen code49-to-code50 upgrade fixtures, hosted verification gates |
+| `e539b9d216899c65922711525ec35544e96d8e4e` | Verified interaction/recovery fixes; preserved on `checkpoint/astravar-genesis-interactions` |
 
 Version marker is now `4.0.0-genesis1`, code50. This is a development checkpoint,
 not a completed release. Original package and signing configuration are unchanged.
@@ -64,9 +65,14 @@ not a completed release. Original package and signing configuration are unchange
   separate carried stack of three, with six helper tests passing. The corrected
   native upgrade has not executed. No candidate-upgrade or handset result is
   established by this run.
-- Hosted full gate `42931499054` on `a3f3540` is still pending at this checkpoint.
-  The next workflow splits debug/rules from release/lint so an earlier regression
-  failure does not spend another full release cycle before publishing evidence.
+- Historical hosted full gate `42931499054` on `a3f3540` completed: debug 720
+  passed, 6 failed, 3 skipped; release 707 passed, 5 failed, 17 skipped (729 tests
+  each). Five failures were the already-corrected old character UI assumptions;
+  the additional debug-only stale-route observer test was corrected and passed
+  in the integrated local run. Lint reported zero errors. Intentional skips were
+  the absent private archive, opt-in live-network cases, and release-only skips
+  for debug sandbox cases. These are not skipped coverage claimed as passing.
+  The next workflow splits debug/rules from release/lint for earlier results.
 - Compose/Robolectric screenshots were visually inspected. This caught a missing
   canvas behind sheet navigation and a font-scale fixture that did not reach its
   separate dialog window. The fixture now checks the rendered text's actual
@@ -75,16 +81,43 @@ not a completed release. Original package and signing configuration are unchange
   ellipsis, font scale and touch bounds. Do not describe these captures as
   physical-device or emulator evidence.
 
-Implemented data changes do **not** unify the two writable campaign/playable
-stores. Reviewed acquisition is explicit snapshot adoption with a rechecked source
-and atomic local receipt. The cross-store race and full authority cutover remain
-unresolved; see `DATA_AUDIT.md`. Do not remove those limitations from the release
-report without implementing and testing their replacements.
+## Storage cutover A integrated
+
+Schema 7 now co-locates the four unchanged playable tables with the campaign
+tables. The original database remains a read-only cutover-time archive; the
+installation receipt prevents replay over later edits. Large historical values
+are copied through bounded reads, and original/canonical corruption handlers
+retain damaged data rather than deleting it. Recovery keeps campaign backup,
+weapon backup and diagnostics available. Read `STORAGE_CUTOVER.md` before editing
+this boundary or making a release claim.
+
+Storage implementation testing passed 80 initial cases. After corruption handling
+was added, 47 other selected current-product regressions and all 17 final migration
+cases passed, along with lint and source/schema guards. The first combined UI/data
+run compiled the product and native instrumentation and passed 64 of 65 cases; its
+remaining navigation fixture tapped a control while the inventory loading layout
+was being replaced. The fixture now waits for the loaded view; both navigation
+tests passed on the final rerun (2 tests, 0 failures, 0 skipped). No production
+behavior or original navigation assertions were removed for that correction.
+
+Native proof tooling now requires exact schema 6-to-7 preservation, unchanged
+original payload files, copied playable tables and the matching authority receipt.
+A separate native heal/restart step verifies later writes in the canonical store.
+Twenty strict upgrade-helper tests and 102 native import/readback tests passed
+against the generated schema 7. Actual native execution on this integrated source
+and a fresh complete debug/release gate remain required.
+
+Co-location does **not** reconcile conflicting source and playable fields. Reviewed
+item acquisition now reads and writes inside one production Room transaction, but
+the two logical representations still have independent edit paths. Gameplay
+authority, projection updates and a portable combined backup remain wave B work.
+Do not describe a shared SQLite file as completed gameplay unification.
 
 ## Outstanding product work
 
-- Complete authoritative campaign/character/companion/item reconciliation and a
-  recoverable migration/cutover. Do not introduce a third database.
+- Complete authoritative campaign/character/companion/item reconciliation,
+  transactional projections and combined recovery. Storage co-location is done;
+  gameplay authority is not. Do not introduce a third database.
 - First-class campaigns, campaign membership and encounter creation are still
   absent. Guided character creation does not provide full class-compendium or
   automatic progression parity.
@@ -102,13 +135,14 @@ report without implementing and testing their replacements.
 ## Resume without restarting
 
 1. Fetch the latest head of PR #15 and inspect its checks before modifying code.
-   Preserve all four checkpoints above, PR #14 and earlier stacked work.
+   Preserve the checkpoints above, PR #14 and earlier stacked work.
 2. Read this file, `DATA_AUDIT.md`, `CREATION.md` and `NATIVE_PLAN.md`. Use the
    existing coverage matrix; do not regenerate the 1,173-site inventory as if no
    audit exists.
 3. Resolve actual focused-test and hosted-workflow failures, retaining assertions.
    Treat successful build/fixtures as evidence only for the tested behavior.
-4. Continue the missing architecture and product work above, then complete the
+4. Read `STORAGE_CUTOVER.md`, preserve schema 7 and its retained original, and
+   continue the missing architecture and product work above, then complete the
    requested QA and owner-compatible release. Never call the current projection
    or copy workflow a completed source-of-truth unification.
 

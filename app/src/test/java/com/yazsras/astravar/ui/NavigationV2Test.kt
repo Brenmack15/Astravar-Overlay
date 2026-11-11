@@ -81,7 +81,12 @@ class NavigationV2Test {
             assertFalse(before.onboarded)
             assertFalse(before.attuned)
             compose.onNodeWithTag("navigation-Inventory").performClick()
+            // The hub's initial loading view also has a Campaign items action.
+            // Observe its populated layout before tapping so an IO emission
+            // cannot replace and move that touch target during the click.
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("genesis-inventory-list").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Campaign items").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("Add Item") and hasClickAction()).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Add Item").assertExists()
             capture("v2-inventory", activity.get())
             compose.onNodeWithTag("navigation-Campaign").performClick()
@@ -91,7 +96,9 @@ class NavigationV2Test {
             // A retained campaign detail must not intercept Back from another
             // destination. Inventory closes its source records before leaving.
             compose.onNodeWithTag("navigation-Inventory").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("genesis-inventory-list").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Campaign items").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("Add Item") and hasClickAction()).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Add Item").assertExists()
             compose.runOnIdle { activity.get().onBackPressedDispatcher.onBackPressed() }
             compose.onNodeWithTag("navigation-Inventory").assertIsSelected()
