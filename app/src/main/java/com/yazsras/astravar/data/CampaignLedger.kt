@@ -93,6 +93,10 @@ interface LedgerDao {
     @Query("SELECT * FROM ledger_items WHERE archived=0 ORDER BY title COLLATE NOCASE ASC")
     fun observeItems(): Flow<List<LedgerItem>>
 
+    /** Review projections must retain an archived source when a playable sheet still holds its ID. */
+    @Query("SELECT * FROM ledger_items ORDER BY title COLLATE NOCASE ASC,id")
+    fun observeAllItems(): Flow<List<LedgerItem>>
+
     @Query("SELECT * FROM ledger_items WHERE id=:id")
     suspend fun getItem(id: String): LedgerItem?
 
@@ -158,6 +162,7 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
     val archive = CampaignArchiveRepository(db)
     val prompts = ChatGptPromptRepository(db)
     val items: Flow<List<LedgerItem>> = dao.observeItems()
+    val itemsIncludingArchived: Flow<List<LedgerItem>> = dao.observeAllItems()
     fun eventsForItem(itemId: String): Flow<List<LedgerEvent>> = dao.eventsForItem(itemId)
 
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = false }

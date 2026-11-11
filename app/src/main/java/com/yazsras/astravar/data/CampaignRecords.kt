@@ -278,14 +278,43 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
     fun requirementsFor(projectId: String) = dao.requirementsFor(projectId)
     suspend fun receipt(commandId: String) = dao.receipt(commandId)
 
-    /** Creates the two linked records together. No default HP, ability scores, or lore is invented. */
-    suspend fun createCompanion(name: String): String = db.withTransaction {
+    /** Identity, companion role, optional owner link and retry receipt share one transaction. */
+    suspend fun createCompanion(name: String, ownerProfileId: String? = null,
+        expectedOwnerRevision: Long? = null, commandId: String = UUID.randomUUID().toString()): String = db.withTransaction {
         val displayName = name.trim()
         text(displayName, 120, true)
-        val companionId = "companion-${UUID.randomUUID()}"
-        val provenance = "Player-created local companion"
-        saveProfile(CharacterProfile(id = companionId, name = displayName), source = provenance)
-        saveCompanionState(CompanionState(companionId = companionId, name = displayName), source = provenance)
+        id(commandId)
+        val fingerprint = campaignHash(campaignJson.encodeToString(listOf("companion-create-v2", displayName,
+            ownerProfileId, expectedOwnerRevision?.toString())))
+        val token = campaignHash(commandId).take(40)
+        val companionId = "companion-$token"
+        // Bind the whole creation request to the existing audited profile receipt.
+        // A separate aggregate receipt without an audit cannot survive backup validation.
+        val provenance = "Player-created local companion\nCreation request: $fingerprint"
+        val profile = CharacterProfile(id = companionId, name = displayName)
+        dao.receipt(commandId)?.let { receipt ->
+            require(receipt.kind == "character-profile" && receipt.recordId == companionId && receipt.resultingRevision == 1L) {
+                "Command ID collision. No changes saved."
+            }
+            val original = campaignJson.decodeFromString<CharacterProfile>(receipt.outcomeJson)
+            require(original.source == provenance && original.copy(source = "", updatedAt = 0) == profile) {
+                "The original creation receipt belongs to a different companion request."
+            }
+            // saveProfile verifies the original fingerprint before consulting current
+            // revisions. An identical retry stays valid after the owner or companion changes.
+            saveProfile(profile, source = provenance, commandId = commandId)
+            return@withTransaction companionId
+        }
+        require(db.ledgerDao().event(commandId) == null) { "Command ID already belongs to an inventory operation." }
+        if (ownerProfileId != null) {
+            val owner = dao.characterProfile(ownerProfileId) ?: error("The selected character no longer exists. Choose an owner again.")
+            check(owner.revision == expectedOwnerRevision) { "The selected character changed. Review the owner before creating this companion." }
+        } else require(expectedOwnerRevision == null) { "Choose a character before recording its revision." }
+        saveProfile(profile, source = provenance, commandId = commandId)
+        saveCompanionState(CompanionState(companionId = companionId, name = displayName), source = provenance, commandId = "companion-state-$token")
+        if (ownerProfileId != null) saveLink(CampaignLink(fromType = "companion", fromId = companionId,
+            toType = "character-profile", toId = ownerProfileId, label = "Companion of", id = "companion-owner-$token"),
+            source = provenance, commandId = "companion-owner-$token")
         companionId
     }
 

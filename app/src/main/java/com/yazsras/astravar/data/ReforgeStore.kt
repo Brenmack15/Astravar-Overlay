@@ -187,6 +187,7 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
         retry(commandId, fp)?.let { return@withTransaction reforgeJson.decodeFromString<ReforgeActionOutcome>(it.afterJson) }
         val before = dao.character(profileId) ?: error("Save the character before rolling an action.")
         check(before.revision == expectedRevision) { "Character changed since this action began. Review the latest state." }
+        checkOwnershipChanges(before.saved().character, nextCharacter)
         require(!before.saved().character.archived && !nextCharacter.archived) { "Restore this archived sheet before recording new actions." }
         require(dao.roll(roll.id) == null && dao.change(roll.id) == null) { "Roll identity already exists." }
         check(expectedRevision < Long.MAX_VALUE)
@@ -235,6 +236,7 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
         val fp = reforgeHash(reforgeJson.encodeToString(listOf(operation, reforgeJson.encodeToString(character), reforgeJson.encodeToString(origin))))
         retry(commandId, fp)?.let { return@withTransaction reforgeJson.decodeFromString<ReforgeSavedCharacter>(it.afterJson) }
         check(dao.character(character.id) == null) { "This character already exists. Open its current saved state." }
+        checkOwnershipChanges(null, character)
         val now = clock()
         val after = ReforgeCharacterRow(character.id, reforgeJson.encodeToString(character.copy(revision = 1)), 1,
             reforgeJson.encodeToString(origin), now, now)
@@ -253,6 +255,7 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
         retry(commandId, fp)?.let { return@withTransaction reforgeJson.decodeFromString<ReforgeSavedCharacter>(it.afterJson) }
         val before = dao.character(profileId) ?: error("This character is not saved yet.")
         check(before.revision == expectedRevision) { "Character changed since this action began. Review the latest state." }
+        checkOwnershipChanges(before.saved().character, character)
         check(expectedRevision < Long.MAX_VALUE) { "Character revision limit reached." }
         val now = maxOf(clock(), Math.addExact(before.updatedAt, 1))
         val after = before.copy(characterJson = reforgeJson.encodeToString(character.copy(revision = expectedRevision + 1)),
@@ -261,6 +264,40 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
         dao.insert(ReforgeChange(commandId, profileId, operation, fp, before.revision, after.revision, now,
             reforgeJson.encodeToString(before.saved()), reforgeJson.encodeToString(after.saved())))
         after.saved()
+    }
+
+    /** Repository-owned acquisition: identity, proof, ownership, character and receipt commit together. */
+    internal suspend fun commitReviewedCampaignItem(review: GenesisInventoryReview,
+        commandId: String): GenesisInventoryOutcome = db.withTransaction {
+        checkId(commandId); validateGenesisInventoryReview(review)
+        val fingerprint = genesisInventoryRequestFingerprint(review)
+        retry(commandId, fingerprint)?.let { return@withTransaction genesisInventoryRetry(it, fingerprint) }
+        val before = dao.character(review.profileId) ?: error("The playable character no longer exists.")
+        check(before.revision == review.expectedRevision) { "The character changed after item review. Review its latest inventory." }
+        val current = before.saved().character
+        require(!current.archived) { "Restore this character before adding equipment." }
+        val (definition, instance) = genesisCampaignItemMapping(review.source, current)
+        require(definition == review.definition && instance == review.instance) { "The reviewed item interpretation changed. No equipment was added." }
+        val next = current.copy(itemDefinitions = current.itemDefinitions + definition, items = current.items + instance)
+        validateCharacter(next)
+        checkOwnershipChanges(current, next)
+        val revision = Math.addExact(before.revision, 1)
+        val now = maxOf(clock(), Math.addExact(before.updatedAt, 1))
+        val after = before.copy(characterJson = reforgeJson.encodeToString(next.copy(revision = revision)), revision = revision, updatedAt = now)
+        val outcome = GenesisInventoryOutcome(after.saved(), review)
+        dao.update(after)
+        dao.insert(ReforgeChange(commandId, current.id, "Add assigned campaign item", fingerprint,
+            before.revision, revision, now, reforgeJson.encodeToString(before.saved()),
+            reforgeJson.encodeToString(outcome), outcomeType = "INVENTORY"))
+        // Source proofs and both immutable snapshots increase recovery size. Validate
+        // the complete prospective backup inside this same transaction, so acquisition
+        // cannot commit an otherwise unexportable history. Do not impose this scan on
+        // unrelated HP/rest edits, and do not retain another copy of the export text.
+        try { exportWithProof() }
+        catch (error: IllegalArgumentException) {
+            throw IllegalArgumentException("This item was not added because a complete character backup could not be validated: ${error.message.orEmpty()} Your previous saved records are unchanged.", error)
+        }
+        outcome
     }
 
     /** Only explicitly initiated results are submitted. A retry returns the original immutable result. */
@@ -325,6 +362,12 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
         dao.change(commandId)?.let { require(it.fingerprint == fingerprint) { "Command identity was reused with different content. Nothing changed." }; return it }
         require(dao.roll(commandId) == null) { "Command identity belongs to an existing roll." }
         return null
+    }
+    private suspend fun checkOwnershipChanges(before: ReforgeCharacter?, after: ReforgeCharacter) {
+        // HP, spells, rests and ordinary actions do not scan every other aggregate.
+        if (before?.items.orEmpty() == after.items && before?.itemDefinitions.orEmpty() == after.itemDefinitions) return
+        val others = dao.allCharacters().filter { it.profileId != after.id }.map { it.saved().character }
+        validateGenesisItemOwnership(before, after, others)
     }
     private suspend fun snapshot(time: Long) = ReforgeBackup(exportedAt = time, characters = dao.allCharacters(), changes = dao.allChanges(), rolls = dao.allRolls(), drafts = dao.allDrafts())
 }
