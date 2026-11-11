@@ -144,8 +144,11 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
         }
     }
     LaunchedEffect(actions.message) {if(actions.message.isNotBlank()) {snackbar.showSnackbar(actions.message);actions.message=""}}
-    androidx.activity.compose.BackHandler(enabled = tab != "Character" && campaignPage == null &&
-        companionPlayId == null && tool == null) { tab = "Character" }
+    androidx.activity.compose.BackHandler(enabled = tab != "Character" &&
+        (tab != "Campaign" || campaignPage == null) &&
+        (tab != "Companions" || companionPlayId == null) && tool == null) { tab = "Character" }
+    androidx.activity.compose.BackHandler(enabled = tab == "Inventory" && requestedInventory == "Campaign items" &&
+        tool == null) { requestedInventory = "My gear"; inventoryRoute++ }
     androidx.activity.compose.BackHandler(enabled=tab=="Campaign" && campaignPage!=null && tool==null) {campaignPage=null}
     AstravarTheme {
         Scaffold(containerColor=RebuildPalette.Canvas,

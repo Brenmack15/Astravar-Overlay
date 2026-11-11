@@ -191,7 +191,9 @@ private enum class SpellbookFilter(val label: String) {
     }
 
     CompositionLocalProvider(LocalGenesisEditorFeedback provides GenesisEditorFeedback(busy, error)) {
-    Column(Modifier.fillMaxSize()) {
+    // The reusable sheet owns its canvas, including transparent tabs and quick
+    // actions; it must not inherit an Activity or host's default white window.
+    Column(Modifier.fillMaxSize().background(RebuildPalette.Canvas)) {
         if (onBackToCompanions != null) {
             PlayerTextButton(onClick = onBackToCompanions, modifier = Modifier.padding(horizontal = 12.dp)) {
                 Text("Back to companions")
@@ -446,7 +448,7 @@ private enum class SpellbookFilter(val label: String) {
                                                 val next = GameplayRules.equip(character, item.id, if (item.state in setOf(ItemState.WORN, ItemState.HELD)) ItemState.CARRIED else ItemState.WORN)
                                                 proposedChange = "${if (item.state in setOf(ItemState.WORN, ItemState.HELD)) "Unequip" else "Equip"} ${definition?.name ?: "item"}" to next
                                             } catch (e: Exception) { error = e.message ?: "Item requirements not met" }
-                                        })
+                                        }, onManage = { error = ""; dialog = "ManageItem:${item.id}" })
                                     } }
                                 }
                                 PlayerOutlinedButton(onClick = { dialog = "ImportItem" }) {
@@ -689,20 +691,31 @@ private enum class SpellbookFilter(val label: String) {
                         statuses.forEach { Text("${if (it.active) "Active" else "Inactive"} · ${it.name}${if (it.reason.isBlank()) "" else " · ${it.reason}"}",
                             style = MaterialTheme.typography.bodyMedium, color = if (it.active) RebuildPalette.Cyan else RebuildPalette.Muted) }
                     }
-                    PlayerOutlinedButton(enabled = !busy, onClick = {
-                        try {
-                            val equipped = item.state in setOf(ItemState.WORN, ItemState.HELD)
-                            proposedChange = "${if (equipped) "Unequip" else "Equip"} ${definition?.name ?: "item"}" to
-                                GameplayRules.equip(character, item.id, if (equipped) ItemState.CARRIED else ItemState.WORN)
-                            dialog = null
-                        } catch (e: Exception) { error = e.message ?: "Item requirements not met" }
-                    }) { Text(if (item.state in setOf(ItemState.WORN, ItemState.HELD)) "Unequip" else "Equip") }
-                    if (definition?.requiresAttunement == true) PlayerOutlinedButton(enabled = !busy, onClick = {
-                        try {
-                            proposedChange = "${if (item.attuned) "End" else "Confirm"} attunement" to GameplayRules.attune(character, item.id, !item.attuned)
-                            dialog = null
-                        } catch (e: Exception) { error = e.message ?: "Attunement unavailable" }
-                    }) { Text(if (item.attuned) "Unattune" else "Attune") }
+                    val equipped = item.state in setOf(ItemState.WORN, ItemState.HELD)
+                    val stack = !equipped && item.quantity > 1
+                    if (stack || (!equipped && item.quantity == 0)) Text(
+                        if (stack) "Split off one item before equipping." else "No items available to equip.",
+                        color = RebuildPalette.Muted)
+                    PlayerOutlinedButton(enabled = !busy && (equipped || item.quantity > 0), onClick = {
+                        if (stack) {
+                            error = ""; dialog = "ManageItem:$itemId"
+                        } else {
+                            try {
+                                proposedChange = "${if (equipped) "Unequip" else "Equip"} ${definition?.name ?: "item"}" to
+                                    GameplayRules.equip(character, item.id, if (equipped) ItemState.CARRIED else ItemState.WORN)
+                                dialog = null
+                            } catch (e: Exception) { error = e.message ?: "Item requirements not met" }
+                        }
+                    }) { Text(if (equipped) "Unequip" else if (stack) "Split stack" else "Equip") }
+                    if (definition?.requiresAttunement == true) {
+                        if (!item.attuned && item.quantity != 1) Text("Choose a single item before attuning.", color = RebuildPalette.Muted)
+                        PlayerOutlinedButton(enabled = !busy && (item.attuned || item.quantity == 1), onClick = {
+                            try {
+                                proposedChange = "${if (item.attuned) "End" else "Confirm"} attunement" to GameplayRules.attune(character, item.id, !item.attuned)
+                                dialog = null
+                            } catch (e: Exception) { error = e.message ?: "Attunement unavailable" }
+                        }) { Text(if (item.attuned) "Unattune" else "Attune") }
+                    }
                     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
                 }
             }

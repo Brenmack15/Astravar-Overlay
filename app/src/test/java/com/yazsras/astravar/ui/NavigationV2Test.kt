@@ -88,7 +88,21 @@ class NavigationV2Test {
             compose.onNodeWithText("Connections").performClick()
             compose.onNodeWithContentDescription("Add connection").assertExists()
             capture("v2-connections", activity.get())
-            compose.onNodeWithText("‹ Campaign").performClick()
+            // A retained campaign detail must not intercept Back from another
+            // destination. Inventory closes its source records before leaving.
+            compose.onNodeWithTag("navigation-Inventory").performClick()
+            compose.onNodeWithText("Campaign items").performClick()
+            compose.onNodeWithText("Add Item").assertExists()
+            compose.runOnIdle { activity.get().onBackPressedDispatcher.onBackPressed() }
+            compose.onNodeWithTag("navigation-Inventory").assertIsSelected()
+            compose.onNodeWithText("Campaign items").assertExists()
+            compose.onNodeWithText("‹ Inventory").assertDoesNotExist()
+            compose.runOnIdle { activity.get().onBackPressedDispatcher.onBackPressed() }
+            compose.onNodeWithTag("navigation-Character").assertIsSelected()
+            compose.onNodeWithTag("navigation-Campaign").performClick()
+            compose.onNodeWithContentDescription("Add connection").assertExists()
+            compose.runOnIdle { activity.get().onBackPressedDispatcher.onBackPressed() }
+            compose.onNodeWithText("‹ Campaign").assertDoesNotExist()
             compose.onNodeWithText("Inventions").performClick()
             compose.onNodeWithText("Add Invention").assertExists()
             compose.onNodeWithText("‹ Campaign").performClick()
@@ -120,6 +134,9 @@ class NavigationV2Test {
             compose.onNodeWithTag("navigation-Companions").performClick()
             // Tab state restores the already-open Eek sheet. Do not click a name
             // again: both its heading and roster context legitimately say "Eek".
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithText("Eek's specialized companion tools").fetchSemanticsNodes().isNotEmpty()
+            }
             compose.onNodeWithText("Eek's specialized companion tools").performScrollTo().assertExists()
             compose.runOnIdle { assertEquals(before, app.repository.state.value) }
             assertEquals(0, overlayStarts)

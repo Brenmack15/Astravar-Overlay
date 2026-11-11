@@ -85,9 +85,11 @@ data class GenesisCharacterRoute(val profileId: String, val section: String = "S
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
-                    Text("Swipe between sections", style = MaterialTheme.typography.labelSmall,
+                    Text("Swipe between sections", modifier = Modifier.weight(1f).padding(end = 12.dp),
+                        style = MaterialTheme.typography.labelSmall,
                         color = RebuildPalette.Muted)
                     Text("${state.currentPage + 1} / ${pages.size}", style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1, softWrap = false,
                         color = RebuildPalette.GoldBright,
                         modifier = Modifier.testTag("genesis-page-indicator").semantics {
                             stateDescription = "${pages[state.currentPage]}, page ${state.currentPage + 1} of ${pages.size}"
@@ -170,7 +172,7 @@ internal fun Modifier.genesisHorizontalControl(): Modifier = nestedScroll(Genesi
                 }.padding(vertical = 4.dp)) {
                 Text("HP ${projection.currentHp ?: "?"} / ${projection.maximumHp.value ?: "?"}",
                     style = MaterialTheme.typography.titleMedium, color = RebuildPalette.Cyan)
-                Text("Temporary ${character.temporaryHp ?: "?"}", style = MaterialTheme.typography.labelSmall,
+                Text("Temp HP ${character.temporaryHp ?: "?"}", style = MaterialTheme.typography.labelSmall,
                     color = RebuildPalette.Muted)
             }
             GenesisHeaderStat("AC", projection.armorClass.value?.toString() ?: "?", "Armor Class",

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.rules.reforge.*
+import com.yazsras.astravar.ui.CampaignDocumentIoV21
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.first
@@ -319,5 +320,35 @@ class GenesisInventoryTest {
             recovery.restore(preview, "restore-protected-backup")
             assertEquals(current, recovery.get(current.character.id))
         } finally { recoveryDb.close() }
+    }
+
+    @Test fun multilingualAcquisitionCannotCrossNativeUtf8BackupLimitEvenBelowCharacterLimit() = runBlocking {
+        var current = actor()
+        val note = "龍".repeat(99_900)
+        repeat(10) { index ->
+            current = playable.save(current.character.id, current.revision,
+                current.character.copy(notes = "$index:$note"), "Fictional multilingual journal $index")
+        }
+        var protected = playable.exportWithProof()
+        while (CampaignDocumentIoV21.utf8Size(protected.text) < 7_200_000) {
+            current = playable.save(current.character.id, current.revision,
+                current.character.copy(notes = "${current.revision}:$note"), "Fictional multilingual journal ${current.revision}")
+            protected = playable.exportWithProof()
+        }
+        assertTrue(protected.text.length < 4_000_000)
+        assertTrue(CampaignDocumentIoV21.utf8Size(protected.text) <= REFORGE_DOCUMENT_BYTES)
+        val item = assignedItem(current.character.id, sourceImage = "A".repeat(900_000))
+        val review = playable.reviewCampaignItem(campaign, current.character.id, item.id)
+        val error = runCatching { playable.acceptCampaignItem(campaign, review, "unicode-document-too-large") }.exceptionOrNull()
+        assertNotNull("UTF-8 bytes must prevent committing an unexportable recovery document", error)
+        assertTrue(error!!.message.orEmpty().contains("8 MiB document limit"))
+        assertEquals(current, playable.get(current.character.id))
+        assertNull(playable.commandReceipt("unicode-document-too-large"))
+        val after = playable.exportWithProof()
+        assertEquals(protected.currentFingerprint, after.currentFingerprint)
+        assertTrue(CampaignDocumentIoV21.utf8Size(after.text) <= REFORGE_DOCUMENT_BYTES)
+        // The earlier backup remains accepted by the actual native document codec.
+        CampaignDocumentIoV21.verifySavedUtf8(protected.text,
+            protected.text.toByteArray(Charsets.UTF_8).inputStream(), REFORGE_DOCUMENT_BYTES)
     }
 }

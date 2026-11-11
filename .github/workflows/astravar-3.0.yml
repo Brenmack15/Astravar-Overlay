@@ -76,10 +76,17 @@ jobs:
             --tests 'com.yazsras.astravar.data.CampaignSyncDomainTest' \
             --tests 'com.yazsras.astravar.data.CampaignConnectionProjectionTest' \
             --tests 'com.yazsras.astravar.data.ReforgeLargeCampaignSelectionTest'
-      - name: Rules, Room, native Compose, lint and debug APK
-        timeout-minutes: 75
+      - name: Rules and debug Room/Compose regressions
+        timeout-minutes: 45
         run: |
-          bash gradlew --no-daemon --console=plain --continue :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug -PastravarScreenshots="$GITHUB_WORKSPACE/validation/reforge-screenshots"
+          bash gradlew --no-daemon --console=plain --continue :rules:test :app:testDebugUnitTest -PastravarScreenshots="$GITHUB_WORKSPACE/validation/reforge-screenshots"
+      - name: Release regressions, lint and debug APK
+        # Do not spend the release/lint budget after a known debug regression.
+        # Every task remains required before this workflow can pass.
+        if: success()
+        timeout-minutes: 45
+        run: |
+          bash gradlew --no-daemon --console=plain --continue :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug -PastravarScreenshots="$GITHUB_WORKSPACE/validation/reforge-screenshots"
       - name: Inspect actual QA package
         run: |
           mkdir -p validation

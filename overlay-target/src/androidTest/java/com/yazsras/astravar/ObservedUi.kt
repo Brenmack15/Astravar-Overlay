@@ -322,9 +322,26 @@ internal class ObservedUi(private val device: UiDevice) {
         val familyPattern = Pattern.compile(family.joinToString("|", transform = Pattern::quote))
         fun matchingNodes(strip: UiObject2, pattern: Pattern): List<UiObject2> =
             strip.findObjects(By.text(pattern).pkg(packageName)) + strip.findObjects(By.desc(pattern).pkg(packageName))
+        fun sectionTabState(node: UiObject2): PrimaryTabState? {
+            var current: UiObject2? = node
+            repeat(12) {
+                val observed = current ?: return null
+                if (observed.isClickable || observed.isSelected) {
+                    // Quick actions can have the same label (Spells, Resources),
+                    // but are Buttons. A section is a native selectable Tab.
+                    if (observed.className == "android.widget.Button") return null
+                    val bounds = Rect(observed.visibleBounds)
+                    return bounds.takeUnless { it.isEmpty }?.let {
+                        PrimaryTabState(it, observed.isEnabled, observed.isSelected, observed.isClickable)
+                    }
+                }
+                current = observed.parent
+            }
+            return null
+        }
         val labelPattern = Pattern.compile(Pattern.quote(label))
         fun sectionStrip() = device.findObjects(stripSelector).firstOrNull {
-            !it.visibleBounds.isEmpty && matchingNodes(it, familyPattern).any { node -> primaryTabState(node) != null }
+            !it.visibleBounds.isEmpty && matchingNodes(it, familyPattern).any { node -> sectionTabState(node) != null }
         }
         val minimumTap = (48 * InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density).toInt()
         var lastObserved = "No section strip observed"
@@ -338,7 +355,7 @@ internal class ObservedUi(private val device: UiDevice) {
                     scrollForObservation(packageName, Direction.UP)
                 } else {
                     val viewport = Rect(strip.visibleBounds)
-                    val state = matchingNodes(strip, labelPattern).firstNotNullOfOrNull(::primaryTabState)
+                    val state = matchingNodes(strip, labelPattern).firstNotNullOfOrNull(::sectionTabState)
                     lastObserved = "strip=$viewport; $label=$state; direction=$direction"
                     val visibleHeight = minOf(viewport.height(), state?.bounds?.height() ?: viewport.height())
                     if (visibleHeight < minimumTap) {
@@ -378,7 +395,9 @@ internal class ObservedUi(private val device: UiDevice) {
                         snapshot(stripSelector, "selected $label section", timeoutMs = (deadline - SystemClock.uptimeMillis()).coerceAtLeast(1), refreshCache = true) {
                             sectionStrip()?.let { selectedStrip ->
                                 val selectedViewport = Rect(selectedStrip.visibleBounds)
-                                matchingNodes(selectedStrip, labelPattern).firstNotNullOfOrNull(::selectedTabBounds)
+                                matchingNodes(selectedStrip, labelPattern).firstNotNullOfOrNull { node ->
+                                    sectionTabState(node)?.takeIf { it.selected && it.enabled }?.bounds
+                                }
                                     ?.takeIf { bounds -> selectedViewport.contains(bounds) &&
                                         bounds.width() >= minimumTap && bounds.height() >= minimumTap }
                             }

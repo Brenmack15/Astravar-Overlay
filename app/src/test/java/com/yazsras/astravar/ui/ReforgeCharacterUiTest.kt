@@ -1,9 +1,12 @@
 package com.yazsras.astravar.ui
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.text.TextLayoutResult
@@ -249,22 +252,41 @@ class ReforgeCharacterUiTest {
 
     @Test fun copyingCampaignItemIsExplicitAndKeepsOriginalIdentityWithoutMagic() {
         var sourceId = ""
-        withSheet(campaignSetup = { ledger ->
-            sourceId = runBlocking { ledger.create(LedgerDraft(title = "Runed lantern", quantity = 1,
-                description = "Mysterious runes, no confirmed effect")).id }
+        lateinit var playable: ReforgeRepository
+        lateinit var campaign: CampaignLedgerRepository
+        withSheet(localSetup = { playable = it }, campaignSetup = { ledger ->
+            campaign = ledger
+            runBlocking {
+                playable.createReviewedCampaignIdentity(ledger, requireNotNull(playable.get("synthetic-player")))
+                val item = ledger.create(LedgerDraft(title = "Runed lantern", quantity = 1,
+                    itemState = "Carried", evidenceStatus = "Proposed",
+                    description = "Mysterious runes, no confirmed effect"))
+                sourceId = item.id
+                ledger.party.moveItem(ItemMoveCommand(item.id, item.revision,
+                    holderProfileId = "synthetic-player", state = "Carried", source = "Fictional reviewed assignment"))
+                ledger.create(LedgerDraft(title = "Unassigned lantern", quantity = 1, itemState = "Carried"))
+            }
         }) { repository ->
+            val sourceBefore = runBlocking { campaignDecodeBackup(campaign.export()).copy(exportedAt = 0) }
             compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Equipment").performScrollTo().performClick()
             compose.onNodeWithText("Add from campaign inventory").performScrollTo().performClick()
+            compose.waitUntil(10000) { compose.onAllNodesWithText("Runed lantern").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Unassigned lantern").assertDoesNotExist()
             assertTrue(runBlocking { repository.get("synthetic-player") }!!.character.items.none { it.id == sourceId })
             compose.onNodeWithText("Runed lantern").performScrollTo().performClick()
-            compose.onNodeWithText("Copy item to character").performClick()
+            compose.waitUntil(10000) { compose.onAllNodesWithText("Add reviewed item").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Source evidence: Proposed").performScrollTo().assertIsDisplayed()
+            assertTrue(runBlocking { repository.get("synthetic-player") }!!.character.items.none { it.id == sourceId })
+            compose.onNodeWithText("Add reviewed item").performClick()
             compose.waitUntil(10000) {
                 runBlocking { repository.get("synthetic-player") }!!.character.items.any { it.id == sourceId }
             }
             val character = runBlocking { repository.get("synthetic-player") }!!.character
             assertEquals(1, character.items.single { it.id == sourceId }.quantity)
+            assertFalse(character.items.single { it.id == sourceId }.attuned)
             assertTrue(character.itemDefinitions.single { it.id == sourceId }.effects.isEmpty())
+            assertEquals(sourceBefore, runBlocking { campaignDecodeBackup(campaign.export()).copy(exportedAt = 0) })
         }
     }
 
@@ -288,11 +310,97 @@ class ReforgeCharacterUiTest {
         assertEquals(8, character.baseAbilities[Stat.STR])
     }
 
+    @Test fun stackedEquipmentOpensSplitReviewBeforeOneItemCanBeEquipped() {
+        val stacked = fixture().copy(items = fixture().items.map { it.copy(quantity = 3) })
+        withSheet(character = stacked, initialSection = "Equipment") { repository ->
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Split off one item before equipping.").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Equip", substring = false).assertDoesNotExist()
+            compose.onNodeWithText("Split stack").performScrollTo().performClick()
+            compose.onNodeWithText("Review split").assertIsEnabled()
+            compose.onNodeWithText("Close").performClick()
+            assertEquals(1L, runBlocking { repository.get(stacked.id) }!!.revision)
+
+            // Inspection exposes the same safe path as the direct inventory row.
+            compose.onNode(hasText("Synthetic armor") and hasClickAction()).performScrollTo().performClick()
+            compose.onNode(hasText("Equip", substring = false) and hasAnyAncestor(isDialog())).assertDoesNotExist()
+            compose.onNode(hasText("Split stack") and hasAnyAncestor(isDialog())).performScrollTo().performClick()
+            compose.onNodeWithText("Quantity in the new stack").assertExists()
+            compose.onNodeWithText("Review split").performScrollTo().performClick()
+            compose.onNodeWithText("Confirm change").assertExists()
+            val beforeConfirmation = runBlocking { repository.get(stacked.id) }!!
+            assertEquals(1L, beforeConfirmation.revision)
+            assertEquals(3, beforeConfirmation.character.items.single().quantity)
+            compose.onNodeWithText("Confirm change").performClick()
+            compose.waitUntil(10_000) { runBlocking { repository.get(stacked.id) }!!.revision == 2L }
+            val split = runBlocking { repository.get(stacked.id) }!!.character
+            assertEquals(2, split.items.size)
+            assertEquals(3, split.items.sumOf { it.quantity })
+            assertEquals(2, split.items.single { it.id == "armor-instance" }.quantity)
+            assertEquals(8, CharacterCalculator.calculate(split).abilities.getValue(Stat.STR).effective.value)
+
+            compose.onNodeWithText("Equip", substring = false).performScrollTo().performClick()
+            compose.onNodeWithText("Confirm change").assertExists()
+            assertEquals(2L, runBlocking { repository.get(stacked.id) }!!.revision)
+            compose.onNodeWithText("Confirm change").performClick()
+            compose.waitUntil(10_000) { runBlocking { repository.get(stacked.id) }!!.revision == 3L }
+            val equipped = runBlocking { repository.get(stacked.id) }!!.character
+            assertEquals(3, equipped.items.sumOf { it.quantity })
+            assertEquals(1, equipped.items.single { it.state == ItemState.WORN }.quantity)
+            assertEquals(21, CharacterCalculator.calculate(equipped).abilities.getValue(Stat.STR).effective.value)
+            assertEquals(26, equipped.hpDamage)
+        }
+    }
+
+    @Test fun emptyEquipmentCannotEquipAndHistoricalEquippedStackCanStillUnequip() {
+        val character = fixture().copy(
+            itemDefinitions = fixture().itemDefinitions + ItemDefinition("empty", "Empty supplies"),
+            items = listOf(fixture().items.single().copy(quantity = 3, state = ItemState.WORN), ItemInstance("empty-stock", "empty", quantity = 0)))
+        withSheet(character = character, initialSection = "Equipment") { repository ->
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Empty supplies").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Equip", substring = false).performScrollTo().assertIsNotEnabled()
+            compose.onNodeWithText("No items available to equip.").assertExists()
+            compose.onNode(hasText("Synthetic armor") and hasClickAction()).performScrollTo().performClick()
+            compose.onNodeWithText("Manage").performClick()
+            compose.onNodeWithText("Review split").assertIsNotEnabled()
+            compose.onNodeWithText("Unequip and end attunement before splitting this stack.").assertExists()
+            compose.onNodeWithText("Close").performClick()
+            compose.onNodeWithText("Unequip").performScrollTo().performClick()
+            compose.onNodeWithText("Confirm change").performClick()
+            compose.waitUntil(10_000) { runBlocking { repository.get(character.id) }!!.revision == 2L }
+            val result = runBlocking { repository.get(character.id) }!!.character
+            assertEquals(ItemState.CARRIED, result.items.single { it.id == "armor-instance" }.state)
+            assertEquals(3, result.items.single { it.id == "armor-instance" }.quantity)
+            assertEquals(0, result.items.single { it.id == "empty-stock" }.quantity)
+        }
+    }
+
     @Test fun compactSheetShowsVitalsAndAllAbilitiesBeforeScrolling() = withSheet {
         compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithContentDescription("HP 40 / 66").assertIsDisplayed()
         Stat.entries.forEach { compose.onNodeWithTag("reforge-${it.name}").assertIsDisplayed() }
         capture("rebirth-character-overview")
+        assertCharacterChromeUsesCanvas()
+    }
+
+    private fun assertCharacterChromeUsesCanvas() {
+        val sampleRows = listOf("quick-health", "genesis-character-tabs", "genesis-page-indicator")
+            .associateWith { compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot.center.y.toInt() }
+        compose.runOnIdle { invalidateNativeCaptureWindows() }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.runOnIdle {
+            val decor = requireNotNull(captureActivity).window.decorView
+            val bitmap = Bitmap.createBitmap(decor.width, decor.height, Bitmap.Config.ARGB_8888)
+            try {
+                // Match the native evidence capture's initial cache-warming draw.
+                decor.draw(Canvas(bitmap))
+                decor.draw(Canvas(bitmap))
+                sampleRows.forEach { (region, y) ->
+                    assertEquals("$region must retain the navy canvas beneath its transparent controls",
+                        RebuildPalette.Canvas.toArgb(), bitmap.getPixel(1, y))
+                }
+            } finally { bitmap.recycle() }
+        }
     }
 
     @Test @Config(qualifiers = "w360dp-h1000dp-xhdpi")
@@ -312,11 +420,31 @@ class ReforgeCharacterUiTest {
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
             val captureName = "rebirth-sheet-${width}-font${(fontScale * 100).toInt()}"
             capture("$captureName-overview")
+            val indicatorLayouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithTag("genesis-page-indicator")
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(indicatorLayouts)) }
+            val indicator = indicatorLayouts.single()
+            assertEquals("Page count must stay on one line at enlarged font sizes", 1, indicator.lineCount)
+            // String Text's semantics paragraph retains the Row's maximum
+            // width even when its measured text fits. Check actual line ink and
+            // every character, rather than that paragraph's blank allocation.
+            assertEquals("1 / 7", indicator.layoutInput.text.text)
+            assertEquals("The complete page count must remain visible", indicator.layoutInput.text.length,
+                indicator.getLineEnd(0, visibleEnd = true))
+            assertFalse("Page count must not be ellipsized", indicator.isLineEllipsized(0))
+            assertTrue("Page count ink must fit beside the swipe hint", indicator.getLineLeft(0) >= -1f &&
+                indicator.getLineRight(0) <= indicator.size.width + 1f)
+            val indicatorBounds = compose.onNodeWithTag("genesis-page-indicator").fetchSemanticsNode().boundsInRoot
+            assertTrue("Page count must not be clipped by its parent", indicatorBounds.width + 1f >= indicator.size.width &&
+                indicatorBounds.height + 1f >= indicator.size.height)
             compose.onNodeWithText("Character setup").performScrollTo()
             capture("$captureName-actions")
             listOf("Roll dice", "Character setup", "Switch character").forEach { label ->
-                compose.onNode(hasText(label) and hasClickAction()).performScrollTo()
-                    .assertIsDisplayed().assertIsEnabled().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+                val action = compose.onNode(hasText(label) and hasClickAction())
+                // Switching is pinned above the pager, so it must remain visible
+                // after the page scroll without requiring a scrollable ancestor.
+                if (label != "Switch character") action.performScrollTo()
+                action.assertIsDisplayed().assertIsEnabled().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
                 val text = compose.onNodeWithText(label, useUnmergedTree = true)
                 val layouts = mutableListOf<TextLayoutResult>()
                 text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }

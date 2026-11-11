@@ -1,11 +1,14 @@
 package com.yazsras.astravar.ui
 
+import android.content.res.Configuration
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -40,16 +43,27 @@ class GenesisCreationUiTest {
         compose.runOnIdle { captureNativeTestWindows("genesis-$name", requireNotNull(captureActivity)) }
     }
 
-    private fun editor(content: @Composable () -> Unit, block: () -> Unit) {
+    @Suppress("DEPRECATION")
+    private fun editor(content: @Composable () -> Unit, requestedFontScale: Float = 1f, block: () -> Unit) {
         val previous = System.getProperty("robolectric.windowManager.useRequestedSize")
         System.setProperty("robolectric.windowManager.useRequestedSize", "true")
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        val resources = controller.get().resources
+        val originalConfiguration = Configuration(resources.configuration)
         try {
+            // Dialogs own their window density; setting only LocalDensity on the
+            // Activity is not proof that the editor itself received font scaling.
+            resources.updateConfiguration(Configuration(originalConfiguration).apply { fontScale = requestedFontScale }, resources.displayMetrics)
             captureActivity = controller.get()
-            controller.get().setContent { AstravarTheme { content() } }
+            controller.get().setContent {
+                CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, requestedFontScale)) {
+                    AstravarTheme { content() }
+                }
+            }
             block()
         } finally {
             captureActivity = null
+            resources.updateConfiguration(originalConfiguration, resources.displayMetrics)
             controller.pause().stop().destroy()
             if (previous == null) System.clearProperty("robolectric.windowManager.useRequestedSize")
             else System.setProperty("robolectric.windowManager.useRequestedSize", previous)
@@ -213,16 +227,47 @@ class GenesisCreationUiTest {
 
     @Test fun enlargedTextKeepsReviewSaveAndBackReachable() {
         var saved: ReforgeCharacter? = null
-        editor({
-            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 2f)) {
-                ReforgeCharacterEditor(null, {}, { saved = it })
-            }
-        }) {
+        editor({ ReforgeCharacterEditor(null, {}, { saved = it }) }, requestedFontScale = 2f) {
             compose.onNodeWithText("Name").performScrollTo().performTextInput("Large text fixture")
             compose.onNodeWithText("Review & save").assertIsDisplayed().performClick()
             compose.onNodeWithText("Back").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithText("Save character", useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+            assertEquals("The editor dialog must render at the requested font scale", 2f,
+                layouts.single().layoutInput.density.fontScale, .01f)
             capture("character-review-font-2")
-            compose.onNodeWithText("Save character").assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
+            val layout = layouts.single()
+            val textBounds = compose.onNodeWithText("Save character", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val diagnostic = buildString {
+                append("Save text overflow: width=${layout.didOverflowWidth}, height=${layout.didOverflowHeight}, ")
+                append("measured=${layout.size}, constraints=${layout.layoutInput.constraints}, ")
+                append("paragraph=${layout.multiParagraph.width}x${layout.multiParagraph.height}, ")
+                append("exceededLines=${layout.multiParagraph.didExceedMaxLines}, ")
+                append("bounds=$textBounds; ")
+                for (line in 0 until layout.lineCount) {
+                    append("line$line=[${layout.getLineLeft(line)},${layout.getLineTop(line)},${layout.getLineRight(line)},${layout.getLineBottom(line)}], ")
+                    append("ellipsized=${layout.isLineEllipsized(line)}; ")
+                }
+            }
+            // String Text's semantic fallback lays out a MultiParagraph at the
+            // parent's maximum width (304px here) while retaining the rendered
+            // intrinsic size (188px). didOverflowWidth counts that unused space;
+            // verify the actual lines and visible node instead of that flag.
+            assertFalse(diagnostic, layout.multiParagraph.didExceedMaxLines)
+            assertFalse(diagnostic, layout.didOverflowHeight)
+            assertEquals(diagnostic, "Save character".length, layout.getLineEnd(layout.lineCount - 1))
+            for (line in 0 until layout.lineCount) {
+                assertFalse(diagnostic, layout.isLineEllipsized(line))
+                assertTrue(diagnostic, layout.getLineLeft(line) >= -1f &&
+                    layout.getLineRight(line) <= layout.size.width + 1f)
+                assertTrue(diagnostic, layout.getLineTop(line) >= -1f &&
+                    layout.getLineBottom(line) <= layout.size.height + 1f)
+            }
+            assertTrue(diagnostic, textBounds.width >= layout.size.width - 1f &&
+                textBounds.height >= layout.size.height - 1f)
+            compose.onNodeWithText("Save character").assertIsDisplayed()
+                .assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).performClick()
             assertEquals("Large text fixture", requireNotNull(saved).name)
         }
     }

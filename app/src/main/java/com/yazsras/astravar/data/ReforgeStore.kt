@@ -19,6 +19,8 @@ import java.util.UUID
 const val REFORGE_LOCAL_ONLY = "Saved on this device · not synchronized"
 internal val reforgeJson = Json { encodeDefaults = true; ignoreUnknownKeys = false }
 internal const val REFORGE_MAX_JSON = 8_000_000
+/** Shared with the native SAF backup reader/writer; character count is a different bound. */
+internal const val REFORGE_DOCUMENT_BYTES = 8 * 1024 * 1024
 
 @Serializable data class ReforgeOrigin(
     val label: String = "Created on this device", val sourceProfileId: String? = null,
@@ -293,7 +295,7 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
         // the complete prospective backup inside this same transaction, so acquisition
         // cannot commit an otherwise unexportable history. Do not impose this scan on
         // unrelated HP/rest edits, and do not retain another copy of the export text.
-        try { exportWithProof() }
+        try { validateGenesisBackupDocumentSize(exportWithProof().text) }
         catch (error: IllegalArgumentException) {
             throw IllegalArgumentException("This item was not added because a complete character backup could not be validated: ${error.message.orEmpty()} Your previous saved records are unchanged.", error)
         }

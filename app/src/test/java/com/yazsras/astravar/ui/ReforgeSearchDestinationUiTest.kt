@@ -2,6 +2,7 @@ package com.yazsras.astravar.ui
 
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.*
 import com.yazsras.astravar.data.*
 import com.yazsras.astravar.rules.reforge.*
@@ -68,6 +69,22 @@ class ReforgeSearchDestinationUiTest {
             compose.waitUntil(10_000) { compose.onAllNodesWithText("Amber scout").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Amber scout").performClick()
             compose.runOnIdle { assertEquals(ReforgeSearchDestination.Connection("fictional-scout"), opened) }
+        } finally { activity.pause().stop().destroy() }
+    }
+
+    @Test fun removingSearchResultWhileSearchIsOpenDoesNotExposeAStaleRoute() {
+        val entries = mutableStateOf(reforgeSearchCatalog(people = listOf(
+            ConnectionEntity(id = "removed", name = "Amber scout"))))
+        var opened: ReforgeSearchDestination? = null
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { AstravarTheme { ReforgeSearchResults(entries.value, { opened = it }) } }
+            compose.onNodeWithText("Items, people, places, spells…").performTextInput("Amber")
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Amber scout").fetchSemanticsNodes().isNotEmpty() }
+            compose.runOnIdle { entries.value = emptyList() }
+            compose.onNodeWithText("Amber scout").assertDoesNotExist()
+            compose.onNodeWithText("No matching records").assertExists()
+            compose.runOnIdle { assertNull(opened) }
         } finally { activity.pause().stop().destroy() }
     }
 }

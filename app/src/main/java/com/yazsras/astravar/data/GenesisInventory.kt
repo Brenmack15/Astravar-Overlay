@@ -11,6 +11,9 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import java.util.UUID
+import java.io.OutputStream
+import java.io.OutputStreamWriter
+import java.nio.charset.CodingErrorAction
 
 /** One row per physical identity; both current gameplay and source evidence remain inspectable. */
 enum class GenesisInventoryAuthority { PLAYABLE, CAMPAIGN_SOURCE, REVIEW_REQUIRED }
@@ -217,4 +220,27 @@ internal fun genesisRestoreOwnershipConflicts(incoming: ReforgeBackup, current: 
     val merged = holders((current.characters + incoming.characters).distinctBy { it.profileId })
     return merged.filter { (id, owners) -> owners.size > 1 && owners != before[id] && owners != incomingHolders[id] }
         .map { (id, _) -> "Physical item $id would have multiple owners after merging. Review the conflicting sheets before restoring." }
+}
+
+/** The same UTF-8 document bound as native backup, counted without another full byte array. */
+internal fun validateGenesisBackupDocumentSize(text: String) {
+    var count = 0L
+    fun add(bytes: Int) {
+        count += bytes
+        require(count <= REFORGE_DOCUMENT_BYTES) { "Backup exceeds the 8 MiB document limit." }
+    }
+    val sink = object : OutputStream() {
+        override fun write(value: Int) = add(1)
+        override fun write(bytes: ByteArray, offset: Int, length: Int) = add(length)
+    }
+    val encoder = Charsets.UTF_8.newEncoder().onMalformedInput(CodingErrorAction.REPORT)
+        .onUnmappableCharacter(CodingErrorAction.REPORT)
+    OutputStreamWriter(sink, encoder).use { writer ->
+        var offset = 0
+        while (offset < text.length) {
+            val length = minOf(8192, text.length - offset)
+            writer.write(text, offset, length)
+            offset += length
+        }
+    }
 }

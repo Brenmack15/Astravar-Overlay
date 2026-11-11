@@ -20,8 +20,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-private const val REFORGE_DOCUMENT_BYTES = 8 * 1024 * 1024
-
 /** SAF-only native character recovery. Data and large previews never enter saved-instance Bundles. */
 @Composable fun ReforgeBackupPage(repository: ReforgeRepository) {
     val context = LocalContext.current

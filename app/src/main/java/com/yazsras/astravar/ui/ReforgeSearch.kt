@@ -121,6 +121,10 @@ internal fun reforgeSearchLinkedEntry(entries: List<ReforgeSearchEntry>, from: R
     return matches.filter { it.origin == from.origin }.singleOrNull() ?: matches.singleOrNull()
 }
 
+/** Background search can finish after a record has been removed or archived. */
+internal fun reforgeCurrentSearchHits(hits: List<ReforgeSearchHit>, entries: Map<String, ReforgeSearchEntry>) =
+    hits.mapNotNull { hit -> entries[hit.document.id]?.let { hit to it } }
+
 private data class SearchCampaignRecords(val items: List<LedgerItem>, val people: List<ConnectionEntity>,
     val projects: List<InventionProject>, val profiles: List<CharacterProfile>, val sources: List<CampaignReferenceRecord>)
 
@@ -147,6 +151,7 @@ private data class SearchCampaignRecords(val items: List<LedgerItem>, val people
     val hits by produceState<List<ReforgeSearchHit>>(emptyList(), documents, query) {
         value = withContext(Dispatchers.Default) { ReforgeSearchIndex.search(documents, query) }
     }
+    val currentHits = remember(hits, byId) { reforgeCurrentSearchHits(hits, byId) }
     val selected = byId[selectedKey]
     fun select(entry: ReforgeSearchEntry) {
         val target = entry.destination
@@ -155,13 +160,12 @@ private data class SearchCampaignRecords(val items: List<LedgerItem>, val people
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PlayerHeading("Search everything")
         PlayerSearch(query, { query = it.take(300) }, "Items, people, places, spells…")
-        Text(if (query.isBlank()) "Search ${documents.size} saved entries" else "${hits.size} matches",
+        Text(if (query.isBlank()) "Search ${documents.size} saved entries" else "${currentHits.size} matches",
             color = RebuildPalette.Muted, style = MaterialTheme.typography.labelLarge)
         if (query.isBlank()) Text("Open a result to continue where it belongs. Source references remain available to read.", color = RebuildPalette.Muted)
-        if (query.isNotBlank() && hits.isEmpty()) PlayerEmpty("No matching records", "Try fewer words or a different name.", "History")
+        if (query.isNotBlank() && currentHits.isEmpty()) PlayerEmpty("No matching records", "Try fewer words or a different name.", "History")
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
-            items(hits, key = { it.document.id }) { hit ->
-                val entry = byId.getValue(hit.document.id)
+            items(currentHits, key = { it.first.document.id }) { (hit, entry) ->
                 Column(Modifier.fillMaxWidth().testTag("search-result-${entry.document.id}")
                     .clickable(role = Role.Button, onClickLabel = if (entry.destination != null && open != null) "Open ${hit.document.title}" else "Read ${hit.document.title}") { select(entry) }
                     .padding(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

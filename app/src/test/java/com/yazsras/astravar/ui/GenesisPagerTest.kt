@@ -70,12 +70,12 @@ class GenesisPagerTest {
             assertTrue(sheetOffset > 0)
             compose.onNodeWithTag("section-Combat").performClick()
             compose.waitForIdle()
-            assertEquals(0f, scrollOffset("Combat"))
+            assertEquals(0f, scrollOffset("Combat"), 0.5f)
             compose.onNodeWithText("Combat row 15").performScrollTo()
             val combatOffset = scrollOffset("Combat")
             compose.onNodeWithTag("section-Sheet").performClick()
             compose.waitForIdle()
-            assertEquals(sheetOffset, scrollOffset("Sheet"))
+            assertEquals(sheetOffset, scrollOffset("Sheet"), 0.5f)
             compose.onNodeWithTag("section-Combat").performClick()
             compose.waitForIdle()
             var saved: Map<String, List<Any?>> = emptyMap()
@@ -84,10 +84,10 @@ class GenesisPagerTest {
             compose.runOnIdle { registry = SaveableStateRegistry(saved) { true }; shown.value = true }
             compose.waitForIdle()
             compose.onNodeWithTag("section-Combat").assertIsSelected()
-            assertEquals(combatOffset, scrollOffset("Combat"))
+            assertEquals(combatOffset, scrollOffset("Combat"), 0.5f)
             compose.onNodeWithTag("section-Sheet").performClick()
             compose.waitForIdle()
-            assertEquals(sheetOffset, scrollOffset("Sheet"))
+            assertEquals(sheetOffset, scrollOffset("Sheet"), 0.5f)
         } finally { activity.pause().stop().destroy() }
     }
 

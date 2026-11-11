@@ -22,14 +22,26 @@ import java.util.UUID
     var confirmRemoval by rememberSaveable { mutableStateOf(false) }
     PlayerSheet("Manage ${definition.name}", onDismiss) {
         Text("Quantity ${item.quantity}. Changes here affect playable gear. Original campaign inventory and history are retained.", color = RebuildPalette.Muted)
-        if (item.quantity > 1) PlayerDisclosure("Split stack") {
+        if (item.quantity > 1) PlayerDisclosure("Split stack", initiallyOpen = true) {
+            Text("Choose how many items to separate. Review and confirm before saving.", color = RebuildPalette.Muted)
             Field("Quantity in the new stack", quantity, { quantity = it })
-            PlayerButton(enabled = !busy, onClick = {
+            // Validate through the same pure rule used by the confirmed action.
+            // This temporary identity never reaches a save or a persisted preview.
+            val splitProblem = remember(character, item.id, quantity) {
+                runCatching {
+                    val previewId = generateSequence("split-validation") { "$it-" }
+                        .first { candidate -> character.items.none { it.id == candidate } }
+                    InventoryRules.split(character, item.id,
+                        optionalInt(quantity, "Split quantity", 1, item.quantity - 1) ?: error("Enter a quantity"), previewId)
+                }.exceptionOrNull()?.let { it.message ?: "This stack cannot be split." }
+            }
+            if (splitProblem != null) Text(splitProblem, color = MaterialTheme.colorScheme.error)
+            PlayerButton(enabled = !busy && splitProblem == null, onClick = {
                 try {
                     onChange("Split ${definition.name} stack", InventoryRules.split(character, item.id,
                         optionalInt(quantity, "Split quantity", 1, item.quantity - 1) ?: error("Enter a quantity"), UUID.randomUUID().toString()))
                 } catch (e: Exception) { error = e.message ?: "This stack could not be split." }
-            }) { Text("Split stack") }
+            }) { Text("Review split") }
         }
         PlayerDisclosure("Transfer to another sheet") {
             Text("Choose a saved character or companion sheet. The complete stack keeps its identity and arrives carried and unattuned.", color = RebuildPalette.Muted)

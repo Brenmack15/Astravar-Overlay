@@ -9,6 +9,7 @@ import sqlite3
 ACTOR = "Genesis Legacy Retention Actor"
 ALLY = "Genesis Legacy Retention Ally"
 ITEM = "Genesis Legacy Retention Compass"
+SUPPLIES = "Genesis Legacy Retention Supplies"
 RESOURCE = "Genesis Legacy Retention Charges"
 DATABASES = ("astravar.db", "astravar-campaign-ledger.db", "astravar-reforge.db")
 
@@ -41,7 +42,12 @@ def inspect(folder):
         definitions = [item for item in character["itemDefinitions"] if item["name"] == ITEM]
         assert len(definitions) == 1
         items = [item for item in character["items"] if item["definitionId"] == definitions[0]["id"]]
-        assert len(items) == 1 and items[0]["quantity"] == 3 and items[0]["state"] == "WORN"
+        assert len(items) == 1 and items[0]["quantity"] == 1 and items[0]["state"] == "WORN"
+        supply_definitions = [item for item in character["itemDefinitions"] if item["name"] == SUPPLIES]
+        assert len(supply_definitions) == 1
+        supplies = [item for item in character["items"] if item["definitionId"] == supply_definitions[0]["id"]]
+        assert len(supplies) == 1 and supplies[0]["quantity"] == 3 and supplies[0]["state"] == "CARRIED"
+        assert supplies[0]["id"] != items[0]["id"]
         resources = [pool for pool in character["resources"] if pool["name"] == RESOURCE]
         assert len(resources) == 1 and resources[0]["current"] == 2 and resources[0]["maximum"] == 5
     with connect(folder / "astravar-campaign-ledger.db") as connection:
@@ -59,6 +65,7 @@ def inspect(folder):
     return {"databases": tables, "fixture": {
         "actor_id": character["id"], "actor_revision": character["revision"],
         "item_id": items[0]["id"], "definition_id": definitions[0]["id"],
+        "supplies_item_id": supplies[0]["id"], "supplies_definition_id": supply_definitions[0]["id"],
         "resource_id": resources[0]["id"], "companion_id": companion["id"],
         "companion_revision": companion["revision"], "relationship_id": relationship["id"],
         "source_identity_matches": True,

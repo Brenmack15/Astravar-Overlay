@@ -76,4 +76,19 @@ class ReforgeSearchNavigationTest {
         assertEquals("Source B", target?.document?.title)
         assertNull(target?.destination)
     }
+
+    @Test fun pendingSearchResultsDropRemovedRecordsAndUseCurrentDestination() {
+        val original = reforgeSearchCatalog(people = listOf(
+            ConnectionEntity(id = "removed", name = "Amber scout"),
+            ConnectionEntity(id = "retained", name = "Amber keeper")))
+        val pendingHits = ReforgeSearchIndex.search(original.map { it.document }, "Amber")
+        assertEquals(2, pendingHits.size)
+        // The database emits a newer snapshot while background search still has its old hits.
+        val current = reforgeSearchCatalog(people = listOf(ConnectionEntity(id = "retained", name = "Renamed keeper")))
+        val resolved = reforgeCurrentSearchHits(pendingHits, current.associateBy { it.document.id })
+        assertEquals(1, resolved.size)
+        assertEquals("Renamed keeper", resolved.single().second.document.title)
+        assertEquals(ReforgeSearchDestination.Connection("retained"), resolved.single().second.destination)
+        assertTrue(reforgeCurrentSearchHits(pendingHits, emptyMap()).isEmpty())
+    }
 }
