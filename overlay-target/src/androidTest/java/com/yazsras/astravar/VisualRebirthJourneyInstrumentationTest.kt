@@ -103,6 +103,7 @@ class VisualRebirthJourneyInstrumentationTest {
         enter("Name", "CI Native Charges")
         enter("Capacity", "3")
         enter("Current uses (blank = unknown)", "2")
+        tap("Review & save")
         tap("Save resource")
         find("CI Native Charges")
         find("2 / 3")
@@ -125,6 +126,7 @@ class VisualRebirthJourneyInstrumentationTest {
         ui.selectSection(product, "Equipment")
         tap("Add item")
         enter("Item name", "CI Native Ally Charm")
+        tap("Review & save")
         tap("Save item")
         find("CI Native Ally Charm")
         tap("Equip")
@@ -182,13 +184,12 @@ class VisualRebirthJourneyInstrumentationTest {
                 capture("spellbook-font-$scale", "Character", "CI Native Signal")
                 // Traversing every direct section also verifies that horizontal
                 // scrolling exposes complete labels at the largest text setting.
-                for (section in listOf("Equipment", "Combat", "Resources", "History", "Sheet")) {
+                for (section in listOf("Equipment", "Combat", "Features", "Resources", "History", "Sheet")) {
                     ui.selectSection(product, section)
                 }
                 // Read-only primary-destination captures retain their upper
                 // headings and actions for the same enlarged-text review.
-                ui.ensurePrimaryTab(product, "Inventory")
-                ui.selectSection(product, "Campaign items")
+                ui.campaignItems(product)
                 capture("inventory-font-$scale", "Inventory", "Equipment, treasures & discoveries")
                 campaignHome()
                 capture("campaign-font-$scale", "Campaign", "Your living world")

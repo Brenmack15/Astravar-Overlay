@@ -297,7 +297,12 @@ internal class ObservedUi(private val device: UiDevice) {
 
     fun campaignItems(packageName: String) {
         ensurePrimaryTab(packageName, "Inventory")
-        selectSection(packageName, "Campaign items")
+        // Genesis exposes one consolidated inventory; the original ledger is
+        // an explicit source-record destination. Keep the older tab path for
+        // the historical upgrade fixtures that share this observer.
+        if (device.hasObject(By.text("‹ Inventory").pkg(packageName))) return
+        if (device.hasObject(By.text("My gear").pkg(packageName))) selectSection(packageName, "Campaign items")
+        else tapText("Campaign items", packageName)
     }
 
     /** Discover a flat section strip through native scrolling, then activate its tab once. */
@@ -305,8 +310,9 @@ internal class ObservedUi(private val device: UiDevice) {
         // Restrict observation to the requested tab family inside its actual
         // horizontal strip. A body heading or unrelated filter is never a tab.
         val families = listOf(
-            listOf("Sheet", "Combat", "Equipment", "Spells", "Resources", "History", "Currency"),
+            listOf("Sheet", "Combat", "Equipment", "Spells", "Features", "Resources", "History", "Currency"),
             listOf("My gear", "Campaign items"),
+            listOf("My items", "All items"),
             listOf("All gear", "Equipped", "Attuned"),
             listOf("All", "Prepared", "Cantrips")
         )

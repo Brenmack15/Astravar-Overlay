@@ -1,7 +1,7 @@
 name: Bounded Android verification
 on:
   push:
-    branches: ['feat/astravar-android', 'feat/astravar-android/**', 'feat/astravar-inventory-mvp-v170', 'feat/astravar-2.0-integrated', 'feat/astravar-2.0-ui-rebuild']
+    branches: ['feat/astravar-android', 'feat/astravar-android/**', 'feat/astravar-inventory-mvp-v170', 'feat/astravar-2.0-integrated', 'feat/astravar-2.0-ui-rebuild', 'feat/astravar-project-genesis*']
   pull_request:
   workflow_dispatch:
     inputs:
@@ -19,7 +19,7 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: android-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && 'manual' || 'automatic' }}
+  group: android-${{ github.head_ref || github.ref_name }}-${{ github.event_name == 'workflow_dispatch' && 'manual' || 'automatic' }}
   cancel-in-progress: true
 jobs:
   verify:
@@ -27,20 +27,30 @@ jobs:
     # historical branch checks available without running the legacy test path twice.
     if: github.head_ref != 'feat/astravar-2.1-player-first' && github.ref_name != 'feat/astravar-2.1-player-first' && github.head_ref != 'feat/astravar-3.0-reforge' && github.ref_name != 'feat/astravar-3.0-reforge'
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && 180 || 150 }}
     env:
       REUSE_RUN_ID: ${{ inputs.reuse_run_id || '0' }}
+      ASTRAVAR_SOURCE_BRANCH: ${{ github.head_ref || github.ref_name }}
       # The Reforge workflow is the exact-head full rules/debug/release/lint gate.
       # Run native acceptance concurrently instead of duplicating that 30-minute
       # regression batch before the first touch on every 3.1 candidate.
-      REFORGE_FULL_GATE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-3.1-') }}
+      REFORGE_FULL_GATE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-3.1-') || startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') }}
+      GENESIS_GATE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') }}
+      EXPECTED_VERSION_NAME: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '4.0.0-genesis1' || '3.2.0-rc1' }}
+      EXPECTED_VERSION_CODE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '50' || '49' }}
       INVENTORY_BETA: ${{ github.head_ref == 'feat/astravar-inventory-mvp-v170' || github.ref_name == 'feat/astravar-inventory-mvp-v170' || github.head_ref == 'feat/astravar-2.0-integrated' || github.ref_name == 'feat/astravar-2.0-integrated' || github.head_ref == 'feat/astravar-2.0-ui-rebuild' || github.ref_name == 'feat/astravar-2.0-ui-rebuild' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           # Verify the exact published head, including on pull_request events.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Require a fresh Genesis baseline and candidate pair
+        if: env.GENESIS_GATE == 'true'
+        run: |
+          # Both versions must use this run's disposable test certificate.
+          test "$REUSE_RUN_ID" = 0 || { echo "Genesis verification requires a fresh build; reused APKs cannot share this run's baseline signer."; exit 1; }
       - name: Select explicit overlay-only recheck
+        if: env.GENESIS_GATE != 'true'
         env:
           PUSH_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
@@ -76,7 +86,7 @@ jobs:
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
       - name: Build native APKs; full regressions stay in the exact-head Reforge gate
         if: env.REUSE_RUN_ID == '0'
-        timeout-minutes: 45
+        timeout-minutes: 60
         env:
           # Explicit marker also allows this opted-in test while the default branch
           # deliberately has no Android workflow. Ordinary pushes/PRs do not write.
@@ -84,7 +94,7 @@ jobs:
         run: |
           chmod +x gradlew
           # Release-candidate checks. Existing debug-branch checks remain unchanged.
-          if [[ "$INVENTORY_BETA" != 'true' ]]; then
+          if [[ "$INVENTORY_BETA" != 'true' && "$REFORGE_FULL_GATE" != 'true' ]]; then
             python3 -m unittest discover -s scripts/tests -v
             python3 scripts/verify_v2_protected_source.py
             python3 scripts/verify_ui_foundation.py
@@ -95,7 +105,7 @@ jobs:
             python3 -m unittest discover -s scripts/tests -v
             python3 scripts/verify_v2_protected_source.py
             stat_args=()
-            if [[ "${{ github.head_ref || github.ref_name }}" == 'feat/astravar-2.0-ui-rebuild' ]]; then
+            if [[ "$ASTRAVAR_SOURCE_BRANCH" == 'feat/astravar-2.0-ui-rebuild' ]]; then
               python3 scripts/verify_ui_foundation.py
               python3 scripts/verify_branding.py
               export ASTRAVAR_VERSION_CODE=23
@@ -119,8 +129,32 @@ jobs:
           fi
           timeout -k 10s 2640s ./gradlew --no-daemon --console=plain "${regression_tasks[@]}" :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
           mkdir -p validation
-          python3 scripts/inspect_release_apk.py app/build/outputs/apk/release/app-release.apk --sdk "$ANDROID_HOME" --package com.yazsras.astravar --version-name 3.2.0-rc1 --version-code 49 --output validation/ci-release-package.json
+          python3 scripts/inspect_release_apk.py app/build/outputs/apk/release/app-release.apk --sdk "$ANDROID_HOME" --package com.yazsras.astravar --version-name "$EXPECTED_VERSION_NAME" --version-code "$EXPECTED_VERSION_CODE" --output validation/ci-release-package.json
           printf '%s\n' 'Optimized release variant, disposable CI signer only. Not compatible with the original owner installation.' > validation/CI-RELEASE-ONLY.txt
+          if [[ "$GENESIS_GATE" == 'true' ]]; then
+            # Build the frozen, previously verified code49 source under the SAME
+            # throwaway CI certificate. No historical owner key enters Actions.
+            astravar_baseline_sha=3543e83bfca5e589f1bbedb09964431ce94a2319
+            astravar_baseline_tree="$RUNNER_TEMP/astravar-genesis-code49"
+            timeout -k 5s 45s git fetch --depth=1 origin "$astravar_baseline_sha"
+            git worktree add --detach "$astravar_baseline_tree" "$astravar_baseline_sha"
+            test "$(git -C "$astravar_baseline_tree" rev-parse HEAD)" = "$astravar_baseline_sha"
+            ASTRAVAR_VERSION_CODE=49 ASTRAVAR_VERSION_NAME=3.2.0-rc1 \
+              timeout -k 10s 1200s bash "$astravar_baseline_tree/gradlew" -p "$astravar_baseline_tree" --no-daemon --console=plain \
+              :app:assembleRelease
+            mkdir -p validation/upgrade-baseline
+            cp "$astravar_baseline_tree/app/build/outputs/apk/release/app-release.apk" validation/upgrade-baseline/code49-ci.apk
+            printf '%s\n' "$astravar_baseline_sha" > validation/upgrade-baseline/SOURCE_COMMIT.txt
+            python3 scripts/inspect_release_apk.py validation/upgrade-baseline/code49-ci.apk --sdk "$ANDROID_HOME" --package com.yazsras.astravar --version-name 3.2.0-rc1 --version-code 49 --output validation/upgrade-baseline/package.json
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs validation/upgrade-baseline/code49-ci.apk > validation/upgrade-baseline/signature.txt
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk > validation/candidate-signature.txt
+            astravar_baseline_certificate=$(awk -F': ' '/certificate SHA-256 digest:/ { print $2 }' validation/upgrade-baseline/signature.txt)
+            astravar_candidate_certificate=$(awk -F': ' '/certificate SHA-256 digest:/ { print $2 }' validation/candidate-signature.txt)
+            [[ "$astravar_baseline_certificate" =~ ^[0-9a-f]{64}$ ]]
+            test "$astravar_baseline_certificate" = "$astravar_candidate_certificate"
+            sha256sum validation/upgrade-baseline/*.apk > validation/upgrade-baseline/SHA256SUMS.txt
+            echo 'ASTRAVAR_BASELINE_APK=validation/upgrade-baseline/code49-ci.apk' >> "$GITHUB_ENV"
+          fi
       - name: Reuse verified product and build current overlay tests
         if: env.REUSE_RUN_ID != '0'
         timeout-minutes: 9
