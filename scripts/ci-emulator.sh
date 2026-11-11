@@ -127,23 +127,10 @@ if [ -n "${ASTRAVAR_BASELINE_APK:-}" ]; then
   snapshot_stores validation/genesis-upgrade-files-after.sha256
   diff -u validation/genesis-upgrade-files-before.sha256 validation/genesis-upgrade-files-after.sha256 >validation/genesis-upgrade-file-diff.txt
   timeout 10s adb -s "$astravar_serial" shell dumpsys package "$astravar_product" >validation/genesis-upgrade-package-after.txt
-  python3 - <<'ASTRAVAR_GENESIS_PACKAGE'
-import json,re
-from pathlib import Path
-before=Path('validation/genesis-upgrade-package-before.txt').read_text()
-after=Path('validation/genesis-upgrade-package-after.txt').read_text()
-def value(text,key):
-    match=re.search(r'\b'+key+r'=([^\n]+)',text)
-    assert match, 'Missing package field '+key
-    return match.group(1).strip()
-assert value(before,'versionCode').split()[0]=='49'
-assert value(after,'versionCode').split()[0]=='50'
-for key in ('userId','firstInstallTime'):
-    assert value(before,key)==value(after,key), 'Upgrade changed '+key
-Path('validation/genesis-upgrade-package-result.json').write_text(json.dumps({
-    'old_version':49,'new_version':50,'same_android_uid':True,'same_first_install_time':True,
-    'ordinary_install_r':True,'disposable_ci_key':True},indent=2)+'\n')
-ASTRAVAR_GENESIS_PACKAGE
+  python3 scripts/genesis-package-readback.py \
+    --before validation/genesis-upgrade-package-before.txt \
+    --after validation/genesis-upgrade-package-after.txt --package "$astravar_product" \
+    --old-version 49 --new-version 50 --output validation/genesis-upgrade-package-result.json
   run_stage GenesisUpgradeInstrumentationTest#verifyAfterUpgrade 1 360 native-genesis-upgrade-readback.txt
   stop_product
   copy_upgrade_stores validation/genesis-upgrade-after
