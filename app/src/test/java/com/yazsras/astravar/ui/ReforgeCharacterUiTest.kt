@@ -195,6 +195,7 @@ class ReforgeCharacterUiTest {
         compose.waitUntil(10000) { compose.onAllNodesWithText("Create character").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Create character").performClick()
         compose.onNodeWithText("Name", substring = false).performTextInput("Fictional traveler")
+        compose.onNodeWithText("Review & save").performClick()
         compose.onNodeWithText("Save character").performClick()
         compose.waitUntil(10000) { runBlocking { repository.observeAll().first() }.any { it.character.name == "Fictional traveler" } }
         val character = runBlocking { repository.observeAll().first() }.single().character
@@ -214,7 +215,7 @@ class ReforgeCharacterUiTest {
         ))
         withSheet(character = character) { repository ->
             compose.waitUntil(10000) { compose.onAllNodesWithText("Spells").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("Spells").performScrollTo().performClick()
+            compose.onNode(hasText("Spells") and hasAnyAncestor(hasTestTag("genesis-character-tabs"))).performScrollTo().performClick()
             compose.onNodeWithText("Quiet Spark").assertExists()
             compose.onNodeWithText("Cantrips").performScrollTo().performClick()
             compose.onNodeWithText("Quiet Spark").assertExists()
@@ -430,7 +431,7 @@ class ReforgeCharacterUiTest {
 
     @Test fun archiveRequiresConfirmationAndRestoreReturnsSameSavedSheet() = withSheet { repository ->
         compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText("Switch character").performScrollTo().performClick()
+        compose.onNodeWithText("Switch character").performClick()
         compose.onNodeWithText("Manage saved sheets").performScrollTo().performClick()
         compose.onNodeWithText("Archive Synthetic artificer").performScrollTo().performClick()
         assertFalse(runBlocking { repository.get("synthetic-player") }!!.character.archived)

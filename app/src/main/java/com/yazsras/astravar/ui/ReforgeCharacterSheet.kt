@@ -52,7 +52,8 @@ private enum class SpellbookFilter(val label: String) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable fun ReforgeCharacterSheet(repository: CampaignLedgerRepository, localRepository: ReforgeRepository? = null,
     initialSection: String = "Sheet", sectionOnly: Boolean = false,
-    companionProfileId: String? = null, onBackToCompanions: (() -> Unit)? = null) {
+    companionProfileId: String? = null, onBackToCompanions: (() -> Unit)? = null,
+    navigationRequest: GenesisCharacterRoute? = null, onOpenArmor: (() -> Unit)? = null) {
     val context = LocalContext.current.applicationContext
     val preferences = remember(context) { Preferences(context) }
     val preferencesState by preferences.flow.collectAsState(initial = OverlayPrefs())
@@ -63,12 +64,9 @@ private enum class SpellbookFilter(val label: String) {
     val actorPreferences = remember(context) { ReforgePreferences.open(context) }
     val actorSelection by remember(actorPreferences) { actorPreferences.activeProfileId.map { true to it } }.collectAsState(initial = false to null)
     val legacyProfiles by repository.records.characterProfiles.collectAsState(initial = emptyList())
-    val campaignItems by repository.items.collectAsState(initial = emptyList())
     var selectedId by remember { mutableStateOf<String?>(null) }
-    var section by rememberSaveable(initialSection) { mutableStateOf(initialSection) }
-    var importQuery by rememberSaveable { mutableStateOf("") }
-    var importId by rememberSaveable { mutableStateOf<String?>(null) }
-    var importRevision by rememberSaveable { mutableStateOf<Long?>(null) }
+    var consumedNavigation by rememberSaveable { mutableIntStateOf(-1) }
+    var unavailableRouteId by rememberSaveable { mutableStateOf<String?>(null) }
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
     var inspecting by rememberSaveable { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf("") }
@@ -86,15 +84,32 @@ private enum class SpellbookFilter(val label: String) {
     val rollNotice = remember { SnackbarHostState() }
     var savedRoll by remember { mutableStateOf<ReforgeRollRecord?>(null) }
     // A roster shortcut must never fall through to another character or change the default actor.
-    val chosenId = companionProfileId
+    val pendingNavigation = navigationRequest?.takeIf { it.token != consumedNavigation }
+    val chosenId = companionProfileId ?: pendingNavigation?.profileId ?: unavailableRouteId
         ?: ReforgePreferences.chooseProfile(selectedId ?: actorSelection.second, active.map { it.character.id })
     val (spellQuery, setSpellQuery) = key(chosenId) { rememberSaveable { mutableStateOf("") } }
     val (spellFilter, setSpellFilter) = key(chosenId) { rememberSaveable { mutableStateOf(SpellbookFilter.ALL) } }
     val (gearQuery, setGearQuery) = key(chosenId) { rememberSaveable { mutableStateOf("") } }
     val (gearFilter, setGearFilter) = key(chosenId) { rememberSaveable { mutableStateOf("All gear") } }
+    var requestedSection by rememberSaveable(initialSection) { mutableStateOf(initialSection) }
+    var sectionRequest by rememberSaveable { mutableIntStateOf(0) }
+    fun openSection(value: String) { requestedSection = value; sectionRequest++ }
+    // A pending dialog or rolled preview belongs to the actor that opened it.
+    // Restore it on recreation; dismiss it only when the selected actor actually changes.
+    var lastActor by rememberSaveable { mutableStateOf(chosenId) }
+    LaunchedEffect(chosenId, profilesState.first, actorSelection.first) {
+        if (!profilesState.first || (companionProfileId == null && !actorSelection.first)) return@LaunchedEffect
+        if (lastActor != null && lastActor != chosenId) {
+            dialog = null; inspecting = null; proposedChange = null; cast = null; rollRequest = null
+            status = ""; error = ""
+            openSection(initialSection)
+        }
+        lastActor = chosenId
+    }
     val saved = active.firstOrNull { it.character.id == chosenId }
     val character = saved?.character
     val projection = character?.let { remember(it) { CharacterCalculator.calculate(it) } }
+    LaunchedEffect(dialog) { if (dialog != null && !busy) error = "" }
     LaunchedEffect(actorSelection) { if (actorSelection.first && selectedId == actorSelection.second) selectedId = null }
     LaunchedEffect(savedRoll, chosenId) {
         val roll = savedRoll ?: return@LaunchedEffect
@@ -104,12 +119,13 @@ private enum class SpellbookFilter(val label: String) {
         }
         if (rollNotice.showSnackbar("Roll saved · ${roll.displayTotal}", "View history",
                 withDismissAction = true, duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) {
-            section = "History"
+            openSection("History")
         }
         savedRoll = null
     }
     fun selectProfile(id: String) {
         if (companionProfileId != null) return
+        unavailableRouteId = null
         selectedId = id
         scope.launch {
             try { actorPreferences.selectProfile(id) }
@@ -148,341 +164,418 @@ private enum class SpellbookFilter(val label: String) {
         dialog = "Adopt"
     }
 
-    ReforgeSheetPage("$chosenId:$section", rollNotice, onBackToCompanions) {
-        if (!profilesState.first || (companionProfileId == null && !actorSelection.first)) {
-            LinearProgressIndicator(Modifier.fillMaxWidth())
-            Text("Opening your saved character…", color = RebuildPalette.Muted)
-            return@ReforgeSheetPage
-        }
-        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("reforge-error"))
-        if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.labelMedium, color = RebuildPalette.Ice, modifier = Modifier.testTag("reforge-save-status"))
-        if (character == null || projection == null) {
-            if (companionProfileId != null) {
-                val archived = all.firstOrNull { it.character.id == companionProfileId }?.character
-                val source = legacyProfiles.firstOrNull { it.id == companionProfileId }
-                PlayerHeading(archived?.name ?: source?.name?.takeIf(String::isNotBlank) ?: "Companion sheet")
-                when {
-                    archived != null -> {
-                        PlayerEmpty("Playable sheet archived", "Restore this companion's saved sheet to use it again.")
-                        PlayerButton(enabled = !busy, onClick = {
-                            action("Playable sheet restored") { local.setArchived(archived, false) }
-                        }) { Text("Restore playable sheet") }
-                    }
-                    source != null -> {
-                        PlayerEmpty("Ready for review", "Review this companion's saved campaign profile to create a playable sheet on this device.")
-                        PlayerButton(enabled = !busy, onClick = { reviewProfile(source.id) }) { Text("Review campaign profile") }
-                    }
-                    else -> PlayerEmpty("Companion sheet unavailable", "No saved profile was found for this companion.")
-                }
-                return@ReforgeSheetPage
-            }
-            PlayerHeading("Your character")
-            AstravarHeroBanner("Make your legend", "Your character, equipment and story. In one place.")
-            PlayerButton(onClick = { dialog = "Create" }) { Text("Create character") }
-            if (all.any { it.character.archived }) PlayerOutlinedButton(onClick = { dialog = "Characters" }) { Text("View archived sheets") }
-            if (legacyProfiles.isNotEmpty()) {
-                Text("Saved campaign profiles", style = MaterialTheme.typography.titleMedium)
-                legacyProfiles.filter { profile -> all.none { it.character.id == profile.id } }.forEach { profile -> PlayerEntry(profile.name.ifBlank { "Unnamed character" },
-                    "Review saved values · original record retained", "Emblem", {
-                        reviewProfile(profile.id)
-                    }) }
-            }
-            Text("Your playable sheets are saved on this device. Campaign sync does not include these sheets yet.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+    LaunchedEffect(pendingNavigation?.token, profilesState.first, actorSelection.first) {
+        val route = pendingNavigation ?: return@LaunchedEffect
+        if (!profilesState.first || !actorSelection.first) return@LaunchedEffect
+        if (active.none { it.character.id == route.profileId }) {
+            unavailableRouteId = route.profileId
+            error = "That saved sheet is unavailable or archived. No other character was opened."
         } else {
-            if (sectionOnly) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("${character.name}'s gear", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
-                    PlayerTextButton(onClick = { dialog = "Characters" }) { Text("Switch") }
+            if (companionProfileId == null) selectProfile(route.profileId)
+            openSection(route.section.takeIf { it in genesisCharacterSections } ?: "Sheet")
+            val target = active.first { it.character.id == route.profileId }.character
+            dialog = route.detailDialog?.takeIf { detail ->
+                val id = detail.substringAfter(':', "")
+                when (detail.substringBefore(':')) {
+                    "Item" -> detail == "Item"
+                    "InspectItem" -> target.items.any { it.id == id }
+                    "InspectSpell" -> target.spells.any { it.id == id }
+                    "Attack" -> target.attacks.any { it.id == id }
+                    "Resource" -> target.resources.any { it.id == id }
+                    else -> false
                 }
-            } else {
-                RebirthCharacterHeader(character, projection,
-                    if (companionProfileId == null) ({ dialog = "Characters" }) else null)
-                RebirthVitals(character, projection, onHp = { dialog = "HP" }, onDefense = { dialog = "Defense" },
-                    onInitiative = { projection.initiative.value?.let { requestRoll("Initiative", it, RollKind.INITIATIVE) } })
-                PlayerTabs(listOf("Sheet", "Combat", "Equipment", "Spells", "Resources", "History"), section, { section = it })
             }
-            when (section) {
-                "Sheet" -> {
-                    RebirthAbilities(projection) { inspecting = it.name }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        PlayerButton(onClick = { openRoll(ReforgeRollRequest("Custom roll", null)) }, modifier = Modifier.weight(1f)) {
-                            ArcaneIcon("d20", Modifier.size(20.dp), MaterialTheme.colorScheme.onPrimary)
-                            Spacer(Modifier.width(8.dp)); Text("Roll dice")
+            if (route.detailDialog != null && dialog == null) error = "That record is no longer available. Its character is open."
+        }
+        consumedNavigation = route.token
+    }
+
+    CompositionLocalProvider(LocalGenesisEditorFeedback provides GenesisEditorFeedback(busy, error)) {
+    Column(Modifier.fillMaxSize()) {
+        if (onBackToCompanions != null) {
+            PlayerTextButton(onClick = onBackToCompanions, modifier = Modifier.padding(horizontal = 12.dp)) {
+                Text("Back to companions")
+            }
+        }
+        Box(Modifier.weight(1f)) {
+            if (character == null || projection == null || !profilesState.first || (companionProfileId == null && !actorSelection.first)) {
+                Page(resetKey = chosenId) {
+                    if (!profilesState.first || (companionProfileId == null && !actorSelection.first)) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        Text("Opening your saved character…", color = RebuildPalette.Muted)
+                        return@Page
+                    }
+                    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("reforge-error"))
+                    if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.labelMedium, color = RebuildPalette.Ice, modifier = Modifier.testTag("reforge-save-status"))
+                    if (character == null || projection == null) {
+                        if (unavailableRouteId != null && companionProfileId == null) {
+                            PlayerEmpty("Sheet unavailable", "The search result is no longer available. Your selected character is unchanged.")
+                            PlayerButton(onClick = { unavailableRouteId = null; error = "" }) { Text("Back to character") }
+                            return@Page
                         }
-                        PlayerTextButton(onClick = { dialog = "Setup" }, modifier = Modifier.weight(1f)) { Text("Character setup") }
+                        if (companionProfileId != null) {
+                            val archived = all.firstOrNull { it.character.id == companionProfileId }?.character
+                            val source = legacyProfiles.firstOrNull { it.id == companionProfileId }
+                            PlayerHeading(archived?.name ?: source?.name?.takeIf(String::isNotBlank) ?: "Companion sheet")
+                            when {
+                                archived != null -> {
+                                    PlayerEmpty("Playable sheet archived", "Restore this companion's saved sheet to use it again.")
+                                    PlayerButton(enabled = !busy, onClick = {
+                                        action("Playable sheet restored") { local.setArchived(archived, false) }
+                                    }) { Text("Restore playable sheet") }
+                                }
+                                source != null -> {
+                                    PlayerEmpty("Ready for review", "Review this companion's saved campaign profile to create a playable sheet on this device.")
+                                    PlayerButton(enabled = !busy, onClick = { reviewProfile(source.id) }) { Text("Review campaign profile") }
+                                }
+                                else -> PlayerEmpty("Companion sheet unavailable", "No saved profile was found for this companion.")
+                            }
+                            return@Page
+                        }
+                        PlayerHeading("Your character")
+                        AstravarHeroBanner("Make your legend", "Your character, equipment and story. In one place.")
+                        PlayerButton(onClick = { dialog = "Create" }) { Text("Create character") }
+                        if (all.any { it.character.archived }) PlayerOutlinedButton(onClick = { dialog = "Characters" }) { Text("View archived sheets") }
+                        if (legacyProfiles.isNotEmpty()) {
+                            Text("Saved campaign profiles", style = MaterialTheme.typography.titleMedium)
+                            legacyProfiles.filter { profile -> all.none { it.character.id == profile.id } }.forEach { profile -> PlayerEntry(profile.name.ifBlank { "Unnamed character" },
+                                "Review saved values · original record retained", "Emblem", {
+                                    reviewProfile(profile.id)
+                                }) }
+                        }
+                        Text("Your playable sheets are saved on this device. Campaign sync does not include these sheets yet.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
                     }
-                    RebirthSectionLabel("Saving throws") {
-                        PlayerTextButton(onClick = { dialog = "Training" }) { Text("Training") }
+                }
+        } else {
+            key(character.id) {
+                Column(Modifier.fillMaxSize()) {
+                    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 16.dp).testTag("reforge-error"))
+                    if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.labelSmall,
+                        color = RebuildPalette.Ice, modifier = Modifier.padding(horizontal = 16.dp).testTag("reforge-save-status"))
+                    GenesisCharacterHeader(character, projection,
+                        onSwitch = if (companionProfileId == null) ({ dialog = "Characters" }) else null,
+                        onHp = { dialog = "HP" }, onDefense = { dialog = "Defense" },
+                        onInitiative = { projection.initiative.value?.let { requestRoll("Initiative", it, RollKind.INITIATIVE) } })
+                    if (!sectionOnly) GenesisQuickActions(character.id) { action ->
+                        when (action) {
+                            "health" -> dialog = "HP"
+                            "attack" -> openSection("Combat")
+                            "spells" -> openSection("Spells")
+                            "inventory" -> openSection("Equipment")
+                            "conditions" -> dialog = "Conditions"
+                            "rest" -> dialog = "Rest"
+                            "resources" -> openSection("Resources")
+                            "dice" -> openRoll(ReforgeRollRequest("Custom roll", null))
+                        }
                     }
-                    BoxWithConstraints(Modifier.fillMaxWidth()) {
-                        val columns = if (maxWidth >= 360.dp && LocalDensity.current.fontScale < 1.25f &&
-                            Stat.entries.all { projection.saves[it]?.value != null }) 2 else 1
-                        Column {
-                            Stat.entries.chunked(columns).forEach { stats ->
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                                    stats.forEach { stat ->
-                                        Column(Modifier.weight(1f)) {
-                                            val value = projection.saves[stat]?.value
-                                            RebirthCheckRow("${stat.name} save", if (stat in character.saveProficiencies) "Proficient" else "", value,
-                                                modifier = Modifier.testTag("reforge-save-${stat.name}")) {
-                                                value?.let { requestRoll("${stat.name} save", it, RollKind.SAVE, stat.name) }
+                    GenesisCharacterPager(
+                        actorId = character.id,
+                        requestedSection = if (lastActor != null && lastActor != chosenId) initialSection else requestedSection,
+                        requestToken = sectionRequest,
+                        sectionOnly = sectionOnly,
+                        modalOpen = dialog != null || inspecting != null || proposedChange != null || cast != null || rollRequest != null,
+                        modifier = Modifier.weight(1f)
+                    ) { section ->
+                        when (section) {
+                            "Sheet" -> {
+                                RebirthAbilities(projection) { inspecting = it.name }
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    PlayerButton(onClick = { openRoll(ReforgeRollRequest("Custom roll", null)) }, modifier = Modifier.weight(1f)) {
+                                        ArcaneIcon("d20", Modifier.size(20.dp), MaterialTheme.colorScheme.onPrimary)
+                                        Spacer(Modifier.width(8.dp)); Text("Roll dice")
+                                    }
+                                    PlayerTextButton(onClick = { dialog = "Setup" }, modifier = Modifier.weight(1f)) { Text("Character setup") }
+                                }
+                                RebirthSectionLabel("Saving throws") {
+                                    PlayerTextButton(onClick = { dialog = "Training" }) { Text("Training") }
+                                }
+                                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                                    val columns = if (maxWidth >= 360.dp && LocalDensity.current.fontScale < 1.25f &&
+                                        Stat.entries.all { projection.saves[it]?.value != null }) 2 else 1
+                                    Column {
+                                        Stat.entries.chunked(columns).forEach { stats ->
+                                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                                                stats.forEach { stat ->
+                                                    Column(Modifier.weight(1f)) {
+                                                        val value = projection.saves[stat]?.value
+                                                        RebirthCheckRow("${stat.name} save", if (stat in character.saveProficiencies) "Proficient" else "", value,
+                                                            modifier = Modifier.testTag("reforge-save-${stat.name}")) {
+                                                            value?.let { requestRoll("${stat.name} save", it, RollKind.SAVE, stat.name) }
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                 }
-                            }
-                        }
-                    }
-                    RebirthSectionLabel("Skills")
-                    Column {
-                        reforgeSkills.forEach { (name, stat) ->
-                            val value = projection.skills[name]?.value ?: projection.abilities[stat]?.modifier
-                            val skill = character.skills[name]
-                            RebirthCheckRow(name, when {
-                                skill?.expertise == true -> "${stat.name} · Expertise"
-                                skill?.proficient == true -> "${stat.name} · Proficient"
-                                skill?.halfProficiency == true -> "${stat.name} · Half proficiency"
-                                else -> stat.name
-                            }, value) { value?.let { requestRoll(name, it, RollKind.SKILL, name) } }
-                        }
-                    }
-                    PlayerDisclosure("Passive scores & movement", initiallyOpen = true) {
-                        listOf("Perception", "Investigation", "Insight").forEach { name ->
-                            val ability = reforgeSkills.getValue(name)
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(name, color = RebuildPalette.Muted)
-                                Text("${projection.passiveScores[name] ?: projection.abilities[ability]?.modifier?.plus(10) ?: "Not set"}")
-                            }
-                        }
-                        Text("Walking speed · ${projection.speed.value?.let { "$it ft." } ?: "Not set"}")
-                    }
-                    PlayerTextButton(onClick = { dialog = "CampaignConnections" }) { Text("Campaign connections") }
-                    ReforgeIdentitySection(character, onEdit = { dialog = "Identity" }, onNotes = { dialog = "Notes" }, onAdvance = { dialog = "Advance" })
-                    if (saved!!.origin.sourceProfileId != null) PlayerDisclosure("Imported sheet · review before play") {
-                        Text("Training, attacks, spells, resources, and movement need your review before relying on calculated values.",
-                            color = RebuildPalette.GoldBright, style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.testTag("reforge-setup-review"))
-                        Text(saved.saveState, color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
-                    }
-                    PlayerDisclosure("Rules & calculation notices") {
-                        Text("Core · ${character.rules.core}\nClass · ${character.rules.classVersion}", color = RebuildPalette.Muted)
-                        (projection.warnings + saved!!.origin.warnings).distinct().forEach { Text(it, color = RebuildPalette.GoldBright) }
-                        Text("Current resources are never inferred from capacity, equipment, an update, or opening the app.", color = RebuildPalette.Muted)
-                    }
-                }
-                "Combat" -> {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        PlayerButton(onClick = { dialog = "HP" }, modifier = Modifier.weight(1f)) { Text("Damage / healing") }
-                        PlayerOutlinedButton(onClick = { dialog = "Conditions" }, modifier = Modifier.weight(1f)) { Text("Conditions") }
-                    }
-                    if (character.conditions.isNotEmpty() || character.concentrationSpellId != null) {
-                        Column(Modifier.fillMaxWidth().background(RebuildPalette.Panel, RoundedCornerShape(8.dp)).padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            if (character.conditions.isNotEmpty()) Text("Conditions · ${character.conditions.joinToString()}", color = RebuildPalette.GoldBright)
-                            if (character.concentrationSpellId != null) {
-                                Text("Concentration", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelMedium)
-                                Text(character.spells.firstOrNull { it.id == character.concentrationSpellId }?.name ?: "Spell not set", color = RebuildPalette.Purple)
-                                PlayerTextButton(onClick = { change("End concentration", character.copy(concentrationSpellId = null), false) }) { Text("End concentration") }
-                            }
-                        }
-                    }
-                    RebirthSectionLabel("Attacks") { PlayerTextButton(onClick = { dialog = "Attack" }) { Text("Add attack") } }
-                    if (character.attacks.isEmpty()) PlayerEmpty("Set up your attacks", "Add an attack using your accepted damage dice and ability. Your specialized armor weapon remains in Tools → Armor weapon.", "Weapon")
-                    Column {
-                        character.attacks.forEach { attack -> key(attack.id) {
-                            Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(attack.name, style = MaterialTheme.typography.titleMedium)
-                                        Text("${attack.actionType} · ${attack.range}", style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
+                                RebirthSectionLabel("Skills")
+                                Column {
+                                    reforgeSkills.forEach { (name, stat) ->
+                                        val value = projection.skills[name]?.value ?: projection.abilities[stat]?.modifier
+                                        val skill = character.skills[name]
+                                        RebirthCheckRow(name, when {
+                                            skill?.expertise == true -> "${stat.name} · Expertise"
+                                            skill?.proficient == true -> "${stat.name} · Proficient"
+                                            skill?.halfProficiency == true -> "${stat.name} · Half proficiency"
+                                            else -> stat.name
+                                        }, value) { value?.let { requestRoll(name, it, RollKind.SKILL, name) } }
                                     }
-                                    PlayerTextButton(onClick = { dialog = "Attack:${attack.id}" }) { Text("Edit") }
                                 }
-                                if (attack.damage.isNotEmpty()) Text("Base damage · ${attack.damage.joinToString(" + ") { "${SecureDice.format(it.formula)} ${it.type.name.lowercase()}" }}",
-                                    color = RebuildPalette.Silver, style = MaterialTheme.typography.bodyMedium)
-                                PlayerOutlinedButton(onClick = { openRoll(ReforgeRollRequest(attack.name, null, RollKind.ATTACK, attack.id, attack.id)) },
-                                    modifier = Modifier.fillMaxWidth()) {
-                                    ArcaneIcon("d20", Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Roll attack & damage")
-                                }
-                            }
-                            HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .55f))
-                        } }
-                    }
-                    RebirthSectionLabel("Turn economy") { PlayerTextButton(onClick = { dialog = "Turn" }) { Text("Configure") } }
-                    if (character.turn.tracking) {
-                        Column {
-                            listOf(
-                                Triple("Action", character.turn.actionAvailable, {
-                                    change("Recorded Action used", character.copy(turn = character.turn.copy(actionAvailable = false, attacksUsed = character.turn.attacksPerAction)), false)
-                                }),
-                                Triple("Bonus Action", character.turn.bonusActionAvailable, {
-                                    change("Recorded Bonus Action used", character.copy(turn = character.turn.copy(bonusActionAvailable = false)), false)
-                                }),
-                                Triple("Reaction", character.turn.reactionAvailable, {
-                                    change("Recorded Reaction used", character.copy(turn = character.turn.copy(reactionAvailable = false)), false)
-                                })
-                            ).forEach { (label, available, spend) ->
-                                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                                    if (available) PlayerTextButton(onClick = spend) { Text("Mark $label used") }
-                                    else Text("Spent", color = RebuildPalette.Muted)
-                                }
-                                HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .45f))
-                            }
-                        }
-                        Text("Attacks ${character.turn.attacksUsed} / ${character.turn.attacksPerAction} · Spell slot this turn ${if (character.turn.spellSlotSpent) "spent" else "not spent"}", color = RebuildPalette.Muted)
-                    } else Text("Tracking off · saved availability retained", color = RebuildPalette.Muted)
-                    PlayerOutlinedButton(onClick = { change("Confirmed next turn", GameplayRules.nextTurn(character), false) }) { Text("My next turn") }
-                    Text("Next turn clears per-turn effect use. It does not complete a rest or advance game time.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
-                }
-                "Equipment" -> {
-                    RebirthSectionLabel("Equipment") {
-                        PlayerTextButton(onClick = { dialog = "Item" }) { Text("Add item") }
-                    }
-                    Text("Attuned · ${character.items.filter { it.attuned }.sumOf { instance -> character.itemDefinitions.firstOrNull { it.id == instance.definitionId }?.attunementCost ?: 0 }} / ${character.attunementLimit}",
-                        color = RebuildPalette.GoldBright, style = MaterialTheme.typography.bodyMedium)
-                    PlayerSearch(gearQuery, setGearQuery, "Find equipment")
-                    PlayerTabs(listOf("All gear", "Equipped", "Attuned"), gearFilter, setGearFilter)
-                    val visibleItems = character.items.filter { item ->
-                        val definition = character.itemDefinitions.firstOrNull { it.id == item.definitionId }
-                        (gearQuery.isBlank() || definition?.name?.contains(gearQuery.trim(), ignoreCase = true) == true) &&
-                            when (gearFilter) {
-                                "Equipped" -> item.state in setOf(ItemState.WORN, ItemState.HELD)
-                                "Attuned" -> item.attuned
-                                else -> true
-                            }
-                    }
-                    if (character.items.isEmpty()) PlayerEmpty("Add your equipment", "Carry, equip and manage your items here. Reviewed effects connect directly to your statistics.", "Core")
-                    else if (visibleItems.isEmpty()) PlayerEmpty("No matching equipment", "Try another name or show all gear.", "Core")
-                    Column {
-                        visibleItems.forEach { item -> key(item.id) {
-                            val definition = character.itemDefinitions.firstOrNull { it.id == item.definitionId }
-                            RebirthItemRow(item, definition, busy, onInspect = { dialog = "InspectItem:${item.id}" }, onEquip = {
-                                try {
-                                    val next = GameplayRules.equip(character, item.id, if (item.state in setOf(ItemState.WORN, ItemState.HELD)) ItemState.CARRIED else ItemState.WORN)
-                                    proposedChange = "${if (item.state in setOf(ItemState.WORN, ItemState.HELD)) "Unequip" else "Equip"} ${definition?.name ?: "item"}" to next
-                                } catch (e: Exception) { error = e.message ?: "Item requirements not met" }
-                            })
-                        } }
-                    }
-                    PlayerOutlinedButton(onClick = { importId = null; importQuery = ""; dialog = "ImportItem" }) {
-                        Text("Add from campaign inventory")
-                    }
-                    PlayerDisclosure("About campaign inventory") {
-                        Text("Equipped items affect this character's calculations. Campaign items keep the original records. Adding one here creates an explicitly reviewed copy, with no automatic magical effects.",
-                            color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                "Spells" -> {
-                    RebirthSectionLabel("Spellbook") {
-                        PlayerTextButton(onClick = { dialog = "Spell" }) { Text("Add spell") }
-                    }
-                    Row(Modifier.fillMaxWidth().background(RebuildPalette.Panel, RoundedCornerShape(8.dp)).padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Column(Modifier.weight(1f)) {
-                            Text("SPELL ATTACK", style = MaterialTheme.typography.labelSmall, color = RebuildPalette.Muted)
-                            PlayerTextButton(enabled = projection.spellAttack.value != null, onClick = {
-                                projection.spellAttack.value?.let { requestRoll("Spell attack", it, RollKind.SPELL_ATTACK) }
-                            }, modifier = Modifier.semantics { contentDescription = "Roll spell attack" }) {
-                                Text(reforgeSigned(projection.spellAttack.value), style = MaterialTheme.typography.headlineSmall)
-                                Spacer(Modifier.width(8.dp)); ArcaneIcon("d20", Modifier.size(20.dp))
-                            }
-                        }
-                        Column(Modifier.weight(1f)) {
-                            Text("SAVE DC", style = MaterialTheme.typography.labelSmall, color = RebuildPalette.Muted)
-                            Text("${projection.spellSaveDc.value ?: "Not set"}", style = MaterialTheme.typography.headlineSmall,
-                                color = RebuildPalette.Silver, modifier = Modifier.padding(vertical = 10.dp))
-                        }
-                    }
-                    if (projection.slotMaxima.isNotEmpty()) {
-                        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            projection.slotMaxima.forEach { (level, max) ->
-                                Column(Modifier.widthIn(min = 92.dp).clickable(role = Role.Button) { dialog = "Slots" }
-                                    .padding(vertical = 8.dp, horizontal = 4.dp)) {
-                                    Text("LEVEL $level", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelSmall)
-                                    Text("${character.spellSlots[level] ?: "Not set"} / $max", color = RebuildPalette.Purple,
-                                        style = MaterialTheme.typography.titleMedium)
-                                }
-                            }
-                        }
-                    }
-                    PlayerDisclosure("Spell slots & preparation") {
-                        Text("Prepared ${character.spells.count { it.preparation == SpellPreparation.PREPARED && it.level > 0 }} / ${projection.preparationLimit ?: "not set"}", color = RebuildPalette.Muted)
-                        if (projection.slotMaxima.isEmpty()) Text("Configure your pinned class and slot capacity in Character setup.", color = RebuildPalette.GoldBright)
-                        PlayerTextButton(onClick = { dialog = "Slots" }) { Text("Set current slots") }
-                    }
-                    if (character.spells.isEmpty()) {
-                        PlayerEmpty("No spells yet", "Add a spell to record its rules, prepare it, or cast it from this sheet.")
-                    } else {
-                        PlayerSearch(spellQuery, setSpellQuery, "Find a spell by name")
-                        PlayerTabs(SpellbookFilter.entries.map { it.label }, spellFilter.label,
-                            { label -> setSpellFilter(SpellbookFilter.entries.first { it.label == label }) })
-                        val spellsByLevel = remember(character.spells, spellQuery, spellFilter) {
-                            val query = spellQuery.trim()
-                            character.spells
-                                .filter { spellFilter.includes(it) && it.name.contains(query, ignoreCase = true) }
-                                .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { spell: SpellDefinition -> spell.name })
-                                .groupBy { it.level }
-                                .toSortedMap()
-                        }
-                        if (spellsByLevel.isEmpty()) {
-                            PlayerEmpty("No matching spells", "Try a different name or show all spells.")
-                            PlayerOutlinedButton(onClick = { setSpellQuery(""); setSpellFilter(SpellbookFilter.ALL) }) { Text("Show all spells") }
-                        }
-                        spellsByLevel.forEach { (level, spells) ->
-                            Text(if (level == 0) "Level 0 · Cantrips" else "Level $level",
-                                Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium, color = RebuildPalette.Purple)
-                            Column {
-                                spells.forEach { spell -> key(spell.id) {
-                                    RebirthSpellRow(spell, onInspect = { dialog = "InspectSpell:${spell.id}" }, onCast = { dialog = "Cast:${spell.id}" })
-                                } }
-                            }
-                        }
-                    }
-                }
-                "Resources" -> {
-                    RebirthSectionLabel("Limited uses") { PlayerTextButton(onClick = { dialog = "Resource" }) { Text("Add resource") } }
-                    PlayerButton(onClick = { dialog = "Rest" }) { Text("Rest & recovery") }
-                    Column {
-                        character.resources.forEach { resource -> key(resource.id) {
-                            Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(resource.name, style = MaterialTheme.typography.titleMedium)
-                                        Text(resource.recharge.name.lowercase().replace('_', ' '), color = RebuildPalette.Muted,
-                                            style = MaterialTheme.typography.bodySmall)
+                                PlayerDisclosure("Passive scores & movement", initiallyOpen = true) {
+                                    listOf("Perception", "Investigation", "Insight").forEach { name ->
+                                        val ability = reforgeSkills.getValue(name)
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                            Text(name, color = RebuildPalette.Muted)
+                                            Text("${projection.passiveScores[name] ?: projection.abilities[ability]?.modifier?.plus(10) ?: "Not set"}")
+                                        }
                                     }
-                                    Text("${resource.current ?: "Not set"} / ${projection.resourceMaxima[resource.id] ?: "Not set"}",
-                                        color = RebuildPalette.GoldBright, style = MaterialTheme.typography.titleLarge)
+                                    Text("Walking speed · ${projection.speed.value?.let { "$it ft." } ?: "Not set"}")
                                 }
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    PlayerTextButton(onClick = { dialog = "Resource:${resource.id}" }) { Text("Edit") }
-                                    if (resource.dieSides != null) PlayerOutlinedButton(onClick = { dialog = "HitDie:${resource.id}" }) { Text("Spend Hit Die") }
-                                    PlayerTextButton(enabled = (resource.current ?: 0) > 0, onClick = {
-                                        change("Use ${resource.name}", character.copy(resources = character.resources.map { if (it.id == resource.id) it.copy(current = requireNotNull(it.current) - 1) else it }), false)
-                                    }) { Text("Use one") }
+                                PlayerTextButton(onClick = { dialog = "CampaignConnections" }) { Text("Campaign connections") }
+                                PlayerTextButton(onClick = { openSection("Features") }) { Text("Features & background") }
+                                if (saved!!.origin.sourceProfileId != null) PlayerDisclosure("Imported sheet · review before play") {
+                                    Text("Training, attacks, spells, resources, and movement need your review before relying on calculated values.",
+                                        color = RebuildPalette.GoldBright, style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.testTag("reforge-setup-review"))
+                                    Text(saved.saveState, color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                                }
+                                PlayerDisclosure("Rules & calculation notices") {
+                                    Text("Core · ${character.rules.core}\nClass · ${character.rules.classVersion}", color = RebuildPalette.Muted)
+                                    (projection.warnings + saved!!.origin.warnings).distinct().forEach { Text(it, color = RebuildPalette.GoldBright) }
+                                    Text("Current resources are never inferred from capacity, equipment, an update, or opening the app.", color = RebuildPalette.Muted)
                                 }
                             }
-                            HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .55f))
-                        } }
-                    }
-                    if (character.resources.isEmpty()) PlayerEmpty("No resources configured", "Add Hit Dice, charges or limited abilities with their accepted capacity and recovery trigger.")
-                }
-                "History" -> {
-                    val rolls by remember(local, character.id) { local.rollHistory(character.id) }.collectAsState(initial = emptyList())
-                    val changes by remember(local, character.id) { local.historySummaries(character.id) }.collectAsState(initial = emptyList())
-                    PlayerHeading("Roll history")
-                    if (rolls.isEmpty()) Text("No rolls yet. Rolls occur only when you tap Roll or enter a manual result.", color = RebuildPalette.Muted)
-                    rolls.forEach { roll -> key(roll.id) { ReforgeSavedRollCard(roll) } }
-                    PlayerDisclosure("Changes & saved revisions") { changes.take(30).forEach { Text("${it.operation} · revision ${it.priorRevision} → ${it.resultingRevision}", color = RebuildPalette.Muted) } }
-                    PlayerDisclosure("Original sources & advanced details") {
-                        Text(saved!!.origin.label)
-                        Text("Record ${character.id}\nRevision ${saved!!.revision}\n${saved!!.origin.sourceFingerprint ?: "Created here"}", style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
-                        saved!!.origin.warnings.forEach { Text(it, color = RebuildPalette.GoldBright) }
+                            "Combat" -> {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    PlayerButton(onClick = { dialog = "HP" }, modifier = Modifier.weight(1f)) { Text("Damage / healing") }
+                                    PlayerOutlinedButton(onClick = { dialog = "Conditions" }, modifier = Modifier.weight(1f)) { Text("Conditions") }
+                                }
+                                if (character.conditions.isNotEmpty() || character.concentrationSpellId != null) {
+                                    Column(Modifier.fillMaxWidth().background(RebuildPalette.Panel, RoundedCornerShape(8.dp)).padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        if (character.conditions.isNotEmpty()) Text("Conditions · ${character.conditions.joinToString()}", color = RebuildPalette.GoldBright)
+                                        if (character.concentrationSpellId != null) {
+                                            Text("Concentration", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelMedium)
+                                            Text(character.spells.firstOrNull { it.id == character.concentrationSpellId }?.name ?: "Spell not set", color = RebuildPalette.Purple)
+                                            PlayerTextButton(onClick = { change("End concentration", character.copy(concentrationSpellId = null), false) }) { Text("End concentration") }
+                                        }
+                                    }
+                                }
+                                if (onOpenArmor != null && companionProfileId == null && character.id == "local-player" &&
+                                    saved!!.origin.sourceProfileId == "local-player") {
+                                    PlayerOutlinedButton(onClick = onOpenArmor, modifier = Modifier.fillMaxWidth()) {
+                                        ArcaneIcon("Weapon", Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Astravar armor attacks")
+                                    }
+                                }
+                                RebirthSectionLabel("Attacks") { PlayerTextButton(onClick = { dialog = "Attack" }) { Text("Add attack") } }
+                                if (character.attacks.isEmpty()) PlayerEmpty("Set up your attacks", "Add an attack using your accepted damage dice and ability. Your specialized armor weapon remains in Tools → Armor weapon.", "Weapon")
+                                Column {
+                                    character.attacks.forEach { attack -> key(attack.id) {
+                                        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                                Column(Modifier.weight(1f)) {
+                                                    Text(attack.name, style = MaterialTheme.typography.titleMedium)
+                                                    Text("${attack.actionType} · ${attack.range}", style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
+                                                }
+                                                PlayerTextButton(onClick = { dialog = "Attack:${attack.id}" }) { Text("Edit") }
+                                            }
+                                            if (attack.damage.isNotEmpty()) Text("Base damage · ${attack.damage.joinToString(" + ") { "${SecureDice.format(it.formula)} ${it.type.name.lowercase()}" }}",
+                                                color = RebuildPalette.Silver, style = MaterialTheme.typography.bodyMedium)
+                                            PlayerOutlinedButton(onClick = { openRoll(ReforgeRollRequest(attack.name, null, RollKind.ATTACK, attack.id, attack.id)) },
+                                                modifier = Modifier.fillMaxWidth()) {
+                                                ArcaneIcon("d20", Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Roll attack & damage")
+                                            }
+                                        }
+                                        HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .55f))
+                                    } }
+                                }
+                                RebirthSectionLabel("Turn economy") { PlayerTextButton(onClick = { dialog = "Turn" }) { Text("Configure") } }
+                                if (character.turn.tracking) {
+                                    Column {
+                                        listOf(
+                                            Triple("Action", character.turn.actionAvailable, {
+                                                change("Recorded Action used", character.copy(turn = character.turn.copy(actionAvailable = false, attacksUsed = character.turn.attacksPerAction)), false)
+                                            }),
+                                            Triple("Bonus Action", character.turn.bonusActionAvailable, {
+                                                change("Recorded Bonus Action used", character.copy(turn = character.turn.copy(bonusActionAvailable = false)), false)
+                                            }),
+                                            Triple("Reaction", character.turn.reactionAvailable, {
+                                                change("Recorded Reaction used", character.copy(turn = character.turn.copy(reactionAvailable = false)), false)
+                                            })
+                                        ).forEach { (label, available, spend) ->
+                                            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                                                if (available) PlayerTextButton(onClick = spend) { Text("Mark $label used") }
+                                                else Text("Spent", color = RebuildPalette.Muted)
+                                            }
+                                            HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .45f))
+                                        }
+                                    }
+                                    Text("Attacks ${character.turn.attacksUsed} / ${character.turn.attacksPerAction} · Spell slot this turn ${if (character.turn.spellSlotSpent) "spent" else "not spent"}", color = RebuildPalette.Muted)
+                                } else Text("Tracking off · saved availability retained", color = RebuildPalette.Muted)
+                                PlayerOutlinedButton(onClick = { change("Confirmed next turn", GameplayRules.nextTurn(character), false) }) { Text("My next turn") }
+                                Text("Next turn clears per-turn effect use. It does not complete a rest or advance game time.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                            }
+                            "Equipment" -> {
+                                RebirthSectionLabel("Equipment") {
+                                    PlayerTextButton(onClick = { dialog = "Item" }) { Text("Add item") }
+                                }
+                                Text("Attuned · ${character.items.filter { it.attuned }.sumOf { instance -> character.itemDefinitions.firstOrNull { it.id == instance.definitionId }?.attunementCost ?: 0 }} / ${character.attunementLimit}",
+                                    color = RebuildPalette.GoldBright, style = MaterialTheme.typography.bodyMedium)
+                                PlayerSearch(gearQuery, setGearQuery, "Find equipment")
+                                PlayerTabs(listOf("All gear", "Equipped", "Attuned"), gearFilter, setGearFilter, Modifier.genesisHorizontalControl())
+                                val visibleItems = character.items.filter { item ->
+                                    val definition = character.itemDefinitions.firstOrNull { it.id == item.definitionId }
+                                    (gearQuery.isBlank() || definition?.name?.contains(gearQuery.trim(), ignoreCase = true) == true) &&
+                                        when (gearFilter) {
+                                            "Equipped" -> item.state in setOf(ItemState.WORN, ItemState.HELD)
+                                            "Attuned" -> item.attuned
+                                            else -> true
+                                        }
+                                }
+                                if (character.items.isEmpty()) PlayerEmpty("Add your equipment", "Carry, equip and manage your items here. Reviewed effects connect directly to your statistics.", "Core")
+                                else if (visibleItems.isEmpty()) PlayerEmpty("No matching equipment", "Try another name or show all gear.", "Core")
+                                Column {
+                                    visibleItems.forEach { item -> key(item.id) {
+                                        val definition = character.itemDefinitions.firstOrNull { it.id == item.definitionId }
+                                        RebirthItemRow(item, definition, busy, onInspect = { dialog = "InspectItem:${item.id}" }, onEquip = {
+                                            try {
+                                                val next = GameplayRules.equip(character, item.id, if (item.state in setOf(ItemState.WORN, ItemState.HELD)) ItemState.CARRIED else ItemState.WORN)
+                                                proposedChange = "${if (item.state in setOf(ItemState.WORN, ItemState.HELD)) "Unequip" else "Equip"} ${definition?.name ?: "item"}" to next
+                                            } catch (e: Exception) { error = e.message ?: "Item requirements not met" }
+                                        })
+                                    } }
+                                }
+                                PlayerOutlinedButton(onClick = { dialog = "ImportItem" }) {
+                                    Text("Add from campaign inventory")
+                                }
+                                PlayerDisclosure("About campaign inventory") {
+                                    Text("Equipped items affect this character's calculations. Campaign items keep the original records. Adding one here creates an explicitly reviewed copy, with no automatic magical effects.",
+                                        color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                            "Spells" -> {
+                                RebirthSectionLabel("Spellbook") {
+                                    PlayerTextButton(onClick = { dialog = "Spell" }) { Text("Add spell") }
+                                }
+                                Row(Modifier.fillMaxWidth().background(RebuildPalette.Panel, RoundedCornerShape(8.dp)).padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("SPELL ATTACK", style = MaterialTheme.typography.labelSmall, color = RebuildPalette.Muted)
+                                        PlayerTextButton(enabled = projection.spellAttack.value != null, onClick = {
+                                            projection.spellAttack.value?.let { requestRoll("Spell attack", it, RollKind.SPELL_ATTACK) }
+                                        }, modifier = Modifier.semantics { contentDescription = "Roll spell attack" }) {
+                                            Text(reforgeSigned(projection.spellAttack.value), style = MaterialTheme.typography.headlineSmall)
+                                            Spacer(Modifier.width(8.dp)); ArcaneIcon("d20", Modifier.size(20.dp))
+                                        }
+                                    }
+                                    Column(Modifier.weight(1f)) {
+                                        Text("SAVE DC", style = MaterialTheme.typography.labelSmall, color = RebuildPalette.Muted)
+                                        Text("${projection.spellSaveDc.value ?: "Not set"}", style = MaterialTheme.typography.headlineSmall,
+                                            color = RebuildPalette.Silver, modifier = Modifier.padding(vertical = 10.dp))
+                                    }
+                                }
+                                if (projection.slotMaxima.isNotEmpty()) {
+                                    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        projection.slotMaxima.forEach { (level, max) ->
+                                            Column(Modifier.widthIn(min = 92.dp).clickable(role = Role.Button) { dialog = "Slots" }
+                                                .padding(vertical = 8.dp, horizontal = 4.dp)) {
+                                                Text("LEVEL $level", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelSmall)
+                                                Text("${character.spellSlots[level] ?: "Not set"} / $max", color = RebuildPalette.Purple,
+                                                    style = MaterialTheme.typography.titleMedium)
+                                            }
+                                        }
+                                    }
+                                }
+                                PlayerDisclosure("Spell slots & preparation") {
+                                    Text("Prepared ${character.spells.count { it.preparation == SpellPreparation.PREPARED && it.level > 0 }} / ${projection.preparationLimit ?: "not set"}", color = RebuildPalette.Muted)
+                                    if (projection.slotMaxima.isEmpty()) Text("Configure your pinned class and slot capacity in Character setup.", color = RebuildPalette.GoldBright)
+                                    PlayerTextButton(onClick = { dialog = "Slots" }) { Text("Set current slots") }
+                                }
+                                if (character.spells.isEmpty()) {
+                                    PlayerEmpty("No spells yet", "Add a spell to record its rules, prepare it, or cast it from this sheet.")
+                                } else {
+                                    PlayerSearch(spellQuery, setSpellQuery, "Find a spell by name")
+                                    PlayerTabs(SpellbookFilter.entries.map { it.label }, spellFilter.label,
+                                        { label -> setSpellFilter(SpellbookFilter.entries.first { it.label == label }) }, Modifier.genesisHorizontalControl())
+                                    val spellsByLevel = remember(character.spells, spellQuery, spellFilter) {
+                                        val query = spellQuery.trim()
+                                        character.spells
+                                            .filter { spellFilter.includes(it) && it.name.contains(query, ignoreCase = true) }
+                                            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { spell: SpellDefinition -> spell.name })
+                                            .groupBy { it.level }
+                                            .toSortedMap()
+                                    }
+                                    if (spellsByLevel.isEmpty()) {
+                                        PlayerEmpty("No matching spells", "Try a different name or show all spells.")
+                                        PlayerOutlinedButton(onClick = { setSpellQuery(""); setSpellFilter(SpellbookFilter.ALL) }) { Text("Show all spells") }
+                                    }
+                                    spellsByLevel.forEach { (level, spells) ->
+                                        Text(if (level == 0) "Level 0 · Cantrips" else "Level $level",
+                                            Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium, color = RebuildPalette.Purple)
+                                        Column {
+                                            spells.forEach { spell -> key(spell.id) {
+                                                RebirthSpellRow(spell, onInspect = { dialog = "InspectSpell:${spell.id}" }, onCast = { dialog = "Cast:${spell.id}" })
+                                            } }
+                                        }
+                                    }
+                                }
+                            }
+                            "Features" -> {
+                                ReforgeIdentitySection(character, onEdit = { dialog = "Identity" }, onNotes = { dialog = "Notes" }, onAdvance = { dialog = "Advance" })
+                                if (character.features.isEmpty()) PlayerEmpty("Your features & feats",
+                                    "Add your accepted class features, feats and homebrew through Edit identity & features. Unreviewed source material does not become an active mechanic.")
+                            }
+                            "Resources" -> {
+                                RebirthSectionLabel("Limited uses") { PlayerTextButton(onClick = { dialog = "Resource" }) { Text("Add resource") } }
+                                PlayerButton(onClick = { dialog = "Rest" }) { Text("Rest & recovery") }
+                                Column {
+                                    character.resources.forEach { resource -> key(resource.id) {
+                                        Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                                Column(Modifier.weight(1f)) {
+                                                    Text(resource.name, style = MaterialTheme.typography.titleMedium)
+                                                    Text(resource.recharge.name.lowercase().replace('_', ' '), color = RebuildPalette.Muted,
+                                                        style = MaterialTheme.typography.bodySmall)
+                                                }
+                                                Text("${resource.current ?: "Not set"} / ${projection.resourceMaxima[resource.id] ?: "Not set"}",
+                                                    color = RebuildPalette.GoldBright, style = MaterialTheme.typography.titleLarge)
+                                            }
+                                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                PlayerTextButton(onClick = { dialog = "Resource:${resource.id}" }) { Text("Edit") }
+                                                if (resource.dieSides != null) PlayerOutlinedButton(onClick = { dialog = "HitDie:${resource.id}" }) { Text("Spend Hit Die") }
+                                                PlayerTextButton(enabled = (resource.current ?: 0) > 0, onClick = {
+                                                    change("Use ${resource.name}", character.copy(resources = character.resources.map { if (it.id == resource.id) it.copy(current = requireNotNull(it.current) - 1) else it }), false)
+                                                }) { Text("Use one") }
+                                            }
+                                        }
+                                        HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .55f))
+                                    } }
+                                }
+                                if (character.resources.isEmpty()) PlayerEmpty("No resources configured", "Add Hit Dice, charges or limited abilities with their accepted capacity and recovery trigger.")
+                            }
+                            "History" -> {
+                                val rolls by remember(local, character.id) { local.rollHistory(character.id) }.collectAsState(initial = emptyList())
+                                val changes by remember(local, character.id) { local.historySummaries(character.id) }.collectAsState(initial = emptyList())
+                                PlayerHeading("Roll history")
+                                if (rolls.isEmpty()) Text("No rolls yet. Rolls occur only when you tap Roll or enter a manual result.", color = RebuildPalette.Muted)
+                                rolls.forEach { roll -> key(roll.id) { ReforgeSavedRollCard(roll) } }
+                                PlayerDisclosure("Changes & saved revisions") { changes.take(30).forEach { Text("${it.operation} · revision ${it.priorRevision} → ${it.resultingRevision}", color = RebuildPalette.Muted) } }
+                                PlayerDisclosure("Original sources & advanced details") {
+                                    Text(saved!!.origin.label)
+                                    Text("Record ${character.id}\nRevision ${saved!!.revision}\n${saved!!.origin.sourceFingerprint ?: "Created here"}", style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
+                                    saved!!.origin.warnings.forEach { Text(it, color = RebuildPalette.GoldBright) }
+                                }
+                            }
+                        }
                     }
                 }
             }
+        }
+        SnackbarHost(rollNotice, Modifier.align(Alignment.BottomCenter).widthIn(max = 600.dp))
         }
     }
     if (dialog == "Create") ReforgeCharacterEditor(null, { dialog = null }) { next -> action("Character saved on this device") { local.create(next); selectProfile(next.id); dialog = null } }
@@ -550,56 +643,7 @@ private enum class SpellbookFilter(val label: String) {
             "CampaignConnections" -> ReforgeCampaignConnectionsDialog(saved!!, local, repository, { dialog = null })
             "Training" -> ReforgeTrainingEditor(character, { dialog = null }) { change("Edit training", it) }
             "Item" -> ReforgeItemEditor(character, { dialog = null }, onSave = { change("Add reviewed equipment", it) })
-            "ImportItem" -> {
-                val available = campaignItems.filter { !it.archived && it.quantity != null && it.quantity > 0 &&
-                    it.itemState !in setOf("Consumed", "Lost", "Sold") &&
-                    character.items.none { held -> held.id == it.id } }
-                val chosen = available.firstOrNull { it.id == importId }
-                PlayerSheet("Add from campaign", onDismiss = { dialog = null }, actions = {
-                    PlayerButton(enabled = !busy && chosen != null && chosen.revision == importRevision, onClick = {
-                        val expectedId = importId ?: return@PlayerButton
-                        val expectedRevision = importRevision ?: return@PlayerButton
-                        val snapshot = saved ?: return@PlayerButton
-                        action("Campaign item copied to your playable gear") {
-                            val latest = repository.items.first().firstOrNull { it.id == expectedId }
-                                ?: error("The campaign item is no longer available. Reopen this picker.")
-                            check(latest.revision == expectedRevision && !latest.archived && latest.quantity != null && latest.quantity > 0 &&
-                                latest.itemState !in setOf("Consumed", "Lost", "Sold")) {
-                                "The campaign item changed. Reopen and review its latest values."
-                            }
-                            check(snapshot.character.items.none { it.id == latest.id } &&
-                                snapshot.character.itemDefinitions.none { it.id == latest.id }) {
-                                "This item already belongs to your playable character. No duplicate was created."
-                            }
-                            val (definition, instance) = campaignItemPlayableCopy(latest)
-                            val updated = snapshot.character.copy(
-                                itemDefinitions = snapshot.character.itemDefinitions + definition,
-                                items = snapshot.character.items + instance)
-                            local.save(snapshot.character.id, snapshot.revision, updated,
-                                "Reviewed copy of campaign item ${latest.id}, source revision ${latest.revision}")
-                            dialog = null; importId = null
-                        }
-                    }) { Text("Copy item to character") }
-                }) {
-                    Text("This creates a reviewed local copy with the original item ID and quantity. Your campaign record stays unchanged; no magical effects activate automatically.",
-                        color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
-                    if (chosen == null) {
-                        PlayerSearch(importQuery, { importQuery = it }, "Find a campaign item")
-                        val matches = available.filter { importQuery.isBlank() || it.title.contains(importQuery, true) }
-                        if (matches.isEmpty()) Text("No eligible items. Add one in Campaign items, or check its quantity and status.", color = RebuildPalette.Muted)
-                        matches.take(40).forEach { item -> PlayerEntry(item.title,
-                            "${item.category} · Qty ${item.quantity} · ${item.itemState}", "Core", {
-                                importId = item.id; importRevision = item.revision
-                            }) }
-                        if (matches.size > 40) Text("Refine your search for more results.", color = RebuildPalette.Muted)
-                    } else {
-                        Text(chosen.title, style = MaterialTheme.typography.titleLarge)
-                        Text("Quantity ${chosen.quantity} · ${chosen.category} · Original revision ${chosen.revision}", color = RebuildPalette.Ice)
-                        Text(chosen.description.ifBlank { "No description recorded." }, color = RebuildPalette.Muted)
-                        PlayerTextButton(onClick = { importId = null; importRevision = null }) { Text("Choose another") }
-                    }
-                }
-            }
+            "ImportItem" -> GenesisCampaignItemPicker(saved!!, local, repository) { dialog = null }
             "Attack" -> ReforgeAttackEditor(character, { dialog = null }, onSave = { change("Add attack", it) })
             "Spell" -> ReforgeSpellEditor(character, { dialog = null }, onSave = { change("Add spell", it) })
             "Resource" -> ReforgeResourceEditor(character, { dialog = null }, onSave = { change("Add resource", it) })
@@ -716,19 +760,5 @@ private enum class SpellbookFilter(val label: String) {
             }
         }
     }
-}
-
-@Composable private fun ReforgeSheetPage(resetKey: String, rollNotice: SnackbarHostState,
-    onBackToCompanions: (() -> Unit)?, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxSize()) {
-        if (onBackToCompanions != null) {
-            PlayerTextButton(onClick = onBackToCompanions, modifier = Modifier.padding(horizontal = 12.dp)) {
-                Text("Back to companions")
-            }
-        }
-        Box(Modifier.weight(1f)) {
-            Page(resetKey = resetKey, content = content)
-            SnackbarHost(rollNotice, Modifier.align(Alignment.BottomCenter).widthIn(max = 600.dp))
-        }
     }
 }

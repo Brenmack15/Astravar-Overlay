@@ -57,6 +57,39 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     var inventoryRoute by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     var companionPlayId by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     var companionPlaySection by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("Sheet") }
+    var searchProfileId by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    var searchSection by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("Sheet") }
+    var searchDetail by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    var searchRouteToken by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
+    var searchIsCompanion by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var searchCampaignItemId by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    val searchRoute = searchProfileId?.let { GenesisCharacterRoute(it, searchSection, searchDetail, searchRouteToken) }
+    fun openSearchDestination(destination: ReforgeSearchDestination) {
+        tool = null; campaignPage = null
+        when (destination) {
+            is ReforgeSearchDestination.Character -> {
+                searchProfileId = destination.profileId; searchSection = destination.section
+                searchDetail = destination.detailDialog; searchRouteToken++
+                searchIsCompanion = destination.companion
+                companionPlayId = if (destination.companion) destination.profileId else null
+                companionPlaySection = destination.section
+                tab = if (destination.companion) "Companions" else "Character"
+            }
+            is ReforgeSearchDestination.Companion -> {
+                searchProfileId = null
+                companionPlayId = destination.profileId; companionPlaySection = "Sheet"; tab = "Companions"
+            }
+            is ReforgeSearchDestination.CampaignItem -> {
+                searchCampaignItemId = destination.itemId; tool = "Campaign item"
+            }
+            is ReforgeSearchDestination.Connection -> {
+                companionPlayId = null; tab = "Campaign"; campaignPage = "Connections:${destination.entityId}"
+            }
+            is ReforgeSearchDestination.Invention -> {
+                companionPlayId = null; tab = "Campaign"; campaignPage = "Inventions:${destination.projectId}"
+            }
+        }
+    }
     LaunchedEffect(ownerConnectionRequest) {
         if (ownerConnectionRequest > 0) {
             companionPlayId = null
@@ -111,6 +144,8 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
         }
     }
     LaunchedEffect(actions.message) {if(actions.message.isNotBlank()) {snackbar.showSnackbar(actions.message);actions.message=""}}
+    androidx.activity.compose.BackHandler(enabled = tab != "Character" && campaignPage == null &&
+        companionPlayId == null && tool == null) { tab = "Character" }
     androidx.activity.compose.BackHandler(enabled=tab=="Campaign" && campaignPage!=null && tool==null) {campaignPage=null}
     AstravarTheme {
         Scaffold(containerColor=RebuildPalette.Canvas,
@@ -118,6 +153,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
             topBar={RebuildAppHeader(s?.demo==true, search = { tool = "Global search" }, tools = { tool = "Tools" })},
             bottomBar={RebuildPrimaryNavigation(tab) { next ->
                 if (next == "Inventory") { requestedInventory = "My gear"; inventoryRoute++ }
+                if (searchIsCompanion) searchProfileId = null
                 companionPlayId = null
                 tab = next
             }}
@@ -139,7 +175,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                             }
                             "Character backup" -> ReforgeBackupPage(playableRepository)
                             "Campaign backup" -> CampaignBackupPageV2(app.campaignLedger)
-                            "Global search" -> ReforgeGlobalSearch(app.campaignLedger)
+                            "Global search" -> ReforgeGlobalSearch(app.campaignLedger, open = ::openSearchDestination)
                             else -> HelpPage()
                         }
                     } }
@@ -159,14 +195,18 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                 val playId = companionPlayId
                 if (tab == "Companions" && playId != null && !remoteTestEnabled) {
                     key(playId, companionPlaySection) {
-                        androidx.activity.compose.BackHandler(enabled = tool == null) { companionPlayId = null }
+                        androidx.activity.compose.BackHandler(enabled = tool == null) { companionPlayId = null; if (searchIsCompanion) searchProfileId = null }
                         ReforgeCharacterSheet(app.campaignLedger, playableRepository,
                             initialSection = companionPlaySection, companionProfileId = playId,
-                            onBackToCompanions = { companionPlayId = null })
+                            onBackToCompanions = { companionPlayId = null; if (searchIsCompanion) searchProfileId = null },
+                            navigationRequest = searchRoute?.takeIf { searchIsCompanion && it.profileId == playId })
                     }
                 } else screenStates.SaveableStateProvider(tab) {
                     when(tab) {
-                        "Character" -> if (remoteTestEnabled) Page { CharacterOverviewV2(app.campaignLedger, current, RemoteStatProtocol.PROFILE_ID) } else ReforgeCharacterSheet(app.campaignLedger)
+                        "Character" -> if (remoteTestEnabled) Page { CharacterOverviewV2(app.campaignLedger, current, RemoteStatProtocol.PROFILE_ID) }
+                            else ReforgeCharacterSheet(app.campaignLedger, playableRepository,
+                                navigationRequest = searchRoute?.takeUnless { searchIsCompanion },
+                                onOpenArmor = { tool = "Armor weapon" })
                         "Armor" -> ArmorOverviewV2(current,app.campaignLedger,
                             combat={tool="Armor weapon"},systems={tool="Spell reservoir"},
                             eek={tab="Campaign";campaignPage="Eek"},inventory={tab="Campaign";campaignPage="Inventory"},
@@ -176,13 +216,20 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                             onOverlayVisibilityChanged={armorModalOpen=it},
                             openReferences={tab="Campaign";campaignPage="Reference Library"})
                         "Combat" -> ReforgeCharacterSheet(app.campaignLedger, initialSection = "Combat")
-                        "Inventory" -> RebuildInventoryHub(app.campaignLedger,
-                            openReferences = { tab = "Campaign"; campaignPage = "Reference Library" },
-                            requestedSection = requestedInventory, routeToken = inventoryRoute)
+                        "Inventory" -> if (requestedInventory == "Campaign items") Column(Modifier.fillMaxSize()) {
+                            PlayerTextButton(onClick = { requestedInventory = "My gear" }) { Text("‹ Inventory") }
+                            Box(Modifier.weight(1f)) { CampaignLedgerPage(app.campaignLedger,
+                                openReferences = { tab = "Campaign"; campaignPage = "Reference Library" }) }
+                        } else GenesisInventoryHub(app.campaignLedger, playableRepository,
+                            open = ::openSearchDestination,
+                            openCampaignRecords = { requestedInventory = "Campaign items"; inventoryRoute++ })
                         "Companions" -> if (remoteTestEnabled) Page { Text("Party records are isolated from the disposable Remote Stat Test. Disable Remote Updates to edit party records.") }
                             else PartyPageV2(app.campaignLedger, current,
                                 openReferences = { tab = "Campaign"; campaignPage = "Reference Library" },
-                                openPlayable = { id, section -> companionPlayId = id; companionPlaySection = section },
+                                openPlayable = { id, section ->
+                                    if (searchIsCompanion) searchProfileId = null
+                                    companionPlayId = id; companionPlaySection = section
+                                },
                                 playableRepository = playableRepository) {
                                     requestedInventory = "Campaign items"; inventoryRoute++; tab = "Inventory"
                                 }
@@ -199,7 +246,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                                 }
                                 Box(Modifier.weight(1f)) {screenStates.SaveableStateProvider("campaign-$page") {
                                     when(page) {
-                                        "Search everything" -> ReforgeGlobalSearch(app.campaignLedger)
+                                        "Search everything" -> ReforgeGlobalSearch(app.campaignLedger, open = ::openSearchDestination)
                                         "Inventory" -> CampaignLedgerPage(app.campaignLedger) {campaignPage="Reference Library"}
                                         "Inventions" -> InventionsPageV2(app.campaignLedger)
                                         "Checkpoints" -> CampaignCheckpointPanel(app.campaignLedger)
@@ -221,7 +268,8 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                 tool?.let {name->RebuildToolSheet(name,{tool=null}) {
                     when(name) {
                         "Tools" -> RebuildConfigHub { tool = it }
-                        "Global search" -> ReforgeGlobalSearch(app.campaignLedger)
+                        "Global search" -> ReforgeGlobalSearch(app.campaignLedger, open = ::openSearchDestination)
+                        "Campaign item" -> CampaignLedgerPage(app.campaignLedger, initialItemId = searchCampaignItemId)
                         "Fictional sync" -> SandboxSyncPage(app.sandboxSync)
                         "Remote Updates" -> if(BuildConfig.DEBUG) RemoteUpdatesPage(app.remoteStats, characterAbilities) {id->
                             tool=null;remoteReviewId=id

@@ -32,6 +32,7 @@ import com.yazsras.astravar.data.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -41,11 +42,17 @@ import java.util.UUID
 /** Presentation only: stable identities, revisions, events and transactions remain repository-owned. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (() -> Unit)? = null) {
+fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (() -> Unit)? = null) =
+    CampaignLedgerPage(repository, initialItemId = null, openReferences = openReferences)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun CampaignLedgerPage(repository: CampaignLedgerRepository, initialItemId: String?, openReferences: (() -> Unit)? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val records = repository.records
-    val items by repository.items.collectAsState(initial = emptyList())
+    val inventoryState by remember(repository, initialItemId) { (if (initialItemId == null) repository.items else repository.itemsIncludingArchived).map { true to it } }.collectAsState(initial = false to emptyList())
+    val items = inventoryState.second
     val placements by repository.party.placements.collectAsState(initial = emptyList())
     val itemDetails by records.itemDetails.collectAsState(initial = emptyList())
     val itemProperties by records.itemProperties.collectAsState(initial = emptyList())
@@ -59,6 +66,7 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (()
     var filter by rememberSaveable { mutableStateOf("All") }
     var mode by rememberSaveable { mutableStateOf("") }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var consumedInitialItem by rememberSaveable { mutableStateOf<String?>(null) }
     // A saved Activity state can predate a successful Room commit. Replaying that draft must return its receipt.
     var profileCommandId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
     // Frozen serializable editor baselines survive recreation, including their optimistic revision.
@@ -159,6 +167,14 @@ fun CampaignLedgerPage(repository: CampaignLedgerRepository, openReferences: (()
         potential = item?.possibleUses.orEmpty(); limitations = item?.limitations.orEmpty()
         source = item?.source.orEmpty(); baselineSource = source; notionId = item?.notionPageId.orEmpty()
         iconData = item?.imageBase64; archived = item?.archived ?: false; message = ""
+    }
+    LaunchedEffect(initialItemId, inventoryState.first, items) {
+        if (initialItemId != null && consumedInitialItem != initialItemId && inventoryState.first) {
+            consumedInitialItem = initialItemId
+            val target = items.firstOrNull { it.id == initialItemId }
+            if (target == null) message = "This item is no longer available. No other item was opened."
+            else { load(target); mode = "detail" }
+        }
     }
     fun execute(block: suspend () -> Unit) {
         if (busy) return

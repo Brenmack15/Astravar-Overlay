@@ -142,7 +142,7 @@ val LocalPlayerDismiss = staticCompositionLocalOf<() -> Unit> { {} }
 @OptIn(ExperimentalLayoutApi::class)
 @Composable fun PlayerSheet(
     title: String, onDismiss: () -> Unit, dirty: Boolean = false, showCancel: Boolean = dirty,
-    dismissEnabled: Boolean = true,
+    dismissEnabled: Boolean = true, scrollResetKey: Any? = title,
     actions: @Composable RowScope.() -> Unit = {}, content: @Composable ColumnScope.() -> Unit
 ) {
     var discard by rememberSaveable { mutableStateOf(false) }
@@ -166,7 +166,7 @@ val LocalPlayerDismiss = staticCompositionLocalOf<() -> Unit> { {} }
                             PlayerTextButton(onClick = close, enabled = dismissEnabled, modifier = Modifier.heightIn(min = 48.dp)) { Text("Close") }
                         }
                         HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .4f))
-                        key(title) { Box(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(20.dp)) {
+                        key(scrollResetKey) { Box(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(20.dp)) {
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 // Keep long names readable without consuming the fixed header or hiding actions.
                                 if (titleOverflows) Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)

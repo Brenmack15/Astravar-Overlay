@@ -14,6 +14,29 @@ import java.io.File
 
 @RunWith(RobolectricTestRunner::class) @Config(sdk = [35])
 class ReforgePreferencesTest {
+    @Test fun quickActionsPersistPerActorWithoutChangingActiveSelection() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val file = File(context.cacheDir, "fictional-genesis-actions.preferences_pb")
+        file.delete()
+        var scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            var preferences = ReforgePreferences(PreferenceDataStoreFactory.create(scope = scope) { file })
+            preferences.selectProfile("fixture-owner")
+            preferences.saveQuickActions("fixture-owner", listOf("rest", "health", "dice"))
+            assertEquals(ReforgePreferences.DEFAULT_QUICK_ACTIONS, preferences.quickActions("fixture-companion").first())
+            scope.coroutineContext[Job]!!.cancelAndJoin()
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            preferences = ReforgePreferences(PreferenceDataStoreFactory.create(scope = scope) { file })
+            assertEquals(listOf("rest", "health", "dice"), preferences.quickActions("fixture-owner").first())
+            assertEquals("fixture-owner", preferences.activeProfileId.first())
+            for (invalid in listOf(emptyList(), listOf("health", "health"), listOf("unknown"), ReforgePreferences.QUICK_ACTIONS)) {
+                try { preferences.saveQuickActions("fixture-owner", invalid); fail("Invalid choices must be rejected") }
+                catch (_: IllegalArgumentException) { }
+            }
+            assertEquals(listOf("rest", "health", "dice"), preferences.quickActions("fixture-owner").first())
+        } finally { scope.coroutineContext[Job]!!.cancelAndJoin(); file.delete() }
+    }
+
     @Test fun primaryFallbackNeverSelectsCompanionAheadOfPrimaryAndExplicitChoiceWins() {
         val profiles = listOf("eek", "local-player", "veyrath")
         assertEquals("local-player", ReforgePreferences.chooseProfile(null, profiles))

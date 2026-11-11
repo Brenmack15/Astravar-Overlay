@@ -24,6 +24,8 @@ import com.yazsras.astravar.data.CampaignLedgerRepository
 import com.yazsras.astravar.data.CharacterProfile
 import com.yazsras.astravar.data.CompanionState
 import com.yazsras.astravar.data.ReforgeRepository
+import com.yazsras.astravar.data.ReforgePreferences
+import java.util.UUID
 import com.yazsras.astravar.data.PartySheetData
 import com.yazsras.astravar.rules.Campaign
 import com.yazsras.astravar.R
@@ -70,7 +72,9 @@ fun PartyPageV2(
     playableRepository: ReforgeRepository? = null,
     openInventory: () -> Unit
 ) {
-    val profiles by repository.records.characterProfiles.collectAsState(initial = emptyList())
+    val profileState by remember(repository) { repository.records.characterProfiles.map { true to it } }
+        .collectAsState(initial = false to emptyList<CharacterProfile>())
+    val profiles = profileState.second
     val states by repository.records.companionStates.collectAsState(initial = emptyList())
     val sheets by repository.party.sheets.collectAsState(initial = emptyList())
     val roster = remember(profiles, states) { partyRoster(profiles, states) }
@@ -80,6 +84,16 @@ fun PartyPageV2(
     var detailsOpen by rememberSaveable { mutableStateOf(false) }
     var adding by rememberSaveable { mutableStateOf(false) }
     var newName by rememberSaveable { mutableStateOf("") }
+    var newOwnerId by rememberSaveable { mutableStateOf<String?>(null) }
+    var newOwnerRevision by rememberSaveable { mutableStateOf<Long?>(null) }
+    var initialOwnerId by rememberSaveable { mutableStateOf<String?>(null) }
+    var ownerQuery by rememberSaveable { mutableStateOf("") }
+    var creationCommand by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
+    val appContext = LocalContext.current.applicationContext
+    val actorPreferences = remember(appContext) { ReforgePreferences.open(appContext) }
+    val actorSelection by remember(actorPreferences) { actorPreferences.activeProfileId.map { true to it } }
+        .collectAsState(initial = false to null)
+    val activeProfileId = actorSelection.second
     var creationError by remember { mutableStateOf("") }
     var creating by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -90,7 +104,13 @@ fun PartyPageV2(
             if (current != null) PlayerTextButton(onClick = { selected = null }) { Text("‹ Party") }
         }
         if (current == null) {
-            PlayerButton(onClick = { newName = ""; creationError = ""; adding = true }) { Text("+ Add companion") }
+            PlayerButton(onClick = {
+                newName = ""; creationError = ""; ownerQuery = ""
+                val owner = profiles.firstOrNull { it.id == activeProfileId }
+                newOwnerId = owner?.id; newOwnerRevision = owner?.revision; initialOwnerId = owner?.id
+                creationCommand = UUID.randomUUID().toString(); adding = true
+            }, enabled = profileState.first && actorSelection.first) { Text("+ Add companion") }
+            if (!profileState.first || !actorSelection.first) Text("Loading companion context…", color = RebuildPalette.Muted)
             Text("Your companions, ready for the next chapter.", color = RebuildPalette.Muted)
             if (roster.isNotEmpty()) PlayerSearch(query, { query = it }, "Find a companion")
             val visibleRoster = roster.filter { member ->
@@ -164,26 +184,51 @@ fun PartyPageV2(
     if (detailsOpen && current?.id == "eek") RebuildToolSheet("Eek details", onDismiss = { detailsOpen = false }) {
         EekPageV2(repository)
     }
-    if (adding) PlayerSheet("Add companion", onDismiss = { if (!creating) adding = false },
-        dirty = newName.isNotBlank(), actions = {
-            PlayerButton(enabled = !creating && newName.isNotBlank(), onClick = {
-                if (creating) return@PlayerButton
+    if (adding) GenesisEditorSheet("Add companion", sections = listOf("Identity", "Association", "Review"), creating = true,
+        context = "Campaign companions", onDismiss = { if (!creating) adding = false },
+        dirty = newName.isNotBlank() || newOwnerId != initialOwnerId, saveLabel = "Create companion", saveEnabled = newName.isNotBlank(),
+        busy = creating, error = creationError, onSave = {
+                if (!creating) {
                 creating = true; creationError = ""
                 scope.launch {
                     try {
-                        val id = repository.records.createCompanion(newName)
+                        val id = repository.records.createCompanion(newName, newOwnerId, newOwnerRevision, creationCommand)
                         selected = id; section = "Sheet"; adding = false; newName = ""
                     } catch (e: CancellationException) { throw e }
                     catch (e: Exception) { creationError = e.message ?: "Companion could not be saved." }
                     finally { creating = false }
                 }
-            }) { Text("Create companion") }
-        }) {
-        Text("Add a companion without filling in a complicated character sheet. Statistics, health and equipment stay unknown until you record them.",
-            color = RebuildPalette.Muted)
-        Field("Companion name", newName, { newName = it }, enabled = !creating)
-        if (creating) LinearProgressIndicator(Modifier.fillMaxWidth())
-        if (creationError.isNotBlank()) Text(creationError, color = MaterialTheme.colorScheme.error)
+                }
+        }) { creationStep, select ->
+        if (creationStep == 0) {
+            Text("Begin with their name. You can record their statistics, abilities and equipment from their companion sheet.", color = RebuildPalette.Muted)
+            Field("Companion name", newName, { newName = it }, enabled = !creating)
+        } else if (creationStep == 1) {
+            val owner = profiles.firstOrNull { it.id == newOwnerId }
+            Text("Connect this companion to an existing campaign profile. You can also keep them unassigned.", color = RebuildPalette.Muted)
+            PlayerEntry("Unassigned", "Keep in the campaign roster", "People", {
+                newOwnerId = null; newOwnerRevision = null
+            }, trailing = if (newOwnerId == null) "Selected" else null)
+            PlayerSearch(ownerQuery, { ownerQuery = it }, "Find an owner")
+            val matchingOwners = profiles.filter { ownerQuery.isBlank() || it.name.contains(ownerQuery.trim(), true) }
+            matchingOwners.take(40).forEach { profile ->
+                PlayerEntry(profile.name.ifBlank { "Unnamed profile" }, "Campaign profile", "Emblem", {
+                    newOwnerId = profile.id; newOwnerRevision = profile.revision
+                }, trailing = if (profile.id == newOwnerId) "Selected" else null)
+            }
+            if (matchingOwners.size > 40) Text("Refine your search for more profiles.", color = RebuildPalette.Muted)
+            if (profiles.isEmpty()) Text("No campaign profiles are available to link yet. The companion can be saved unassigned.", color = RebuildPalette.Muted)
+            if (newOwnerId != null && owner == null) Text("The selected owner is unavailable. Choose another profile or Unassigned.", color = MaterialTheme.colorScheme.error)
+        } else {
+            GenesisReviewSection("Identity", { select(0) }) {
+                GenesisReviewValue("Companion name", newName)
+                GenesisReviewValue("Destination", "Campaign companion roster")
+            }
+            GenesisReviewSection("Association", { select(1) }) {
+                GenesisReviewValue("Owner", newOwnerId?.let { id -> profiles.firstOrNull { it.id == id }?.name ?: "Unavailable — select an owner again" }.orEmpty(), "Unassigned")
+            }
+            Text("Health, statistics and resources remain unknown. Creating this record does not grant abilities or create an additional playable character.", color = RebuildPalette.Muted)
+        }
     }
 }
 
