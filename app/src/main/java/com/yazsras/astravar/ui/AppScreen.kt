@@ -169,6 +169,10 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     androidx.activity.compose.BackHandler(enabled = tab == "Inventory" && requestedInventory == "Campaign items" &&
         tool == null) { requestedInventory = "My gear"; inventoryRoute++ }
     androidx.activity.compose.BackHandler(enabled=tab=="Campaign" && campaignPage!=null && tool==null) {campaignPage=null}
+    // Register the route fallback before the sheet: its pager closes Combat to Sheet first.
+    androidx.activity.compose.BackHandler(enabled = encounterReturn && tab in listOf("Character", "Companions") && tool == null) {
+        returnToEncounter()
+    }
     AstravarTheme {
         CompositionLocalProvider(LocalGenesisConnectedEnvironment provides connected) {
         Scaffold(containerColor=RebuildPalette.Canvas,
@@ -224,7 +228,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                 val playId = companionPlayId
                 if (tab == "Companions" && playId != null && !remoteTestEnabled) {
                     key(playId, companionPlaySection) {
-                        androidx.activity.compose.BackHandler(enabled = tool == null) { companionPlayId = null; if (searchIsCompanion) searchProfileId = null }
+                        androidx.activity.compose.BackHandler(enabled = tool == null && !encounterReturn) { companionPlayId = null; if (searchIsCompanion) searchProfileId = null }
                         ReforgeCharacterSheet(app.campaignLedger, playableRepository,
                             initialSection = companionPlaySection, companionProfileId = playId,
                             onBackToCompanions = { companionPlayId = null; if (searchIsCompanion) searchProfileId = null },
@@ -298,9 +302,6 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                         }
                         else -> RebuildConfigHub { tool = it }
                     }
-                }
-                androidx.activity.compose.BackHandler(enabled = encounterReturn && tab in listOf("Character", "Companions") && tool == null) {
-                    returnToEncounter()
                 }
                 tool?.let {name->RebuildToolSheet(name,{tool=null}) {
                     when(name) {

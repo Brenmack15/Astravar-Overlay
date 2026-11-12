@@ -227,4 +227,26 @@ class GenesisEncounterUiTest {
             }
         }
     }
+
+    @Test fun delayedCampaignContextInitializesOnceWithoutReassigningAnyActor() = fixture { f ->
+        val context = mutableStateOf(f.env.copy(selectedCampaignId = null, selectionLoaded = false))
+        val actorBefore = runBlocking { f.env.authority.actor(hero) }
+        show({ GenesisEncountersPage(context.value) {} }) {
+            awaitText("Loading campaign context…")
+            compose.onNode(hasText("Create encounter") and hasClickAction()).assertIsNotEnabled()
+            compose.runOnIdle { context.value = f.env }
+            awaitText("Fictional Vale")
+            click("Create encounter")
+            compose.waitUntil(15_000) { compose.onAllNodes(hasText("Encounter name") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Encounter name").performTextInput("Fictional late context")
+            click("Review & save")
+            click("Save encounter")
+            awaitText("Setup · confirm the order before starting")
+            runBlocking {
+                assertEquals(f.campaign.id, f.env.authority.encounters.observe(f.campaign.id).first().single().record.campaignId)
+                assertEquals(actorBefore, f.env.authority.actor(hero))
+                assertTrue(f.env.authority.encounters.observe(f.other.id).first().isEmpty())
+            }
+        }
+    }
 }

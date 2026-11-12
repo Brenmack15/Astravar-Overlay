@@ -24,7 +24,8 @@ import java.util.UUID
 @Serializable private data class GenesisEncounterUiDraft(val id: String, val revision: Long?, val campaignId: String?,
     val title: String = "", val notes: String = "", val participants: List<GenesisEncounterMemberDraft> = emptyList())
 
-private fun encounterName(id: String, profiles: List<CharacterProfile>): String {
+private fun encounterName(id: String, profiles: List<CharacterProfile>, loaded: Boolean = true): String {
+    if (!loaded) return "Loading participant…"
     val profile = profiles.firstOrNull { it.id == id } ?: return "Unavailable participant · $id"
     return profile.name + if (profiles.count { it.name == profile.name } > 1) " · $id" else ""
 }
@@ -34,10 +35,23 @@ private fun encounterName(id: String, profiles: List<CharacterProfile>): String 
     openActor: (ReforgeSearchDestination.Character) -> Unit) {
     val repository = environment.authority.encounters
     val campaigns by environment.authority.campaigns.collectAsState(initial = emptyList())
-    val profiles by environment.campaign.records.characterProfiles.collectAsState(initial = emptyList())
-    val actors by environment.authority.actorAssociations.collectAsState(initial = emptyList())
-    val playable by environment.local.observeAll().collectAsState(initial = emptyList())
+    val profileState by remember(environment.campaign) { environment.campaign.records.characterProfiles.map { true to it } }
+        .collectAsState(initial = false to emptyList<CharacterProfile>())
+    val actorState by remember(environment.authority) { environment.authority.actorAssociations.map { true to it } }
+        .collectAsState(initial = false to emptyList<GenesisActorAuthority>())
+    val playableState by remember(environment.local) { environment.local.observeAll().map { true to it } }
+        .collectAsState(initial = false to emptyList<ReforgeSavedCharacter>())
+    val profiles = profileState.second
+    val actors = actorState.second
+    val playable = playableState.second
+    val referencesLoaded = profileState.first && actorState.first && playableState.first
     var campaignId by rememberSaveable { mutableStateOf(environment.selectedCampaignId) }
+    var campaignInitialized by rememberSaveable { mutableStateOf(environment.selectionLoaded) }
+    LaunchedEffect(environment.selectionLoaded, environment.selectedCampaignId) {
+        if (!campaignInitialized && environment.selectionLoaded) {
+            campaignId = environment.selectedCampaignId; campaignInitialized = true
+        }
+    }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var savedSelection by remember { mutableStateOf<GenesisEncounterSnapshot?>(null) }
     var editorId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -59,7 +73,7 @@ private fun encounterName(id: String, profiles: List<CharacterProfile>): String 
     val selected = rows.second.firstOrNull { it.record.id == selectedId }
         ?: savedSelection?.takeIf { it.record.id == selectedId && it.record.campaignId == campaignId }
     fun selectCampaign(id: String?) {
-        campaignId = id; selectedId = null; error = ""
+        campaignId = id; campaignInitialized = true; selectedId = null; error = ""
         scope.launch {
             try { environment.preferences.selectCampaign(id) }
             catch (e: CancellationException) { throw e }
@@ -83,8 +97,9 @@ private fun encounterName(id: String, profiles: List<CharacterProfile>): String 
         }
         Text("Track participants, manual order and rounds. Use their sheets for attacks, HP and resources.", color = RebuildPalette.Muted)
         Choices("Campaign", campaigns.filterNot { it.archived }.map { it.id }, campaignId,
-            display = { id -> campaigns.firstOrNull { it.id == id }?.name ?: "Campaign unavailable" }, enabled = !busy, change = ::selectCampaign)
-        if (campaignId == null) PlayerEmpty("Choose a campaign", "Encounters keep explicit campaign and participant relationships.")
+            display = { id -> campaigns.firstOrNull { it.id == id }?.name ?: "Campaign unavailable" }, enabled = environment.selectionLoaded && !busy, change = ::selectCampaign)
+        if (!campaignInitialized) Text("Loading campaign context…", color = RebuildPalette.Muted)
+        else if (campaignId == null) PlayerEmpty("Choose a campaign", "Encounters keep explicit campaign and participant relationships.")
         PlayerSearch(query, { query = it }, "Find an encounter")
         if (!rows.first || busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (message.isNotBlank()) Text(message, color = RebuildPalette.Ice, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
@@ -94,7 +109,7 @@ private fun encounterName(id: String, profiles: List<CharacterProfile>): String 
         visible.forEach { snapshot ->
             PlayerEntry(snapshot.record.title, when (snapshot.record.status) {
                 GenesisEncounterStatus.DRAFT -> "Setup · ${snapshot.participants.size} participants"
-                GenesisEncounterStatus.ACTIVE -> "Round ${snapshot.record.round} · ${snapshot.record.currentActorId?.let { encounterName(it, profiles) } ?: "Participant unavailable"}"
+                GenesisEncounterStatus.ACTIVE -> "Round ${snapshot.record.round} · ${snapshot.record.currentActorId?.let { encounterName(it, profiles, profileState.first) } ?: "Participant unavailable"}"
                 GenesisEncounterStatus.ENDED -> "Ended · round ${snapshot.record.round}"
             }, "Shield", { selectedId = snapshot.record.id })
         }
@@ -106,7 +121,7 @@ private fun encounterName(id: String, profiles: List<CharacterProfile>): String 
                     when (snapshot.record.status) {
                         GenesisEncounterStatus.DRAFT -> {
                             PlayerTextButton(enabled = !busy, onClick = { editorId = snapshot.record.id }) { Text("Edit setup") }
-                            PlayerButton(enabled = !busy && snapshot.participants.isNotEmpty(), onClick = {
+                            PlayerButton(enabled = !busy && referencesLoaded && snapshot.participants.isNotEmpty(), onClick = {
                                 action {
                                     startReview = repository.reviewStart(snapshot.record.id, snapshot.record.revision)
                                     acknowledged = false; "Review the participants and turn order before starting."
@@ -133,18 +148,20 @@ private fun encounterName(id: String, profiles: List<CharacterProfile>): String 
                     GenesisEncounterStatus.ENDED -> "Ended · round ${selected.record.round}"
                 }, style = MaterialTheme.typography.titleLarge)
                 if (selected.record.status == GenesisEncounterStatus.ACTIVE) Text(
-                    "Current turn: ${selected.record.currentActorId?.let { encounterName(it, profiles) } ?: "Unavailable participant"}",
+                    "Current turn: ${selected.record.currentActorId?.let { encounterName(it, profiles, profileState.first) } ?: "Unavailable participant"}",
                     color = RebuildPalette.GoldBright, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                 if (selected.record.notes.isNotBlank()) ReforgeRichText(selected.record.notes)
                 Text("Next turn changes this tracker only. Resolve actions and turn-based effects on the relevant sheet; HP, resources, weapon actions and campaign time stay unchanged.", color = RebuildPalette.Muted)
                 selected.participants.sortedBy { it.position }.forEachIndexed { index, member ->
                     val actor = actors.firstOrNull { it.actorId == member.actorId }
                     val saved = playable.firstOrNull { it.character.id == member.actorId && !it.character.archived }
-                    val name = encounterName(member.actorId, profiles)
+                    val name = encounterName(member.actorId, profiles, profileState.first)
                     Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("${index + 1}. $name", style = MaterialTheme.typography.titleMedium,
                             color = if (selected.record.currentActorId == member.actorId) RebuildPalette.GoldBright else MaterialTheme.colorScheme.onSurface)
                         Text("Initiative: ${member.initiative?.toString() ?: "Not entered"}", color = RebuildPalette.Muted)
+                        if (!referencesLoaded) Text("Loading participant records…", color = RebuildPalette.Muted)
+                        else {
                         if (actor == null || actor.campaignId != selected.record.campaignId) Text("Membership changed · retained encounter participant", color = RebuildPalette.GoldBright)
                         if (actor?.playable == true && saved != null) {
                             val projection = remember(saved) { runCatching { CharacterCalculator.calculate(saved.character) }.getOrNull() }
@@ -155,6 +172,7 @@ private fun encounterName(id: String, profiles: List<CharacterProfile>): String 
                         } else {
                             Text("Source or archived record · no playable actions here", color = RebuildPalette.Muted)
                             PlayerTextButton(onClick = { sourceActorId = member.actorId }) { Text("View $name's source") }
+                        }
                         }
                     }
                     HorizontalDivider()
@@ -181,16 +199,16 @@ private fun encounterName(id: String, profiles: List<CharacterProfile>): String 
     }
     startReview?.let { frozen ->
         PlayerSheet("Start encounter", { startReview = null; acknowledged = false }, dismissEnabled = !busy, actions = {
-            PlayerButton(enabled = acknowledged && !busy, onClick = {
+            PlayerButton(enabled = acknowledged && referencesLoaded && !busy, onClick = {
                 action { repository.start(frozen, command); startReview = null; acknowledged = false; "Encounter started" }
             }) { Text("Start encounter") }
         }) {
             Text(frozen.snapshot.record.title, style = MaterialTheme.typography.titleLarge)
             frozen.snapshot.participants.sortedBy { it.position }.forEachIndexed { index, member ->
-                GenesisReviewValue("${index + 1}. ${encounterName(member.actorId, profiles)}", "Initiative: ${member.initiative?.toString() ?: "Not entered"}")
+                GenesisReviewValue("${index + 1}. ${encounterName(member.actorId, profiles, profileState.first)}", "Initiative: ${member.initiative?.toString() ?: "Not entered"}")
             }
             Text("The first listed participant begins round 1. Initiative is entered manually; this tracker does not roll, spend resources or reset actions.", color = RebuildPalette.Muted)
-            Toggle("I confirm this turn order", acknowledged, enabled = !busy) { acknowledged = it }
+            Toggle("I confirm this turn order", acknowledged, enabled = referencesLoaded && !busy) { acknowledged = it }
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("genesis-encounter-error"))
         }
     }
@@ -210,10 +228,13 @@ private fun encounterName(id: String, profiles: List<CharacterProfile>): String 
     } }
     sourceActorId?.let { id ->
         val profile = profiles.firstOrNull { it.id == id }
-        PlayerSheet(encounterName(id, profiles), { sourceActorId = null }) {
+        PlayerSheet(encounterName(id, profiles, profileState.first), { sourceActorId = null }) {
+            if (!referencesLoaded) LinearProgressIndicator(Modifier.fillMaxWidth())
+            else {
             Text("This participant remains a source record. Encounter tracking does not create a playable sheet or invent statistics.", color = RebuildPalette.Muted)
             GenesisReviewValue("Source", profile?.source.orEmpty(), "No source recorded")
             GenesisReviewValue("Role", actors.firstOrNull { it.actorId == id }?.role?.let(::genesisRoleLabel).orEmpty(), "Membership unavailable")
+            }
         }
     }
 }
@@ -221,7 +242,9 @@ private fun encounterName(id: String, profiles: List<CharacterProfile>): String 
 @Composable internal fun GenesisEncounterEditor(environment: GenesisConnectedEnvironment, existing: GenesisEncounterSnapshot?,
     initialCampaignId: String?, onDismiss: () -> Unit, onSaved: (GenesisEncounterSnapshot) -> Unit) {
     val campaigns by environment.authority.campaigns.collectAsState(initial = emptyList())
-    val profiles by environment.campaign.records.characterProfiles.collectAsState(initial = emptyList())
+    val profileState by remember(environment.campaign) { environment.campaign.records.characterProfiles.map { true to it } }
+        .collectAsState(initial = false to emptyList<CharacterProfile>())
+    val profiles = profileState.second
     val actorState by remember(environment.authority) { environment.authority.actorAssociations.map { true to it } }
         .collectAsState(initial = false to emptyList<GenesisActorAuthority>())
     val actors = actorState.second
@@ -247,9 +270,9 @@ private fun encounterName(id: String, profiles: List<CharacterProfile>): String 
         it.actorId == member.actorId && it.campaignId == draft.campaignId && it.revision == member.authorityRevision
     } }
     val initiativesValid = draft.participants.all { it.initiative.isBlank() || it.initiative.toIntOrNull() != null }
-    val valid = initialized && actorState.first && draftState.canSave && baselineState.canSave && draft.title.isNotBlank() &&
+    val valid = initialized && actorState.first && profileState.first && draftState.canSave && baselineState.canSave && draft.title.isNotBlank() &&
         campaigns.any { it.id == draft.campaignId && !it.archived } && membershipsValid && initiativesValid
-    val editable = !busy && initialized && actorState.first && draftState.canSave && baselineState.canSave
+    val editable = !busy && initialized && actorState.first && profileState.first && draftState.canSave && baselineState.canSave
     fun move(index: Int, delta: Int) {
         val other = index + delta
         if (!busy && other in draft.participants.indices) {
@@ -286,7 +309,7 @@ private fun encounterName(id: String, profiles: List<CharacterProfile>): String 
                 Text("Turn order", style = MaterialTheme.typography.titleMedium)
                 Text("Arrange each participant explicitly. Initiative values are notes; they do not automatically reorder this list.", color = RebuildPalette.Muted)
                 draft.participants.forEachIndexed { index, member -> key(member.actorId) {
-                    val name = encounterName(member.actorId, profiles)
+                    val name = encounterName(member.actorId, profiles, profileState.first)
                     Text("${index + 1}. $name", style = MaterialTheme.typography.titleMedium)
                     Field("Initiative: $name", member.initiative, { value -> draft = draft.copy(participants = draft.participants.map { if (it.actorId == member.actorId) it.copy(initiative = value) else it }) }, enabled = editable)
                     if (member.initiative.isNotBlank() && member.initiative.toIntOrNull() == null) Text("Enter a whole initiative value or leave it blank.", color = MaterialTheme.colorScheme.error)
@@ -301,10 +324,11 @@ private fun encounterName(id: String, profiles: List<CharacterProfile>): String 
                 PlayerSearch(query, { query = it }, "Find a campaign participant")
                 val choices = actors.filter { it.campaignId == draft.campaignId && draft.campaignId != null && draft.participants.none { member -> member.actorId == it.actorId } }
                     .filter { query.isBlank() || encounterName(it.actorId, profiles).contains(query.trim(), true) }
-                if (choices.isEmpty()) Text("No matching campaign members. Add or review their membership from Campaign first.", color = RebuildPalette.Muted)
+                if (!profileState.first || !actorState.first) Text("Loading campaign members…", color = RebuildPalette.Muted)
+                else if (choices.isEmpty()) Text("No matching campaign members. Add or review their membership from Campaign first.", color = RebuildPalette.Muted)
                 if (draft.participants.size >= 100) Text("100 participants selected. Remove one before adding another.", color = RebuildPalette.Muted)
                 if (choices.size > 40) Text("Showing the first 40 matches. Search for a participant to narrow the list.", color = RebuildPalette.Muted)
-                choices.take(40).forEach { actor ->
+                choices.take(40).takeIf { profileState.first && actorState.first }.orEmpty().forEach { actor ->
                     val name = encounterName(actor.actorId, profiles)
                     PlayerOutlinedButton(enabled = editable && draft.participants.size < 100, onClick = {
                         draft = draft.copy(participants = draft.participants + GenesisEncounterMemberDraft(actor.actorId, actor.revision))
