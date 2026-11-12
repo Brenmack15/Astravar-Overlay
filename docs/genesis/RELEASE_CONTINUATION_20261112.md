@@ -23,9 +23,12 @@ Focused2/2passed,0fail/errors/skips. Evidence:
 Prior clean641 separate lintDebug passed0errors68warnings1hint; debug APK and
 observer instrumentation assembled. `shared-tabs-lint-build-a86-1-results/`.
 No local Gradle active. Exact remote signing checkout
-`genesis-release-source-d12bdfe` is being prepared, without touching old worktrees.
-a86 full rules/debug passed16:16:09; release/lint continues. a86 native emulator
-continues. Do not cancel either: their source-specific evidence remains useful.
+`genesis-release-source-d12bdfe` is clean at the exact remote commit/tree,
+verified without touching old worktrees.
+a86 full rules/debug passed16:16:09; release/lint continues. a86 native43251800807
+completed SUCCESS, observed16:41UTC; artifact/log/SQL/font evidence inspection is
+in progress, not yet complete. Currentd12 native build passed16:37:26 and its
+emulator journeys run; d12 full debug still pending. Do not cancel either: their source-specific evidence remains useful.
 Owner helper is still disabled/failedde98-pinned: final signing/activation must use
 the actual successful d12 or later source, never an earlier passing gate.
 PR15 unchanged. No Genesis owner APK has been signed, transferred or installed.
