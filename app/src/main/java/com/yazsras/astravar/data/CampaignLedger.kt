@@ -135,9 +135,11 @@ interface LedgerDao {
     ChatGptPrompt::class, ChatGptPromptCatalogState::class,
     ReforgeCharacterRow::class, ReforgeChange::class, ReforgeRollRecord::class, ReforgeNoteDraft::class,
     GenesisStorageReceipt::class, GenesisCampaignRecord::class, GenesisActorAuthority::class,
-    GenesisItemAuthority::class, GenesisAuthorityReceipt::class], version = 8, exportSchema = true)
-@TypeConverters(PartyConverters::class, ReforgeConverters::class, GenesisAuthorityConverters::class)
+    GenesisItemAuthority::class, GenesisAuthorityReceipt::class,
+    GenesisEncounterRecord::class, GenesisEncounterParticipant::class], version = 9, exportSchema = true)
+@TypeConverters(PartyConverters::class, ReforgeConverters::class, GenesisAuthorityConverters::class, GenesisEncounterConverters::class)
 abstract class CampaignLedgerDb : RoomDatabase() {
+    abstract fun genesisEncounterDao(): GenesisEncounterDao
     abstract fun genesisAuthorityDao(): GenesisAuthorityDao
     abstract fun reforgeDao(): ReforgeDao
     abstract fun genesisStorageDao(): GenesisStorageDao
@@ -152,7 +154,7 @@ abstract class CampaignLedgerDb : RoomDatabase() {
         fun open(context: Context): CampaignLedgerDb = Room.databaseBuilder(
             context.applicationContext, CampaignLedgerDb::class.java, "astravar-campaign-ledger.db"
         ).openHelperFactory(GenesisNonDestructiveOpenHelperFactory()).enableMultiInstanceInvalidation()
-            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4, CAMPAIGN_MIGRATION_4_5, CAMPAIGN_MIGRATION_5_6, CAMPAIGN_MIGRATION_6_7, CAMPAIGN_MIGRATION_7_8).build() // NEVER fallbackToDestructiveMigration()
+            .addMigrations(CAMPAIGN_MIGRATION_1_2, CAMPAIGN_MIGRATION_2_3, CAMPAIGN_MIGRATION_3_4, CAMPAIGN_MIGRATION_4_5, CAMPAIGN_MIGRATION_5_6, CAMPAIGN_MIGRATION_6_7, CAMPAIGN_MIGRATION_7_8, CAMPAIGN_MIGRATION_8_9).build() // NEVER fallbackToDestructiveMigration()
     }
 }
 

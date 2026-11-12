@@ -185,6 +185,17 @@ internal fun genesisAuthorityRestoreConflicts(incoming: GenesisAuthorityExport, 
     compare("Actor authority", incoming.actors, current.actors) { it.actorId }
     compare("Item authority", incoming.items, current.items) { it.itemId }
     compare("Authority receipt", incoming.receipts, current.receipts) { it.commandId }
+    compare("Encounter", incoming.encounters, current.encounters) { it.id }
+    require(incoming.encounterParticipants.size <= 50_000) { "Encounter participants exceed the supported backup record limit." }
+    val participantKeys = incoming.encounterParticipants.map { it.encounterId to it.actorId }
+    require(participantKeys.distinct().size == participantKeys.size) { "Encounter contains duplicate participant identities." }
+    val localParticipants = current.encounterParticipants.associateBy { it.encounterId to it.actorId }
+    incoming.encounterParticipants.forEach { participant ->
+        checkId(participant.encounterId); checkId(participant.actorId)
+        localParticipants[participant.encounterId to participant.actorId]?.let {
+            if (it != participant) errors += "Encounter participant ${participant.actorId} in ${participant.encounterId} differs from its saved record. Neither version will be replaced."
+        }
+    }
     return errors
 }
 
@@ -192,7 +203,10 @@ private fun mergeGenesisAuthority(incoming: GenesisAuthorityExport, current: Gen
     campaigns = (current.campaigns + incoming.campaigns).distinctBy { it.id }.sortedBy { it.id },
     actors = (current.actors + incoming.actors).distinctBy { it.actorId }.sortedBy { it.actorId },
     items = (current.items + incoming.items).distinctBy { it.itemId }.sortedBy { it.itemId },
-    receipts = (current.receipts + incoming.receipts).distinctBy { it.commandId }.sortedBy { it.commandId }
+    receipts = (current.receipts + incoming.receipts).distinctBy { it.commandId }.sortedBy { it.commandId },
+    encounters = (current.encounters + incoming.encounters).distinctBy { it.id }.sortedBy { it.id },
+    encounterParticipants = (current.encounterParticipants + incoming.encounterParticipants).distinctBy { it.encounterId to it.actorId }
+        .sortedWith(compareBy({ it.encounterId }, { it.position }))
 )
 
 private fun mergeGenesisPlayable(incoming: ReforgeBackup, current: ReforgeBackup) = current.copy(
@@ -376,5 +390,9 @@ class GenesisAuthorityBackupRepository internal constructor(
         merged.actors.filter { it.actorId !in actors }.forEach { target.insert(it) }
         merged.items.filter { it.itemId !in items }.forEach { target.insert(it) }
         merged.receipts.filter { it.commandId !in receipts }.forEach { target.insert(it) }
+        val encounters = current.encounters.map { it.id }.toSet()
+        val participants = current.encounterParticipants.map { it.encounterId to it.actorId }.toSet()
+        merged.encounters.filter { it.id !in encounters }.forEach { db.genesisEncounterDao().insert(it) }
+        merged.encounterParticipants.filter { (it.encounterId to it.actorId) !in participants }.forEach { db.genesisEncounterDao().insert(it) }
     }
 }

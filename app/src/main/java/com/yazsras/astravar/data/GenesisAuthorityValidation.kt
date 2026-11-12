@@ -125,6 +125,7 @@ internal fun genesisAuthorityBackupErrors(
                 require(outcome.outputId in items) { "Crafted physical output authority is missing." }
                 itemProofs[receipt.commandId] = outcome.actors.single { it.character.id == review.outputOwnerActorId }
             }
+            GENESIS_ENCOUNTER_COMMAND -> genesisValidateEncounterReceipt(receipt, receipts::get)
             else -> error("Unsupported authority receipt kind.")
         }
     } }
@@ -253,5 +254,6 @@ internal fun genesisAuthorityBackupErrors(
     }
     playable.changes.filter { it.operation.startsWith(GENESIS_AUTHORITY_SOURCE) }.forEach { actorMarker(it.profileId) }
     saved.values.filter { it.origin.label == GENESIS_AUTHORITY_SOURCE }.forEach { actorMarker(it.character.id) }
+    errors += genesisEncounterBackupErrors(authority)
     return errors.distinct()
 }

@@ -56,6 +56,7 @@ internal suspend fun genesisRequireAuthorityCommand(db: CampaignLedgerDb, receip
             genesisRequireAffectedActor(db, requireNotNull(db.genesisAuthorityDao().actor(outcome.character.id)))
         }
         "craft-items" -> genesisRequireCraftCommand(db, receipt)
+        GENESIS_ENCOUNTER_COMMAND -> genesisRequireEncounterCommand(db, receipt)
         else -> error("Unsupported connected command kind.")
     }
 }

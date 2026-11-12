@@ -42,11 +42,14 @@ data class GenesisAuthorityReceipt(
     val requestJson: String, val outcomeJson: String, val createdAt: Long
 )
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class GenesisAuthorityExport(
     val campaigns: List<GenesisCampaignRecord> = emptyList(),
     val actors: List<GenesisActorAuthority> = emptyList(),
     val items: List<GenesisItemAuthority> = emptyList(),
-    val receipts: List<GenesisAuthorityReceipt> = emptyList()
+    val receipts: List<GenesisAuthorityReceipt> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val encounters: List<GenesisEncounterRecord> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val encounterParticipants: List<GenesisEncounterParticipant> = emptyList()
 )
 
 @Serializable data class GenesisFieldDifference(val field: String, val sourceValue: String, val playableValue: String)
@@ -69,7 +72,7 @@ class GenesisAuthorityConverters {
 }
 
 @Dao interface GenesisAuthorityDao {
-    @Query("SELECT EXISTS(SELECT 1 FROM genesis_campaigns) OR EXISTS(SELECT 1 FROM genesis_actor_authority) OR EXISTS(SELECT 1 FROM genesis_item_authority) OR EXISTS(SELECT 1 FROM genesis_authority_receipts)") suspend fun hasAuthority(): Boolean
+    @Query("SELECT EXISTS(SELECT 1 FROM genesis_campaigns) OR EXISTS(SELECT 1 FROM genesis_actor_authority) OR EXISTS(SELECT 1 FROM genesis_item_authority) OR EXISTS(SELECT 1 FROM genesis_authority_receipts) OR EXISTS(SELECT 1 FROM genesis_encounters) OR EXISTS(SELECT 1 FROM genesis_encounter_participants)") suspend fun hasAuthority(): Boolean
     @Query("SELECT * FROM genesis_campaigns ORDER BY name,id") fun campaigns(): Flow<List<GenesisCampaignRecord>>
     @Query("SELECT * FROM genesis_campaigns ORDER BY id") suspend fun allCampaigns(): List<GenesisCampaignRecord>
     @Query("SELECT * FROM genesis_campaigns WHERE id=:id") suspend fun campaign(id: String): GenesisCampaignRecord?

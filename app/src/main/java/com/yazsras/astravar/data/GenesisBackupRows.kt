@@ -131,6 +131,14 @@ internal fun genesisAuthorityBackupRows(db: CampaignLedgerDb): GenesisAuthorityE
         receipts = rows("genesis_authority_receipts", "commandId,kind,fingerprint,requestJson,outcomeJson,createdAt", "commandId") {
             GenesisAuthorityReceipt(it.text("commandId"), it.text("kind"), it.text("fingerprint"), it.text("requestJson"),
                 it.text("outcomeJson"), it.long("createdAt"))
+        },
+        encounters = rows("genesis_encounters", "id,campaignId,title,notes,status,round,currentActorId,revision,creationCommandId,lastCommandId,createdAt,updatedAt", "id") {
+            GenesisEncounterRecord(it.text("id"), it.text("campaignId"), it.text("title"), it.text("notes"),
+                GenesisEncounterStatus.valueOf(it.text("status")), Math.toIntExact(it.long("round")), it.optionalText("currentActorId"),
+                it.long("revision"), it.text("creationCommandId"), it.text("lastCommandId"), it.long("createdAt"), it.long("updatedAt"))
+        },
+        encounterParticipants = rows("genesis_encounter_participants", "encounterId,actorId,initiative,position", "encounterId,position") {
+            GenesisEncounterParticipant(it.text("encounterId"), it.text("actorId"), it.optionalLong("initiative")?.let(Math::toIntExact), Math.toIntExact(it.long("position")))
         })
 }
 

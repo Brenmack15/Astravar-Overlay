@@ -22,6 +22,7 @@ class GenesisAuthorityRepository(private val db: CampaignLedgerDb, private val r
     private val local get() = ReforgeRepository(db)
     val backup = GenesisAuthorityBackupRepository(db, ready)
     val crafting = GenesisCraftingRepository(db, ready)
+    val encounters = GenesisEncounterRepository(db, ready)
     val campaigns: Flow<List<GenesisCampaignRecord>> = flow { ready(); emitAll(dao.campaigns()) }
     val actorAssociations: Flow<List<GenesisActorAuthority>> = flow { ready(); emitAll(dao.actors()) }
     suspend fun actor(actorId: String): GenesisActorAuthority? { ready(); return dao.actor(actorId) }
