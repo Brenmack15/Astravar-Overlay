@@ -68,7 +68,7 @@ class GenesisUpgradeReadbackTest(unittest.TestCase):
         self.after_folder = self.root / "after"
         self.before_folder.mkdir()
         self.campaign6 = schema("CampaignLedgerDb", 6)
-        self.campaign7 = schema("CampaignLedgerDb", 7)
+        self.campaign8 = schema("CampaignLedgerDb", 8)
         self.reforge1 = schema("ReforgeDb", 1)
         self.playable_tables = [entity["tableName"] for entity in self.reforge1["entities"]]
         with sqlite3.connect(self.before_folder / "astravar.db") as db:
@@ -125,7 +125,7 @@ class GenesisUpgradeReadbackTest(unittest.TestCase):
         with sqlite3.connect(source_uri, uri=True) as source:
             source_digest, counts = HELPER["raw_digest"](source)
             with sqlite3.connect(self.after_folder / "astravar-campaign-ledger.db") as destination:
-                create_entities(destination, self.campaign7)
+                create_entities(destination, self.campaign8)
                 for table in self.playable_tables:
                     rows = source.execute(f'SELECT * FROM "{table}"').fetchall()
                     columns = [entry[1] for entry in source.execute(f'PRAGMA table_info("{table}")')]
@@ -164,10 +164,20 @@ class GenesisUpgradeReadbackTest(unittest.TestCase):
         before, after = self.migrated_pair()
         HELPER["verify"](before, after)
         self.assertEqual(31, len(self.campaign6["entities"]))
-        self.assertEqual(36, len(self.campaign7["entities"]))
+        self.assertEqual(40, len(self.campaign8["entities"]))
         self.assertEqual("item-id", after["fixture"]["item_id"])
         self.assertEqual("supplies-id", after["fixture"]["supplies_item_id"])
         self.assertEqual(before["fixture"], after["fixture"])
+
+    def test_upgrade_does_not_silently_create_authority(self):
+        before, after = self.migrated_pair()
+        for table in HELPER["AUTHORITY_TABLES"]:
+            self.assertEqual(0, after["databases"][HELPER["CAMPAIGN"]]["tables"][table]["rows"])
+        with sqlite3.connect(self.after_folder / "astravar-campaign-ledger.db") as db:
+            insert(db, "genesis_campaigns", id="invented-campaign", name="Unexpected enrollment", notes="",
+                   revision=1, createdAt=1, updatedAt=1, commandId="invented-command")
+        with self.assertRaisesRegex(ValueError, "must not automatically enroll"):
+            HELPER["inspect"](self.after_folder, phase="preserved")
 
     def test_large_opaque_blob_history_and_json_whitespace_are_copied_verbatim(self):
         opaque = b"\x00" + b"unsupported historical binary\xff" * 120000

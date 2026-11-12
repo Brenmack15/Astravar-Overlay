@@ -129,7 +129,7 @@ class GenesisUpgradeInstrumentationTest {
         ui.descriptionBounds("HP 17 / 32", product)
     }
 
-    /** Runs only after host comparison proves the untouched schema6→7 cutover. */
+    /** Runs only after host comparison proves the untouched schema6→8 cutover. */
     @Test fun canonicalWriteSurvivesRestart() {
         launch()
         assertTrue("Canonical write proof requires the candidate build",

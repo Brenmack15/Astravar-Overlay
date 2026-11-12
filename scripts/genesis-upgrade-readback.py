@@ -26,6 +26,7 @@ RAW_TABLES = {
     "reforge_note_drafts": "profileId,expectedRevision,text,updatedAt".split(","),
 }
 RECEIPT = "genesis_storage_receipt"
+AUTHORITY_TABLES = {"genesis_campaigns", "genesis_actor_authority", "genesis_item_authority", "genesis_authority_receipts"}
 
 
 def require(condition, message):
@@ -145,7 +146,7 @@ def inspect(folder, phase="baseline"):
     folder = Path(folder)
     require(phase in {"baseline", "preserved", "written"}, "Unknown verification phase")
     require(all((folder / name).is_file() for name in DATABASES), "A required original store is missing")
-    version = 6 if phase == "baseline" else 7
+    version = 6 if phase == "baseline" else 8
     files = source_file_hashes(folder)
     tables = {WEAPON: database_snapshot(folder / WEAPON, "AstravarDb", 3),
               LEGACY: database_snapshot(folder / LEGACY, "ReforgeDb", 1),
@@ -154,7 +155,9 @@ def inspect(folder, phase="baseline"):
         source_digest, counts = raw_digest(source)
     receipt = None
     with connect(folder / CAMPAIGN) as campaign:
-        if version == 7:
+        if version >= 7:
+            require(all(campaign.execute(f'SELECT count(*) FROM "{table}"').fetchone()[0] == 0
+                        for table in AUTHORITY_TABLES), "Upgrade must not automatically enroll existing campaign records")
             receipts = [dict(row) for row in campaign.execute(f"SELECT * FROM {RECEIPT}")]
             require(len(receipts) == 1, "Storage authority must have exactly one receipt")
             receipt = receipts[0]
@@ -164,7 +167,7 @@ def inspect(folder, phase="baseline"):
                     "Storage receipt does not prove this retained original")
             if phase == "preserved":
                 require(raw_digest(campaign) == (source_digest, counts), "Canonical rows differ from the original at cutover")
-        active_file = CAMPAIGN if version == 7 else LEGACY
+        active_file = CAMPAIGN if version >= 7 else LEGACY
         with connect(folder / active_file) as active:
             matches = [(dict(row), json.loads(row["characterJson"])) for row in active.execute("SELECT * FROM reforge_characters")
                        if json.loads(row["characterJson"])["name"] == ACTOR]
@@ -223,9 +226,9 @@ def verify(before, current):
         require(before["databases"][name] == current["databases"][name], f"Original store changed: {name}")
     require(before["source_files"] == current["source_files"], "Original playable DB/WAL/journal bytes changed")
     old, new = before["databases"][CAMPAIGN], current["databases"][CAMPAIGN]
-    require(old["user_version"] == 6 and new["user_version"] == 7, "Expected schema6 to schema7")
-    additions = set(RAW_TABLES) | {RECEIPT}
-    require(set(new["tables"]) == set(old["tables"]) | additions, "Cutover did not add exactly the four playable tables and receipt")
+    require(old["user_version"] == 6 and new["user_version"] == 8, "Expected schema6 to schema8")
+    additions = set(RAW_TABLES) | {RECEIPT} | AUTHORITY_TABLES
+    require(set(new["tables"]) == set(old["tables"]) | additions, "Cutover did not add exactly the playable storage and empty authority tables")
     for name, state in old["tables"].items():
         if name != "room_master_table":
             require(state == new["tables"][name], f"Original campaign table changed: {name}")
@@ -243,7 +246,7 @@ def verify_write(preserved, current):
     require(preserved["source_files"] == current["source_files"], "UI write changed retained original bytes")
     require(preserved["receipt"] == current["receipt"], "A later write replaced the cutover authority")
     before, after = preserved["databases"][CAMPAIGN], current["databases"][CAMPAIGN]
-    require(before["user_version"] == after["user_version"] == 7 and before["identity_hash"] == after["identity_hash"], "Canonical schema changed during UI write")
+    require(before["user_version"] == after["user_version"] == 8 and before["identity_hash"] == after["identity_hash"], "Canonical schema changed during UI write")
     require(set(before["tables"]) == set(after["tables"]), "Tables changed during UI write")
     for name in before["tables"]:
         if name not in {"reforge_characters", "reforge_changes"}:

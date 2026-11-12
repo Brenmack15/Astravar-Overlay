@@ -9,11 +9,18 @@ import sqlite3
 ARCHIVE_TABLES = {"campaign_references", "campaign_reference_relations", "campaign_import_receipts",
                   "campaign_import_backups", "campaign_archive_sources"}
 MARKER = "ASTRAVAR_FICTIONAL_NATIVE_IMPORT_V1"
-SUPPORTED_ROOM_SCHEMAS = (4, 5, 6, 7)
+SUPPORTED_ROOM_SCHEMAS = (4, 5, 6, 7, 8)
 # Prompt settings and unified gameplay storage do not change the campaign backup protocol.
 SUPPORTED_MAPPED_EXPORT_SCHEMAS = (4, 5)
 GENESIS_STORAGE_TABLES = {"reforge_characters", "reforge_changes", "reforge_rolls",
                           "reforge_note_drafts", "genesis_storage_receipt"}
+
+
+GENESIS_AUTHORITY_TABLES = {"genesis_campaigns", "genesis_actor_authority", "genesis_item_authority", "genesis_authority_receipts"}
+
+
+def storage_tables(room_schema):
+    return GENESIS_STORAGE_TABLES | (GENESIS_AUTHORITY_TABLES if room_schema >= 8 else set())
 
 
 def sha(value):
@@ -21,13 +28,13 @@ def sha(value):
 
 
 def validate_storage_tables(db, room_schema):
-    """A schema7 marker alone cannot establish that canonical storage survived."""
+    """A version marker alone cannot establish that canonical storage and authority survived."""
     if room_schema < 7:
         return
-    schema_file = Path(__file__).resolve().parents[1] / "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/7.json"
+    schema_file = Path(__file__).resolve().parents[1] / f"app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/{room_schema}.json"
     entities = {entry["tableName"]: entry for entry in json.loads(schema_file.read_text())["database"]["entities"]}
-    assert GENESIS_STORAGE_TABLES <= entities.keys(), "Exported schema7 lacks canonical storage definitions"
-    for table in sorted(GENESIS_STORAGE_TABLES):
+    assert storage_tables(room_schema) <= entities.keys(), "Exported schema lacks canonical storage definitions"
+    for table in sorted(storage_tables(room_schema)):
         entity = entities[table]
         primary_keys = entity["primaryKey"]["columnNames"]
         expected = {field["columnName"]: (field["affinity"], int(field.get("notNull", False)),
