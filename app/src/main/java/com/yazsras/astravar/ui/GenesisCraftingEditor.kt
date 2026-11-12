@@ -186,15 +186,24 @@ private fun genesisCraftContainerLabel(character: ReforgeCharacter, instance: It
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("genesis-craft-error"))
             if (outcome != null) {
+                val recordedOwner = outcome.actors.singleOrNull { saved -> saved.character.items.any { it.id == outcome.outputId } }?.character
+                val recordedItem = recordedOwner?.items?.singleOrNull { it.id == outcome.outputId }
+                val recordedContainer = recordedItem?.containerId?.let { id -> recordedOwner?.items?.singleOrNull { it.id == id } }
+                val containerName = recordedContainer?.let { container -> recordedOwner?.itemDefinitions?.singleOrNull { it.id == container.definitionId }?.name }
                 Text("${outcome.sourceOutput.quantity} × ${outcome.sourceOutput.title}", style = MaterialTheme.typography.titleLarge)
-                Text("The saved receipt confirms this craft and its material consumption. Reopening this result does not craft again.", color = RebuildPalette.Muted)
+                Text("The materials were deducted and the crafted item was added to ${outcome.sourceOutput.owner}'s inventory. Reopening this result does not consume materials again.", color = RebuildPalette.Muted)
                 GenesisReviewValue("Recorded owner", outcome.sourceOutput.owner)
-                GenesisReviewValue("Recorded location", outcome.sourceOutput.location)
-                Text("These are the recorded results. Later inventory edits or transfers remain intact.", color = RebuildPalette.Muted)
+                GenesisReviewValue("Recorded location", when (recordedItem?.state) {
+                    ItemState.CARRIED -> "Carried"
+                    ItemState.STORED -> "Stored"
+                    else -> "Unknown"
+                })
+                GenesisReviewValue("Recorded container", if (recordedItem?.containerId == null) "No container" else containerName ?: "Unavailable in the recorded result")
+                Text("This shows where the item was saved. Later edits or transfers remain intact.", color = RebuildPalette.Muted)
             } else if (recoveryChecked) {
                 Text("No completed craft was found for this attempt.", style = MaterialTheme.typography.titleMedium)
                 Text("Materials were not consumed by this command. Review the current project, quantities and output again before confirming.", color = RebuildPalette.Muted)
-            } else Text("Checking the previous command before another craft can be prepared. No command is retried automatically.", color = RebuildPalette.Muted)
+            } else Text("Checking whether the previous craft was saved before you can record another. Nothing is submitted again automatically.", color = RebuildPalette.Muted)
         }
         return
     }
@@ -229,7 +238,7 @@ private fun genesisCraftContainerLabel(character: ReforgeCharacter, instance: It
             }
         }) {
         Text(frozen?.project?.title ?: project.title, style = MaterialTheme.typography.titleLarge)
-        Text("Record an already resolved craft. Preview consumes nothing and does not resolve checks or advance campaign time.", color = RebuildPalette.Muted)
+        Text("Record an already resolved craft. Reviewing makes no changes and does not resolve checks or advance campaign time.", color = RebuildPalette.Muted)
         PlayerTabs(listOf("Materials", "Output", "Review"), listOf("Materials", "Output", "Review")[step], { section ->
             if (!busy) { if (section == "Review") prepareReview() else edit(if (section == "Materials") 0 else 1) }
         })
@@ -307,7 +316,7 @@ private fun genesisCraftContainerLabel(character: ReforgeCharacter, instance: It
                     GenesisReviewValue("Container", container?.let { instance -> genesisCraftContainerLabel(owner.playable.character, instance) }.orEmpty(), "No container")
                     GenesisReviewValue("Source", frozen.source)
                 }
-                Text("Confirmation consumes these exact material quantities once and saves the same output identity in campaign and character inventory. Any intervening change requires a fresh review.", color = RebuildPalette.Muted)
+                Text("Confirmation deducts these exact materials and adds the crafted item to the selected owner's inventory. If the project or inventory changes first, review it again.", color = RebuildPalette.Muted)
                 Toggle("I confirm this craft is resolved and these quantities are correct", acknowledged, enabled = !busy) { acknowledged = it }
             }
         }

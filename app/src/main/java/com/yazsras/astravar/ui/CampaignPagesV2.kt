@@ -167,7 +167,15 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
         title = project?.title.orEmpty(); description = project?.description.orEmpty(); status = project?.status ?: "Proposed"
         source = project?.source.orEmpty(); baselineSource = source; actions.message = ""
     }
+    // A link opens detail directly, without the list-row load callback. Initialize its baseline
+    // once the actual record arrives; never replace a restored draft or failed recovery snapshot.
+    LaunchedEffect(selectedId, selected?.revision, mode) {
+        if (mode == "detail" && selectedId != null && projectSnapshot == null && projectDraft.canSave) {
+            selected?.let(::load)
+        }
+    }
     fun beginCraft() {
+        if (projectSnapshot == null && projectDraft.canSave) selected?.let(::load)
         outputTitle = ""; outputQuantity = "1"; outputDescription = ""; consumedJson = "{}"; craftReviewJson = null; craftLabelsJson = "[]"
         source = selected?.source.orEmpty(); baselineSource = source; mode = "craft"; actions.message = ""
     }

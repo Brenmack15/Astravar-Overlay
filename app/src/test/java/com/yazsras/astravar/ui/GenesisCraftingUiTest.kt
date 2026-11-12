@@ -3,10 +3,14 @@ package com.yazsras.astravar.ui
 import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.ui.test.*
+import androidx.compose.ui.Modifier
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -65,7 +69,9 @@ class GenesisCraftingUiTest {
         val previous = System.getProperty("robolectric.windowManager.useRequestedSize")
         System.setProperty("robolectric.windowManager.useRequestedSize", "true")
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
-        try { captureActivity = controller.get(); controller.get().setContent { AstravarTheme { content() } }; block() }
+        try { captureActivity = controller.get(); controller.get().setContent { AstravarTheme {
+            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { content() }
+        } }; block() }
         finally {
             captureActivity = null; controller.pause().stop().destroy()
             if (previous == null) System.clearProperty("robolectric.windowManager.useRequestedSize") else System.setProperty("robolectric.windowManager.useRequestedSize", previous)
@@ -118,6 +124,9 @@ class GenesisCraftingUiTest {
             capture("genesis-connected-craft-review")
             confirm()
             awaitText("Craft saved")
+            compose.onNodeWithText("Stored").assertExists()
+            compose.onNodeWithText("Fictional Satchel").assertExists()
+            compose.onAllNodes(hasText("Actor:", substring = true) or hasText("Item:", substring = true)).assertCountEquals(0)
             action("Return to invention")
             awaitText("Craft saved · Fictional Brass Compass")
             runBlocking {
@@ -185,7 +194,7 @@ class GenesisCraftingUiTest {
             var staleBundle: Map<String, List<Any?>> = emptyMap()
             compose.runOnIdle { staleBundle = registry.performSave() }
             action("Return to invention")
-            compose.waitForIdle()
+            compose.waitUntil(15_000) { compose.onAllNodesWithText("Return to invention").fetchSemanticsNodes().isEmpty() && callbacks == 1 }
             assertEquals(1, callbacks)
             runBlocking { assertNull(f.env.preferences.pendingCraft(f.project.id)) }
 
@@ -202,7 +211,7 @@ class GenesisCraftingUiTest {
                 assertTrue(f.env.authority.backup.previewRestore(f.env.authority.backup.exportWithProof().text).valid)
             }
             action("Return to invention")
-            compose.waitForIdle()
+            compose.waitUntil(15_000) { compose.onAllNodesWithText("Return to invention").fetchSemanticsNodes().isEmpty() && callbacks == 2 }
             assertEquals(2, callbacks)
         }
     }
