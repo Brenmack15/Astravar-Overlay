@@ -101,6 +101,7 @@ class GenesisCampaignUiTest {
         }) {
             compose.onNodeWithText("NPC name").performTextInput("Fictional Harbor Keeper")
             click("Review & save")
+            awaitText(world.name)
             compose.onNodeWithText(world.name).assertExists()
             capture("genesis-connected-npc-review")
             click("Create NPC")
@@ -129,6 +130,7 @@ class GenesisCampaignUiTest {
         show({ GenesisSourceActorEditor(env.copy(selectedCampaignId = world.id), GenesisActorRole.COMPANION, {}, { created = it }, owner.actor.actorId) }) {
             compose.onNodeWithText("Companion name").performTextInput("Fictional Brass Finch")
             click("Review & save")
+            awaitText(owner.profile.name)
             compose.onNodeWithText(owner.profile.name).assertExists()
             capture("genesis-connected-companion-review")
             click("Create companion")

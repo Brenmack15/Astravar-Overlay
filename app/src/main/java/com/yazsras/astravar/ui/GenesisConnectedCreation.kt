@@ -56,9 +56,16 @@ private data class GenesisCampaignChoice(val id: String?, val label: String)
     ownerId: String?, setOwner: (String?) -> Unit, enabled: Boolean = true,
     roleEditable: Boolean = true
 ) {
-    val campaigns by environment.authority.campaigns.collectAsState(initial = emptyList())
-    val actors by environment.authority.actorAssociations.collectAsState(initial = emptyList())
-    val profiles by environment.campaign.records.characterProfiles.collectAsState(initial = emptyList())
+    val campaignState by remember(environment.authority) { environment.authority.campaigns.map { true to it } }
+        .collectAsState(initial = false to emptyList<GenesisCampaignRecord>())
+    val actorState by remember(environment.authority) { environment.authority.actorAssociations.map { true to it } }
+        .collectAsState(initial = false to emptyList<GenesisActorAuthority>())
+    val profileState by remember(environment.campaign) { environment.campaign.records.characterProfiles.map { true to it } }
+        .collectAsState(initial = false to emptyList<CharacterProfile>())
+    val campaigns = campaignState.second
+    val actors = actorState.second
+    val profiles = profileState.second
+    val ownersLoaded = actorState.first && profileState.first
     var ownerQuery by rememberSaveable { mutableStateOf("") }
     if (roleEditable) Choices("Role", GenesisActorRole.entries, role, display = ::genesisRoleLabel, enabled = enabled) {
         if (enabled) { setRole(it); if (it != GenesisActorRole.COMPANION) setOwner(null) }
@@ -66,31 +73,40 @@ private data class GenesisCampaignChoice(val id: String?, val label: String)
     val campaignChoices = listOf(GenesisCampaignChoice(null, "Unassigned campaign")) +
         campaigns.filterNot { it.archived }.map { GenesisCampaignChoice(it.id, it.name) }
     val selectedCampaign = campaignChoices.firstOrNull { it.id == campaignId }
-        ?: GenesisCampaignChoice(campaignId, "Unavailable campaign")
-    Choices("Campaign", campaignChoices, selectedCampaign, display = { it.label }, enabled = enabled) {
+        ?: GenesisCampaignChoice(campaignId, if (campaignState.first) "Unavailable campaign" else "Loading campaign…")
+    Choices("Campaign", campaignChoices, selectedCampaign, display = { it.label }, enabled = enabled && campaignState.first) {
         if (enabled) setCampaign(it.id)
     }
-    if (campaignId != null && campaigns.none { it.id == campaignId && !it.archived })
+    if (campaignState.first && campaignId != null && campaigns.none { it.id == campaignId && !it.archived })
         Text("Choose an available campaign before saving.", color = MaterialTheme.colorScheme.error)
     if (role == GenesisActorRole.COMPANION) {
         val candidates = profiles.filter { it.id != actorId && (campaignId == null || actors.any { actor -> actor.actorId == it.id && actor.campaignId == campaignId }) }
-        PlayerOutlinedButton(enabled = enabled, onClick = { setOwner(null) }) { Text(if (ownerId == null) "Unassigned owner · Selected" else "Unassigned owner") }
+        if (!ownersLoaded) Text("Loading owners…", color = RebuildPalette.Muted)
+        PlayerOutlinedButton(enabled = enabled && ownersLoaded, onClick = { setOwner(null) }) { Text(if (ownerId == null) "Unassigned owner · Selected" else "Unassigned owner") }
         PlayerSearch(ownerQuery, { if (enabled) ownerQuery = it }, "Find an owner")
         candidates.filter { ownerQuery.isBlank() || it.name.contains(ownerQuery.trim(), true) }.take(40).forEach { profile ->
             PlayerEntry(profile.name.ifBlank { "Unnamed profile" }, genesisOwnerLabel(profile, candidates, actors, campaigns), "Emblem",
-                { if (enabled) setOwner(profile.id) }, trailing = if (ownerId == profile.id) "Selected" else null)
+                { if (enabled && ownersLoaded) setOwner(profile.id) }, trailing = if (ownerId == profile.id) "Selected" else null)
         }
-        if (ownerId != null && candidates.none { it.id == ownerId }) Text("The owner must belong to this campaign. Choose an available owner or Unassigned owner.", color = MaterialTheme.colorScheme.error)
+        if (ownersLoaded && ownerId != null && candidates.none { it.id == ownerId }) Text("The owner must belong to this campaign. Choose an available owner or Unassigned owner.", color = MaterialTheme.colorScheme.error)
     }
 }
 
 @Composable internal fun GenesisAssociationSummary(environment: GenesisConnectedEnvironment,
     role: GenesisActorRole, campaignId: String?, ownerId: String?) {
-    val campaigns by environment.authority.campaigns.collectAsState(initial = emptyList())
-    val profiles by environment.campaign.records.characterProfiles.collectAsState(initial = emptyList())
+    val campaignState by remember(environment.authority) { environment.authority.campaigns.map { true to it } }
+        .collectAsState(initial = false to emptyList<GenesisCampaignRecord>())
+    val profileState by remember(environment.campaign) { environment.campaign.records.characterProfiles.map { true to it } }
+        .collectAsState(initial = false to emptyList<CharacterProfile>())
     GenesisReviewValue("Role", genesisRoleLabel(role))
-    GenesisReviewValue("Campaign", campaignId?.let { id -> campaigns.firstOrNull { it.id == id }?.name ?: "Unavailable campaign" }.orEmpty(), "Unassigned campaign")
-    if (role == GenesisActorRole.COMPANION) GenesisReviewValue("Owner", ownerId?.let { id -> profiles.firstOrNull { it.id == id }?.name ?: "Unavailable owner" }.orEmpty(), "Unassigned owner")
+    val campaignName = campaignId?.let { id -> campaignState.second.firstOrNull { it.id == id }?.name
+        ?: if (campaignState.first) "Unavailable campaign" else "Loading campaign…" }
+    GenesisReviewValue("Campaign", campaignName.orEmpty(), "Unassigned campaign")
+    if (role == GenesisActorRole.COMPANION) {
+        val ownerName = ownerId?.let { id -> profileState.second.firstOrNull { it.id == id }?.name
+            ?: if (profileState.first) "Unavailable owner" else "Loading owner…" }
+        GenesisReviewValue("Owner", ownerName.orEmpty(), "Unassigned owner")
+    }
 }
 
 @Composable internal fun GenesisConnectedCharacterEditor(environment: GenesisConnectedEnvironment,
