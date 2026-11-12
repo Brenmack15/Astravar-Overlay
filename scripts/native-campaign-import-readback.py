@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Independently inspect copied fictional-emulator campaign databases. Never connects to a device."""
+# Schema 9 support reconstructed from the recovery handoff; verification pending.
 import argparse
 import hashlib
 import json
@@ -9,7 +10,7 @@ import sqlite3
 ARCHIVE_TABLES = {"campaign_references", "campaign_reference_relations", "campaign_import_receipts",
                   "campaign_import_backups", "campaign_archive_sources"}
 MARKER = "ASTRAVAR_FICTIONAL_NATIVE_IMPORT_V1"
-SUPPORTED_ROOM_SCHEMAS = (4, 5, 6, 7, 8)
+SUPPORTED_ROOM_SCHEMAS = (4, 5, 6, 7, 8, 9)
 # Prompt settings and unified gameplay storage do not change the campaign backup protocol.
 SUPPORTED_MAPPED_EXPORT_SCHEMAS = (4, 5)
 GENESIS_STORAGE_TABLES = {"reforge_characters", "reforge_changes", "reforge_rolls",
@@ -17,10 +18,13 @@ GENESIS_STORAGE_TABLES = {"reforge_characters", "reforge_changes", "reforge_roll
 
 
 GENESIS_AUTHORITY_TABLES = {"genesis_campaigns", "genesis_actor_authority", "genesis_item_authority", "genesis_authority_receipts"}
+GENESIS_ENCOUNTER_TABLES = {"genesis_encounters", "genesis_encounter_participants"}
 
 
 def storage_tables(room_schema):
-    return GENESIS_STORAGE_TABLES | (GENESIS_AUTHORITY_TABLES if room_schema >= 8 else set())
+    return (GENESIS_STORAGE_TABLES
+            | (GENESIS_AUTHORITY_TABLES if room_schema >= 8 else set())
+            | (GENESIS_ENCOUNTER_TABLES if room_schema >= 9 else set()))
 
 
 def sha(value):

@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
@@ -131,6 +132,11 @@ class GenesisJourneyInstrumentationTest {
         tap("Save character")
         find("Genesis Native Hero")
         ui.descriptionBounds("HP 14 / 20", product)
+        assertSection("Sheet")
+        // Roll dice belongs near the top of Sheet. The observed code50 run
+        // exhausted discovery scrolling down through skills before reversing;
+        // reveal this known upper control first within the same 30-second budget.
+        ui.textBounds("Roll dice", product, scrollAttempts = 18, firstDirection = Direction.UP)
         capture("character-sheet", "Character", "Genesis Native Hero", "Roll dice")
 
         // Creation is already connected. Explicit review confirms the same identity

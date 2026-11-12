@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Strictly verify copied synthetic stores across additive storage cutover and one UI write."""
+# Schema 9 support reconstructed from the recovery handoff; verification pending.
 import argparse
 import hashlib
 import json
@@ -27,6 +28,7 @@ RAW_TABLES = {
 }
 RECEIPT = "genesis_storage_receipt"
 AUTHORITY_TABLES = {"genesis_campaigns", "genesis_actor_authority", "genesis_item_authority", "genesis_authority_receipts"}
+ENCOUNTER_TABLES = {"genesis_encounters", "genesis_encounter_participants"}
 
 
 def require(condition, message):
@@ -142,11 +144,12 @@ def actor_proof(row, character):
             "saved_sha256": canonical_hash(saved)}
 
 
-def inspect(folder, phase="baseline"):
+def inspect(folder, phase="baseline", expected_room_schema=8):
     folder = Path(folder)
     require(phase in {"baseline", "preserved", "written"}, "Unknown verification phase")
+    require(expected_room_schema in (8, 9), "Supported upgrade targets are schemas 8 and 9")
     require(all((folder / name).is_file() for name in DATABASES), "A required original store is missing")
-    version = 6 if phase == "baseline" else 8
+    version = 6 if phase == "baseline" else expected_room_schema
     files = source_file_hashes(folder)
     tables = {WEAPON: database_snapshot(folder / WEAPON, "AstravarDb", 3),
               LEGACY: database_snapshot(folder / LEGACY, "ReforgeDb", 1),
@@ -155,6 +158,9 @@ def inspect(folder, phase="baseline"):
         source_digest, counts = raw_digest(source)
     receipt = None
     with connect(folder / CAMPAIGN) as campaign:
+        if version == 9:
+            require(all(campaign.execute(f'SELECT count(*) FROM "{table}"').fetchone()[0] == 0
+                        for table in ENCOUNTER_TABLES), "Upgrade must not invent encounter state")
         if version >= 7:
             require(all(campaign.execute(f'SELECT count(*) FROM "{table}"').fetchone()[0] == 0
                         for table in AUTHORITY_TABLES), "Upgrade must not automatically enroll existing campaign records")
@@ -226,8 +232,10 @@ def verify(before, current):
         require(before["databases"][name] == current["databases"][name], f"Original store changed: {name}")
     require(before["source_files"] == current["source_files"], "Original playable DB/WAL/journal bytes changed")
     old, new = before["databases"][CAMPAIGN], current["databases"][CAMPAIGN]
-    require(old["user_version"] == 6 and new["user_version"] == 8, "Expected schema6 to schema8")
+    require(old["user_version"] == 6 and new["user_version"] in (8, 9), "Expected schema6 to explicitly inspected schema8 or schema9")
     additions = set(RAW_TABLES) | {RECEIPT} | AUTHORITY_TABLES
+    if new["user_version"] == 9:
+        additions |= ENCOUNTER_TABLES
     require(set(new["tables"]) == set(old["tables"]) | additions, "Cutover did not add exactly the playable storage and empty authority tables")
     for name, state in old["tables"].items():
         if name != "room_master_table":
@@ -246,7 +254,7 @@ def verify_write(preserved, current):
     require(preserved["source_files"] == current["source_files"], "UI write changed retained original bytes")
     require(preserved["receipt"] == current["receipt"], "A later write replaced the cutover authority")
     before, after = preserved["databases"][CAMPAIGN], current["databases"][CAMPAIGN]
-    require(before["user_version"] == after["user_version"] == 8 and before["identity_hash"] == after["identity_hash"], "Canonical schema changed during UI write")
+    require(before["user_version"] == after["user_version"] and before["user_version"] in (8, 9) and before["identity_hash"] == after["identity_hash"], "Canonical schema changed during UI write")
     require(set(before["tables"]) == set(after["tables"]), "Tables changed during UI write")
     for name in before["tables"]:
         if name not in {"reforge_characters", "reforge_changes"}:
@@ -286,10 +294,11 @@ def main():
     parser.add_argument("--compare", type=Path)
     parser.add_argument("--verify-write", type=Path)
     parser.add_argument("--synthetic-emulator", action="store_true", required=True)
+    parser.add_argument("--expected-room-schema", type=int, choices=(8, 9), default=8)
     args = parser.parse_args()
     require(not (args.compare and args.verify_write), "Preservation and later UI writes are separate verification stages")
     phase = "written" if args.verify_write else "preserved" if args.compare else "baseline"
-    current = inspect(args.folder, phase)
+    current = inspect(args.folder, phase, expected_room_schema=args.expected_room_schema)
     if args.compare:
         verify(json.loads(args.compare.read_text()), current)
     if args.verify_write:

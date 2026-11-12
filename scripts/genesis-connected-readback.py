@@ -5,6 +5,7 @@ This validates copied emulator data independently of Android repository callback
 The journey merges its own complete export; it does not simulate deleted-record
 recovery or certify any real campaign or physical phone.
 """
+# Schema 9 support reconstructed from the recovery handoff; verification pending.
 import argparse
 import copy
 import hashlib
@@ -76,8 +77,9 @@ def backup_fingerprint(backup):
     return sha(compact(canonical, ascii_only=True))
 
 
-def inspect(database, backup_document, *, synthetic_emulator=False):
+def inspect(database, backup_document, *, synthetic_emulator=False, expected_room_schema=8):
     require(synthetic_emulator, "Only copied fictional emulator records are supported")
+    require(expected_room_schema in (8, 9), "Supported connected schemas are 8 and 9")
     database, backup_document = Path(database), Path(backup_document)
     require(database.is_file() and backup_document.is_file(), "Database and actual SAF backup must exist")
     require(0 < backup_document.stat().st_size <= DOCUMENT_LIMIT, "Backup exceeds the 64 MiB supported size")
@@ -86,7 +88,7 @@ def inspect(database, backup_document, *, synthetic_emulator=False):
     require(backup.get("format") == "astravar-connected-campaign" and backup.get("schema") == 1,
             "Expected a complete connected backup, not a partial export")
     require({"campaign", "playable", "authority", "exportedAt"} <= backup.keys(), "A backup domain is missing")
-    schema = UPGRADE["database_snapshot"](database, "CampaignLedgerDb", 8)
+    schema = UPGRADE["database_snapshot"](database, "CampaignLedgerDb", expected_room_schema)
     authority = backup["authority"]
     with connect(database) as db:
         require(not list(db.execute("PRAGMA foreign_key_check")), "A database relationship is orphaned")
@@ -97,6 +99,11 @@ def inspect(database, backup_document, *, synthetic_emulator=False):
             exported = index(values, key)
             require(saved == exported, f"Backup differs from current {table} identities or exact rows")
             return saved
+        if expected_room_schema == 9:
+            encounters = equal_backup("genesis_encounters", authority.get("encounters", []), "id")
+            require(not encounters and not rows("genesis_encounter_participants") and
+                    authority.get("encounterParticipants", []) == [],
+                    "The connected backup stage must precede encounter creation")
         campaigns = equal_backup("genesis_campaigns", authority["campaigns"], "id")
         actors = equal_backup("genesis_actor_authority", authority["actors"], "actorId")
         items = equal_backup("genesis_item_authority", authority["items"], "itemId")
@@ -179,7 +186,7 @@ def inspect(database, backup_document, *, synthetic_emulator=False):
         require(audit["recordId"] == fingerprint and audit["kind"] == "RESTORE" and
                 audit["source"] == "User-reviewed complete connected backup merge", "Merge audit does not prove reviewed complete restore")
     return {"status": "PASS", "scope": "fictional emulator connected journey; same-file protected merge",
-            "room_schema": 8, "room_identity": schema["identity_hash"], "backup_bytes": len(raw),
+            "room_schema": expected_room_schema, "room_identity": schema["identity_hash"], "backup_bytes": len(raw),
             "backup_sha256": hashlib.sha256(raw).hexdigest(), "backup_fingerprint": fingerprint,
             "campaign_id": campaign["id"], "hero_id": hero["actorId"], "npc_id": npc["actorId"],
             "companion_id": companion["actorId"], "item_id": instance["id"], "definition_id": definition["id"],
@@ -192,9 +199,11 @@ def main():
     parser.add_argument("--database", required=True, type=Path)
     parser.add_argument("--backup-document", required=True, type=Path)
     parser.add_argument("--synthetic-emulator", action="store_true")
+    parser.add_argument("--expected-room-schema", type=int, choices=(8, 9), default=8)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
-    result = inspect(args.database, args.backup_document, synthetic_emulator=args.synthetic_emulator)
+    result = inspect(args.database, args.backup_document, synthetic_emulator=args.synthetic_emulator,
+                     expected_room_schema=args.expected_room_schema)
     args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result))
 

@@ -59,11 +59,15 @@ private enum class SpellbookFilter(val label: String) {
     val preferencesState by preferences.flow.collectAsState(initial = OverlayPrefs())
     val local = remember(localRepository, context) { localRepository ?: ReforgeRepository.open(context) }
     val connected = LocalGenesisConnectedEnvironment.current
-    val profilesState by remember(local) { local.observeAll().map { true to it } }.collectAsState(initial = false to emptyList<ReforgeSavedCharacter>())
+    // Capture readiness and records from the same composition snapshot. A delegated
+    // read inside an effect can observe a newer IO emission than its captured actor list.
+    val profilesState = remember(local) { local.observeAll().map { true to it } }
+        .collectAsState(initial = false to emptyList<ReforgeSavedCharacter>()).value
     val all = profilesState.second
     val active = all.filterNot { it.character.archived }
     val actorPreferences = remember(context) { ReforgePreferences.open(context) }
-    val actorSelection by remember(actorPreferences) { actorPreferences.activeProfileId.map { true to it } }.collectAsState(initial = false to null)
+    val actorSelection = remember(actorPreferences) { actorPreferences.activeProfileId.map { true to it } }
+        .collectAsState(initial = false to null).value
     val legacyProfiles by repository.records.characterProfiles.collectAsState(initial = emptyList())
     var selectedId by remember { mutableStateOf<String?>(null) }
     var consumedNavigation by rememberSaveable { mutableIntStateOf(-1) }

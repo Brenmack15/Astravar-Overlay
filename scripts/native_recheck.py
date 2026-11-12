@@ -310,7 +310,8 @@ def main():
     parser.add_argument("--fixture", type=Path)
     parser.add_argument("--rolled-back", action="store_true")
     parser.add_argument("--synthetic-demo", action="store_true")
-    parser.add_argument("--expected-room-schema", type=int, choices=(4, 5, 6, 7, 8), default=4)
+    # Reconstructed schema9 CLI support; historical defaults and profile pins remain unchanged.
+    parser.add_argument("--expected-room-schema", type=int, choices=(4, 5, 6, 7, 8, 9), default=4)
     args = parser.parse_args()
     configure_profile(args.profile)
     if args.command == "guard":
