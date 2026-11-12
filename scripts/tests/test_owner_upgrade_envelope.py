@@ -151,6 +151,34 @@ class EnvelopeTest(unittest.TestCase):
         with self.assertRaises(ValueError): self.decrypt()
         self.assertFalse((self.root / "decoded").exists())
 
+    def test_real_multichunk_roundtrip_and_reordering_rejected(self):
+        payload = bytes(range(256)) * 2300
+        self.files["candidate"].write_bytes(payload)
+        self.config["apks"]["candidate"].update(size=len(payload), sha256=E.digest(payload))
+        self.context = E.binding(self.config, 125, 1, "c" * 40)
+        self.recipient = E.create_recipient(self.config, 125, 1, "c" * 40,
+            self.root / "multi-private", self.root / "multi-public", now=1000)
+        manifest = self.encrypt()
+        self.assertEqual(len(manifest["files"][1]["chunks"]), 2)
+        E.decrypt(self.config, self.recipient, self.context, self.root / "multi-private/transport-private.pem",
+                  self.transfer, self.root / "multi-decoded", now=1001)
+        self.assertEqual((self.root / "multi-decoded/candidate.apk").read_bytes(), payload)
+        manifest["files"][1]["chunks"].reverse(); self.save_manifest(manifest)
+        with self.assertRaisesRegex(ValueError, "path/order"):
+            E.decrypt(self.config, self.recipient, self.context, self.root / "multi-private/transport-private.pem",
+                      self.transfer, self.root / "reordered", now=1001)
+
+    def test_wrong_private_recipient_and_receive_expiry(self):
+        self.encrypt()
+        E.create_recipient(self.config, 125, 1, "c" * 40,
+            self.root / "wrong-private", self.root / "wrong-public", now=1000)
+        with self.assertRaisesRegex(ValueError, "Wrong private"):
+            E.decrypt(self.config, self.recipient, self.context, self.root / "wrong-private/transport-private.pem",
+                      self.transfer, self.root / "wrong-decoded", now=1001)
+        with self.assertRaisesRegex(ValueError, "expired"):
+            E.decrypt(self.config, self.recipient, self.context, self.root / "private/transport-private.pem",
+                      self.transfer, self.root / "late-decoded", now=2800)
+
 
 if __name__ == "__main__":
     unittest.main()

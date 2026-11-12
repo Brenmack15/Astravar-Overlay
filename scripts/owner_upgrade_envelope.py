@@ -20,7 +20,10 @@ SCHEMA = 1
 REPOSITORY = "Brenmack15/Astravar-Overlay"
 WORKFLOW = ".github/workflows/owner-upgrade-private.yml"
 OWNER_CERT = "4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847"
-BASELINE = "3543e83bfca5e589f1bbedb09964431ce94a2319"
+BASELINE = "7bb03b5e15d639e94947a491e76f37b1b23a1af5"
+BASELINE_EQUIVALENCE = {"frozen_source": "3543e83bfca5e589f1bbedb09964431ce94a2319",
+                        "app_tree": "0da5fc7f0e3ed99862ed709c6723c304dab533f3",
+                        "rules_tree": "f6e4d084f0c6b349883eefee2f2aa5669a7d24ac"}
 MAX_APK = 128 * 1024 * 1024
 CHUNK = 512 * 1024
 MAX_CHUNKS = 1026
@@ -78,12 +81,13 @@ def read_json(path):
 
 def validate_config(config):
     exact_keys(config, ("schema", "enabled", "repository", "candidate_source", "baseline_source",
-                        "owner_certificate_sha256", "gates", "observer_artifact", "apks"))
+                        "baseline_equivalence", "owner_certificate_sha256", "gates", "observer_artifact", "apks"))
     require(config["schema"] == SCHEMA and config["enabled"] is True,
             "Owner upgrade transport is disabled until concrete reviewed pins exist")
     require(config["repository"] == REPOSITORY, "Unexpected repository")
     hex_value(config["candidate_source"], 40)
-    require(config["baseline_source"] == BASELINE, "Frozen code49 baseline changed")
+    require(config["baseline_source"] == BASELINE, "Original owner code49 source changed")
+    require(config["baseline_equivalence"] == BASELINE_EQUIVALENCE, "Frozen baseline equivalence changed")
     require(config["owner_certificate_sha256"] == OWNER_CERT, "Owner identity changed")
     require(isinstance(config["gates"], list) and len(config["gates"]) == 2, "Require both source gates")
     paths = set()
@@ -167,6 +171,8 @@ def validate_recipient(recipient, expected_binding, now=None):
     key = serialization.load_pem_public_key(pem)
     require(isinstance(key, rsa.RSAPublicKey) and key.key_size == 3072 and
             key.public_numbers().e == 65537, "Expected RSA-3072 transport recipient")
+    require(pem == key.public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo),
+            "Recipient must contain only canonical public key bytes")
     return key
 
 

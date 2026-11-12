@@ -1,0 +1,4 @@
+# CPython 3.12 Linux x86_64, official PyPI wheel hashes. No source builds.
+cryptography==50.0.0 --hash=sha256:105110f43a471dbd0060b9c9516cb8a6a79233631a04cc2ba16f28323ac6e025 --hash=sha256:37fdb0d0111f1e2ff07139dfb79f1b49531f8e213c46f1163dd7642979b58c47
+cffi==2.0.0 --hash=sha256:3e17ed538242334bf70832644a32a7aae3d83b57567f9fd60a26257e992b79ba
+pycparser==2.23 --hash=sha256:e5c6e8d3fbad53479cab09ac03729e0a9faf2bee3db8208a550daf5af81a5934
