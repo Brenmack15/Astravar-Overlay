@@ -4,24 +4,54 @@ This is the current recovery handoff, not a completed release. Read the original
 `docs/genesis/SESSION_RECOVERY.md` at `ee04d5f` first, then this file and the
 linked milestone checkpoints. Later verified facts here supersede older status.
 
-## Active resumed session — import disclosure correction published
+## Active resumed session — observed tab discovery correction published
 
-Current published source: `e9f73d2df7bca6955ae87d6a0adcea78458339ac`,
-tree `fc249b61737ad1641b4134c0ea9e3a67c067636d`. Local equivalent
-`d4dde54158817bb0b4aa68869c912f4fab8eddfd`. Existing branches:
+Current published source: `de98cb694a2c8bfa03911f8c827ebea370fdc6c7`,
+tree `25ac8d5012b0a0daba86d82dba63c61d93a2baaf`. Local equivalent
+`080d8dbfe976e37f6faa39234ce7be6600a9c729`. Existing branches:
 - `checkpoint/astravar-genesis-resumed-verification-20261112`
 - `feat/astravar-project-genesis-resume-verification-20261112`
 
-Fresh exacte9f gates created13:56:39UTC, pending overall:
-- Full43232146446/job131229960062: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43232146446
-- Native43232146658/job131229962339: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43232146658
+Fresh exactde98 gates created14:51:36UTC, pending:
+- Full43241574505/job131263095907: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43241574505
+- Native43241574458/job131263095844: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43241574458
 
-Observed14:36UTC: full Rules/debug Room+Compose passed14:19:22; release/lint/
-QA assembly running. Native fresh baseline+candidate APK build passed14:15:06;
-actual API36 ordered journeys running. No failed step reported; final outcomes
-and artifacts are still pending. There is no active local Gradle/emulator job.
-Exact remote signing checkout `genesis-release-source-e9f73d2` is clean.
-No signing, owner encryption/transfer or original-owner installation has occurred.
+Only ObservedUi.kt section discovery changed frome9f. Captured200% UI/logs showed
+the old observer's793px/35-step flings skip from Sheet/Combat/Equipment to
+Features/Resources/History while the body remained Sheet; Spells had worked at
+130%. New detached snapshots use visible family order, <=one-third-width/80-step
+overlapping movements, targeted clipped-tab reveals and stationary-edge evidence.
+Original16-gesture/30second bounds, >=48dp/full viewport containment, enabled/
+clickable checks, single product tap and fresh selected-state assertion remain.
+Retained Party Currency-before-History order is preserved. Two source reviews
+passed. Local observer/test APK compile and assembly passed in45seconds;
+`genesis-resume-evidence/section-discovery-compile-1.log`. Session56517 finished.
+No product/rules/database source changed. No APK reuse or assertion relaxation.
+
+Exact remote signing checkout `genesis-release-source-de98cb6` is clean.
+There is no active local Gradle/emulator. No owner signing, encryption/transfer,
+owner49→50 installation or physical handset acceptance has occurred.
+
+### Completed e9f verification — full passed, native discovery failed
+
+Full43232146446 passed on exacte9f: rules166, debug931total/928pass/3skip,
+release931total/914pass/17skip, Python320 and bridge134; zero failures/errors.
+Lint0errors, debug81warnings+1hint/release83+1;131 HOST screenshots.
+Artifact13952834984,51,348,651bytes, SHA256
+`9c6c0ba19e2d66fc36cc46f5bd78a517de8de21caeb3cc8089cb6d578a364ddf`.
+Sourcee9f/treefc249, all indexed hashes/bytes and XML counters verified.
+
+Native43232146658 FAILED VisualRebirthJourneyInstrumentationTest:222→
+ObservedUi.selectSection:439, missing Spells at200% (density432). Ten tests passed:
+upgrade3,overlay3,large/recovery2,PlayerFirst1,Genesis1. Prerequisite failure
+prevented connected host readback, crafting, encounter and import stages; the
+Library disclosure correction was not reached. Artifact13953278491,
+75,286,619bytes, SHA256
+`0317858217fbf9873e16a40a49e7dbc8415f54dfaf020f14eadd439af2f7a5eb`.
+Source and embedded APKe9f verified; independently reran schema6→9 retention,
+canonical healing and same UID/first-install-time49→50 proof successfully.
+Evidence: `genesis-resume-evidence/e9f73d2d/{full,native}`.
+Final and pre-display-reset failure PNG/XML plus logs are retained.
 
 2798 FULL43223390477 passed. Artifact13949762181,51,353,629bytes, SHA256
 `1ca78237dcec3b7a292f2b58b38eb94b13a435142ccceeea746b6a32c23a5bf5`.
@@ -58,9 +88,9 @@ The environment works again. Read-only searches did not recover old worktrees,
 runtime/private directories or original local991dd4a/e023321/803668e bytes.
 Do not reconstruct feature work already present in combined52831.
 New main checkout `/workspace/scratch/30508fda364e/Astravar-Genesis-Resume-20261112`
-is clean at local `d4dde54158817bb0b4aa68869c912f4fab8eddfd`, tree-identical toe9f.
-Clean verification tree: `genesis-resume-backend-verification`, same locald4d.
-Exact remote source trees preserve2798 and the newe9f candidate separately.
+is clean at local `080d8dbfe976e37f6faa39234ce7be6600a9c729`, tree-identical tode98.
+Clean verification tree: `genesis-resume-backend-verification`, same local080.
+Exact remote source trees preserve2798, e9f and de98 separately.
 Earlier `genesis-release-source-b8ce9b5` is preserved but superseded.
 No reset, clean or overwrite occurred. Direct git push lacks credentials; guarded
 GitHub connector writes publish exactly matching complete trees. All checkpoints
@@ -178,7 +208,7 @@ Fresh local comparison confirms both app trees
 `0da5fc7f0e3ed99862ed709c6723c304dab533f3` and both rules trees
 `f6e4d084f0c6b349883eefee2f2aa5669a7d24ac`. Keep these provenance roles distinct.
 
-Next: monitor both exacte9f gates, investigate failures without
+Next: monitor both exactde98 gates, investigate failures without
 weaker assertions. Download/check exact successful native artifact and all native
 stages, privately sign that same payload, test actual owner-key update if environment
 permits, preserve reports/screenshots and deliver with honest remaining scope.
