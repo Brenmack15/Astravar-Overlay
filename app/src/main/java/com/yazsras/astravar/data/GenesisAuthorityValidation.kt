@@ -118,6 +118,13 @@ internal fun genesisAuthorityBackupErrors(
                 }
                 itemProofs[receipt.commandId] = outcome
             }
+            "craft-items" -> {
+                val outcome = genesisValidateCraftReceipt(receipt, GenesisCraftingEvidence(campaign.events, campaign.records.audit,
+                    campaign.records.receipts, campaign.records.crafts, campaign.records.consumptions, playable.changes, campaign.records.links))
+                val review = campaignJson.decodeFromString<GenesisCraftingReview>(receipt.requestJson)
+                require(outcome.outputId in items) { "Crafted physical output authority is missing." }
+                itemProofs[receipt.commandId] = outcome.actors.single { it.character.id == review.outputOwnerActorId }
+            }
             else -> error("Unsupported authority receipt kind.")
         }
     } }
@@ -213,6 +220,13 @@ internal fun genesisAuthorityBackupErrors(
             if (acquisition != null) {
                 val review = reforgeJson.decodeFromString<GenesisInventoryReview>(proof)
                 require(review == acquisition.review) { "Physical item's source proof differs from its immutable acquisition review." }
+            } else if (receipts[item.activationCommandId]?.kind == "craft-items") {
+                val parent = requireNotNull(receipts[item.activationCommandId])
+                val review = campaignJson.decodeFromString<GenesisCraftingReview>(parent.requestJson)
+                val outcome = campaignJson.decodeFromString<GenesisCraftingOutcome>(parent.outcomeJson)
+                require(outcome.outputId == item.itemId && campaignJson.decodeFromString<GenesisCraftItemProof>(proof) == genesisCraftProof(parent.commandId, review, outcome)) {
+                    "Crafted item's original material and project proof is inconsistent."
+                }
             } else {
                 val review = campaignJson.decodeFromString<GenesisActorAuthorityReview>(proof)
                 require(review.fingerprint == genesisActorAuthorityReviewFingerprint(review) && review.playable.character.items.any { it.id == item.itemId } &&
@@ -220,6 +234,7 @@ internal fun genesisAuthorityBackupErrors(
             }
         }
         if (acquisition != null) require(item.sourceProofJson != null) { "Managed acquisition is missing its original source proof." }
+        if (receipts[item.activationCommandId]?.kind == "craft-items") require(item.sourceProofJson != null) { "Crafted output is missing its original source proof." }
     } }
     // Management markers are retained in immutable history. Removing just the authority tables
     // from a file cannot turn an already connected projection into independently writable truth.

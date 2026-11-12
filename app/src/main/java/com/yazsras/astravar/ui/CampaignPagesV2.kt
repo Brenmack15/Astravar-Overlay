@@ -66,12 +66,15 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
 
 @Composable fun InventionsPageV2(repository: CampaignLedgerRepository, initialProjectId: String? = null) {
     val records = repository.records
+    val connected = LocalGenesisConnectedEnvironment.current
+    var connectedCraftOpen by rememberSaveable(initialProjectId) { mutableStateOf(false) }
     val projects by records.projects.collectAsState(initial = emptyList())
     val items by repository.items.collectAsState(initial = emptyList())
     val links by records.links.collectAsState(initial = emptyList())
     val audit by records.audit.collectAsState(initial = emptyList())
     val actions = rememberLocalRecordActions()
     var selectedId by rememberSaveable(initialProjectId) { mutableStateOf(initialProjectId) }
+    var revealCraftOutput by rememberSaveable(selectedId) { mutableStateOf(false) }
     var projectDraftId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
     var projectCommandId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
     var mode by rememberSaveable(initialProjectId) { mutableStateOf(if (initialProjectId == null) "" else "detail") }
@@ -231,7 +234,13 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
             }
         }
     }
-    if (mode.isNotBlank()) {
+    if (connectedCraftOpen && connected != null && selected != null) key(selected.id) {
+        GenesisCraftingEditor(connected, selected, onDismiss = { connectedCraftOpen = false }, onSaved = { outcome ->
+            connectedCraftOpen = false; mode = "detail"; revealCraftOutput = true
+            actions.message = "Craft saved · ${outcome.sourceOutput.title} is in ${outcome.sourceOutput.owner}'s inventory"
+        }, onUseSourceOnly = { connectedCraftOpen = false; beginCraft() })
+    }
+    if (mode.isNotBlank() && !connectedCraftOpen) {
         val sheetTitle = when(mode) { "create" -> "Add Invention"; "edit" -> "Edit invention"; "stage" -> if (selectedStage == null) "Add stage" else "Edit stage"; "material" -> if (selectedRequirement == null) "Add material" else "Edit material"; "craft" -> "Confirm a resolved craft"; "review" -> "Commit confirmed craft?"; "event" -> "Invention history"; else -> selected?.title ?: "Invention" }
         PlayerSheet(sheetTitle, onDismiss = { if (!actions.busy) { if (mode == "review") { craftReviewJson = null; mode = "craft" } else mode = "" } }, dirty = dirty && mode != "review", actions = {
             when(mode) {
@@ -306,12 +315,12 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
                         }
                         PlayerTextButton(onClick = { requirementSnapshot = null; materialId = null; materialLabel = ""; materialQuantity = ""; materialNotes = ""; source = project.source; baselineSource = source; mode = "material" }) { Text("Add material") }
                     }
-                    ExpandableRecordSection("Physical output") {
+                    ExpandableRecordSection("Physical output", initiallyExpanded = revealCraftOutput) {
                         if (physicalOutputs.isEmpty()) Text("No linked physical output or equipment", color = Muted)
                         physicalOutputs.forEach { link ->
                             RecordValue(link.label, items.firstOrNull { it.id == link.toId }?.title ?: "item · ${link.toId}")
                         }
-                        PlayerTextButton(onClick = ::beginCraft) { Text("Confirm a resolved craft") }
+                        PlayerTextButton(onClick = { if (connected == null) beginCraft() else { revealCraftOutput = true; connectedCraftOpen = true } }) { Text("Confirm a resolved craft") }
                     }
                     ExpandableRecordSection("References & associations") {
                         if (associations.isEmpty()) Text("No linked references or associations", color = Muted)

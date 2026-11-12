@@ -199,6 +199,8 @@ class CampaignLedgerRepository(private val db: CampaignLedgerDb) {
         require(clean.imageBase64 == null || clean.imageBase64.length <= 1_000_000) { "Image is too large." }
         return clean
     }
+    /** Read-only validation for connected command previews; creation uses the same contract. */
+    internal fun validatedDraft(input: LedgerDraft): LedgerDraft = validate(input)
 
     private fun LedgerItem.draft() = LedgerDraft(
         title, category, owner, itemState, location, evidenceStatus, quantity, description,
