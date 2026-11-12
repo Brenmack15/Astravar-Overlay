@@ -65,7 +65,11 @@ class GenesisCampaignUiTest {
             else System.setProperty("robolectric.windowManager.useRequestedSize", previous)
         }
     }
-    private fun click(text: String) = compose.onNode(hasText(text) and hasClickAction()).performScrollTo().performClick()
+    private fun button(text: String) = compose.onNode(hasText(text) and hasClickAction() and hasAnyAncestor(isDialog()))
+    // Sheet footer actions are fixed outside the scrolling content. Requiring a
+    // scroll ancestor for those buttons fails before any tap is attempted.
+    private fun click(text: String) = button(text).assertIsDisplayed().performClick()
+    private fun contentClick(text: String) = button(text).performScrollTo().assertIsDisplayed().performClick()
     private fun awaitText(text: String) = compose.waitUntil(15_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
 
     @Test fun createCampaignThroughGuidedEditorRetainsOneIdentityAndNotes() = fixture { env, db ->
@@ -209,7 +213,7 @@ class GenesisCampaignUiTest {
             }
         }) {
             awaitText("Fictional Stale Review")
-            click("Character")
+            contentClick("Character")
             compose.onNodeWithText("Companion").performClick()
             var savedDraft: Map<String, List<Any?>> = emptyMap()
             compose.runOnIdle { savedDraft = registry.performSave(); visible.value = false }
@@ -225,7 +229,7 @@ class GenesisCampaignUiTest {
             compose.onNode(hasText("Accept reviewed values") and hasClickAction()).assertIsNotEnabled()
             capture("genesis-shared-character-review")
             runBlocking { env.local.save(original.character.id, original.revision, original.character.copy(currentHp = 9), "Fictional later damage") }
-            click("I reviewed these values and membership")
+            contentClick("I reviewed these values and membership")
             click("Accept reviewed values")
             awaitText("These records changed after review. Review the latest differences before accepting.")
             runBlocking {
