@@ -19,6 +19,7 @@ import urllib.request
 import zipfile
 
 import owner_upgrade_envelope as E
+from owner_upgrade_diagnostics import failure_id
 
 CRITICAL_STEPS = {
     ".github/workflows/android.yml": {
@@ -197,7 +198,12 @@ def verify_apk(path, expected, sdk):
     tools = sdk / "build-tools/35.0.0"
     def run(tool, *args):
         result = subprocess.run([str(tools / tool), *args, str(path)], capture_output=True, text=True, timeout=45)
-        E.require(result.returncode == 0, "APK inspection failed: " + tool)
+        if tool == "apksigner":
+            E.require(result.returncode == 0, "APK signature inspection failed")
+        elif tool == "aapt":
+            E.require(result.returncode == 0, "APK metadata inspection failed")
+        else:
+            E.require(result.returncode == 0, "APK alignment inspection failed")
         return result.stdout
     signature = run("apksigner", "verify", "--verbose", "--print-certs")
     certs = re.findall(r"^Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]{64})$", signature, re.MULTILINE)
@@ -267,10 +273,10 @@ def fetch_transfer(api, context, output, deadline):
             break
         except urllib.error.HTTPError as error:
             if error.code != 404:
-                raise ValueError("Transfer ref lookup failed") from None
+                E.require(False, "Transfer ref lookup failed")
             time.sleep(15)
     else:
-        raise ValueError("Bounded transfer wait expired")
+        E.require(False, "Bounded transfer wait expired")
     E.require(found.get("object", {}).get("type") == "commit", "Transfer ref is not a commit")
     commit = found["object"]["sha"]; E.hex_value(commit, 40)
     commit_info = api.get("git/commits/" + commit)
@@ -427,5 +433,5 @@ if __name__ == "__main__":
         main()
     except Exception as error:
         # Never dump private paths, signed download URLs, APK bytes or request credentials.
-        print("Owner upgrade transfer failed: " + type(error).__name__, file=sys.stderr)
+        print("Owner upgrade transfer failed: " + failure_id(error), file=sys.stderr)
         sys.exit(1)

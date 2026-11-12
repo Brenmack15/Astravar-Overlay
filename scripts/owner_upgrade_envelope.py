@@ -36,9 +36,16 @@ PACKAGES = {"baseline": ("com.yazsras.astravar", 49),
             "observer-test": ("com.yazsras.astravar.target.test", 1)}
 
 
+class RequirementFailure(ValueError):
+    """A trusted source check with a stable, non-secret diagnostic identifier."""
+    def __init__(self, message):
+        super().__init__(message)
+        self.diagnostic_id = "CHECK_" + hashlib.sha256(message.encode()).hexdigest()[:16]
+
+
 def require(condition, message):
     if not condition:
-        raise ValueError(message)
+        raise RequirementFailure(message)
 
 
 def exact_keys(value, keys):

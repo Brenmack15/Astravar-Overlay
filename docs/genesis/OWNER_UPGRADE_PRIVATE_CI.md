@@ -131,6 +131,15 @@ python3 -m unittest discover -s scripts/tests -p 'test_owner_upgrade*.py' -v
 bash -n scripts/ci-owner-upgrade.sh
 ```
 
+Transfer failures emit only a stable `CHECK_` identifier or a fixed generic
+failure category. They never print exception contents, private paths, signed
+download URLs, credentials or APK bytes. Resolve an identifier locally against
+the exact reviewed receiver source with
+`python3 scripts/owner_upgrade_diagnostics.py`; its JSON maps literal source
+checks to their meaning and file/line. This command reads only helper source,
+and does not open runtime evidence or owner files. A changed line number does
+not change the identifier for the same literal check.
+
 No actual owner APK was encrypted or installed during implementation. No workflow
 was launched. No transport key was used as an app signer. Accelerated CI success,
 owner-certificate compatibility, actual owner49→50 emulator installation and
