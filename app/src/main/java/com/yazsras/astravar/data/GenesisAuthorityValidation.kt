@@ -98,18 +98,24 @@ internal fun genesisAuthorityBackupErrors(
                     outcome.lastCommandId == receipt.commandId && outcome.revision == Math.addExact(requireNotNull(input[1]).toLong(), 1L)) { "Association outcome differs from its request." }
                 actorProofs[receipt.commandId] = outcome
             }
-            "create-item" -> {
+            "create-item", "create-items" -> {
                 val input = request(4)
                 val definition = reforgeJson.decodeFromString<ItemDefinition>(requireNotNull(input[2]))
-                val instance = reforgeJson.decodeFromString<ItemInstance>(requireNotNull(input[3]))
+                val instances = if (receipt.kind == "create-items") reforgeJson.decodeFromString<List<ItemInstance>>(requireNotNull(input[3]))
+                    else listOf(reforgeJson.decodeFromString<ItemInstance>(requireNotNull(input[3])))
                 val outcome = reforgeJson.decodeFromString<ReforgeSavedCharacter>(receipt.outcomeJson)
-                require(instance.id in items) { "Created physical identity is missing from portable authority." }
+                require(instances.all { it.id in items }) { "Created physical identity is missing from portable authority." }
                 require(outcome.character.id == input[0] && outcome.revision == Math.addExact(requireNotNull(input[1]).toLong(), 1L) &&
-                    outcome.character.items.singleOrNull { it.id == instance.id } == instance &&
+                    instances.all { instance -> outcome.character.items.singleOrNull { it.id == instance.id } == instance } &&
                     outcome.character.itemDefinitions.singleOrNull { it.id == definition.id } == definition) { "Created item differs from its reviewed request." }
                 validateCharacter(outcome.character)
                 val child = requireNotNull(playableHistory[genesisChild(receipt.commandId, "playable")]) { "Created item's playable receipt is missing." }
                 require(reforgeChangeCharacter(child) == outcome) { "Created item outcome differs from its playable receipt." }
+                if (receipt.kind == "create-items") {
+                    val before = reforgeJson.decodeFromString<ReforgeSavedCharacter>(requireNotNull(child.beforeJson))
+                    require(outcome.character == genesisCreatedItemsCharacter(before.character, definition, instances).copy(revision = outcome.revision) &&
+                        outcome.origin == before.origin && outcome.createdAt == before.createdAt) { "Item creation changed unreviewed gameplay or original provenance." }
+                }
                 itemProofs[receipt.commandId] = outcome
             }
             else -> error("Unsupported authority receipt kind.")

@@ -87,6 +87,26 @@ class GenesisAuthorityRepository(private val db: CampaignLedgerDb, private val r
         readGenesisAuthorityItem(db, instance.id)?.let { dao.update(it.copy(activationCommandId = commandId)) }
         record(commandId, "create-item", request, reforgeJson.encodeToString(saved)); saved
     }
+    /** One reviewed definition may create a carried remainder and one equipped physical item. */
+    suspend fun createItems(ownerActorId: String, expectedPlayableRevision: Long, definition: ItemDefinition, instances: List<ItemInstance>,
+        commandId: String = UUID.randomUUID().toString()): ReforgeSavedCharacter = transaction {
+        val request = campaignJson.encodeToString(listOf(ownerActorId, expectedPlayableRevision.toString(), reforgeJson.encodeToString(definition), reforgeJson.encodeToString(instances)))
+        retry(commandId, "create-items", request)?.let { return@transaction reforgeJson.decodeFromString<ReforgeSavedCharacter>(it.outcomeJson) }
+        require(dao.actor(ownerActorId)?.playable == true) { "Review and connect this character before creating connected equipment." }
+        val current = requireNotNull(local.get(ownerActorId)) { "The playable character is missing." }
+        check(current.revision == expectedPlayableRevision) { "The character changed. Review its latest inventory." }
+        require(instances.all { db.ledgerDao().getItem(it.id) == null && readGenesisAuthorityItem(db, it.id) == null }) {
+            "A physical item identity already exists. Use its explicit acquisition or transfer workflow."
+        }
+        val next = genesisCreatedItemsCharacter(current.character, definition, instances)
+        val saved = withGenesisProjection(db) { local.save(ownerActorId, expectedPlayableRevision, next,
+            "$GENESIS_AUTHORITY_SOURCE: create items", genesisChild(commandId, "playable")) }
+        instances.forEach { instance ->
+            val physical = requireNotNull(readGenesisAuthorityItem(db, instance.id)) { "Created physical item projection is missing." }
+            dao.update(physical.copy(activationCommandId = commandId))
+        }
+        record(commandId, "create-items", request, reforgeJson.encodeToString(saved)); saved
+    }
     suspend fun reviewActorAuthority(actorId: String, role: GenesisActorRole, campaignId: String? = null,
         ownerActorId: String? = null, legacyModifierResolutions: List<GenesisLegacyModifierResolution> = emptyList()): GenesisActorAuthorityReview = transaction {
         validateAssociation(actorId, role, campaignId, ownerActorId)

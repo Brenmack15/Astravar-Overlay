@@ -36,17 +36,23 @@ internal suspend fun genesisRequireAuthorityCommand(db: CampaignLedgerDb, receip
             require(db.genesisAuthorityDao().actor(outcome.actorId) == outcome) { "Membership change failed current-record readback." }
             genesisRequireAffectedActor(db, outcome)
         }
-        "create-item" -> {
+        "create-item", "create-items" -> {
             val input = genesisAuthorityRequest(receipt, 4)
             val definition = reforgeJson.decodeFromString<ItemDefinition>(requireNotNull(input[2]))
-            val instance = reforgeJson.decodeFromString<ItemInstance>(requireNotNull(input[3]))
+            val instances = if (receipt.kind == "create-items") reforgeJson.decodeFromString<List<ItemInstance>>(requireNotNull(input[3]))
+                else listOf(reforgeJson.decodeFromString<ItemInstance>(requireNotNull(input[3])))
             val outcome = reforgeJson.decodeFromString<ReforgeSavedCharacter>(receipt.outcomeJson)
             require(outcome.character.id == input[0] && outcome.revision == Math.addExact(requireNotNull(input[1]).toLong(), 1L) &&
-                outcome.character.items.singleOrNull { it.id == instance.id } == instance &&
+                instances.all { instance -> outcome.character.items.singleOrNull { it.id == instance.id } == instance } &&
                 outcome.character.itemDefinitions.singleOrNull { it.id == definition.id } == definition) { "Created item differs from its requested definition or physical identity." }
-            genesisRequirePlayableDecision(db, receipt.commandId, outcome)
+            val child = genesisRequirePlayableDecision(db, receipt.commandId, outcome)
+            if (receipt.kind == "create-items") {
+                val before = reforgeJson.decodeFromString<ReforgeSavedCharacter>(requireNotNull(child.beforeJson))
+                require(outcome.character == genesisCreatedItemsCharacter(before.character, definition, instances).copy(revision = outcome.revision) &&
+                    outcome.origin == before.origin && outcome.createdAt == before.createdAt) { "Item creation changed unreviewed gameplay or provenance." }
+            }
             require(ReforgeRepository(db).get(outcome.character.id) == outcome) { "Item creation failed playable readback." }
-            require(readGenesisAuthorityItem(db, instance.id)?.activationCommandId == receipt.commandId) { "Created item lost its original activation decision." }
+            require(instances.all { readGenesisAuthorityItem(db, it.id)?.activationCommandId == receipt.commandId }) { "Created item lost its original activation decision." }
             genesisRequireAffectedActor(db, requireNotNull(db.genesisAuthorityDao().actor(outcome.character.id)))
         }
         else -> error("Unsupported connected command kind.")
@@ -65,7 +71,7 @@ private suspend fun genesisCheckAuthorityReceiptHeader(db: CampaignLedgerDb, rec
         db.reforgeDao().change(receipt.commandId) == null && db.reforgeDao().roll(receipt.commandId) == null) { "Connected command identity also belongs to another saved domain." }
 }
 
-private suspend fun genesisRequirePlayableDecision(db: CampaignLedgerDb, commandId: String, saved: ReforgeSavedCharacter) {
+private suspend fun genesisRequirePlayableDecision(db: CampaignLedgerDb, commandId: String, saved: ReforgeSavedCharacter): ReforgeChange {
     validateCharacter(saved.character)
     val child = requireNotNull(GenesisBackupRow.read(db.openHelper.writableDatabase, "reforge_changes",
         "commandId,profileId,operation,fingerprint,priorRevision,resultingRevision,createdAt,beforeJson,afterJson,outcomeType".split(','),
@@ -75,6 +81,7 @@ private suspend fun genesisRequirePlayableDecision(db: CampaignLedgerDb, command
             it.text("afterJson"), it.text("outcomeType"))
     }.singleOrNull()) { "Original playable child receipt is missing." }
     require(reforgeChangeCharacter(child) == saved) { "Connected outcome differs from its immutable playable receipt." }
+    return child
 }
 
 /** Historical activation is compared to its frozen request, never to later edited mechanics. */
