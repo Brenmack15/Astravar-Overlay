@@ -84,20 +84,21 @@ Helper requires exact successful full/native receipts, native artifact/product
 digests, embedded commit, clean exact source, original owner certificate and
 byte-equality of every ZIP entry. Never sign a failed or superseded payload.
 
-No KVM. A normal AOSP API36 software emulator was launched13:08:19UTC using the
-prepared supervisor, boot timeout1200s and maximum lifetime3600s. Persistent exec
-session80618; evidence `genesis-owner-upgrade-emulator/evidence/attempt-20261112T130819Z`.
-At13:22:45UTC it was still booting (~14minutes); no APK installed. The QCOW2
-data image is actively changing. Port5590 is valid; official-source review shows
-explicit registration to the prestarted private server5049, despite its fallback
-scan-range warning. Do not diagnose a port failure from that warning alone. Poll only that session and send all
-adb operations as supervisor JSON lines through the same session. Do not launch
-another adb client or Gradle concurrently. It owns the shared runtime lock.
+No KVM. The bounded normal AOSP API36 software attempt launched13:08:19UTC,
+timed out after1200seconds and stopped. Session80618 is finished; no APK was
+installed. Evidence: `genesis-owner-upgrade-emulator/evidence/attempt-20261112T130819Z`,
+including RESULT.json, emulator.log and2.4MB final logcat. The logs show system
+server/zygote restarts and an Android watchdog killing system_server after its
+main thread was blocked68seconds. ADB registration worked (logcat captured).
+No OS watchdog/fsync/SELinux bypass or data clearing was used. No original-key
+in-place installation acceptance exists. Do not call this a product APK failure
+or rerun unbounded software boots. Hosted CI remains independent and uses its
+disposable signer. Runtime build lock is released.
 Keep original code49 owner APK unchanged; fictional baseline seed, normal install-r,
 native retention/canonical-write and independent DB readback remain required.
 No OS bypasses, data clearing or uninstall.
 
-Next: monitor both2798 gates and the bounded owner emulator, investigate failures without
+Next: monitor both2798 gates, investigate failures without
 weaker assertions. Download/check exact successful native artifact and all native
 stages, privately sign that same payload, test actual owner-key update if environment
 permits, preserve reports/screenshots and deliver with honest remaining scope.
