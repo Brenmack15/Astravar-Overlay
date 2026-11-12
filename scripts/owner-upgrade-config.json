@@ -1,73 +1,73 @@
 {
-  "schema": 1,
-  "enabled": false,
-  "repository": "Brenmack15/Astravar-Overlay",
-  "candidate_source": "de98cb694a2c8bfa03911f8c827ebea370fdc6c7",
-  "baseline_source": "7bb03b5e15d639e94947a491e76f37b1b23a1af5",
-  "owner_certificate_sha256": "4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847",
-  "gates": [
-    {
-      "run_id": 0,
-      "run_attempt": 0,
-      "workflow_path": ".github/workflows/android.yml",
-      "source_sha": "de98cb694a2c8bfa03911f8c827ebea370fdc6c7"
-    },
-    {
-      "run_id": 0,
-      "run_attempt": 0,
-      "workflow_path": ".github/workflows/astravar-3.0.yml",
-      "source_sha": "de98cb694a2c8bfa03911f8c827ebea370fdc6c7"
-    }
-  ],
-  "observer_artifact": {
-    "run_id": 0,
-    "run_attempt": 0,
-    "artifact_id": 0,
-    "name": "android-verification",
-    "digest": "",
-    "source_sha": "de98cb694a2c8bfa03911f8c827ebea370fdc6c7",
-    "reference_apk_sha256": "",
-    "reference_apk_size": 0
-  },
   "apks": {
     "baseline": {
-      "sha256": "",
-      "size": 0,
-      "package": "com.yazsras.astravar",
-      "version_code": 49,
       "certificate_sha256": "4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847",
-      "source_sha": "7bb03b5e15d639e94947a491e76f37b1b23a1af5"
+      "package": "com.yazsras.astravar",
+      "sha256": "45fcd71a2e1294f8865e700b3e8539d8bfc92c15dffe43c26daaaf2a065b3fe5",
+      "size": 12889965,
+      "source_sha": "7bb03b5e15d639e94947a491e76f37b1b23a1af5",
+      "version_code": 49
     },
     "candidate": {
-      "sha256": "",
-      "size": 0,
-      "package": "com.yazsras.astravar",
-      "version_code": 50,
       "certificate_sha256": "4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847",
-      "source_sha": "de98cb694a2c8bfa03911f8c827ebea370fdc6c7"
+      "package": "com.yazsras.astravar",
+      "sha256": "2c14bd7ec186122a94b5273e072ea262efeae60b00af96c65ecc21c49ce0e9b1",
+      "size": 13184678,
+      "source_sha": "a86ab0fa87ce47a4f99550dcfa8fe01ed0e22928",
+      "version_code": 50
     },
     "observer": {
-      "sha256": "",
-      "size": 0,
+      "certificate_sha256": "76e9b19a92820c98a6fb655c98084b5ac562b39aad01ac0417474428109929d7",
       "package": "com.yazsras.astravar.target",
-      "version_code": 1,
-      "certificate_sha256": "",
-      "source_sha": "de98cb694a2c8bfa03911f8c827ebea370fdc6c7"
+      "sha256": "46f7c5d72192e1e9fdc0c88b731977364e871f0df0b501cdca37b61caf072f28",
+      "size": 854388,
+      "source_sha": "a86ab0fa87ce47a4f99550dcfa8fe01ed0e22928",
+      "version_code": 1
     },
     "observer-test": {
-      "sha256": "",
-      "size": 0,
-      "package": "com.yazsras.astravar.target.test",
-      "version_code": null,
-      "certificate_sha256": "",
-      "source_sha": "de98cb694a2c8bfa03911f8c827ebea370fdc6c7",
+      "certificate_sha256": "76e9b19a92820c98a6fb655c98084b5ac562b39aad01ac0417474428109929d7",
+      "instrumentation_runner": "androidx.test.runner.AndroidJUnitRunner",
       "instrumentation_target": "com.yazsras.astravar.target",
-      "instrumentation_runner": "androidx.test.runner.AndroidJUnitRunner"
+      "package": "com.yazsras.astravar.target.test",
+      "sha256": "e91b2eae9a2ed912993419cde5918dfe54fbec06fd9905c2e2c911837abc092c",
+      "size": 1065796,
+      "source_sha": "a86ab0fa87ce47a4f99550dcfa8fe01ed0e22928",
+      "version_code": null
     }
   },
   "baseline_equivalence": {
-    "frozen_source": "3543e83bfca5e589f1bbedb09964431ce94a2319",
     "app_tree": "0da5fc7f0e3ed99862ed709c6723c304dab533f3",
+    "frozen_source": "3543e83bfca5e589f1bbedb09964431ce94a2319",
     "rules_tree": "f6e4d084f0c6b349883eefee2f2aa5669a7d24ac"
-  }
+  },
+  "baseline_source": "7bb03b5e15d639e94947a491e76f37b1b23a1af5",
+  "candidate_source": "a86ab0fa87ce47a4f99550dcfa8fe01ed0e22928",
+  "enabled": true,
+  "gates": [
+    {
+      "run_attempt": 1,
+      "run_id": 43251800807,
+      "source_sha": "a86ab0fa87ce47a4f99550dcfa8fe01ed0e22928",
+      "workflow_path": ".github/workflows/android.yml"
+    },
+    {
+      "run_attempt": 1,
+      "run_id": 43251800831,
+      "source_sha": "a86ab0fa87ce47a4f99550dcfa8fe01ed0e22928",
+      "workflow_path": ".github/workflows/astravar-3.0.yml"
+    }
+  ],
+  "observer_artifact": {
+    "artifact_id": 13964072482,
+    "digest": "0f15ee8159fac0c1cd166c073dafcf13873968f97b411f66db9dd2ec3b059b67",
+    "name": "android-verification",
+    "reference_apk_sha256": "d501530c8b1cdc59eb5dce857f23441b5f25f3b2bd881bcd768a9fabf7ca1962",
+    "reference_apk_size": 13185882,
+    "run_attempt": 1,
+    "run_id": 43251800807,
+    "source_sha": "a86ab0fa87ce47a4f99550dcfa8fe01ed0e22928"
+  },
+  "owner_certificate_sha256": "4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847",
+  "repository": "Brenmack15/Astravar-Overlay",
+  "schema": 1
 }
