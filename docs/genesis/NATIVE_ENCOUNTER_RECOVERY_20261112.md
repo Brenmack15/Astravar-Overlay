@@ -2,7 +2,7 @@
 
 ## Status and preservation boundary
 
-This is a technical handoff reconstructed from the working agent's retained execution history after the execution environment became unavailable. It is **not** a recovered source patch, a blob-verified copy of local commit `991dd4a`, or a passing native release. The initial documentation-only checkpoint is followed by two complete source files reconstructed from retained tool output and a recorded patch; their original local blob hashes remain unavailable.
+This is a technical handoff reconstructed from the working agent's retained execution history after the execution environment became unavailable. It is **not** a recovered source patch, a blob-verified copy of local commit `991dd4a`, or a passing native release. The initial documentation-only checkpoint is followed by three complete source files reconstructed from retained tool output and recorded patches; their original local blob hashes remain unavailable.
 
 - Repository: `Brenmack15/Astravar-Overlay`.
 - New recovery branch: `checkpoint/astravar-genesis-native-recovery-20261112`.
@@ -38,16 +38,17 @@ No app production source, app test source, generated schema, signing configurati
 
 ## Files partially recovered after the handoff
 
-Two complete files are now preserved at their normal repository paths on this separate recovery branch. They are reconstructed from recorded tool output/writes, **not verified against original991dd4a blobs**, and have not been compiled or tested in the unavailable environment:
+Three complete files are now preserved at their normal repository paths on this separate recovery branch. They are reconstructed from recorded tool output/writes, **not verified against original991dd4a blobs**, and have not been compiled or tested in the unavailable environment:
 
 | File | Recovery commit | New GitHub blob | Basis |
 | --- | --- | --- | --- |
 | `overlay-target/src/androidTest/java/com/yazsras/astravar/GenesisEncounterInstrumentationTest.kt` | `c3206cca7764fe3d6e1bfd1e9233076b39aa22b2` | `ba01680bbc7c08bbdd9272e1527ec59dafb78194` | Full 148-line recorded readback |
 | `scripts/genesis-encounter-readback.py` | `96e546ec7730c1d5d53156348382b4a8e7735516` | `572c96b9828b00df9c090c288cc4df6426cd01e3` | Full recorded readback plus the exact later proof-strengthening patch; 177 lines |
+| `scripts/ci-emulator.sh` | `a187ce7a2fad9369417e2116f1b3f0041c13c3c8` | `e926af21e3af5df584891606aeb2f35057c968a4` | Complete recorded diff applied to exact base blob `a3ae852cac66bc00b817c95910abec398839a138`; 233 lines |
 
-Both GitHub files were fetched again and matched the submitted recovery text exactly. This proves remote preservation of the reconstructed text, not equality with the inaccessible original commit.
+All three GitHub files were fetched again and matched the submitted recovery text exactly. This proves remote preservation of the reconstructed text, not equality with the inaccessible original commit. For `ci-emulator.sh`, the reconstructed blob also matches the original recorded diff's seven-character result prefix `e926af2` (preimage `a3ae852`); the full original blob hash was not recorded. Its full diff was available, so no source lines needed to be invented.
 
-The other **eight** files in the inventory remain missing from the local991 change set: the 17-test encounter suite, CI stage wiring, and the six pre-existing helper/test updates. Their complete final contents were not retained in accessible history. The branch keeps the published base versions rather than committing truncated or invented replacements. The reconstructed files are not a runnable release or complete schema9 native gate until those dependencies and tests are recovered or rebuilt and verified.
+The other **seven** files in the inventory remain missing from the local991 change set: the 17-test encounter suite and the six pre-existing helper/test updates. Their complete final contents were not retained in accessible history. The branch keeps the published base versions rather than committing truncated or invented replacements. The reconstructed files are not a runnable release or complete schema9 native gate until those dependencies and tests are recovered or rebuilt and verified. In particular, the restored CI stage requests schema9 from helper versions that still need their missing updates: do not dispatch CI or treat this partial branch as an acceptance candidate yet.
 
 The standalone private-signing helper's full source also did not survive in accessible history. It is not recreated here. Its existence or earlier reported checks are not a recovered signing capability; no key/configuration/credential was read or published.
 
