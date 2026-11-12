@@ -32,6 +32,7 @@ import java.util.UUID
     val audit by records.audit.collectAsState(initial = emptyList())
     val state = companions.firstOrNull { it.companionId == "eek" }
     val eekResources = resources.filter { it.companionId == "eek" }
+    val resourceAccess = rememberGenesisCompanionResourceAccess("eek")
     val equipment = links.filter { (it.toType == "companion" && it.toId == "eek") || (it.fromType == "companion" && it.fromId == "eek") }
     val actions = rememberLocalRecordActions()
     var mode by rememberSaveable { mutableStateOf<String?>(null) }
@@ -68,6 +69,7 @@ import java.util.UUID
     val staleState = stateBaseline != null && state != null && state.revision != stateBaseline.revision
     val latestResource = resources.firstOrNull { it.id == resourceBaseline?.id }
     val staleResource = resourceBaseline != null && latestResource != null && latestResource.revision != resourceBaseline.revision
+    val resourceEditable = resourceAccess.editable(resourceBaseline?.id)
     fun openStatus() {
         stateJson = state?.let { Json.encodeToString(it) }; condition = state?.condition ?: "Unknown"
         notes = state?.notes.orEmpty(); source = state?.source.orEmpty(); actions.message = ""; mode = "status"
@@ -100,8 +102,9 @@ import java.util.UUID
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("Resources", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            PlayerTextButton(onClick = { openResource(null) }, enabled = state != null && !actions.busy) { Text("Add resource") }
+            PlayerTextButton(onClick = { openResource(null) }, enabled = state != null && !actions.busy && resourceAccess.editable(null)) { Text("Add resource") }
         }
+        resourceAccess.explanation(null)?.let { Text(it, color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall) }
         if (eekResources.isEmpty()) PlayerCard {
             Text("No confirmed resource values", style = MaterialTheme.typography.bodyMedium)
             Text(if (state == null) "Save Eek's status before adding resources." else "Unknown values stay unknown.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
@@ -113,6 +116,8 @@ import java.util.UUID
                     PlayerCard(modifier = Modifier.weight(1f), onClick = { openResource(resource) }) {
                         Text(resource.name, style = MaterialTheme.typography.labelLarge)
                         Text("${resource.current?.toString() ?: "?"} / ${resource.maximum?.toString() ?: "?"}", style = MaterialTheme.typography.headlineSmall, color = RebuildPalette.Ice)
+                        if (resourceAccess.loaded && resourceAccess.managed && !resourceAccess.editable(resource.id))
+                            Text("Inactive history", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
                     }
                 }
                 if (resourceColumns == 2 && row.size == 1) Spacer(Modifier.weight(1f))
@@ -150,12 +155,13 @@ import java.util.UUID
                         mode = null; "Eek status saved locally."
                     }
                 }) { Text("Save Eek status") }
-                "resource" -> PlayerButton(enabled = resourceError == null && !actions.busy && !staleResource && state != null && resourceName.isNotBlank() && source.isNotBlank(), onClick = {
+                "resource" -> PlayerButton(enabled = resourceError == null && !actions.busy && !staleResource && resourceEditable && state != null && resourceName.isNotBlank() && source.isNotBlank(), onClick = {
                     check(resourceError == null) { "Reload the saved resource before saving." }
                     val before = resourceBaseline; val current = resourceCurrent.trim(); val maximum = resourceMaximum.trim(); val src = source.trim()
                     val model = before?.copy(name = resourceName.trim(), current = current.toIntOrNull(), maximum = maximum.toIntOrNull())
                         ?: CompanionResource(name = resourceName.trim(), current = current.toIntOrNull(), maximum = maximum.toIntOrNull(), id = resourceDraftId)
                     actions.run {
+                        require(resourceAccess.editable(before?.id)) { resourceAccess.explanation(before?.id) ?: "Resource is not editable." }
                         require(current.isEmpty() || current.toIntOrNull()?.let { it >= 0 } == true) { "Current value must be nonnegative or unknown." }
                         require(maximum.isEmpty() || maximum.toIntOrNull()?.let { it >= 0 } == true) { "Maximum must be nonnegative or unknown." }
                         records.saveCompanionResource(model, before?.revision, src)
@@ -184,10 +190,11 @@ import java.util.UUID
                 }
                 "resource" -> {
                     if (staleResource) Text("A newer resource value exists. Cancel and reopen to load it.", color = MaterialTheme.colorScheme.error)
-                    Field("Resource name", resourceName, { resourceName = it }, enabled = !actions.busy)
-                    Field("Confirmed current value (blank = unknown)", resourceCurrent, { resourceCurrent = it }, enabled = !actions.busy)
-                    Field("Confirmed maximum (blank = unknown)", resourceMaximum, { resourceMaximum = it }, enabled = !actions.busy)
-                    Field("Resource source", source, { source = it }, single = false, enabled = !actions.busy)
+                    resourceAccess.explanation(resourceBaseline?.id)?.let { Text(it, color = RebuildPalette.Muted) }
+                    Field("Resource name", resourceName, { resourceName = it }, enabled = !actions.busy && resourceEditable && !resourceAccess.managed)
+                    Field("Confirmed current value (blank = unknown)", resourceCurrent, { resourceCurrent = it }, enabled = !actions.busy && resourceEditable)
+                    Field("Confirmed maximum (blank = unknown)", resourceMaximum, { resourceMaximum = it }, enabled = !actions.busy && resourceEditable && !resourceAccess.managed)
+                    Field("Resource source", source, { source = it }, single = false, enabled = !actions.busy && resourceEditable)
                     Text("Blank is unknown. Counters do not recover automatically.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
                 }
                 "equipmentList" -> {
