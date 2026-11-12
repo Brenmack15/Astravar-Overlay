@@ -40,8 +40,11 @@ and logs under `genesis-resume-evidence` before continuing or starting another b
 
 Matching complete trees have been published with guarded GitHub connector writes
 because direct git push lacks credentials. PR15 remains draft/unmerged at7e229;
-all older checkpoints are preserved. No fresh full/native CI branch yet at this
-update. Do not claim the earlier passing subsets establish the final release.
+all older checkpoints are preserved. Fresh exact-source push gates are running on
+`feat/astravar-project-genesis-resume-verification-20261112`:
+- Full: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43220288546
+- Native: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43220288629
+Both are pending at this update. Do not claim the earlier passing subsets establish the final release.
 
 Original private key and trusted code49 owner APK are recovered with matching
 full certificate/checksum. A newly reconstructed signing helper passed23 synthetic
