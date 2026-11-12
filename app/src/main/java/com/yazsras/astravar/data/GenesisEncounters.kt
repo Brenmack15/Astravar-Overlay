@@ -77,10 +77,12 @@ class GenesisEncounterRepository internal constructor(private val db: CampaignLe
             require(previous.kind == GENESIS_ENCOUNTER_COMMAND && previous.requestJson == json && previous.fingerprint == fingerprint) {
                 "Command identity was reused with different encounter content. Nothing changed."
             }
-            return genesisReadEncounterOutcome(db, previous).after
+            return genesisReadEncounterHistory(db, previous).after
         }
         require(db.recordsDao().receipt(commandId) == null && db.ledgerDao().event(commandId) == null &&
-            db.reforgeDao().change(commandId) == null && db.reforgeDao().roll(commandId) == null) { "Encounter command identity belongs to another operation." }
+            db.reforgeDao().change(commandId) == null && db.reforgeDao().roll(commandId) == null && !genesisAuditIdentityExists(db, commandId)) {
+            "Encounter command identity belongs to another operation."
+        }
         val before = dao.get(request.encounterId)?.ordered()
         check(before?.record?.revision == request.expectedRevision) { "The encounter changed. Reopen its current state before saving." }
         before?.let { genesisRequireEncounterCurrent(db, it) }
@@ -125,12 +127,24 @@ internal suspend fun genesisReadEncounterOutcome(db: CampaignLedgerDb, receipt: 
 internal suspend fun genesisRequireEncounterCurrent(db: CampaignLedgerDb, current: GenesisEncounterSnapshot) {
     genesisValidateEncounterSnapshot(current)
     val receipt = requireNotNull(readGenesisAuthorityReceipt(db, current.record.lastCommandId)) { "Encounter's latest history is missing." }
-    val outcome = genesisReadEncounterOutcome(db, receipt)
+    val outcome = genesisReadEncounterHistory(db, receipt)
     require(outcome.after == current) { "Encounter state differs from its latest immutable command." }
-    outcome.before?.let { before ->
-        val prior = requireNotNull(readGenesisAuthorityReceipt(db, before.record.lastCommandId)) { "Encounter's previous history is missing." }
-        require(genesisReadEncounterOutcome(db, prior).after == before) { "Encounter history does not join its previous revision." }
+}
+
+/** Scoped ancestry prevents extending a broken tracker; unrelated campaign histories are never exported. */
+internal suspend fun genesisReadEncounterHistory(db: CampaignLedgerDb, receipt: GenesisAuthorityReceipt): GenesisEncounterOutcome {
+    val latest = genesisReadEncounterOutcome(db, receipt)
+    val seen = mutableSetOf(receipt.commandId)
+    var before = latest.before
+    while (before != null) {
+        val id = before.record.lastCommandId
+        require(seen.add(id)) { "Encounter history contains a cycle." }
+        val prior = requireNotNull(readGenesisAuthorityReceipt(db, id)) { "Encounter's previous history is missing." }
+        val outcome = genesisReadEncounterOutcome(db, prior)
+        require(outcome.after == before) { "Encounter history does not join its previous revision." }
+        before = outcome.before
     }
+    return latest
 }
 
 internal suspend fun genesisRequireEncounterCommand(db: CampaignLedgerDb, receipt: GenesisAuthorityReceipt) {

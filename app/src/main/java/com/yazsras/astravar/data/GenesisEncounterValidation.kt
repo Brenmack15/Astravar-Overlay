@@ -128,6 +128,7 @@ internal fun genesisEncounterBackupErrors(authority: GenesisAuthorityExport): Li
     fun verify(label: String, body: () -> Unit) { try { body() } catch (e: Exception) { errors += "$label: ${e.message ?: "Invalid encounter history"}" } }
     val receipts = authority.receipts.associateBy { it.commandId }
     val records = authority.encounters.associateBy { it.id }
+    val participantsByEncounter = authority.encounterParticipants.groupBy { it.encounterId }
     val actorIds = authority.actors.map { it.actorId }.toSet()
     val campaignIds = authority.campaigns.map { it.id }.toSet()
     val outcomes = mutableMapOf<String, GenesisEncounterOutcome>()
@@ -139,11 +140,12 @@ internal fun genesisEncounterBackupErrors(authority: GenesisAuthorityExport): Li
         }
         outcomes[receipt.commandId] = outcome
     } }
+    val histories = outcomes.values.groupBy { it.after.record.id }
     records.values.forEach { record -> verify("Encounter ${record.id}") {
-        val current = GenesisEncounterSnapshot(record, authority.encounterParticipants.filter { it.encounterId == record.id }.sortedBy { it.position })
+        val current = GenesisEncounterSnapshot(record, participantsByEncounter[record.id].orEmpty().sortedBy { it.position })
         genesisValidateEncounterSnapshot(current)
         require(record.campaignId in campaignIds && current.participants.all { it.actorId in actorIds })
-        val history = outcomes.values.filter { it.after.record.id == record.id }.sortedBy { it.after.record.revision }
+        val history = histories[record.id].orEmpty().sortedBy { it.after.record.revision }
         require(history.isNotEmpty() && history.first().before == null && history.first().after.record.revision == 1L)
         history.zipWithNext().forEach { (prior, next) -> require(next.before == prior.after) { "Encounter history is incomplete or branches." } }
         require(history.last().after == current && history.last().after.record.lastCommandId == record.lastCommandId) {

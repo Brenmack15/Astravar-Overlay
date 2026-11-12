@@ -32,8 +32,19 @@ transaction. Connected backup adds default-omitted encounter fields, retains
 original membership proof and validates the full transition chain. Existing
 same-ID differences block merge; history remains valid after later actor changes.
 
-At the first backend checkpoint, no Gradle task has run. Backend lifecycle and
-portable-proof tests are being added; migration-retention tests are a separate
-owned commit. The current C software-emulator run has the sole local build slot.
+The backend checkpoint `d271df7` includes both production and migration-retention
+test work. The subsequent test checkpoint adds13 backend lifecycle/portable-proof
+cases: state/order/restart, unchanged mechanics, exact retries, stale setup and
+membership, later actor changes, invalid states, transaction rollback, old backup
+bytes/fingerprint, every lifecycle restore, rehashed tampering, old history gaps,
+audit-ID collisions and protected merge conflicts. The two migration cases cover
+all40 frozen schema8 tables and injected migration rollback. No Gradle task has
+run yet. The current C software-emulator run has the sole local build slot.
+
+Historical proof checks use keyed ancestry reads for this encounter only, so a
+missing older receipt blocks further commands and exact retries. This is linear
+in the encounter's own history per command; very long encounters require measured
+performance work. Backup grouping avoids repeated global encounter scans, but
+the existing complete-document cap and broader current-roster limits remain.
 Preserve this branch and every dirty follow-up before continuing. No remote ref,
 PR, source pin, signing material or C checkout has been changed by this work.

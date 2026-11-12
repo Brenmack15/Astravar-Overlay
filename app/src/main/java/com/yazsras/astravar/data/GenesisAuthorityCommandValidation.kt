@@ -70,8 +70,15 @@ private suspend fun genesisCheckAuthorityReceiptHeader(db: CampaignLedgerDb, rec
     rejectDuplicateJsonMembers(receipt.requestJson)
     rejectDuplicateJsonMembers(receipt.outcomeJson)
     require(db.recordsDao().receipt(receipt.commandId) == null && db.ledgerDao().event(receipt.commandId) == null &&
-        db.reforgeDao().change(receipt.commandId) == null && db.reforgeDao().roll(receipt.commandId) == null) { "Connected command identity also belongs to another saved domain." }
+        db.reforgeDao().change(receipt.commandId) == null && db.reforgeDao().roll(receipt.commandId) == null && !genesisAuditIdentityExists(db, receipt.commandId)) {
+        "Connected command identity also belongs to another saved domain."
+    }
 }
+
+internal fun genesisAuditIdentityExists(db: CampaignLedgerDb, commandId: String): Boolean =
+    db.openHelper.writableDatabase.query("SELECT EXISTS(SELECT 1 FROM campaign_audit WHERE id=?)", arrayOf(commandId)).use {
+        check(it.moveToFirst()); it.getInt(0) == 1
+    }
 
 private suspend fun genesisRequirePlayableDecision(db: CampaignLedgerDb, commandId: String, saved: ReforgeSavedCharacter): ReforgeChange {
     validateCharacter(saved.character)
