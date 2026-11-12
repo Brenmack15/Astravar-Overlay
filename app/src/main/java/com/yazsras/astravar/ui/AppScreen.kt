@@ -76,8 +76,10 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     var searchRouteToken by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     var searchIsCompanion by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var searchCampaignItemId by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    var encounterReturn by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val searchRoute = searchProfileId?.let { GenesisCharacterRoute(it, searchSection, searchDetail, searchRouteToken) }
     fun openSearchDestination(destination: ReforgeSearchDestination) {
+        encounterReturn = false
         tool = null; campaignPage = null
         when (destination) {
             is ReforgeSearchDestination.Character -> {
@@ -102,6 +104,10 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                 companionPlayId = null; tab = "Campaign"; campaignPage = "Inventions:${destination.projectId}"
             }
         }
+    }
+    fun returnToEncounter() {
+        tool = null; searchProfileId = null; companionPlayId = null
+        encounterReturn = false; campaignPage = "Encounters"; tab = "Campaign"
     }
     LaunchedEffect(ownerConnectionRequest) {
         if (ownerConnectionRequest > 0) {
@@ -169,6 +175,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
             snackbarHost={SnackbarHost(snackbar)},
             topBar={RebuildAppHeader(s?.demo==true, search = { tool = "Global search" }, tools = { tool = "Tools" })},
             bottomBar={RebuildPrimaryNavigation(tab) { next ->
+                encounterReturn = false
                 if (next == "Inventory") { requestedInventory = "My gear"; inventoryRoute++ }
                 if (searchIsCompanion) searchProfileId = null
                 companionPlayId = null
@@ -201,6 +208,9 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                     return@Column
                 }
                 if(actions.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (encounterReturn && tab in listOf("Character", "Companions")) {
+                    PlayerTextButton(onClick = ::returnToEncounter) { Text("‹ Return to encounter") }
+                }
                 if (remoteTestEnabled) Row(Modifier.fillMaxWidth().background(RebuildPalette.Active).padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Text(if(tab=="Character") "Disposable profile" else "Remote test on", Modifier.weight(1f), color = RebuildPalette.Ice,
@@ -270,6 +280,9 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                                         "Search everything" -> ReforgeGlobalSearch(app.campaignLedger, open = ::openSearchDestination)
                                         "Inventory" -> CampaignLedgerPage(app.campaignLedger) {campaignPage="Reference Library"}
                                         "Inventions" -> InventionsPageV2(app.campaignLedger)
+                                        "Encounters" -> GenesisEncountersPage(connected) { destination ->
+                                            openSearchDestination(destination); encounterReturn = true
+                                        }
                                         "Checkpoints" -> CampaignCheckpointPanel(app.campaignLedger)
                                         "Eek" -> EekPageV2(app.campaignLedger)
                                         "Reference Library" -> CampaignReferenceLibraryV21(app.campaignLedger)
@@ -285,6 +298,9 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                         }
                         else -> RebuildConfigHub { tool = it }
                     }
+                }
+                androidx.activity.compose.BackHandler(enabled = encounterReturn && tab in listOf("Character", "Companions") && tool == null) {
+                    returnToEncounter()
                 }
                 tool?.let {name->RebuildToolSheet(name,{tool=null}) {
                     when(name) {

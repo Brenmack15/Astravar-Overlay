@@ -51,7 +51,10 @@ import java.util.UUID
             } else PlayerHeading("Campaign") {
                 PlayerTextButton(onClick = { dialog = "Campaigns" }) { Text("Choose campaign") }
             }
-            Text(selected?.name ?: if (environment.selectedCampaignId == null) "Unassigned campaign" else "Selected campaign unavailable", style = MaterialTheme.typography.titleLarge)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(selected?.name ?: if (environment.selectedCampaignId == null) "Unassigned campaign" else "Selected campaign unavailable", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                PlayerTextButton(onClick = { open("Encounters") }) { Text("Encounters") }
+            }
             PlayerTabs(listOf("People", "Journal"), section, { section = it })
         }
         Box(Modifier.weight(1f)) {
