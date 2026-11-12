@@ -4,26 +4,46 @@ This is the current recovery handoff, not a completed release. Read the original
 `docs/genesis/SESSION_RECOVERY.md` at `ee04d5f` first, then this file and the
 linked milestone checkpoints. Later verified facts here supersede older status.
 
-## Active resumed session — full exact-source CI passed, native pending
+## Active resumed session — import disclosure correction published
 
-Current published source: `2798fc6f19210333c086d548759c09297ec7f380`,
-tree `2d102002b922f9cf0f58ab6f6b43a60fddf7371b`. Branches:
+Current published source: `e9f73d2df7bca6955ae87d6a0adcea78458339ac`,
+tree `fc249b61737ad1641b4134c0ea9e3a67c067636d`. Local equivalent
+`d4dde54158817bb0b4aa68869c912f4fab8eddfd`. Existing branches:
 - `checkpoint/astravar-genesis-resumed-verification-20261112`
 - `feat/astravar-project-genesis-resume-verification-20261112`
 
-Fresh exact-source gates started13:01:57UTC:
-- Full: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43223390477
-- Native: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43223390400
+Fresh exacte9f gates created13:56:39UTC, pending:
+- Full43232146446/job131229960062: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43232146446
+- Native43232146658/job131229962339: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43232146658
 
-At13:43UTC, FULL passed. Independently downloaded artifact13949762181,
-51,353,629bytes, SHA256 `1ca78237dcec3b7a292f2b58b38eb94b13a435142ccceeea746b6a32c23a5bf5`.
-Source2798/tree2d102, all indexed bytes/hashes and XML counters verified.
-Rules166 passed; debug931 total/928 passed/3 skipped; release931 total/914 passed/
-17 skipped; zero failures/errors. Python320 and bridge134 passed. Lint has zero
-errors (debug81 warnings+1hint, release83+1). 131 captures are HOST screenshots.
-Skipped identities are in `genesis-resume-evidence/2798fc6f/full/verified-summary.json`.
-Native build passed13:21:32; at13:46:43 its actual API36 emulator stage remained
-running with no failed step. Native acceptance remains pending.
+2798 FULL43223390477 passed. Artifact13949762181,51,353,629bytes, SHA256
+`1ca78237dcec3b7a292f2b58b38eb94b13a435142ccceeea746b6a32c23a5bf5`.
+Source2798/tree2d102, indexed bytes/hashes and XML counters independently verified:
+rules166; debug931total/928passed/3skip; release931total/914passed/17skip;
+zero failures/errors. Python320, bridge134 passed. Lint zeroerrors,
+debug81warnings+1hint/release83+1. 131 captures are HOST screenshots.
+
+2798 NATIVE43223390400 failed at CampaignImportInstrumentationTest:500→176:
+missing Reference Library after returning from successful import/readback.
+Artifact13951355019,83,591,642bytes, SHA256
+`bac17f56fefa46310657a2098899c08e29a11a33a7c6072b74a2488db738393f`.
+Exact source and embedded APK2798 verified. Fifteen native tests passed across
+upgrade3,overlay3,large/recovery2,PlayerFirst1,Visual1,Genesis1,Crafting1,
+Encounter1,UpdateFixture1,UpdatePreservation1. Dependent import rollback/mapped
+stages did not execute. Independent copied DB/package readbacks reproduced
+schema6→9 retention, later canonical heal, connected same-file SAF restore,
+crafting and encounter proofs; same-version store hashes identical.
+Evidence: `genesis-resume-evidence/2798fc6f/{full,native}`.
+These are fictional CI-signer journeys; no owner-key or physical acceptance.
+
+The narrow correction changes one native navigation line: campaignEntry now
+calls existing observed-state expandDisclosure instead of always toggling the
+Library section. The log showed an immediate toggle on return; the product now
+retains its expanded state. Helper observes the exact row's visible +/−, taps
+once only if collapsed, and verifies expansion. All import/content/attachment/
+duplicate/rollback/mapped assertions and timeouts remain unchanged. No product
+source changed. Local observer test APK compilation is running in session55860;
+log `genesis-resume-evidence/import-disclosure-compile-1.log`. Fresh gates required.
 
 ### Recovered environment and preserved work
 
@@ -31,9 +51,9 @@ The environment works again. Read-only searches did not recover old worktrees,
 runtime/private directories or original local991dd4a/e023321/803668e bytes.
 Do not reconstruct feature work already present in combined52831.
 New main checkout `/workspace/scratch/30508fda364e/Astravar-Genesis-Resume-20261112`
-is clean at local `46c194e45d3b239fba033ab3dc63f9b23580ab83`, tree-identical to2798.
-Clean verification tree: `genesis-resume-backend-verification`, same local46c.
-Clean exact remote signing-source tree: `genesis-release-source-2798fc6`.
+is clean at local `d4dde54158817bb0b4aa68869c912f4fab8eddfd`, tree-identical toe9f.
+Clean verification tree: `genesis-resume-backend-verification`, same locald4d.
+Exact remote source trees preserve2798 and the newe9f candidate separately.
 Earlier `genesis-release-source-b8ce9b5` is preserved but superseded.
 No reset, clean or overwrite occurred. Direct git push lacks credentials; guarded
 GitHub connector writes publish exactly matching complete trees. All checkpoints
@@ -132,7 +152,7 @@ Fresh local comparison confirms both app trees
 `0da5fc7f0e3ed99862ed709c6723c304dab533f3` and both rules trees
 `f6e4d084f0c6b349883eefee2f2aa5669a7d24ac`. Keep these provenance roles distinct.
 
-Next: monitor native2798, investigate failures without
+Next: monitor both exacte9f gates, investigate failures without
 weaker assertions. Download/check exact successful native artifact and all native
 stages, privately sign that same payload, test actual owner-key update if environment
 permits, preserve reports/screenshots and deliver with honest remaining scope.
