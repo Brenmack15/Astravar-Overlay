@@ -49,6 +49,15 @@ class NavigationV2Test {
         }
     }
 
+    private fun awaitJournalReady() {
+        compose.onNodeWithTag("section-Journal").assertIsSelected()
+        // Restored route tabs precede Room's first combined journal emission.
+        // Observe the real loaded reading surface before using its destinations.
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithTag("genesis-campaign-scroll-Journal").fetchSemanticsNodes().size == 1
+        }
+    }
+
     /** Recreate from parcelled state so retained hub state is not just a live composition object. */
     private fun savedState(controller: ActivityController<ComponentActivity>): Bundle {
         val state = Bundle()
@@ -109,6 +118,7 @@ class NavigationV2Test {
             capture("v2-inventory", activity.get())
             compose.onNodeWithTag("navigation-Campaign").performClick()
             compose.onNodeWithTag("section-Journal").performClick()
+            awaitJournalReady()
             compose.onNodeWithText("Connections").performClick()
             compose.onNodeWithContentDescription("Add connection").assertExists()
             capture("v2-connections", activity.get())
@@ -138,6 +148,7 @@ class NavigationV2Test {
             compose.onNodeWithTag("navigation-Campaign").assertIsSelected()
             compose.onNodeWithTag("section-Journal").assertIsSelected()
             compose.onNodeWithText("‹ Campaign").assertDoesNotExist()
+            awaitJournalReady()
             compose.onNodeWithText("Inventions").performClick()
             compose.onNodeWithText("Add Invention").assertExists()
             compose.onNodeWithText("‹ Campaign").performClick()
@@ -165,6 +176,7 @@ class NavigationV2Test {
             compose.onNodeWithText("CONFIRM YOUR WEAPON PROFILE").assertExists()
             compose.onAllNodesWithText("Close").onLast().performClick()
             compose.onNodeWithTag("navigation-Campaign").performClick()
+            awaitJournalReady()
             compose.onNodeWithText("Checkpoints").assertExists()
             compose.onNodeWithTag("navigation-Companions").performClick()
             // Tab state restores the already-open Eek sheet. Do not click a name
