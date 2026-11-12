@@ -52,6 +52,7 @@ data class GenesisCharacterRoute(val profileId: String, val section: String = "S
     requestToken: Int = 0,
     sectionOnly: Boolean = false,
     modalOpen: Boolean = false,
+    showPageHint: Boolean = true,
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.(String) -> Unit
 ) {
@@ -82,7 +83,7 @@ data class GenesisCharacterRoute(val profileId: String, val section: String = "S
                 PlayerTabs(pages, pages[state.currentPage], { label ->
                     scope.launch { moveTo(pages.indexOf(label)) }
                 }, Modifier.padding(horizontal = 4.dp).testTag("genesis-character-tabs"))
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp),
+                if (showPageHint) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
                     Text("Swipe between sections", modifier = Modifier.weight(1f).padding(end = 12.dp),
@@ -100,7 +101,9 @@ data class GenesisCharacterRoute(val profileId: String, val section: String = "S
                 state = state,
                 key = { pages[it] },
                 userScrollEnabled = !sectionOnly && !modalOpen,
-                modifier = Modifier.weight(1f).fillMaxWidth().testTag("genesis-character-pager"),
+                modifier = Modifier.weight(1f).fillMaxWidth().testTag("genesis-character-pager").semantics {
+                    stateDescription = "${pages[state.currentPage]}, page ${state.currentPage + 1} of ${pages.size}"
+                },
                 verticalAlignment = Alignment.Top
             ) { index ->
                 val section = pages[index]
@@ -147,9 +150,33 @@ internal fun Modifier.genesisHorizontalControl(): Modifier = nestedScroll(Genesi
     onSwitch: (() -> Unit)?,
     onHp: () -> Unit,
     onDefense: () -> Unit,
-    onInitiative: () -> Unit
+    onInitiative: () -> Unit,
+    compact: Boolean = false,
+    onControls: (() -> Unit)? = null
 ) {
     val largeText = LocalDensity.current.fontScale >= 1.5f
+    // Short windows keep the reading surface usable. All full controls remain
+    // one tap away in a scrollable sheet; text keeps the user's chosen scale.
+    if (compact && onControls != null) {
+        Row(Modifier.fillMaxWidth().background(RebuildPalette.Canvas).padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(character.name, Modifier.weight(1f).semantics { heading() },
+                style = MaterialTheme.typography.titleMedium, color = RebuildPalette.Silver,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onHp)
+                .semantics(mergeDescendants = true) {
+                    contentDescription = "HP ${projection.currentHp ?: "Not set"} / ${projection.maximumHp.value ?: "Not set"}"
+                }.padding(vertical = 6.dp), verticalArrangement = Arrangement.Center) {
+                Text("HP ${projection.currentHp ?: "?"} / ${projection.maximumHp.value ?: "?"}",
+                    style = MaterialTheme.typography.titleMedium, color = RebuildPalette.Cyan)
+            }
+            IconButton(onClick = onControls, modifier = Modifier.size(48.dp)
+                .testTag("genesis-character-controls").semantics { contentDescription = "Character controls" }) {
+                ArcaneIcon("Settings", Modifier.size(24.dp), RebuildPalette.GoldBright)
+            }
+        }
+        return
+    }
     Column(Modifier.fillMaxWidth().background(RebuildPalette.Canvas).padding(horizontal = 16.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {

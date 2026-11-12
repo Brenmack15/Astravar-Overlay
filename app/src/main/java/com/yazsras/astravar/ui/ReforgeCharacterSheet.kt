@@ -163,6 +163,19 @@ private enum class SpellbookFilter(val label: String) {
         adopting = local.readLegacyPreview(repository, id)
         dialog = "Adopt"
     }
+    fun quickAction(value: String) {
+        dialog = null
+        when (value) {
+            "health" -> dialog = "HP"
+            "attack" -> openSection("Combat")
+            "spells" -> openSection("Spells")
+            "inventory" -> openSection("Equipment")
+            "conditions" -> dialog = "Conditions"
+            "rest" -> dialog = "Rest"
+            "resources" -> openSection("Resources")
+            "dice" -> openRoll(ReforgeRollRequest("Custom roll", null))
+        }
+    }
 
     LaunchedEffect(pendingNavigation?.token, profilesState.first, actorSelection.first) {
         val route = pendingNavigation ?: return@LaunchedEffect
@@ -199,7 +212,8 @@ private enum class SpellbookFilter(val label: String) {
                 Text("Back to companions")
             }
         }
-        Box(Modifier.weight(1f)) {
+        BoxWithConstraints(Modifier.weight(1f)) {
+            val compactChrome = maxHeight < 480.dp || (LocalDensity.current.fontScale >= 1.5f && maxHeight < 640.dp)
             if (character == null || projection == null || !profilesState.first || (companionProfileId == null && !actorSelection.first)) {
                 Page(resetKey = chosenId) {
                     if (!profilesState.first || (companionProfileId == null && !actorSelection.first)) {
@@ -260,24 +274,15 @@ private enum class SpellbookFilter(val label: String) {
                     GenesisCharacterHeader(character, projection,
                         onSwitch = if (companionProfileId == null) ({ dialog = "Characters" }) else null,
                         onHp = { dialog = "HP" }, onDefense = { dialog = "Defense" },
-                        onInitiative = { projection.initiative.value?.let { requestRoll("Initiative", it, RollKind.INITIATIVE) } })
-                    if (!sectionOnly) GenesisQuickActions(character.id) { action ->
-                        when (action) {
-                            "health" -> dialog = "HP"
-                            "attack" -> openSection("Combat")
-                            "spells" -> openSection("Spells")
-                            "inventory" -> openSection("Equipment")
-                            "conditions" -> dialog = "Conditions"
-                            "rest" -> dialog = "Rest"
-                            "resources" -> openSection("Resources")
-                            "dice" -> openRoll(ReforgeRollRequest("Custom roll", null))
-                        }
-                    }
+                        onInitiative = { projection.initiative.value?.let { requestRoll("Initiative", it, RollKind.INITIATIVE) } },
+                        compact = compactChrome, onControls = { dialog = "Controls" })
+                    if (!sectionOnly && !compactChrome) GenesisQuickActions(character.id, ::quickAction)
                     GenesisCharacterPager(
                         actorId = character.id,
                         requestedSection = if (lastActor != null && lastActor != chosenId) initialSection else requestedSection,
                         requestToken = sectionRequest,
                         sectionOnly = sectionOnly,
+                        showPageHint = !compactChrome,
                         modalOpen = dialog != null || inspecting != null || proposedChange != null || cast != null || rollRequest != null,
                         modifier = Modifier.weight(1f)
                     ) { section ->
@@ -638,6 +643,13 @@ private enum class SpellbookFilter(val label: String) {
     }
     if (character != null && projection != null) {
         when (dialog) {
+            "Controls" -> PlayerSheet("Character controls", { dialog = null }) {
+                GenesisCharacterHeader(character, projection,
+                    onSwitch = if (companionProfileId == null) ({ dialog = "Characters" }) else null,
+                    onHp = { dialog = "HP" }, onDefense = { dialog = "Defense" },
+                    onInitiative = { projection.initiative.value?.let { dialog = null; requestRoll("Initiative", it, RollKind.INITIATIVE) } })
+                GenesisQuickActions(character.id, ::quickAction)
+            }
             "Identity" -> ReforgeIdentityEditor(character, { dialog = null }) { change("Edit identity & features", it) }
             "Notes" -> ReforgeNotesEditor(saved!!, local, { dialog = null })
             "Advance" -> ReforgeAdvancementDialog(character, { dialog = null }) { change("Confirmed character advancement", it) }
