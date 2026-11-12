@@ -1,0 +1,101 @@
+{
+  "note": "GitHub connector publication retains exact trees. Local commits remain intact; no reset or forced ref updates were used. This map covers implementation checkpoints before the recovery report commit.",
+  "branch": "checkpoint/astravar-genesis-recovery-20261112",
+  "mappings": [
+    {
+      "local": "68afef8eea22777ca3e6781794721319b6de560b",
+      "remote": "1e9488e2195b3107031b3db5daac4c31a0aae6e0",
+      "tree": "8d2e9030f4610935c629deec0286ab66b3c2d528"
+    },
+    {
+      "local": "686e237318bf491b5225db3132c244c237dd1ad1",
+      "remote": "d04b40f345d1c0a3f18b273930bccd677460c3a1",
+      "tree": "dc9837d6306a04fe66cdeae175e29620addc1e80"
+    },
+    {
+      "local": "bfad9261ee1ec483126dd3d3d56c637728088141",
+      "remote": "96a6faaf3450a94087e346f770c555005c8e5a86",
+      "tree": "76e496dabb639ae82cbafacd7fb63fbaa5f9f281"
+    },
+    {
+      "local": "a48ca22d86fa80e1e9235873852f778a1d7653aa",
+      "remote": "cbdebf905d96539aae31b798fb98ab7c6bd2b8e0",
+      "tree": "61232efa9efba8260f4150944c0dad5aa7741d14"
+    },
+    {
+      "local": "c176850aede69ada04af9de58dfa9af5b244041d",
+      "remote": "9859fa28fb838d601387f0d962c57e85383bf450",
+      "tree": "e8764712577e5c6bf457eab8530de4f38008f9da"
+    },
+    {
+      "local": "439ce0d61408f9caffc01484e14b4008e456725f",
+      "remote": "ef7bd2187ea3db2f16aeef72ad5d7b0ff23dc5be",
+      "tree": "4ea2ce039835e4e948fbce2eb7fcef4f0fc5564d"
+    },
+    {
+      "local": "12e59057e39acb541ff6c4145e35c5c0cb1b252a",
+      "remote": "5ae85c477cc46f7fa576cc3c0866f1c3e964449f",
+      "tree": "ded509178a238b549a7cee519f17b9ac8dcb9f6b"
+    },
+    {
+      "local": "61ffa31bd3b4d9501e7a42c92c595929bc097a88",
+      "remote": "f5d5e1755586c3e1de2cc0ee90000caa1bee0421",
+      "tree": "5dc6d24e011760a6f02b623dc9b5186094bfd1d6"
+    },
+    {
+      "local": "58c4c91e865d1f1ef310feb5e750ec0da1dbef63",
+      "remote": "97f54caeac50f1a115edd60f7a0495def28fc6ba",
+      "tree": "3e70f64ece30131922d6e16b14bec400ecc74e27"
+    },
+    {
+      "local": "d378b1f4d945a97aaf9c9ab768e5f8026e8860f3",
+      "remote": "fa3af199b75c27e53eed9070c82f16c6f066d0d1",
+      "tree": "67fce7d7b1413714d892d1dfe61e0e27b7c72a31"
+    },
+    {
+      "local": "186c7420f9983bfa9180ee2174723f9ba4ae7dac",
+      "remote": "73e1597a3e23c0bbf5b12cb1dd87ee4a5c13d45f",
+      "tree": "e3f30c2255a91ef1d0f08f3c5f1fc6e7dd3c0ab4"
+    },
+    {
+      "local": "2d815482d1aeafcbaa01b170b077873f887c4c49",
+      "remote": "07f03c70b0b0567403e492b375c807791e3ff0fe",
+      "tree": "0ec1586806ad58bd913f88493e7f5261a58c9482"
+    },
+    {
+      "local": "fe3099f7f9d26da193ee9cf74e148204a50fc1f9",
+      "remote": "caacd8c51014e2cb507244d9ef15afc977e22e47",
+      "tree": "1e87d70e62c17cdac309bd1539793c3545ee4695"
+    },
+    {
+      "local": "66d8ed7e04239d8d4449eb02e072def50e940571",
+      "remote": "4dcba58a863c1a91f8226f1e7fe184fed7c77a61",
+      "tree": "f5521a5c02f7b3e47b1ef5f04d1c97fe45e4cd1f"
+    },
+    {
+      "local": "ce472516acdf0eb1efeaaa9512ec377b72b79ee3",
+      "remote": "943e7567d05f3258d22ba0822d931671f00ac40b",
+      "tree": "5fdad151ca758daa6113aa931aa9575b1f741d05"
+    },
+    {
+      "local": "3f990f1152a5633d60e988ae67afc63bcec22c55",
+      "remote": "9602fca0640404ea89e1dbcfc82c7b5c233ffda0",
+      "tree": "2697da2c73094edbfba787ba7add7f8d9cb48e01"
+    },
+    {
+      "local": "5b4751e79eb1303d6d1137cc89beee9ebe811e4d",
+      "remote": "7c1ffff2ba82fd5e2c637dcd9ad9dc30cad8ebbb",
+      "tree": "fc788b3a48f205b4d28fcdfbbfa1f43a5b515d2b"
+    },
+    {
+      "local": "1c25eb2e919fcb83d682e0e36b889b7d1a8e1099",
+      "remote": "0c2f46e851087187ee71ba3b168f97217ce4c338",
+      "tree": "59e491ae481872e1b8b43429071850f11f7414b1"
+    },
+    {
+      "local": "d85f9c7f17268387320af946e4d13e3d1eb3b846",
+      "remote": "fb1f58e66781665e8e4b01f8c9ae0719e0209e0c",
+      "tree": "01d4e692a777e51bb3c96251d01e6b4c58756803"
+    }
+  ]
+}
