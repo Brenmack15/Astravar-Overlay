@@ -1,5 +1,6 @@
 package com.yazsras.astravar.data
 
+import com.yazsras.astravar.rules.reforge.ReforgeCharacter
 import kotlinx.serialization.encodeToString
 
 internal fun genesisValidateEncounterSnapshot(value: GenesisEncounterSnapshot) {
@@ -92,12 +93,72 @@ internal fun genesisEncounterTransition(request: GenesisEncounterRequest, before
     return next
 }
 
-/** A saved association receipt is evidence of former membership even after a later reassignment. */
+/** Validate the frozen decision itself; later membership and gameplay are deliberately irrelevant. */
 internal fun genesisEncounterMemberAuthority(receipt: GenesisAuthorityReceipt): GenesisActorAuthority {
+    checkId(receipt.commandId)
     require(receipt.fingerprint == genesisAuthorityFingerprint(receipt.kind, receipt.requestJson))
+    rejectDuplicateJsonMembers(receipt.requestJson); rejectDuplicateJsonMembers(receipt.outcomeJson)
+    fun request() = campaignJson.decodeFromString<List<String?>>(receipt.requestJson).also {
+        require(it.size == 5) { "Unsupported historical membership request shape." }
+    }
     return when (receipt.kind) {
-        "create-actor", "register-actor", "accept-actor" -> campaignJson.decodeFromString<GenesisActorCreationOutcome>(receipt.outcomeJson).actor
-        "update-association" -> campaignJson.decodeFromString<GenesisActorAuthority>(receipt.outcomeJson)
+        "create-actor", "register-actor", "accept-actor" -> {
+            val outcome = campaignJson.decodeFromString<GenesisActorCreationOutcome>(receipt.outcomeJson)
+            val actor = outcome.actor
+            require(actor.activationCommandId == receipt.commandId && actor.lastCommandId == receipt.commandId &&
+                actor.actorId == outcome.profile.id && actor.playable == (outcome.playable != null)) {
+                "Historical membership is not bound to its original activation."
+            }
+            outcome.playable?.let { require(it.character.id == actor.actorId && actor.playableRevision == it.revision) }
+            // These are the same frozen request/outcome invariants used by complete
+            // authority backup validation, without reading today's actor or campaign.
+            when (receipt.kind) {
+                "create-actor" -> {
+                    val input = request()
+                    require(outcome.profile.name == input[0] && actor.role.name == input[1] &&
+                        actor.campaignId == input[2] && actor.ownerActorId == input[3] && actor.revision == 1L) {
+                        "Historical membership differs from its creation request."
+                    }
+                    val requested = input[4]?.let { reforgeJson.decodeFromString<ReforgeCharacter>(it) }
+                    require((requested == null) == (outcome.playable == null))
+                    requested?.let { require(outcome.playable?.character == it.copy(revision = 1)) {
+                        "Historical activation changed its requested mechanics."
+                    } }
+                }
+                "register-actor" -> {
+                    val input = request()
+                    require(actor.actorId == input[0] && actor.role.name == input[2] && actor.campaignId == input[3] &&
+                        actor.ownerActorId == input[4] && actor.revision == 1L && !actor.playable &&
+                        outcome.profile.revision == Math.addExact(requireNotNull(input[1]).toLong(), 1L)) {
+                        "Historical membership differs from its registration request."
+                    }
+                }
+                else -> {
+                    val review = campaignJson.decodeFromString<GenesisActorAuthorityReview>(receipt.requestJson)
+                    require(review.fingerprint == genesisActorAuthorityReviewFingerprint(review))
+                    genesisValidateLegacyModifierResolutions(review.playable.character, review.source?.abilities.orEmpty(), review.legacyModifierResolutions)
+                    require(actor.actorId == review.actorId && actor.role == review.role && actor.campaignId == review.campaignId &&
+                        actor.ownerActorId == review.ownerActorId && actor.revision == Math.addExact(review.expectedAuthorityRevision ?: 0L, 1L)) {
+                        "Historical membership differs from its reviewed association."
+                    }
+                    val result = requireNotNull(outcome.playable)
+                    require(result.character == review.playable.character.copy(revision = Math.addExact(review.playable.revision, 1L)) &&
+                        result.origin == review.playable.origin && result.createdAt == review.playable.createdAt) {
+                        "Historical activation changed unreviewed mechanics or provenance."
+                    }
+                }
+            }
+            actor
+        }
+        "update-association" -> {
+            val input = request()
+            campaignJson.decodeFromString<GenesisActorAuthority>(receipt.outcomeJson).also { actor ->
+                require(actor.actorId == input[0] && actor.role.name == input[2] && actor.campaignId == input[3] &&
+                    actor.ownerActorId == input[4] && actor.revision == Math.addExact(requireNotNull(input[1]).toLong(), 1L)) {
+                    "Historical membership differs from its association request."
+                }
+            }
+        }
         else -> error("Encounter membership does not reference an actor association decision.")
     }.also { require(it.lastCommandId == receipt.commandId) }
 }
