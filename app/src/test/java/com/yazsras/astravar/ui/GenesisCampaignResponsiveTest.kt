@@ -207,6 +207,24 @@ class GenesisCampaignResponsiveTest {
             compose.onNode(hasText("Campaign import") and hasClickAction()).assertIsDisplayed()
             assertEquals("An expanded library and its reading position survive section changes",
                 expandedLibraryPosition, scrollPosition("Journal"), 1f)
+            compose.onNodeWithTag("navigation-Companions").performClick()
+            compose.onNodeWithTag("navigation-Campaign").performClick()
+            awaitCampaignContext()
+            compose.onNodeWithTag("section-Journal").assertIsSelected()
+            compose.onNode(hasText("Campaign import") and hasClickAction()).assertIsDisplayed()
+            assertEquals("Loading the hub again must not clamp the expanded library position",
+                expandedLibraryPosition, scrollPosition("Journal"), 1f)
+            val expandedState = savedState(activity)
+            activity.pause().stop().destroy()
+            activity = Robolectric.buildActivity(ComponentActivity::class.java).create(expandedState).start().resume().visible()
+            mount()
+            awaitCampaignContext()
+            compose.onNodeWithTag("navigation-Campaign").assertIsSelected()
+            compose.onNodeWithTag("section-Journal").assertIsSelected()
+            compose.onNode(hasText("Campaign import") and hasClickAction()).assertIsDisplayed()
+            assertEquals("Process-style recreation must retain the expanded library position after records load",
+                expandedLibraryPosition, scrollPosition("Journal"), 1f)
+            capture("genesis-campaign-library-font200-restored", activity.get())
             assertEquals("Navigation must not change retained connected campaign records", beforeRecords,
                 runBlocking { app.genesisStorage.authority.backup.exportWithProof().currentFingerprint })
         } finally {

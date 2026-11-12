@@ -78,3 +78,27 @@ retains the offscreen check after deeper scrolling, and adds a selected long
 campaign name. All existing route, bounds and restoration assertions remain.
 This follow-up still requires execution. Backend60/rules166 results above remain
 valid for their recorded source; no broad release acceptance is implied.
+
+## Reading-position regression found during resumed QA
+
+Local lintDebug and QA assembleDebug passed (zero lint errors,69 warnings/1hint).
+Native test Kotlin compilation exposed a nested implicit-lambda shadow in the
+file-picker helper; naming the observed node explicitly fixes it. Native observer
+and test APKs then compiled and assembled successfully.
+
+The long-campaign fixture correctly rejected the old partial export; the test
+now compares Complete connected backup fingerprints before/after navigation.
+All full-text, geometry, route, section-position, detail/Back and initial Activity
+recreation checks passed, then the final expanded-library assertion found a real
+product defect: returning People→Journal shifted scroll4521→4398. Journal content
+re-subscribed with empty initial lists, briefly measuring a shorter page and
+clamping the saved position before its real records arrived.
+
+The fix retains a combined loaded journal snapshot above the section boundary and
+mounts restored scrolling content only after its campaign context and relevant
+records have emitted. Empty saved lists remain valid; loading is distinct. No
+delay or corrective scrolling is used. The unchanged exact-position assertion
+is extended through primary navigation and a second parcelled Activity recreation.
+Standalone label tests wait for the real journal instead of its loading heading.
+This product correction requires fresh execution; oldb8ce full/native runs
+43220288546/43220288629 predate it and cannot establish release acceptance.

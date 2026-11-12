@@ -29,8 +29,16 @@ import java.util.UUID
         .collectAsState(initial = false to emptyList<GenesisCampaignRecord>())
     val associationState by remember(environment.authority) { environment.authority.actorAssociations.map { true to it } }
         .collectAsState(initial = false to emptyList<GenesisActorAuthority>())
-    val profiles by environment.campaign.records.characterProfiles.collectAsState(initial = emptyList())
-    val playable by environment.local.observeAll().collectAsState(initial = emptyList())
+    val profileState by remember(environment.campaign) { environment.campaign.records.characterProfiles.map { true to it } }
+        .collectAsState(initial = false to emptyList<CharacterProfile>())
+    val playableState by remember(environment.local) { environment.local.observeAll().map { true to it } }
+        .collectAsState(initial = false to emptyList<ReforgeSavedCharacter>())
+    // Collect above the section boundary so switching tabs never substitutes an
+    // empty checkpoint/entity/project list for the journal currently being read.
+    val journal by rememberRebirthJournalSnapshot(environment.campaign)
+    val journalSnapshot = journal
+    val profiles = profileState.second
+    val playable = playableState.second
     val campaigns = campaignState.second
     val actors = associationState.second
     val selected = campaigns.firstOrNull { it.id == environment.selectedCampaignId && !it.archived }
@@ -45,6 +53,8 @@ import java.util.UUID
     var error by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    val sectionReady = environment.selectionLoaded && campaignState.first &&
+        (if (section == "Journal") journalSnapshot != null else associationState.first && profileState.first && playableState.first)
     fun selectCampaign(id: String?) {
         scope.launch {
             try { environment.preferences.selectCampaign(id); status = "Campaign context selected"; dialog = null }
@@ -58,53 +68,60 @@ import java.util.UUID
         PlayerTabs(listOf("People", "Journal"), section, { section = it }, Modifier.padding(horizontal = 16.dp))
         Box(Modifier.weight(1f).fillMaxWidth().instrumentSurface().testTag("genesis-campaign-viewport"),
             contentAlignment = Alignment.TopCenter) {
-            sectionStates.SaveableStateProvider(section) {
-                Column(Modifier.widthIn(max = 900.dp).fillMaxWidth()
-                    .verticalScroll(if (section == "Journal") journalScroll else peopleScroll)
-                    .testTag("genesis-campaign-scroll-$section")
-                    .padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    val expandedText = LocalDensity.current.fontScale >= 1.5f
-                    if (expandedText) {
-                        PlayerHeading("Campaign")
-                        PlayerTextButton(onClick = { dialog = "Campaigns" }) { Text("Choose campaign") }
-                    } else PlayerHeading("Campaign") {
-                        PlayerTextButton(onClick = { dialog = "Campaigns" }) { Text("Choose campaign") }
-                    }
-                    val campaignName = selected?.name ?: if (environment.selectedCampaignId == null) "Unassigned campaign" else "Selected campaign unavailable"
-                    if (expandedText) {
-                        Text(campaignName, style = MaterialTheme.typography.titleLarge)
-                        PlayerTextButton(onClick = { open("Encounters") }) { Text("Encounters") }
-                    } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(campaignName, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-                        PlayerTextButton(onClick = { open("Encounters") }) { Text("Encounters") }
-                    }
-                    if (section == "Journal") {
-                        Text("Journal · all retained campaign records", style = MaterialTheme.typography.labelLarge,
-                            color = RebuildPalette.Muted)
-                        RebirthCampaignJournalContent(environment.campaign, open, showHeading = false)
-                    } else {
-                        if (!campaignState.first || !associationState.first || !environment.selectionLoaded) LinearProgressIndicator(Modifier.fillMaxWidth())
-                        Text("Membership is explicit. Selecting a campaign does not move anyone into it.", color = RebuildPalette.Muted)
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            PlayerButton(onClick = { dialog = "NPC" }, enabled = environment.selectionLoaded) { Text("Create NPC") }
-                            PlayerOutlinedButton(onClick = { dialog = "Members" }) { Text("Add existing") }
+            // A restored ScrollState must first measure real content. Measuring a
+            // loading placeholder can clamp a near-bottom position irreversibly.
+            if (!sectionReady) Column(Modifier.fillMaxWidth().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                Text(if (section == "Journal") "Loading journal…" else "Loading campaign members…", color = RebuildPalette.Muted)
+            } else {
+                sectionStates.SaveableStateProvider(section) {
+                    Column(Modifier.widthIn(max = 900.dp).fillMaxWidth()
+                        .verticalScroll(if (section == "Journal") journalScroll else peopleScroll)
+                        .testTag("genesis-campaign-scroll-$section")
+                        .padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        val expandedText = LocalDensity.current.fontScale >= 1.5f
+                        if (expandedText) {
+                            PlayerHeading("Campaign")
+                            PlayerTextButton(onClick = { dialog = "Campaigns" }) { Text("Choose campaign") }
+                        } else PlayerHeading("Campaign") {
+                            PlayerTextButton(onClick = { dialog = "Campaigns" }) { Text("Choose campaign") }
                         }
-                        PlayerSearch(query, { query = it }, "Find a campaign member")
-                        val members = actors.filter { it.campaignId == environment.selectedCampaignId }
-                            .filter { actor -> query.isBlank() || profiles.firstOrNull { it.id == actor.actorId }?.name?.contains(query.trim(), true) == true }
-                        if (members.isEmpty()) PlayerEmpty("No matching members", "Create an NPC or assign an existing character or companion. Saved records outside this campaign remain available.")
-                        members.forEach { actor ->
-                            val profile = profiles.firstOrNull { it.id == actor.actorId }
-                            PlayerEntry(profile?.name ?: "Saved actor", genesisRoleLabel(actor.role) + if (actor.playable) " · Shared gameplay values" else " · Source record", "People",
-                                { dialog = "Actor:${actor.actorId}" }, trailing = "Membership")
-                            if (actor.playable && playable.any { it.character.id == actor.actorId && !it.character.archived }) {
-                                PlayerTextButton(onClick = { openActor(actor.actorId, actor.role == GenesisActorRole.COMPANION) }) { Text("Open ${profile?.name ?: "sheet"}") }
-                            } else if (actor.role == GenesisActorRole.NPC) {
-                                PlayerTextButton(onClick = { open("Connections:${actor.actorId}") }) { Text("Open NPC details") }
+                        val campaignName = selected?.name ?: if (environment.selectedCampaignId == null) "Unassigned campaign" else "Selected campaign unavailable"
+                        if (expandedText) {
+                            Text(campaignName, style = MaterialTheme.typography.titleLarge)
+                            PlayerTextButton(onClick = { open("Encounters") }) { Text("Encounters") }
+                        } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(campaignName, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                            PlayerTextButton(onClick = { open("Encounters") }) { Text("Encounters") }
+                        }
+                        if (section == "Journal") {
+                            Text("Journal · all retained campaign records", style = MaterialTheme.typography.labelLarge,
+                                color = RebuildPalette.Muted)
+                            RebirthCampaignJournalContent(requireNotNull(journalSnapshot), open, showHeading = false)
+                        } else {
+                            Text("Membership is explicit. Selecting a campaign does not move anyone into it.", color = RebuildPalette.Muted)
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                PlayerButton(onClick = { dialog = "NPC" }, enabled = environment.selectionLoaded) { Text("Create NPC") }
+                                PlayerOutlinedButton(onClick = { dialog = "Members" }) { Text("Add existing") }
                             }
+                            PlayerSearch(query, { query = it }, "Find a campaign member")
+                            val members = actors.filter { it.campaignId == environment.selectedCampaignId }
+                                .filter { actor -> query.isBlank() || profiles.firstOrNull { it.id == actor.actorId }?.name?.contains(query.trim(), true) == true }
+                            if (members.isEmpty()) PlayerEmpty("No matching members", "Create an NPC or assign an existing character or companion. Saved records outside this campaign remain available.")
+                            members.forEach { actor ->
+                                val profile = profiles.firstOrNull { it.id == actor.actorId }
+                                PlayerEntry(profile?.name ?: "Saved actor", genesisRoleLabel(actor.role) + if (actor.playable) " · Shared gameplay values" else " · Source record", "People",
+                                    { dialog = "Actor:${actor.actorId}" }, trailing = "Membership")
+                                if (actor.playable && playable.any { it.character.id == actor.actorId && !it.character.archived }) {
+                                    PlayerTextButton(onClick = { openActor(actor.actorId, actor.role == GenesisActorRole.COMPANION) }) { Text("Open ${profile?.name ?: "sheet"}") }
+                                } else if (actor.role == GenesisActorRole.NPC) {
+                                    PlayerTextButton(onClick = { open("Connections:${actor.actorId}") }) { Text("Open NPC details") }
+                                }
+                            }
+                            if (status.isNotBlank()) Text(status, color = RebuildPalette.Ice)
+                            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
                         }
-                        if (status.isNotBlank()) Text(status, color = RebuildPalette.Ice)
-                        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
                     }
                 }
             }

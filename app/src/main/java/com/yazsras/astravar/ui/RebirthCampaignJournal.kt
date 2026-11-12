@@ -18,18 +18,38 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.R
 import com.yazsras.astravar.data.CampaignLedgerRepository
+import com.yazsras.astravar.data.CampaignCheckpoint
+import com.yazsras.astravar.data.ConnectionEntity
+import com.yazsras.astravar.data.InventionProject
+import kotlinx.coroutines.flow.combine
+
+internal data class RebirthJournalSnapshot(val checkpoints: List<CampaignCheckpoint>,
+    val entities: List<ConnectionEntity>, val projects: List<InventionProject>)
+
+/** Null means not loaded; an emitted empty journal is a real saved state. */
+@Composable internal fun rememberRebirthJournalSnapshot(repository: CampaignLedgerRepository): State<RebirthJournalSnapshot?> =
+    remember(repository) {
+        combine(repository.party.checkpoints, repository.records.entities, repository.records.projects) { checkpoints, entities, projects ->
+            RebirthJournalSnapshot(checkpoints, entities, projects)
+        }
+    }.collectAsState(initial = null)
 
 /** A read-only window onto the same saved journal records used by the editors. */
 @Composable fun RebirthCampaignJournal(repository: CampaignLedgerRepository, open: (String) -> Unit) {
-    Page { RebirthCampaignJournalContent(repository, open) }
+    val snapshot by rememberRebirthJournalSnapshot(repository)
+    val loaded = snapshot
+    if (loaded == null) Column(Modifier.fillMaxSize().instrumentSurface().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        PlayerHeading("Campaign")
+        LinearProgressIndicator(Modifier.fillMaxWidth())
+        Text("Loading journal…", color = RebuildPalette.Muted)
+    } else Page { RebirthCampaignJournalContent(loaded, open) }
 }
 
-/** Embed the journal in a parent-owned scroll surface without nesting another page or heading. */
-@Composable internal fun ColumnScope.RebirthCampaignJournalContent(repository: CampaignLedgerRepository,
+/** The parent retains loaded records and owns scrolling; remounting must not measure a false empty journal. */
+@Composable internal fun ColumnScope.RebirthCampaignJournalContent(snapshot: RebirthJournalSnapshot,
     open: (String) -> Unit, showHeading: Boolean = true) {
-    val checkpoints by repository.party.checkpoints.collectAsState(initial = emptyList())
-    val entities by repository.records.entities.collectAsState(initial = emptyList())
-    val projects by repository.records.projects.collectAsState(initial = emptyList())
+    val (checkpoints, entities, projects) = snapshot
     val latest = checkpoints.maxByOrNull { it.updatedAt }
     val expandedText = LocalDensity.current.fontScale > 1.15f
     if (showHeading) PlayerHeading("Campaign") {

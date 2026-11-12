@@ -134,6 +134,8 @@ class RebirthCampaignJournalTest {
         try {
             resources.updateConfiguration(Configuration(original).apply { this.fontScale = fontScale }, resources.displayMetrics)
             activity.get().setContent { AstravarTheme { RebirthCampaignJournal(repository, opened::add) } }
+            // Wait for the real journal page, rather than its loading heading.
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Your living world").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Campaign").assertIsDisplayed()
             capture("$captureName-header", activity.get())
             checkLabel("Campaign", singleLine = true)
