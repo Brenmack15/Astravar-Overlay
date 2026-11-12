@@ -12,10 +12,32 @@ tree `25ac8d5012b0a0daba86d82dba63c61d93a2baaf`. Local equivalent
 - `checkpoint/astravar-genesis-resumed-verification-20261112`
 - `feat/astravar-project-genesis-resume-verification-20261112`
 
-Fresh exactde98 gates created14:51:36UTC, still pending as of15:22UTC.
-Rules/debug stage passed15:21:13; release tests/lint/QA APK are running.
-Native baseline/candidate build passed15:11:54; ordered emulator journeys running.
-No final gate conclusion/count or artifact acceptance is claimed yet:
+Exactde98 native gate FAILED. Do not sign, activate the owner transport, or
+label de98 a release candidate. Full gate still running release/lint after its
+rules/debug stage passed15:21:13. Native build passed15:11:54, then10 native tests
+passed and VisualRebirth failed at line227 / ObservedUi460.
+
+Actual failure PNG/XML/settings show font_scale=1.0, density432. Tab strip
+[11,751..1069,881] is130px high, but central Equipment clickable bounds end874
+(123px). The scrolled Spell slots disclosure has clickable bounds
+[43,874..1037,1012], above its ScrollView viewport starting939; its out-of-viewport
+accessibility region occludes central tab bounds. Decorative tab children still
+have130px bounds; they must NOT substitute for actual actionable bounds.
+Root and two reviewers independently identified this production semantic clipping
+problem. A focused viewport-boundary correction is being investigated; no new
+product fix is committed yet. Keep the48dp and native assertions unchanged.
+
+Artifact13959240370,72,597,017bytes, SHA256
+`b572221483040a1aaffe0faa57d6c7946a91fd0da43181a62b34d0859f0a7c9c`.
+Downloaded source+embedded APKde98 and product digest verified. Product APK SHA256
+`797ce0c717e8241bbb2dcfdf9b5a6682a11aa6b9ac43f5fd79ad8c106145d206`.
+Independent schema6→9 retention, canonical heal and sameUID10216/firstInstallTime
+15:12:55 package49→50 proofs passed. Source scripts/schema Git blobs matched.
+Later connected/crafting/encounter/import stages did not run. Full results pending.
+Evidence: `genesis-resume-evidence/de98cb69/native/` (verified-summary.json,
+independent-readback, pre-reset failure PNG/XML/TXT and original artifact).
+
+Pinned de98 workflows:
 - Full43241574505/job131263095907: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43241574505
 - Native43241574458/job131263095844: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43241574458
 
