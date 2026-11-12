@@ -12,7 +12,10 @@ tree `25ac8d5012b0a0daba86d82dba63c61d93a2baaf`. Local equivalent
 - `checkpoint/astravar-genesis-resumed-verification-20261112`
 - `feat/astravar-project-genesis-resume-verification-20261112`
 
-Fresh exactde98 gates created14:51:36UTC, pending:
+Fresh exactde98 gates created14:51:36UTC, still pending as of15:22UTC.
+Rules/debug stage passed15:21:13; release tests/lint/QA APK are running.
+Native baseline/candidate build passed15:11:54; ordered emulator journeys running.
+No final gate conclusion/count or artifact acceptance is claimed yet:
 - Full43241574505/job131263095907: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43241574505
 - Native43241574458/job131263095844: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43241574458
 
