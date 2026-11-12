@@ -237,7 +237,7 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
     if (connectedCraftOpen && connected != null && selected != null) key(selected.id) {
         GenesisCraftingEditor(connected, selected, onDismiss = { connectedCraftOpen = false }, onSaved = { outcome ->
             connectedCraftOpen = false; mode = "detail"; revealCraftOutput = true
-            actions.message = "Craft saved · ${outcome.sourceOutput.title} is in ${outcome.sourceOutput.owner}'s inventory"
+            actions.message = "Craft saved · ${outcome.sourceOutput.title}"
         }, onUseSourceOnly = { connectedCraftOpen = false; beginCraft() })
     }
     if (mode.isNotBlank() && !connectedCraftOpen) {

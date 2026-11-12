@@ -58,12 +58,17 @@ private fun genesisCraftContainerLabel(character: ReforgeCharacter, instance: It
     var ownerQuery by rememberSaveable(project.id) { mutableStateOf("") }
     var membershipId by rememberSaveable(project.id) { mutableStateOf<String?>(null) }
     var commandId by rememberSaveable(project.id) { mutableStateOf(UUID.randomUUID().toString()) }
+    // One atomic bundle value also protects a stale activity snapshot after the durable hint clears.
+    var pendingJson by rememberSaveable(project.id) { mutableStateOf<String?>(null) }
     // Approval and the mechanical snapshot never restore independently after recreation.
     var reviewed by remember { mutableStateOf<GenesisCraftingReview?>(null) }
     var acknowledged by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
-    var completed by remember { mutableStateOf(false) }
+    var recoveryLoaded by remember { mutableStateOf(false) }
+    var pending by remember { mutableStateOf<GenesisPendingCraft?>(null) }
+    var savedOutcome by remember { mutableStateOf<GenesisCraftingOutcome?>(null) }
+    var recoveryChecked by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val draftsValid = selectionsDraft.canSave && descriptionDraft.canSave && sourceDraft.canSave
     val selectedOwner = playable.firstOrNull { it.character.id == ownerId }
@@ -72,14 +77,30 @@ private fun genesisCraftContainerLabel(character: ReforgeCharacter, instance: It
     val containers = selectedOwner?.character?.items.orEmpty().filter {
         it.quantity > 0 && it.state in setOf(ItemState.CARRIED, ItemState.STORED) && it.id !in selectedMaterialIds
     }
-    val dirty = !completed && (title.isNotBlank() || quantity != "1" || description.isNotBlank() ||
+    val dirty = savedOutcome == null && (title.isNotBlank() || quantity != "1" || description.isNotBlank() ||
         selections.isNotEmpty() || ownerId != null || containerId != null || source != project.source)
+    suspend fun recoverPending() {
+        recoveryChecked = false
+        val restored = pendingJson?.let(::decodeGenesisPendingCraft)
+        val recovery = GenesisCraftSubmission.recover(environment, project.id, restored)
+        pending = recovery.pending
+        pendingJson = recovery.pending?.let(::encodeGenesisPendingCraft)
+        savedOutcome = recovery.outcome
+        recoveryChecked = true; recoveryLoaded = true
+    }
+    LaunchedEffect(environment.authority, environment.preferences, project.id) {
+        busy = true
+        try { recoverPending() }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { error = e.message ?: "The previous craft outcome could not be verified. Preserve this draft and retry the lookup." }
+        finally { busy = false }
+    }
     LaunchedEffect(step, reviewed) { if (step == 2 && reviewed == null) step = 1 }
     fun edit(section: Int) {
-        if (!busy) { step = section; reviewed = null; acknowledged = false; error = ""; commandId = UUID.randomUUID().toString() }
+        if (!busy && recoveryLoaded && pending == null) { step = section; reviewed = null; acknowledged = false; error = ""; commandId = UUID.randomUUID().toString() }
     }
     fun prepareReview() {
-        if (busy || !loaded || !draftsValid) return
+        if (busy || !loaded || !draftsValid || !recoveryLoaded || pending != null) return
         error = ""; acknowledged = false
         try {
             require(title.isNotBlank()) { "Enter the crafted item's name." }
@@ -114,6 +135,69 @@ private fun genesisCraftContainerLabel(character: ReforgeCharacter, instance: It
             }
         } catch (e: Exception) { error = e.message ?: "Check the selected materials and destination." }
     }
+    fun finishSaved() {
+        val token = pending ?: return
+        if (busy) return
+        busy = true; error = ""
+        scope.launch {
+            try {
+                val outcome = GenesisCraftSubmission.acknowledge(environment, token)
+                // Keep the bundle token until this surface is disposed; an old snapshot must recover.
+                onSaved(outcome)
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = e.message ?: "The saved craft could not be verified. Retry the lookup before continuing." }
+            finally { busy = false }
+        }
+    }
+    if (!recoveryLoaded || pending != null || pendingJson != null) {
+        val outcome = savedOutcome
+        PlayerSheet(if (outcome != null) "Craft saved" else "Check previous craft", onDismiss = {
+            if (outcome != null) finishSaved() else onDismiss()
+        }, dirty = outcome == null && dirty, dismissEnabled = !busy, actions = {
+            when {
+                outcome != null -> PlayerButton(enabled = !busy, onClick = ::finishSaved) { Text("Return to invention") }
+                recoveryChecked && pending != null -> PlayerButton(enabled = !busy, onClick = {
+                    val token = pending ?: return@PlayerButton
+                    busy = true; error = ""
+                    scope.launch {
+                        try {
+                            val committed = GenesisCraftSubmission.reviewAgain(environment, token)
+                            if (committed != null) savedOutcome = committed
+                            else {
+                                pending = null; pendingJson = null; reviewed = null; acknowledged = false
+                                commandId = UUID.randomUUID().toString(); step = 1
+                            }
+                        } catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { recoveryChecked = false; error = e.message ?: "The pending craft could not be resolved." }
+                        finally { busy = false }
+                    }
+                }) { Text("Review draft again") }
+                else -> PlayerButton(enabled = !busy, onClick = {
+                    busy = true; error = ""
+                    scope.launch {
+                        try { recoverPending() }
+                        catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { error = e.message ?: "The previous craft outcome could not be verified." }
+                        finally { busy = false }
+                    }
+                }) { Text("Check saved outcome") }
+            }
+        }) {
+            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("genesis-craft-error"))
+            if (outcome != null) {
+                Text("${outcome.sourceOutput.quantity} × ${outcome.sourceOutput.title}", style = MaterialTheme.typography.titleLarge)
+                Text("The saved receipt confirms this craft and its material consumption. Reopening this result does not craft again.", color = RebuildPalette.Muted)
+                GenesisReviewValue("Recorded owner", outcome.sourceOutput.owner)
+                GenesisReviewValue("Recorded location", outcome.sourceOutput.location)
+                Text("These are the recorded results. Later inventory edits or transfers remain intact.", color = RebuildPalette.Muted)
+            } else if (recoveryChecked) {
+                Text("No completed craft was found for this attempt.", style = MaterialTheme.typography.titleMedium)
+                Text("Materials were not consumed by this command. Review the current project, quantities and output again before confirming.", color = RebuildPalette.Muted)
+            } else Text("Checking the previous command before another craft can be prepared. No command is retried automatically.", color = RebuildPalette.Muted)
+        }
+        return
+    }
     val frozen = reviewed
     PlayerSheet(if (frozen == null) "Record connected craft" else "Review connected craft", onDismiss,
         dirty = dirty, dismissEnabled = !busy, scrollResetKey = Triple(step, frozen?.fingerprint, error), actions = {
@@ -125,13 +209,19 @@ private fun genesisCraftContainerLabel(character: ReforgeCharacter, instance: It
                     val review = frozen ?: return@PlayerButton
                     if (!busy) {
                         busy = true; error = ""
+                        val token = GenesisPendingCraft(project.id, review.fingerprint, commandId)
+                        pendingJson = encodeGenesisPendingCraft(token); pending = token; recoveryChecked = false
                         scope.launch {
                             try {
-                                val outcome = environment.authority.crafting.accept(review, commandId)
-                                completed = true
-                                onSaved(outcome)
+                                savedOutcome = GenesisCraftSubmission.submit(environment, review, token)
+                                recoveryChecked = true
                             } catch (e: CancellationException) { throw e }
-                            catch (e: Exception) { error = e.message ?: "Craft was not saved. Review the current records and try again." }
+                            catch (e: Exception) {
+                                error = e.message ?: "The craft outcome needs to be checked before continuing."
+                                try { recoverPending() }
+                                catch (cancel: CancellationException) { throw cancel }
+                                catch (lookup: Exception) { error = lookup.message ?: "The craft outcome could not be verified. Preserve the pending command." }
+                            }
                             finally { busy = false }
                         }
                     }

@@ -117,7 +117,9 @@ class GenesisCraftingUiTest {
             }
             capture("genesis-connected-craft-review")
             confirm()
-            awaitText("Craft saved · Fictional Brass Compass is in Fictional Craft Keeper's inventory")
+            awaitText("Craft saved")
+            action("Return to invention")
+            awaitText("Craft saved · Fictional Brass Compass")
             runBlocking {
                 val saved = requireNotNull(f.env.local.get(actorId))
                 val output = f.db.ledgerDao().allItems().single { it.title == "Fictional Brass Compass" }
@@ -149,6 +151,83 @@ class GenesisCraftingUiTest {
             assertEquals(1, reopened.recordsDao().allCrafts().size)
             assertTrue(GenesisAuthorityRepository(reopened).backup.previewRestore(GenesisAuthorityRepository(reopened).backup.exportWithProof().text).valid)
         } } finally { reopened.close() }
+    }
+
+    @Test fun commitBeforeDismissRecoversWithoutBundleAndStaleBundleNeverConsumesAgain() = fixture { f ->
+        var registry = SaveableStateRegistry(null) { true }
+        val visible = mutableStateOf(true)
+        var callbacks = 0
+        var firstOutputId: String? = null
+        show({ if (visible.value) CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
+            GenesisCraftingEditor(f.env, f.project, { visible.value = false }, {
+                callbacks++; firstOutputId?.let { original -> assertEquals(original, it.outputId) }
+                firstOutputId = it.outputId; visible.value = false
+            })
+        } }) {
+            chooseMaterialsAndOutput()
+            action("Review connected craft")
+            awaitText("I confirm this craft is resolved and these quantities are correct")
+            confirm()
+            awaitText("Craft saved")
+            assertEquals(0, callbacks)
+            val pending = runBlocking { requireNotNull(f.env.preferences.pendingCraft(f.project.id)) }
+            val outputId = runBlocking { f.db.recordsDao().allCrafts().single().outputItemId }
+            firstOutputId = outputId
+            capture("genesis-connected-craft-saved")
+
+            // Dispose every in-memory editor state, including its bundle. Only the durable intent remains.
+            compose.runOnIdle { visible.value = false }
+            compose.waitForIdle()
+            compose.runOnIdle { registry = SaveableStateRegistry(null) { true }; visible.value = true }
+            awaitText("Craft saved")
+            compose.onNodeWithTag("genesis-confirm-craft").assertDoesNotExist()
+            assertEquals(0, callbacks)
+            var staleBundle: Map<String, List<Any?>> = emptyMap()
+            compose.runOnIdle { staleBundle = registry.performSave() }
+            action("Return to invention")
+            compose.waitForIdle()
+            assertEquals(1, callbacks)
+            runBlocking { assertNull(f.env.preferences.pendingCraft(f.project.id)) }
+
+            // An older Android saved-state snapshot must still show the same immutable outcome.
+            compose.runOnIdle { registry = SaveableStateRegistry(staleBundle) { true }; visible.value = true }
+            awaitText("Craft saved")
+            compose.onNodeWithTag("genesis-confirm-craft").assertDoesNotExist()
+            runBlocking {
+                assertEquals(3, f.db.ledgerDao().getItem(materialId)?.quantity)
+                assertEquals(3, f.env.local.get(actorId)?.character?.items?.single { it.id == materialId }?.quantity)
+                assertEquals(outputId, f.db.recordsDao().allCrafts().single().outputItemId)
+                assertEquals(2, f.db.recordsDao().allConsumptions().single().quantity)
+                assertEquals(outputId, f.env.authority.crafting.completed(pending.projectId, pending.reviewFingerprint, pending.commandId)?.outputId)
+                assertTrue(f.env.authority.backup.previewRestore(f.env.authority.backup.exportWithProof().text).valid)
+            }
+            action("Return to invention")
+            compose.waitForIdle()
+            assertEquals(2, callbacks)
+        }
+    }
+
+    @Test fun pendingUncommittedAttemptRequiresFreshReviewAndFreshApproval() = fixture { f ->
+        val unused = GenesisPendingCraft(f.project.id, "e".repeat(64), "fictional-uncommitted-craft")
+        runBlocking { f.env.preferences.rememberPendingCraft(unused) }
+        show({ GenesisCraftingEditor(f.env, f.project, {}, {}) }) {
+            awaitText("No completed craft was found for this attempt.")
+            compose.onNodeWithTag("genesis-confirm-craft").assertDoesNotExist()
+            runBlocking {
+                assertEquals(unused, f.env.preferences.pendingCraft(f.project.id))
+                assertEquals(5, f.db.ledgerDao().getItem(materialId)?.quantity)
+                assertTrue(f.db.recordsDao().allCrafts().isEmpty())
+            }
+            action("Review draft again")
+            awaitText("Crafted item name")
+            runBlocking { assertNull(f.env.preferences.pendingCraft(f.project.id)) }
+            action("Back")
+            chooseMaterialsAndOutput()
+            action("Review connected craft")
+            awaitText("I confirm this craft is resolved and these quantities are correct")
+            compose.onNodeWithTag("genesis-confirm-craft").assertIsNotEnabled()
+            runBlocking { assertEquals(5, f.db.ledgerDao().getItem(materialId)?.quantity); assertTrue(f.db.recordsDao().allCrafts().isEmpty()) }
+        }
     }
 
     @Test fun sourceOnlyWorkflowRemainsReachableAndDoesNotEnrollItsOutput() = fixture { f ->

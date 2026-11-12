@@ -7,7 +7,25 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+
+/** A device-local recovery hint, never evidence that materials were consumed. */
+@Serializable data class GenesisPendingCraft(val projectId: String, val reviewFingerprint: String, val commandId: String)
+
+internal fun encodeGenesisPendingCraft(value: GenesisPendingCraft): String {
+    checkId(value.projectId); checkId(value.commandId)
+    require(value.reviewFingerprint.matches(Regex("[0-9a-f]{64}"))) { "The saved craft review identity is invalid." }
+    return reforgeJson.encodeToString(value)
+}
+
+internal fun decodeGenesisPendingCraft(value: String): GenesisPendingCraft {
+    require(value.length <= 2_048) { "The saved craft recovery hint is too large." }
+    rejectDuplicateJsonMembers(value)
+    return reforgeJson.decodeFromString<GenesisPendingCraft>(value).also { encodeGenesisPendingCraft(it) }
+}
 
 /** One asynchronous, device-local file. It never changes character mechanics or old app preferences. */
 private val Context.reforgePlayerPreferences: DataStore<Preferences> by preferencesDataStore(name = "astravar-reforge-preferences")
@@ -47,6 +65,39 @@ class ReforgePreferences(private val store: DataStore<Preferences>) {
     suspend fun selectProfile(profileId: String) {
         checkId(profileId)
         store.edit { it[ACTIVE_PROFILE] = profileId }
+    }
+
+    private fun pendingCraftKey(projectId: String): Preferences.Key<String> {
+        checkId(projectId)
+        return stringPreferencesKey("pending_craft_${reforgeHash(projectId)}")
+    }
+
+    /** Load the unresolved UI intent before another command for this project can be prepared. */
+    suspend fun pendingCraft(projectId: String): GenesisPendingCraft? = store.data.first()[pendingCraftKey(projectId)]
+        ?.let(::decodeGenesisPendingCraft)?.also {
+            require(it.projectId == projectId) { "The saved craft recovery hint belongs to another invention." }
+        }
+
+    /** Persist before submitting. A second surface cannot replace an unresolved command. */
+    suspend fun rememberPendingCraft(value: GenesisPendingCraft) {
+        val encoded = encodeGenesisPendingCraft(value)
+        val key = pendingCraftKey(value.projectId)
+        store.edit { preferences ->
+            val current = preferences[key]?.let(::decodeGenesisPendingCraft)
+            check(current == null || current == value) { "Resolve the earlier craft outcome before preparing another craft." }
+            preferences[key] = encoded
+        }
+    }
+
+    /** Exact compare-and-clear protects a newer intent from an older activity's completion. */
+    suspend fun clearPendingCraft(expected: GenesisPendingCraft) {
+        encodeGenesisPendingCraft(expected)
+        val key = pendingCraftKey(expected.projectId)
+        store.edit { preferences ->
+            val current = preferences[key]?.let(::decodeGenesisPendingCraft)
+            check(current == null || current == expected) { "A different craft is awaiting recovery. Close and reopen this invention." }
+            if (current == expected) preferences.remove(key)
+        }
     }
 
     /** Device-local navigation preference, never a character revision or gameplay mutation. */
