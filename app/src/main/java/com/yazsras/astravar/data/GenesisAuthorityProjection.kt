@@ -141,7 +141,9 @@ internal suspend fun genesisProjectCharacter(db: CampaignLedgerDb, before: Refor
                 description = definition.description, evidenceStatus = "Confirmed", itemState = genesisItemState(instance), source = GENESIS_AUTHORITY_SOURCE), genesisChild(commandId, "item-create:$id"), id)
             val value = GenesisItemAuthority(id, owner?.character?.id, reforgeJson.encodeToString(definition), reforgeJson.encodeToString(instance),
                 (priorAuthority?.revision ?: 0) + 1, priorAuthority?.activationCommandId ?: if (sourceProof != null && !activation) commandId else authority.activationCommandId,
-                priorAuthority?.sourceProofJson ?: sourceProof?.takeUnless { activation }, System.currentTimeMillis())
+                // A known null belongs to this item's original actor/creation receipt. It is
+                // not a missing value to fill with another item's acquisition proof.
+                if (priorAuthority != null) priorAuthority.sourceProofJson else sourceProof?.takeUnless { activation }, System.currentTimeMillis())
             if (priorAuthority == null) db.genesisAuthorityDao().insert(value)
             else if (priorAuthority.copy(revision = value.revision, updatedAt = value.updatedAt) != value) db.genesisAuthorityDao().update(value)
         }

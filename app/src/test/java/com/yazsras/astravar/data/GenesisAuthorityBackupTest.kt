@@ -411,6 +411,87 @@ class GenesisAuthorityBackupTest {
         assertFalse(target.previewRestore(genesisAuthorityBackupJson(corrupt)).valid)
     }
 
+    @Test fun successiveAcquisitionsPreserveEachExistingItemsOriginalAuthorityProofThroughRestore() = runBlocking {
+        val campaign = CampaignLedgerRepository(sourceDb)
+        val playable = ReforgeRepository(sourceDb)
+        val authority = GenesisAuthorityRepository(sourceDb)
+        val ownerId = "mixed-provenance-owner"
+        campaign.records.saveProfile(CharacterProfile(id = ownerId, name = "Fictional provenance keeper"),
+            source = sourceLabel, commandId = "mixed-source-profile")
+        suspend fun assignedSource(id: String, name: String, evidence: String): LedgerItem {
+            val item = campaign.create(LedgerDraft(name, quantity = 1, evidenceStatus = evidence,
+                itemState = "Carried", source = sourceLabel, description = "Retain the exact original evidence for $name."),
+                "$id-create", id)
+            campaign.party.moveItem(ItemMoveCommand(item.id, item.revision, holderProfileId = ownerId,
+                source = sourceLabel, commandId = "$id-place"))
+            return requireNotNull(sourceDb.ledgerDao().getItem(item.id))
+        }
+        // Legacy assignment happens before authority enrollment, through ordinary repositories.
+        val initialSource = assignedSource("mixed-initial-item", "Initial fictional lens", "Confirmed")
+        val firstSource = assignedSource("mixed-source-first", "Proposed fictional crystal", "Proposed")
+        val secondSource = assignedSource("mixed-source-second", "Second fictional crystal", "Confirmed")
+        playable.create(ReforgeCharacter(ownerId, "Fictional provenance keeper",
+            itemDefinitions = listOf(ItemDefinition("mixed-initial-definition", initialSource.title, description = initialSource.description)),
+            items = listOf(ItemInstance(initialSource.id, "mixed-initial-definition"))), "mixed-playable-create")
+        val actorReview = authority.reviewActorAuthority(ownerId, GenesisActorRole.PLAYER)
+        val activated = authority.acceptActorAuthority(actorReview, "mixed-actor-activation")
+        val created = authority.createItem(ownerId, requireNotNull(activated.playable).revision,
+            ItemDefinition("mixed-created-definition", "Created fictional compass"),
+            ItemInstance("mixed-created-item", "mixed-created-definition"), "mixed-item-creation")
+        val originalRows = sourceDb.genesisAuthorityDao().allItems().associateBy { it.itemId }
+        assertEquals(setOf(initialSource.id, "mixed-created-item"), originalRows.keys)
+        assertEquals("mixed-actor-activation", originalRows.getValue(initialSource.id).activationCommandId)
+        assertEquals("mixed-item-creation", originalRows.getValue("mixed-created-item").activationCommandId)
+        originalRows.values.forEach { assertNull(it.sourceProofJson) }
+        val originalLedger = originalRows.keys.associateWith { requireNotNull(sourceDb.ledgerDao().getItem(it)) }
+        val originalPlacements = originalRows.keys.associateWith { requireNotNull(sourceDb.partyDao().placement(it)) }
+        val originalReceipts = originalRows.values.associate { row ->
+            row.activationCommandId to requireNotNull(readGenesisAuthorityReceipt(sourceDb, row.activationCommandId))
+        }
+        suspend fun assertOriginalProofsUnchanged() {
+            originalRows.forEach { (id, row) ->
+                assertEquals(row, readGenesisAuthorityItem(sourceDb, id))
+                assertEquals(originalLedger.getValue(id), sourceDb.ledgerDao().getItem(id))
+                assertEquals(originalPlacements.getValue(id), sourceDb.partyDao().placement(id))
+            }
+            originalReceipts.forEach { (id, receipt) -> assertEquals(receipt, readGenesisAuthorityReceipt(sourceDb, id)) }
+        }
+
+        val firstReview = playable.reviewCampaignItem(campaign, ownerId, firstSource.id)
+        assertEquals(created.revision, firstReview.expectedRevision)
+        playable.acceptCampaignItem(campaign, firstReview, "mixed-first-acquisition")
+        assertOriginalProofsUnchanged()
+        val firstAuthority = requireNotNull(readGenesisAuthorityItem(sourceDb, firstSource.id))
+        assertEquals("mixed-first-acquisition", firstAuthority.activationCommandId)
+        assertEquals(reforgeJson.encodeToString(firstReview), firstAuthority.sourceProofJson)
+        assertEquals("Proposed", firstReview.source.item.evidenceStatus)
+        assertTrue(firstReview.definition.effects.isEmpty())
+
+        val secondReview = playable.reviewCampaignItem(campaign, ownerId, secondSource.id)
+        val finalPlayable = playable.acceptCampaignItem(campaign, secondReview, "mixed-second-acquisition")
+        assertOriginalProofsUnchanged()
+        assertEquals(firstAuthority, readGenesisAuthorityItem(sourceDb, firstSource.id))
+        val secondAuthority = requireNotNull(readGenesisAuthorityItem(sourceDb, secondSource.id))
+        assertEquals("mixed-second-acquisition", secondAuthority.activationCommandId)
+        assertEquals(reforgeJson.encodeToString(secondReview), secondAuthority.sourceProofJson)
+        assertNotEquals(firstAuthority.sourceProofJson, secondAuthority.sourceProofJson)
+
+        val exported = source.exportWithProof()
+        val expected = decodeGenesisAuthorityBackup(exported.text)
+        val restoreReview = target.previewRestore(exported.text)
+        assertTrue(restoreReview.conflicts.joinToString(), restoreReview.valid)
+        target.restore(restoreReview, "mixed-provenance-restore")
+        val restored = decodeGenesisAuthorityBackup(target.exportWithProof().text)
+        assertEquals(expected.authority, restored.authority)
+        assertEquals(expected.campaign.items, restored.campaign.items)
+        assertEquals(expected.campaign.records.placements, restored.campaign.records.placements)
+        assertEquals(expected.playable, restored.playable)
+        assertEquals(finalPlayable, ReforgeRepository(targetDb).get(ownerId))
+        assertEquals("Proposed", targetDb.ledgerDao().getItem(firstSource.id)?.evidenceStatus)
+        assertEquals(firstAuthority, readGenesisAuthorityItem(targetDb, firstSource.id))
+        assertEquals(secondAuthority, readGenesisAuthorityItem(targetDb, secondSource.id))
+    }
+
     @Test fun reviewedLegacyReconciliationAndRenamedCompanionResourceKeepOriginalProofPortable() = runBlocking {
         val id = "legacy-reviewed-companion"
         val campaign = CampaignLedgerRepository(sourceDb)
