@@ -171,8 +171,7 @@ class CampaignImportInstrumentationTest {
 
     private fun campaignEntry(name: String) {
         if (name == "Inventory") { ui.campaignItems(product); return }
-        ui.ensurePrimaryTab(product, "Campaign")
-        if (device.hasObject(By.text("‹ Campaign").pkg(product))) tap("‹ Campaign")
+        ui.campaignJournal(product)
         if (name in listOf("Campaign import", "Reference Library")) tap("Library & source records")
         tap(name)
     }

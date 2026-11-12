@@ -77,8 +77,7 @@ class VisualRebirthJourneyInstrumentationTest {
         }
     }
     private fun campaignHome() {
-        ui.ensurePrimaryTab(product, "Campaign")
-        if (device.hasObject(By.text("‹ Campaign").pkg(product))) tap("‹ Campaign")
+        ui.campaignJournal(product)
     }
     private fun companionRoster() {
         ui.ensurePrimaryTab(product, "Companions")
@@ -117,8 +116,8 @@ class VisualRebirthJourneyInstrumentationTest {
         find("none")
         capture("resource-persistence", "Character", "1 / 3")
 
-        // Gear belongs to the exact reviewed companion sheet, independently of
-        // its original source record and the selected main character.
+        // Gear belongs to the exact reviewed companion and projects into its
+        // shared source record without changing the selected main character.
         companionRoster()
         capture("companion-selection", "Companions", "CI Native Ally")
         tap("CI Native Ally")
@@ -135,7 +134,7 @@ class VisualRebirthJourneyInstrumentationTest {
         restart()
         companionRoster()
         tap("CI Native Ally")
-        find("4 / 12")
+        find("6 / 12")
         tap("Open playable sheet")
         ui.selectSection(product, "Equipment")
         find("CI Native Ally Charm")

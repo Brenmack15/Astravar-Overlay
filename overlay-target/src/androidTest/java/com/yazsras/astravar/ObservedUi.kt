@@ -288,7 +288,7 @@ internal class ObservedUi(private val device: UiDevice) {
         tapText("Tools", packageName)
         val group = when (name) {
             "Armor weapon", "Spell reservoir", "Spell library", "Rules & profile", "Resources & recovery", "Roll history" -> "Advanced combat & magic"
-            "Character sources", "Character backup", "Campaign backup", "Campaign import", "Owner connection", "Weapon backup", "Fictional sync", "Remote Updates" -> "Records, backups & connection"
+            "Character sources", "Character backup", "Campaign backup", "Complete backup", "Campaign import", "Owner connection", "Weapon backup", "Fictional sync", "Remote Updates" -> "Records, backups & connection"
             else -> null
         }
         if (group != null) tapText(group, packageName)
@@ -305,6 +305,15 @@ internal class ObservedUi(private val device: UiDevice) {
         else tapText("Campaign items", packageName)
     }
 
+    /** Preserve source-directory journeys through the explicit Genesis Journal tab. */
+    fun campaignJournal(packageName: String) {
+        ensurePrimaryTab(packageName, "Campaign")
+        if (device.hasObject(By.text("‹ Campaign").pkg(packageName))) tapText("‹ Campaign", packageName)
+        // Older frozen builds expose the journal directly. This optional tab
+        // follows only an observed new campaign selector, preserving that route.
+        if (device.hasObject(By.text("Choose campaign").pkg(packageName))) selectSection(packageName, "Journal")
+    }
+
     /** Discover a flat section strip through native scrolling, then activate its tab once. */
     fun selectSection(packageName: String, label: String) {
         // Restrict observation to the requested tab family inside its actual
@@ -314,7 +323,8 @@ internal class ObservedUi(private val device: UiDevice) {
             listOf("My gear", "Campaign items"),
             listOf("My items", "All items"),
             listOf("All gear", "Equipped", "Attuned"),
-            listOf("All", "Prepared", "Cantrips")
+            listOf("All", "Prepared", "Cantrips"),
+            listOf("People", "Journal")
         )
         val family = families.singleOrNull { label in it } ?: error("Unknown tab family for $label")
         val deadline = SystemClock.uptimeMillis() + 30_000

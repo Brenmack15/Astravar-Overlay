@@ -20,7 +20,7 @@ class PlayerFirstJourneyInstrumentationTest {
     private val product get() = InstrumentationRegistry.getArguments().getString("astravarPackage") ?: "com.yazsras.astravar"
     private val ui get() = ObservedUi(device)
     private val files get() = instrumentation.targetContext.getExternalFilesDir(null)!!
-    private fun tap(text: String) = ui.tapText(text, product, scrollAttempts = 18)
+    private fun tap(text: String) = ui.tapText(text, product, scrollAttempts = 18, preferLast = true)
     private fun find(text: String) = ui.textBounds(text, product, scrollAttempts = 18)
     private fun enter(label: String, value: String) {
         tap(label)
@@ -38,15 +38,28 @@ class PlayerFirstJourneyInstrumentationTest {
         ui.awaitMainAfterSavedDialogs(product)
     }
     private fun stat(prefix: String) = ui.descriptionBounds(prefix, product)
+    private fun acceptSharedReview(role: String, alreadyAgree: Boolean = false) {
+        find("Campaign membership")
+        ui.textBounds(role, product, scrollAttempts = 18, preferLast = true)
+        tap("Review shared values")
+        find("Review shared values")
+        ui.textBounds(role, product, scrollAttempts = 18, preferLast = true)
+        if (alreadyAgree) find("The shared values already agree.")
+        tap("I reviewed these values and membership")
+        tap("Accept reviewed values")
+        find("Shared values connected and saved")
+        capture("shared-${role.lowercase()}-review")
+        tap("Close")
+    }
 
     @Test fun characterAdvancementReviewedEquipmentCompanionAndRestart() {
         assertEquals("Fictional destructive fixtures require an emulator", "1", device.executeShellCommand("getprop ro.kernel.qemu").trim())
         restart()
         ui.ensurePrimaryTab(product, "Character")
-        if (device.hasObject(By.text("Switch character").pkg(product))) {
+        if (device.hasObject(By.desc("Switch character").pkg(product))) {
             // The older-build retention fixture intentionally survives into
             // these new-character journeys; do not reset it to regain onboarding.
-            tap("Switch character")
+            ui.tap(By.desc("Switch character").pkg(product), "Switch character")
             tap("Create character or companion")
         } else tap("Create character")
         enter("Name", "CI Native Hero")
@@ -67,7 +80,7 @@ class PlayerFirstJourneyInstrumentationTest {
         find("CI Native Hero")
         stat("STR 8")
         capture("created-sheet")
-        tap("Switch character")
+        ui.tap(By.desc("Switch character").pkg(product), "Switch character")
         find("Characters & companions")
         ui.captureStableDialog(File(files, "player-first-character-selection.png"), product,
             "Characters & companions", listOf(By.text("CI Native Hero").pkg(product)))
@@ -94,12 +107,12 @@ class PlayerFirstJourneyInstrumentationTest {
         stat("HP 31 / 37")
         ui.selectSection(product, "Sheet")
         tap("Campaign connections")
-        tap("I reviewed this name-only campaign identity")
-        tap("Create campaign identity")
-        find("Campaign identity ready")
-        find("CI Native Hero Revised · Character")
+        // The new actor already has one shared identity. Explicitly review its
+        // source/playable values; no second name-only record should be created.
+        acceptSharedReview("Character", alreadyAgree = true)
+        find("CI Native Hero Revised")
+        stat("HP 31 / 37")
         capture("reviewed-campaign-identity")
-        tap("Close")
 
         ui.ensurePrimaryTab(product, "Inventory")
         // One inventory exposes playable gear and source records. Exercise the
@@ -208,10 +221,12 @@ class PlayerFirstJourneyInstrumentationTest {
         })
 
         ui.ensurePrimaryTab(product, "Companions")
+        if (device.hasObject(By.text("Back to companions").pkg(product))) tap("Back to companions")
+        if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
         tap("+ Add companion")
         enter("Companion name", "CI Native Ally")
         tap("Association")
-        tap("Unassigned") // This journey tests a separately created manual relationship below.
+        tap("Unassigned owner") // This journey tests a separately created manual relationship below.
         tap("Review & save")
         tap("Create companion")
         find("CI Native Ally")
@@ -259,6 +274,9 @@ class PlayerFirstJourneyInstrumentationTest {
         tap("I will review training, actions and current resources before relying on this sheet")
         tap("Review baselines & create sheet")
         tap("Save character")
+        // Adoption preserves the original source snapshot. Connecting its
+        // reviewed mechanics is a separate explicit decision, including role.
+        acceptSharedReview("Companion")
         stat("HP 4 / 12")
         tap("Back to companions")
         find("Open playable sheet")
@@ -285,7 +303,7 @@ class PlayerFirstJourneyInstrumentationTest {
         // Compose returns to the roster in the same window. Verify the destination rather than a window change.
         device.pressBack()
         find("Go to combat")
-        find("4 / 12")
+        find("6 / 12")
 
         restart()
         ui.ensurePrimaryTab(product, "Character")
@@ -294,11 +312,12 @@ class PlayerFirstJourneyInstrumentationTest {
         ui.ensurePrimaryTab(product, "Companions")
         if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
         tap("CI Native Ally")
+        find("6 / 12")
         tap("Go to combat")
         find("CI Native Ally")
         stat("HP 6 / 12")
         instrumentation.sendStatus(0, Bundle().apply {
-            putString("stream", "\nCHECKPOINT: native companion reviewed for play, entered Combat directly, saved and reopened companion-only healing, and retained original source HP and main-character selection\n")
+            putString("stream", "\nCHECKPOINT: native companion adopted and explicitly connected as Companion, entered Combat directly, saved healing once and reopened matching source/playable HP 6/12; main-character selection and HP31/37 remained unchanged. Original source snapshot retention is independently checked by repository and backup tests.\n")
         })
     }
 }

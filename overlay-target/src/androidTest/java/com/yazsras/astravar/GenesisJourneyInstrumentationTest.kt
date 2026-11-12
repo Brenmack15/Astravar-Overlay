@@ -146,6 +146,8 @@ class GenesisJourneyInstrumentationTest {
         find("Shared values connected and saved")
         tap("Close")
         ui.ensurePrimaryTab(product, "Companions")
+        if (device.hasObject(By.text("Back to companions").pkg(product))) tap("Back to companions")
+        if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
         tap("+ Add companion")
         enter("Companion name", "Genesis Native Familiar")
         tap("Review & save")
