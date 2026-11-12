@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.data.*
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.util.UUID
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable internal fun GenesisCampaignHub(environment: GenesisConnectedEnvironment, open: (String) -> Unit,
     openActor: (String, Boolean) -> Unit) {
     val campaignState by remember(environment.authority) { environment.authority.campaigns.map { true to it } }
@@ -43,7 +45,10 @@ import java.util.UUID
     }
     Column(Modifier.fillMaxSize().background(RebuildPalette.Canvas)) {
         Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            PlayerHeading("Campaign") {
+            if (LocalDensity.current.fontScale >= 1.5f) {
+                PlayerHeading("Campaign")
+                PlayerTextButton(onClick = { dialog = "Campaigns" }) { Text("Choose campaign") }
+            } else PlayerHeading("Campaign") {
                 PlayerTextButton(onClick = { dialog = "Campaigns" }) { Text("Choose campaign") }
             }
             Text(selected?.name ?: if (environment.selectedCampaignId == null) "Unassigned campaign" else "Selected campaign unavailable", style = MaterialTheme.typography.titleLarge)
@@ -57,7 +62,7 @@ import java.util.UUID
             } else Page {
                 if (!campaignState.first || !associationState.first || !environment.selectionLoaded) LinearProgressIndicator(Modifier.fillMaxWidth())
                 Text("Membership is explicit. Selecting a campaign does not move anyone into it.", color = RebuildPalette.Muted)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     PlayerButton(onClick = { dialog = "NPC" }, enabled = environment.selectionLoaded) { Text("Create NPC") }
                     PlayerOutlinedButton(onClick = { dialog = "Members" }) { Text("Add existing") }
                 }

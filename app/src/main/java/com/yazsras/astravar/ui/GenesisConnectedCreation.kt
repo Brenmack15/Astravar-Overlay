@@ -47,6 +47,8 @@ internal fun genesisOwnerLabel(profile: CharacterProfile, profiles: List<Charact
     return if (ambiguous) "$label · ${profile.id}" else label
 }
 
+private data class GenesisCampaignChoice(val id: String?, val label: String)
+
 @Composable internal fun GenesisAssociationFields(
     environment: GenesisConnectedEnvironment, actorId: String? = null,
     role: GenesisActorRole, setRole: (GenesisActorRole) -> Unit,
@@ -58,12 +60,15 @@ internal fun genesisOwnerLabel(profile: CharacterProfile, profiles: List<Charact
     val actors by environment.authority.actorAssociations.collectAsState(initial = emptyList())
     val profiles by environment.campaign.records.characterProfiles.collectAsState(initial = emptyList())
     var ownerQuery by rememberSaveable { mutableStateOf("") }
-    if (roleEditable) Choices("Role", GenesisActorRole.entries, role, display = ::genesisRoleLabel) {
+    if (roleEditable) Choices("Role", GenesisActorRole.entries, role, display = ::genesisRoleLabel, enabled = enabled) {
         if (enabled) { setRole(it); if (it != GenesisActorRole.COMPANION) setOwner(null) }
     }
-    Choices("Campaign", listOf<String?>(null) + campaigns.filterNot { it.archived }.map { it.id }, campaignId,
-        display = { id -> campaigns.firstOrNull { it.id == id }?.name ?: if (id == null) "Unassigned campaign" else "Unavailable campaign" }) {
-        if (enabled) setCampaign(it)
+    val campaignChoices = listOf(GenesisCampaignChoice(null, "Unassigned campaign")) +
+        campaigns.filterNot { it.archived }.map { GenesisCampaignChoice(it.id, it.name) }
+    val selectedCampaign = campaignChoices.firstOrNull { it.id == campaignId }
+        ?: GenesisCampaignChoice(campaignId, "Unavailable campaign")
+    Choices("Campaign", campaignChoices, selectedCampaign, display = { it.label }, enabled = enabled) {
+        if (enabled) setCampaign(it.id)
     }
     if (campaignId != null && campaigns.none { it.id == campaignId && !it.archived })
         Text("Choose an available campaign before saving.", color = MaterialTheme.colorScheme.error)
