@@ -4,6 +4,37 @@ This is the current recovery handoff, not a completed release. Read the original
 `docs/genesis/SESSION_RECOVERY.md` at `ee04d5f` first, then this file and the
 linked milestone checkpoints. Later verified facts here supersede older status.
 
+## Latest continuation point — integrated source saved after outage
+
+Start new work from `52831db4963639eca07956c3e485f45cfe673431` after first
+checking the recoverable local worktrees below. Tree
+`74780088b1c4048fde8c865b17e65761deb21cd0`; branches
+`checkpoint/astravar-genesis-encounter-integrated-20261112` and
+`feat/astravar-project-genesis-encounter-verification-20261112`.
+
+This preserves three ordered parents: D product/editor/proof
+`89712ae0c47a92c9d75d41a36b866c1d4b835cfa`, C routing/provenance
+`8ac2f646ee697bec5ad7b6198c15475c537fb0a2`, and completed reconstructed native9
+`1e1b5a97a0c3dacce3df6e64f099013b033cf1ac`. The exact union of655 file blobs and
+modes was checked against GitHub's resulting recursive tree. The only shared
+product file, GenesisAuthorityValidation.kt, retains D validation and adds the
+exact four-line C origin/creation-time invariant. Read
+`COMBINED_ENCOUNTER_CHECKPOINT_20261112.md`.
+
+Exact integrated runs (observed in progress, no pass claim):
+- Full: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43152318166
+- Native9: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43152318129
+
+C8ac also has isolated runs, observed in progress:
+- Full: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43151601302
+- Native8: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43151601228
+- Branch: `feat/astravar-project-genesis-provenance-fix-20261112`.
+
+Do not restart integration or rebuild the now-complete seven reconstructed
+native files. Inspect actual run status/results and work from guarded descendants.
+The original local991dd4a bytes still have not been recovered. None of these new
+sources has runtime acceptance at this handoff. PR15 remains at B7e229.
+
 ## Execution interruption: recover before doing more work
 
 The execution environment became unavailable after the implementation and test
@@ -132,6 +163,18 @@ state, return Equipment → Sheet, verify stable item/owner and unchanged unrela
 actor/weapon. Exactly3 files changed from E4ab (product, test, handoff), reviewed
 through GitHub. No local compilation/test/signing was possible for c66.
 
+### Portable provenance follow-up: C8ac
+
+`checkpoint/astravar-genesis-provenance-20261112` at
+`8ac2f646ee697bec5ad7b6198c15475c537fb0a2` directly follows c66.
+Complete backup validation now matches the existing live invariant: a managed
+saved character's origin and creation timestamp must match the frozen activation.
+Three new explicit-Unit tests cover coherent altered-origin/latest-receipt rejection,
+altered timestamp rejection, and a legitimate edited restore followed by a live
+association/export. Ordinary save timestamps are monotonic, so the timestamp
+fixture does not depend on elapsed wall time. Source/peer review completed;
+compilation and execution pending. See PROVENANCE_RESTORE_CHECKPOINT_20261112.md.
+
 ### Earlier evidence retained
 
 C4c6 full43139619440 PASSED with the same898 app totals,166 rules,272 Python,
@@ -205,10 +248,21 @@ D focused verification before outage:
 - XML/logs last saved under `genesis-encounters-second-results`,
   `genesis-encounters-focused1.log`, `genesis-encounters-focused2.log`.
 
-Another D product issue is identified but UNFIXED: the saved encounter editor
-mixes live actorState readiness with captured actors in its initialization effect.
-Freeze one composition Pair and add an existing-saved-setup edit/revision regression.
-Current5 UI tests do not establish that case. Do not invent a passing result.
+The saved encounter editor snapshot issue is corrected in c018489d369e238081682693cfafcd43bc5dbb09
+on checkpoint/astravar-genesis-encounter-editor-recovery-20261112. It freezes the
+actor readiness/list Pair and adds two real saved-edit/recreation/stale-membership
+UI tests. These new cases remain unexecuted at this handoff; the prior5 passing
+UI cases do not establish them.
+
+D historical membership proof is tightened in89712ae0c47a92c9d75d41a36b866c1d4b835cfa
+on checkpoint/astravar-genesis-encounter-proof-20261112 (child ofc018).
+All four historical membership kinds now bind the original request to its outcome,
+not only its rehashed fingerprint. Five new explicit-Unit tests reject coherent
+old-request corruption without writes and retain legitimate old participation,
+exact retry and portable history after later reassignment. The scoped validator
+does not read today's actor/campaign or export the full archive. Two independent
+source reviews found no blocking API/compatibility issue; runtime checks pending.
+Both follow-ups are included in integrated52831.
 
 ## Missing local native work: partial source recovery
 
@@ -230,11 +284,21 @@ scripts/genesis-connected-readback.py; scripts/genesis-crafting-readback.py;
 scripts/genesis-upgrade-readback.py; scripts/native-campaign-import-readback.py;
 scripts/native_recheck.py; scripts/tests/test_native_campaign_import_readback.py.
 
-The recovered CI stage asks for schema9, but these dependency changes are missing.
-Do NOT dispatch that partial branch as a complete native candidate.
+The a224 partial branch alone still lacks these dependencies and must not be
+used as a complete native candidate. A later complete reconstruction now exists:
 Before outage222 Python cases passed together, then17 encounter cases including
 2 new adversarial proofs passed:224 unique observed passes across runs, not one
 final combined224 run. Shell syntax/diff passed. Native Kotlin was not compiled.
+
+All seven missing files now have complete NEW equivalents at
+`1e1b5a97a0c3dacce3df6e64f099013b033cf1ac` on
+`checkpoint/astravar-genesis-native-reconstructed-20261112`, descendant ofa224.
+Read NATIVE_RECONSTRUCTION_20261112.md. All files were fetched back text-equal.
+The reconstructed encounter/integration suite has18 authored cases, including a
+manual-order mutation independent of initiative and a schema9 crafting boundary.
+Schema8 defaults/classes and historical31/32/33/export-format pins remain.
+These bytes were not executed locally; old222/17 results do not verify them.
+Completed source is included in integrated52831 and its new full/native9 gates.
 
 Local e023321/803668e changed only GenesisEncounterNavigationUiTest diagnostics:
 separate Character/Combat waits; retain capture Activity; on any Throwable during
@@ -278,15 +342,16 @@ acceptance exists. No owner data was used in the fictional tests.
 
 1. Recover the existing execution environment/worktrees/objects read-only first;
    preserve missing local commits before any new implementation or build.
-2. Inspect c66 full/native runs on its feature branch. Resolve genuine product
-   or test-harness failures without dropping gameplay, identity or retention checks.
-   Preserve each correction before running on its exact new source.
-3. Preserve/recover D991/e023/803. If unavailable, use the explicit partial handoff
-   to reconstruct only missing files, label them reconstructed and verify them.
-   Combine the guarded D core/Unit fix, completed native work and verified C fixes
-   on a new recoverable checkpoint; do not overwrite either history.
-4. Fix the pending D editor snapshot issue; run focused backend13, migration2,
-   encounter UI/navigation and saved-setup regression, then full/native9 gates.
+2. Inspect integrated52831 full/native9 runs, plus isolated C8ac/c66 results.
+   Resolve genuine product or harness failures without dropping gameplay, identity
+   or retention checks. Preserve corrections before testing exact new source.
+3. Preserve/recover original D991/e023/803 if available. Compare991 with the already
+   complete1e1b reconstructed equivalents; do not redo or overwrite them blindly.
+   e023/803 are additional timeout diagnostics only; core tests are preserved.
+4. Run/review integrated backend13 plus5 membership-proof, migration2, encounter
+   UI7/navigation, C provenance3 and inventory-route regressions, then the full
+   schema9 gates. The editor/source fixes and all native dependencies are already
+   integrated; do not restart their implementation.
 5. Only when relevant exact-source gates pass, advance PR15 by guarded non-force
    update. Preserve base3543 and unrelated branches/PRs.
 6. Privately recover original signer, verify exact source artifact, sign tested
