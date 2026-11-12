@@ -117,7 +117,7 @@ class GenesisEncounterTest {
         unchangedMechanics(original, authority.backup.snapshot())
     }
 
-    @Test fun identicalRetriesReturnOriginalOutcomeAfterLaterTurnsAndResetWithoutReapplying() = runBlocking {
+    @Test fun identicalRetriesReturnOriginalOutcomeAfterLaterTurnsAndResetWithoutReapplying(): Unit = runBlocking {
         fixture()
         val created = draft()
         val review = encounters.reviewStart(id, created.record.revision)
@@ -185,7 +185,7 @@ class GenesisEncounterTest {
         } finally { target.close() }
     }
 
-    @Test fun invalidRosterAndLifecycleRequestsPreserveAllRecords() = runBlocking {
+    @Test fun invalidRosterAndLifecycleRequestsPreserveAllRecords(): Unit = runBlocking {
         fixture()
         val foreign = authority.createActor("Foreign fictional NPC", GenesisActorRole.NPC, otherWorld.id, commandId = "foreign-npc")
         val invalid = listOf(inputs() + inputs().first(), listOf(GenesisEncounterParticipantInput("missing-actor", 1)),
@@ -320,7 +320,7 @@ class GenesisEncounterTest {
         } finally { target.close() }
     }
 
-    @Test fun olderMissingReceiptStopsReadAdvanceEndAndExactRetryWithoutFurtherWrites() = runBlocking {
+    @Test fun olderMissingReceiptStopsReadAdvanceEndAndExactRetryWithoutFurtherWrites(): Unit = runBlocking {
         fixture()
         val created = draft()
         val review = encounters.reviewStart(id, created.record.revision)
