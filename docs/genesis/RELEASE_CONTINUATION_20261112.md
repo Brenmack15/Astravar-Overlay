@@ -11,9 +11,13 @@ tree `2d102002b922f9cf0f58ab6f6b43a60fddf7371b`. Branches:
 - `checkpoint/astravar-genesis-resumed-verification-20261112`
 - `feat/astravar-project-genesis-resume-verification-20261112`
 
-Fresh exact-source gates started13:01:57UTC and remain pending:
+Fresh exact-source gates started13:01:57UTC and remain pending overall:
 - Full: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43223390477
 - Native: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43223390400
+
+At13:22UTC, full Rules/debug Room+Compose PASSED (13:21:39), release/lint/APK
+running. Native fresh baseline+candidate APK build PASSED (13:21:32), actual
+API36 ordered emulator journeys now running. Final counts/artifacts are pending.
 
 ### Recovered environment and preserved work
 
@@ -83,17 +87,17 @@ byte-equality of every ZIP entry. Never sign a failed or superseded payload.
 No KVM. A normal AOSP API36 software emulator was launched13:08:19UTC using the
 prepared supervisor, boot timeout1200s and maximum lifetime3600s. Persistent exec
 session80618; evidence `genesis-owner-upgrade-emulator/evidence/attempt-20261112T130819Z`.
-At launch it was booting; no APK installed. Poll only that session and send all
+At13:22:45UTC it was still booting (~14minutes); no APK installed. The QCOW2
+data image is actively changing. Port5590 is valid; official-source review shows
+explicit registration to the prestarted private server5049, despite its fallback
+scan-range warning. Do not diagnose a port failure from that warning alone. Poll only that session and send all
 adb operations as supervisor JSON lines through the same session. Do not launch
 another adb client or Gradle concurrently. It owns the shared runtime lock.
-After local build finishes, use one bounded persistent supervisor session for
-every adb action; do not spawn adb in another execution namespace. Prefer starting
-when fresh hosted gates are advanced enough to finish within the60minute maximum.
 Keep original code49 owner APK unchanged; fictional baseline seed, normal install-r,
 native retention/canonical-write and independent DB readback remain required.
 No OS bypasses, data clearing or uninstall.
 
-Next: finish local lint/build, monitor both2798 gates, investigate failures without
+Next: monitor both2798 gates and the bounded owner emulator, investigate failures without
 weaker assertions. Download/check exact successful native artifact and all native
 stages, privately sign that same payload, test actual owner-key update if environment
 permits, preserve reports/screenshots and deliver with honest remaining scope.
