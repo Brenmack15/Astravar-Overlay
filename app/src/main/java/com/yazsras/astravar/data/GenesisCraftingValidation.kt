@@ -1,5 +1,6 @@
 package com.yazsras.astravar.data
 
+import com.yazsras.astravar.rules.reforge.ItemState
 import kotlinx.serialization.encodeToString
 
 internal data class GenesisCraftingEvidence(
@@ -35,6 +36,11 @@ internal fun genesisValidateCraftReceipt(receipt: GenesisAuthorityReceipt, evide
         val use = material.use; val before = material.item; val quantity = requireNotNull(before.quantity)
         require(use.itemId == before.id && use.expectedRevision == before.revision && use.quantity in 1..quantity &&
             !before.archived && before.itemState in setOf("Carried", "Stored"))
+        material.placement?.let { placement ->
+            require(placement.itemId == before.id && placement.state in setOf("Carried", "Stored") && placement.installedProjectId == null) {
+                "Crafted material's original placement was not an ordinary carried or stored material."
+            }
+        }
         val consumption = CraftConsumption("$child:$index", child, before.id, use.quantity, quantity,
             quantity - use.quantity, before.revision, before.revision + 1)
         require(outcome.consumptions.singleOrNull { it.id == consumption.id } == consumption) { "Craft consumption differs from the reviewed quantity." }
@@ -99,6 +105,12 @@ internal fun genesisValidateCraftReceipt(receipt: GenesisAuthorityReceipt, evide
         val before = review.actors.single { it.authority.actorId == authority.ownerActorId }.playable.character
         val instance = before.items.single { it.id == material.item.id }
         val definition = before.itemDefinitions.single { it.id == instance.definitionId }
+        val placement = requireNotNull(material.placement) { "Crafted material's original managed placement is missing." }
+        require(instance.state in setOf(ItemState.CARRIED, ItemState.STORED) &&
+            placement.state == genesisItemState(instance) && material.item.itemState == genesisItemState(instance) &&
+            placement.containerItemId == instance.containerId) {
+            "Crafted material's original physical state differs from its ordinary source placement."
+        }
         require(authority.itemId == instance.id && reforgeJson.decodeFromString<com.yazsras.astravar.rules.reforge.ItemInstance>(authority.instanceJson) == instance &&
             reforgeJson.decodeFromString<com.yazsras.astravar.rules.reforge.ItemDefinition>(authority.definitionJson) == definition &&
             material.placement?.holderProfileId == before.id && instance.quantity == material.item.quantity && !instance.attuned && definition.effects.isEmpty() &&
@@ -109,7 +121,9 @@ internal fun genesisValidateCraftReceipt(receipt: GenesisAuthorityReceipt, evide
     require(requested.owner == owner.profile.name && requested.location == placementLocation(ItemPlacement("preview-output", owner.authority.actorId,
         review.outputContainerItemId, state = requested.itemState)))
     review.outputContainerItemId?.let { container ->
-        require(owner.playable.character.items.any { it.id == container && it.quantity > 0 } && review.materials.none { it.item.id == container })
+        require(requested.itemState == "Stored" && owner.playable.character.items.any {
+            it.id == container && it.quantity > 0 && it.state in setOf(ItemState.CARRIED, ItemState.STORED)
+        } && review.materials.none { it.item.id == container }) { "The original crafted output container was not available for storage." }
     }
     return outcome
 }

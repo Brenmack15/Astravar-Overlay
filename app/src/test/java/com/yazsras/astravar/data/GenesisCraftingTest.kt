@@ -241,11 +241,14 @@ class GenesisCraftingTest {
         fixture()
         val frozen = review()
         val box = db.ledgerDao().getItem(outputContainer)!!
-        campaign.party.moveItem(ItemMoveCommand(box.id, box.revision, holderProfileId = firstId, state = "Stored", source = source, commandId = "craft-container-moved"))
+        campaign.party.moveItem(ItemMoveCommand(box.id, box.revision, expectedPlacementRevision = db.partyDao().placement(box.id)?.revision,
+            holderProfileId = firstId, state = "Stored", source = source, commandId = "craft-container-moved"))
         rejectUnchanged { crafting.accept(frozen, "stale-container-craft") }
         val next = review()
         val sourceItem = db.ledgerDao().getItem(sourceMaterial)!!
-        campaign.party.moveItem(ItemMoveCommand(sourceItem.id, sourceItem.revision, state = "Stored", source = source, commandId = "craft-source-placement-added"))
+        campaign.party.moveItem(ItemMoveCommand(sourceItem.id, sourceItem.revision,
+            expectedPlacementRevision = db.partyDao().placement(sourceItem.id)?.revision,
+            state = "Stored", source = source, commandId = "craft-source-placement-added"))
         rejectUnchanged { crafting.accept(next, "stale-placement-craft") }
         assertTrue(db.recordsDao().allCrafts().isEmpty())
     }
@@ -345,6 +348,101 @@ class GenesisCraftingTest {
             assertTrue(target.reforgeDao().allCharacters().isEmpty())
             assertTrue(target.genesisAuthorityDao().allItems().isEmpty())
         } finally { target.close() }
+    }
+
+    @Test fun rehashedPortableProofRejectsUnavailableSourceOnlyMaterialPlacements() = runBlocking {
+        fixture()
+        val parent = "portable-placement-craft"
+        val frozen = review()
+        val outcome = crafting.accept(frozen, parent)
+        val current = authority.backup.snapshot()
+        val receipt = current.authority.receipts.single { it.commandId == parent }
+        val originalMaterial = frozen.materials.single { it.item.id == sourceMaterial }
+        assertNull(originalMaterial.placement)
+        assertTrue(originalMaterial.use.quantity < originalMaterial.item.quantity!!)
+        val target = Room.inMemoryDatabaseBuilder(context, CampaignLedgerDb::class.java).allowMainThreadQueries().build()
+        try {
+            val recovery = GenesisAuthorityBackupRepository(target)
+            val valid = recovery.previewRestore(genesisAuthorityBackupJson(current))
+            assertTrue(valid.conflicts.joinToString(), valid.valid)
+            // A partial source-only use has no depletion-placement audit. Rehash every enclosing
+            // identity so rejection proves original material eligibility, not a stale checksum.
+            val unavailable = listOf(
+                ItemPlacement(sourceMaterial, state = "Equipped", source = source),
+                ItemPlacement(sourceMaterial, installedProjectId = projectId, state = "Stored", source = source),
+                ItemPlacement(firstMaterial, state = "Carried", source = source))
+            unavailable.forEach { placement ->
+                val changed = frozen.copy(materials = frozen.materials.map {
+                    if (it.item.id == sourceMaterial) it.copy(placement = placement) else it
+                })
+                val forged = changed.copy(fingerprint = genesisCraftReviewFingerprint(changed))
+                val request = campaignJson.encodeToString(forged)
+                val proof = campaignJson.encodeToString(genesisCraftProof(parent, forged, outcome))
+                val changedAuthority = current.authority.copy(
+                    receipts = current.authority.receipts.map {
+                        if (it.commandId == parent) receipt.copy(requestJson = request,
+                            fingerprint = genesisAuthorityFingerprint(receipt.kind, request)) else it
+                    },
+                    items = current.authority.items.map {
+                        if (it.itemId == outcome.outputId) it.copy(sourceProofJson = proof) else it
+                    })
+                val preview = recovery.previewRestore(genesisAuthorityBackupJson(current.copy(authority = changedAuthority)))
+                assertFalse("Unavailable frozen material placement must reject even after rehashing", preview.valid)
+                assertTrue(preview.conflicts.joinToString(), preview.conflicts.any { it.contains("original placement") })
+            }
+            assertTrue(target.reforgeDao().allCharacters().isEmpty())
+            assertTrue(target.genesisAuthorityDao().allItems().isEmpty())
+            assertEquals(current, authority.backup.snapshot())
+        } finally { target.close() }
+    }
+
+    @Test fun rehashedCraftChildrenCannotHideAnUnavailableFrozenPhysicalState() = runBlocking {
+        fixture()
+        val parent = "forged-physical-state-craft"
+        val outcome = crafting.accept(review(), parent)
+        val receipt = readGenesisAuthorityReceipt(db, parent)!!
+        val evidence = genesisCraftEvidence(db, receipt)
+        assertEquals(outcome, genesisValidateCraftReceipt(receipt, evidence))
+        val frozen = campaignJson.decodeFromString<GenesisCraftingReview>(receipt.requestJson)
+        val unchanged = authority.backup.snapshot()
+        // Full consumption projects Consumed regardless of the retained typed state. Keep every
+        // child internally consistent so only frozen material/container eligibility rejects it.
+        listOf(secondMaterial to ItemState.HELD, outputContainer to ItemState.WORN).forEach { (itemId, state) ->
+            val changedActors = frozen.actors.map { actor ->
+                if (actor.playable.character.items.none { it.id == itemId }) actor else {
+                    val saved = actor.playable.copy(character = actor.playable.character.copy(items = actor.playable.character.items.map {
+                        if (it.id == itemId) it.copy(state = state) else it
+                    }))
+                    actor.copy(playable = saved, authority = actor.authority.copy(projectionFingerprint = genesisProjectionFingerprint(saved)))
+                }
+            }
+            val changed = frozen.copy(actors = changedActors, materials = frozen.materials.map { material ->
+                if (material.item.id != itemId) material else {
+                    val physical = changedActors.flatMap { it.playable.character.items }.single { it.id == itemId }
+                    material.copy(authority = material.authority!!.copy(instanceJson = reforgeJson.encodeToString(physical)))
+                }
+            })
+            val forged = changed.copy(fingerprint = genesisCraftReviewFingerprint(changed))
+            val expected = genesisCraftCharacters(forged, outcome.sourceOutput).associateBy { it.id }
+            val forgedOutcome = outcome.copy(actors = outcome.actors.map {
+                it.copy(character = expected.getValue(it.character.id).copy(revision = it.revision))
+            })
+            val forgedEvidence = evidence.copy(changes = evidence.changes.map { change ->
+                val before = forged.actors.single { it.authority.actorId == change.profileId }.playable
+                val after = forgedOutcome.actors.single { it.character.id == change.profileId }
+                change.copy(beforeJson = reforgeJson.encodeToString(before), afterJson = reforgeJson.encodeToString(after),
+                    fingerprint = reforgeHash(reforgeJson.encodeToString(listOf("save", change.profileId, before.revision.toString(),
+                        change.operation, reforgeJson.encodeToString(expected.getValue(change.profileId))))))
+            })
+            val request = campaignJson.encodeToString(forged)
+            val forgedReceipt = receipt.copy(requestJson = request, fingerprint = genesisAuthorityFingerprint(receipt.kind, request),
+                outcomeJson = campaignJson.encodeToString(forgedOutcome))
+            val failure = runCatching { genesisValidateCraftReceipt(forgedReceipt, forgedEvidence) }.exceptionOrNull()
+            assertNotNull("Rehashed unavailable original physical state must reject", failure)
+            val expectedMessage = if (itemId == secondMaterial) "original physical state" else "original crafted output container"
+            assertTrue(failure.toString(), failure!!.message.orEmpty().contains(expectedMessage))
+        }
+        assertEquals(unchanged, authority.backup.snapshot())
     }
 
     @Test fun archivedMaterialOwnerOrOutputOwnerCannotStartOrAcceptCrafting() = runBlocking {
