@@ -35,6 +35,20 @@ native files. Inspect actual run status/results and work from guarded descendant
 The original local991dd4a bytes still have not been recovered. None of these new
 sources has runtime acceptance at this handoff. PR15 remains at B7e229.
 
+## Last CI observation — 04:10:25 UTC
+
+All six runs below remained in progress; none had a failed step at this observation.
+- c66 full43150255995: Rules/debug PASSED at04:10:01; release/lint/APK running.
+- c66 native43150256068: native APK build PASSED at04:03:37; emulator journey running.
+- C8ac full43151601302: rules/debug running; native43151601228: APK build running.
+- Integrated52831 full43152318166: rules/debug running; native43152318129: APK build running.
+
+These are actual step summaries from GitHub. New final test totals are not yet
+observed. Decoded job logs return404 until completion in this connection.
+The earlier E4ab full gate took about53minutes; pending is not failure or success.
+The local execution/signing environment remains unavailable. No owner-signed
+Genesis APK or owner-key/physical installation acceptance was produced.
+
 ## Execution interruption: recover before doing more work
 
 The execution environment became unavailable after the implementation and test
