@@ -156,6 +156,19 @@ class ReforgeRepository private constructor(private val db: RoomDatabase, privat
         }
         work()
     }
+    /** A connected identity is proven by explicit activation in this same database session. */
+    internal suspend fun inspectManagedCampaignIdentity(campaign: CampaignLedgerRepository,
+        reviewed: ReforgeSavedCharacter): ReforgeCampaignIdentity? {
+        val canonical = db as? CampaignLedgerDb ?: return null
+        require(canonical === campaign.transactionDatabase) { "Open campaign and playable records in the same application session before using a connected identity." }
+        return withTransaction {
+            val actor = canonical.genesisAuthorityDao().actor(reviewed.character.id)?.takeIf { it.playable }
+                ?: return@withTransaction null
+            check(dao.character(reviewed.character.id)?.saved() == reviewed) { "This connected character changed. Review the current saved sheet before continuing." }
+            genesisRequireAffectedActor(canonical, actor)
+            ReforgeCampaignIdentity(requireNotNull(canonical.recordsDao().characterProfile(actor.actorId)))
+        }
+    }
     suspend fun readNoteDraft(profileId: String): ReforgeNoteDraft? { ready(); return dao.draft(profileId) }
     suspend fun saveNoteDraft(profileId: String, expectedRevision: Long, text: String,
         expectedDraftUpdatedAt: Long? = null): ReforgeNoteDraft = withTransaction {
@@ -336,9 +349,17 @@ class ReforgeRepository private constructor(private val db: RoomDatabase, privat
         // cannot commit an otherwise unexportable history. Do not impose this scan on
         // unrelated HP/rest edits, and do not retain another copy of the export text.
         try {
-            val canonical = db as? CampaignLedgerDb
-            if (canonical != null && canonical.genesisAuthorityDao().actor(current.id)?.playable == true) GenesisAuthorityBackupRepository(canonical).exportWithProof()
-            else validateGenesisBackupDocumentSize(exportWithProof().text)
+            // This internal recovery proof is not a partial public export: portable managed
+            // records still require Complete backup. Retain the original character/history
+            // guard without reading unrelated campaign archives or relaxing either limit.
+            val recovery = (db as? CampaignLedgerDb)?.let(::genesisPlayableBackupRows) ?: snapshot(0)
+            validateReforgeBackup(recovery)
+            val recoveryText = reforgeJson.encodeToString(recovery)
+            require(recoveryText.length <= REFORGE_MAX_JSON) { "Backup exceeds the supported export size." }
+            validateGenesisBackupDocumentSize(recoveryText)
+            (db as? CampaignLedgerDb)?.genesisAuthorityDao()?.actor(current.id)?.takeIf { it.playable }?.let { actor ->
+                genesisRequireAffectedActor(db as CampaignLedgerDb, actor)
+            }
         }
         catch (error: IllegalArgumentException) {
             throw IllegalArgumentException("This item was not added because a complete character backup could not be validated: ${error.message.orEmpty()} Your previous saved records are unchanged.", error)

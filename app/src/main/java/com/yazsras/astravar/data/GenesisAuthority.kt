@@ -37,9 +37,9 @@ class GenesisAuthorityRepository(private val db: CampaignLedgerDb, private val r
         return null
     }
     private suspend fun record(commandId: String, kind: String, request: String, outcome: String) {
-        dao.insert(GenesisAuthorityReceipt(commandId, kind, genesisAuthorityFingerprint(kind, request), request, outcome, System.currentTimeMillis()))
-        // Explicit creation/enrollment must be recoverable as one portable graph before committing.
-        backup.exportWithProof()
+        val receipt = GenesisAuthorityReceipt(commandId, kind, genesisAuthorityFingerprint(kind, request), request, outcome, System.currentTimeMillis())
+        dao.insert(receipt)
+        genesisRequireAuthorityCommand(db, receipt)
     }
     suspend fun createCampaign(name: String, notes: String = "", commandId: String = UUID.randomUUID().toString()): GenesisCampaignRecord = transaction {
         val clean = name.trim(); require(clean.isNotBlank() && clean.length <= 120 && notes.length <= 12_000) { "Enter a campaign name and supported notes." }
@@ -88,11 +88,14 @@ class GenesisAuthorityRepository(private val db: CampaignLedgerDb, private val r
         record(commandId, "create-item", request, reforgeJson.encodeToString(saved)); saved
     }
     suspend fun reviewActorAuthority(actorId: String, role: GenesisActorRole, campaignId: String? = null,
-        ownerActorId: String? = null): GenesisActorAuthorityReview = transaction {
+        ownerActorId: String? = null, legacyModifierResolutions: List<GenesisLegacyModifierResolution> = emptyList()): GenesisActorAuthorityReview = transaction {
         validateAssociation(actorId, role, campaignId, ownerActorId)
         val saved = requireNotNull(local.get(actorId)) { "Configure and save this actor's reviewed playable mechanics first." }
         val source = db.recordsDao().characterProfile(actorId)?.let { campaign.readCharacterSnapshot(actorId) }
         validateEnrollment(saved, source)
+        // Empty initial previews retain unresolved source modifiers for explicit review.
+        // Once any proof is supplied it must resolve the entire frozen set correctly.
+        if (legacyModifierResolutions.isNotEmpty()) genesisValidateLegacyModifierResolutions(saved.character, source?.abilities.orEmpty(), legacyModifierResolutions)
         val projected = genesisProfile(saved.character, source?.profile)
         val sourceCompanion = db.recordsDao().companion(actorId)
         val sourceEntity = db.recordsDao().entity(actorId)
@@ -115,6 +118,7 @@ class GenesisAuthorityRepository(private val db: CampaignLedgerDb, private val r
             difference("Armor Class", source?.profile?.armorClass, projected.armorClass)
             difference("Level", source?.profile?.level, projected.level)
             Stat.entries.forEach { stat -> difference(stat.name, source?.abilities?.find { it.key == stat.name }?.score, CharacterCalculator.calculate(saved.character).abilities.getValue(stat).effective.value) }
+            source?.abilities.orEmpty().filter { it.magicModifier != 0 }.forEach { difference("${it.key} recorded magical modifier", it.magicModifier, 0) }
             saved.character.items.forEach { item ->
                 val old = source?.items?.find { it.id == item.id }
                 difference("${saved.character.itemDefinitions.find { it.id == item.definitionId }?.name ?: item.id} quantity", old?.quantity, item.quantity)
@@ -143,12 +147,13 @@ class GenesisAuthorityRepository(private val db: CampaignLedgerDb, private val r
         val draft = GenesisActorAuthorityReview(actorId, role, campaignId, ownerActorId, prior?.revision, saved, source, differences, "")
         val supplemental = campaignJson.encodeToString(listOf(sourceCompanion?.let { campaignJson.encodeToString(it) },
             sourceEntity?.let { campaignJson.encodeToString(it) }, campaignJson.encodeToString(sourceResources)))
-        draft.copy(supplementalSourceJson = supplemental).let { it.copy(fingerprint = genesisActorAuthorityReviewFingerprint(it)) }
+        draft.copy(supplementalSourceJson = supplemental, legacyModifierResolutions = legacyModifierResolutions).let { it.copy(fingerprint = genesisActorAuthorityReviewFingerprint(it)) }
     }
     suspend fun acceptActorAuthority(review: GenesisActorAuthorityReview, commandId: String = UUID.randomUUID().toString()): GenesisActorCreationOutcome = transaction {
         val request = campaignJson.encodeToString(review)
         retry(commandId, "accept-actor", request)?.let { return@transaction campaignJson.decodeFromString<GenesisActorCreationOutcome>(it.outcomeJson) }
-        check(reviewActorAuthority(review.actorId, review.role, review.campaignId, review.ownerActorId) == review) { "These records changed after review. Review the latest differences before accepting." }
+        genesisValidateLegacyModifierResolutions(review.playable.character, review.source?.abilities.orEmpty(), review.legacyModifierResolutions)
+        check(reviewActorAuthority(review.actorId, review.role, review.campaignId, review.ownerActorId, review.legacyModifierResolutions) == review) { "These records changed after review. Review the latest differences before accepting." }
         val old = dao.actor(review.actorId)
         withGenesisProjection(db) {
             if (review.source == null) campaign.records.saveProfile(CharacterProfile(name = review.playable.character.name, id = review.actorId), source = GENESIS_AUTHORITY_SOURCE, commandId = genesisChild(commandId, "identity"))
@@ -224,7 +229,6 @@ class GenesisAuthorityRepository(private val db: CampaignLedgerDb, private val r
     }
     private suspend fun validateEnrollment(saved: ReforgeSavedCharacter, source: ReforgeLegacySnapshot?) {
         require(!saved.character.archived) { "Restore this playable actor before connecting it." }
-        require(source?.abilities.orEmpty().none { it.magicModifier != 0 }) { "Legacy manual magical modifiers need explicit structured-effects review before mechanical authority can change. Source records are retained." }
         val others = db.reforgeDao().allCharacters().filter { it.profileId != saved.character.id }.map { it.saved().character }
         validateGenesisItemOwnership(null, saved.character, others)
         saved.character.items.forEach { item ->

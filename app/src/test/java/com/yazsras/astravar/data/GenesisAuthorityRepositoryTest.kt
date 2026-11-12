@@ -148,7 +148,10 @@ class GenesisAuthorityRepositoryTest {
         assertEquals(listOf("Original fictional uncertainty"), db.partyDao().sheet(id)!!.sheet.unresolvedConflicts)
         val command = db.genesisAuthorityDao().receipt("accept-reviewed-authority")!!
         assertEquals(reviewed, campaignJson.decodeFromString<GenesisActorAuthorityReview>(command.requestJson))
-        assertEquals(reviewed, campaignJson.decodeFromString<GenesisActorAuthorityReview>(db.genesisAuthorityDao().item(item.id)!!.sourceProofJson!!))
+        val physical = db.genesisAuthorityDao().item(item.id)!!
+        assertNull(physical.sourceProofJson) // Enrollment references one immutable actor proof rather than duplicating it per item.
+        assertEquals(command.commandId, physical.activationCommandId)
+        assertEquals(reviewed, campaignJson.decodeFromString<GenesisActorAuthorityReview>(requireNotNull(readGenesisAuthorityReceipt(db, physical.activationCommandId)).requestJson))
         assertEquals(6, reviewed.source!!.profile.currentHp)
         assertEquals(1, reviewed.source.items.single { it.id == item.id }.quantity)
 

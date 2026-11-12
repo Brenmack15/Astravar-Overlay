@@ -25,6 +25,7 @@ internal suspend fun ReforgeRepository.inspectCampaignIdentity(legacy: CampaignL
     val character = reviewed.character
     checkId(character.id)
     require(reviewed.revision > 0 && character.revision == reviewed.revision)
+    inspectManagedCampaignIdentity(legacy, reviewed)?.let { return it }
     val originalId = reviewed.origin.sourceProfileId
     if (originalId != null) {
         require(originalId == character.id && reviewed.origin.sourceFingerprint != null) { "The original campaign identity needs source review." }
