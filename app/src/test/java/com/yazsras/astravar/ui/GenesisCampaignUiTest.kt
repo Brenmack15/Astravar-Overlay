@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
+import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.ui.test.*
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.room.Room
@@ -199,8 +201,25 @@ class GenesisCampaignUiTest {
 
     @Test fun staleSharedReviewCannotOverwriteLaterGameplay() = fixture { env, db ->
         val original = runBlocking { env.local.create(ReforgeCharacter("fictional-stale-review", "Fictional Stale Review", baseMaxHp = 20, currentHp = 12)) }
-        show({ GenesisActorMembershipEditor(env, original.character.id, {}) }) {
+        var registry = SaveableStateRegistry(null) { true }
+        val visible = mutableStateOf(true)
+        show({
+            if (visible.value) CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
+                GenesisActorMembershipEditor(env, original.character.id, {})
+            }
+        }) {
             awaitText("Fictional Stale Review")
+            click("Character")
+            compose.onNodeWithText("Companion").performClick()
+            var savedDraft: Map<String, List<Any?>> = emptyMap()
+            compose.runOnIdle { savedDraft = registry.performSave(); visible.value = false }
+            compose.waitForIdle()
+            compose.runOnIdle { registry = SaveableStateRegistry(savedDraft) { true }; visible.value = true }
+            awaitText("Fictional Stale Review")
+            compose.onNode(hasText("Companion") and hasClickAction()).assertExists()
+            compose.onNode(hasText("Close") and hasClickAction()).performClick()
+            awaitText("Discard changes?")
+            compose.onNodeWithText("Keep editing").performClick()
             click("Review shared values")
             awaitText("I reviewed these values and membership")
             compose.onNode(hasText("Accept reviewed values") and hasClickAction()).assertIsNotEnabled()
