@@ -89,6 +89,10 @@ class GenesisCompanionResourceVisibilityTest {
     }
     private fun waitFor(text: String) = compose.waitUntil(15_000) { compose.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty() }
     private fun dialogAction(text: String) = compose.onNode(hasText(text) and hasClickAction() and hasAnyAncestor(isDialog()))
+    // Disabled text fields deliberately omit SetText. Requiring that action would exclude
+    // the very read-only control this regression needs to inspect.
+    private fun readOnlyField(label: String) = compose.onNode(hasText(label) and hasAnyAncestor(isDialog()))
+        .assertIsNotEnabled().assert(hasSetTextAction().not())
 
     @Test fun companionEditorRetainsInactiveHistoryAndUpdatesOnlyBoundAvailability() = fixture { env, db, created ->
         val originalCounter = runBlocking { db.recordsDao().allCompanionResources().single { it.name == "Retired repair" } }
@@ -99,12 +103,12 @@ class GenesisCompanionResourceVisibilityTest {
             compose.onNode(hasText("Retired repair") and hasClickAction()).performScrollTo().performClick()
             waitFor("Inactive source history.")
             dialogAction("Save resource").assertIsNotEnabled()
-            compose.onNode(hasSetTextAction() and hasText("Current amount · blank = unknown")).assertIsNotEnabled()
+            readOnlyField("Current amount · blank = unknown")
             dialogAction("Close").performClick()
             compose.onNode(hasText(pool.name) and hasClickAction()).performScrollTo().performClick()
             waitFor("Shared resource.")
-            compose.onNode(hasSetTextAction() and hasText("Resource name")).assertIsNotEnabled()
-            compose.onNode(hasSetTextAction() and hasText("Maximum amount · blank = unknown")).assertIsNotEnabled()
+            readOnlyField("Resource name")
+            readOnlyField("Maximum amount · blank = unknown")
             compose.onNode(hasSetTextAction() and hasText("Current amount · blank = unknown")).performTextReplacement("1")
             dialogAction("Save resource").assertIsEnabled().performClick()
             waitFor("Resource saved locally")
@@ -124,7 +128,7 @@ class GenesisCompanionResourceVisibilityTest {
             runBlocking { env.local.save("eek", created.revision, created.character.copy(resources = emptyList()), "Remove fictional resources", "resource-ui-remove-open") }
             waitFor("Inactive source history.")
             dialogAction("Update known resource").assertIsNotEnabled()
-            compose.onNode(hasSetTextAction() and hasText("Confirmed current value (blank = unknown)")).assertIsNotEnabled()
+            readOnlyField("Confirmed current value (blank = unknown)")
             runBlocking {
                 assertTrue(env.local.get("eek")!!.character.resources.isEmpty())
                 assertEquals(originalCounter, db.recordsDao().resource(originalCounter.id))
