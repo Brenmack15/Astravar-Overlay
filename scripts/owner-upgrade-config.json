@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "enabled": false,
+  "repository": "Brenmack15/Astravar-Overlay",
+  "candidate_source": "2798fc6f19210333c086d548759c09297ec7f380",
+  "baseline_source": "3543e83bfca5e589f1bbedb09964431ce94a2319",
+  "owner_certificate_sha256": "4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847",
+  "gates": [
+    {
+      "run_id": 0,
+      "run_attempt": 0,
+      "workflow_path": ".github/workflows/android.yml",
+      "source_sha": "2798fc6f19210333c086d548759c09297ec7f380"
+    },
+    {
+      "run_id": 0,
+      "run_attempt": 0,
+      "workflow_path": ".github/workflows/astravar-3.0.yml",
+      "source_sha": "2798fc6f19210333c086d548759c09297ec7f380"
+    }
+  ],
+  "observer_artifact": {
+    "run_id": 0,
+    "run_attempt": 0,
+    "artifact_id": 0,
+    "name": "android-verification",
+    "digest": "",
+    "source_sha": "2798fc6f19210333c086d548759c09297ec7f380",
+    "reference_apk_sha256": "",
+    "reference_apk_size": 0
+  },
+  "apks": {
+    "baseline": {
+      "sha256": "",
+      "size": 0,
+      "package": "com.yazsras.astravar",
+      "version_code": 49,
+      "certificate_sha256": "4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847",
+      "source_sha": "3543e83bfca5e589f1bbedb09964431ce94a2319"
+    },
+    "candidate": {
+      "sha256": "",
+      "size": 0,
+      "package": "com.yazsras.astravar",
+      "version_code": 50,
+      "certificate_sha256": "4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847",
+      "source_sha": "2798fc6f19210333c086d548759c09297ec7f380"
+    },
+    "observer": {
+      "sha256": "",
+      "size": 0,
+      "package": "com.yazsras.astravar.target",
+      "version_code": 1,
+      "certificate_sha256": "",
+      "source_sha": "2798fc6f19210333c086d548759c09297ec7f380"
+    },
+    "observer-test": {
+      "sha256": "",
+      "size": 0,
+      "package": "com.yazsras.astravar.target.test",
+      "version_code": 1,
+      "certificate_sha256": "",
+      "source_sha": "2798fc6f19210333c086d548759c09297ec7f380"
+    }
+  }
+}
