@@ -54,6 +54,8 @@ def check_transport(value, config):
     E.exact_keys(value["apks"], E.ALL_ROLES)
     for role, metadata in value["apks"].items():
         fields = ("sha256", "package", "version_code", "certificate_sha256")
+        if role == "observer-test":
+            fields += ("instrumentation_target", "instrumentation_runner")
         E.exact_keys(metadata, fields)
         E.require(metadata == {key: config["apks"][role][key] for key in fields}, "Unexpected APK evidence")
     expected = config["observer_artifact"]

@@ -30,10 +30,14 @@ MAX_CHUNKS = 1026
 MAX_JSON = 1024 * 1024
 ROLES = ("baseline", "candidate")
 ALL_ROLES = (*ROLES, "observer", "observer-test")
+TEST_TARGET = "com.yazsras.astravar.target"
+TEST_RUNNER = "androidx.test.runner.AndroidJUnitRunner"
 PACKAGES = {"baseline": ("com.yazsras.astravar", 49),
             "candidate": ("com.yazsras.astravar", 50),
             "observer": ("com.yazsras.astravar.target", 1),
-            "observer-test": ("com.yazsras.astravar.target.test", 1)}
+            # AGP omits versionCode on this instrumentation-only APK. None means
+            # absent in aapt metadata, never a wildcard or permission for code0.
+            "observer-test": ("com.yazsras.astravar.target.test", None)}
 
 
 class RequirementFailure(ValueError):
@@ -118,10 +122,19 @@ def validate_config(config):
     require(artifact["reference_apk_size"] <= MAX_APK, "Reference APK exceeds limit")
     exact_keys(config["apks"], ALL_ROLES)
     for role, expected in config["apks"].items():
-        exact_keys(expected, ("sha256", "size", "package", "version_code", "certificate_sha256", "source_sha"))
+        fields = ("sha256", "size", "package", "version_code", "certificate_sha256", "source_sha")
+        if role == "observer-test":
+            fields += ("instrumentation_target", "instrumentation_runner")
+        exact_keys(expected, fields)
         hex_value(expected["sha256"]); hex_value(expected["certificate_sha256"])
         require(type(expected["size"]) is int and 0 < expected["size"] <= MAX_APK, "APK size exceeds bound")
+        require((role == "observer-test" and expected["version_code"] is None) or
+                (role != "observer-test" and type(expected["version_code"]) is int),
+                "APK versionCode must have the exact role-specific type")
         require((expected["package"], expected["version_code"]) == PACKAGES[role], "APK role identity mismatch")
+        if role == "observer-test":
+            require(expected["instrumentation_target"] == TEST_TARGET and expected["instrumentation_runner"] == TEST_RUNNER,
+                    "Observer test must target the separate observer with the approved runner")
         expected_source = BASELINE if role == "baseline" else config["candidate_source"]
         require(expected["source_sha"] == expected_source, "APK source mismatch")
         if role in ROLES:

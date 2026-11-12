@@ -24,6 +24,17 @@ workflow paths, non-skipped verification jobs and critical steps are checked liv
 by the receiver. The native artifact ID, archive digest, exact APK hashes/sizes,
 full signing certificates and embedded Git provenance are mandatory.
 
+The observer application is `com.yazsras.astravar.target`, versionCode1. Its
+instrumentation APK is `com.yazsras.astravar.target.test`; AGP omits versionCode
+and versionName for that APK, so the reviewed config and receipt explicitly use
+`version_code: null`. This permits only actual absence, never an arbitrary or
+zero version. The test APK must declare exactly one instrumentation entry targeting
+the separate observer package with `androidx.test.runner.AndroidJUnitRunner`, and
+both observer APKs must share the pinned test certificate. Neither debug observer
+APK contains AGP's embedded Git provenance entry: their source is established by
+the exact successful native run/attempt, artifact ID/digest and APK hashes. The
+owner49/50 embedded source checks remain mandatory and unchanged.
+
 Actual historical owner49 embeds
 `7bb03b5e15d639e94947a491e76f37b1b23a1af5`. The unchanged UI seed baseline is
 `3543e83bfca5e589f1bbedb09964431ce94a2319`. Their app tree is

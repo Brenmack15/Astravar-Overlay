@@ -44,19 +44,22 @@ if certificate != '4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e
 expected = {'baseline': ('com.yazsras.astravar', 49),
             'candidate': ('com.yazsras.astravar', 50),
             'observer': ('com.yazsras.astravar.target', 1),
-            'observer-test': ('com.yazsras.astravar.target.test', 1)}
+            'observer-test': ('com.yazsras.astravar.target.test', None)}
 for name in ('baseline.apk', 'candidate.apk', 'observer.apk', 'observer-test.apk'):
     path = private / name
     if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
         raise SystemExit('A validated input APK is missing or unsafe')
     role = name[:-4]
     proof = validation.get('apks', {}).get(role, {})
-    if (proof.get('package'), proof.get('version_code')) != expected[role]:
+    if 'version_code' not in proof or (proof.get('package'), proof.get('version_code')) != expected[role]:
         raise SystemExit('Receiver package/version binding is incorrect')
     if not re.fullmatch(r'[0-9a-f]{64}', proof.get('certificate_sha256', '')):
         raise SystemExit('An APK certificate binding is missing')
     if role in ('baseline', 'candidate') and proof['certificate_sha256'] != certificate:
         raise SystemExit('Owner APK certificate bindings disagree')
+    if role == 'observer-test' and (proof.get('instrumentation_target') != 'com.yazsras.astravar.target' or
+                                   proof.get('instrumentation_runner') != 'androidx.test.runner.AndroidJUnitRunner'):
+        raise SystemExit('Receiver instrumentation target/runner binding is incorrect')
     with path.open('rb') as handle:
         digest = hashlib.file_digest(handle, 'sha256').hexdigest()
     if digest != proof.get('sha256'):

@@ -193,11 +193,45 @@ def under_runner(path):
     return resolved
 
 
+def verify_apk_metadata(badging, signature, expected, manifest=None):
+    """Validate actual tool output; only instrumentation has an absent version."""
+    certs = re.findall(r"^Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]{64})$", signature, re.MULTILINE)
+    counts = re.findall(r"^Number of signers: (\d+)$", signature, re.MULTILINE)
+    E.require(len(certs) == 1 and certs[0].lower() == expected["certificate_sha256"] and counts == ["1"],
+              "APK must have exactly the pinned signer")
+    # A signing lineage is not an authorized replacement for the original identity.
+    E.require(not re.search(r"(?:past|lineage).*certificate", signature, re.IGNORECASE), "Unexpected signer lineage")
+    packages = re.findall(r"^package: name='([^']+)' versionCode='([0-9]*)'", badging, re.MULTILINE)
+    test_apk = expected["package"] == "com.yazsras.astravar.target.test"
+    E.require(test_apk or type(expected["version_code"]) is int, "Non-test APK requires an explicit versionCode")
+    version = "" if test_apk and expected["version_code"] is None else str(expected["version_code"])
+    E.require(packages == [(expected["package"], version)], "APK package/version mismatch")
+    fields = ("sha256", "package", "version_code", "certificate_sha256")
+    if test_apk:
+        E.require(expected["version_code"] is None, "Observer test versionCode must be explicitly absent")
+        E.require(isinstance(manifest, str), "Observer test instrumentation manifest is required")
+        lines = manifest.splitlines()
+        starts = [index for index, line in enumerate(lines) if re.fullmatch(r"\s*E: instrumentation(?: \(line=\d+\))?", line)]
+        E.require(len(starts) == 1, "Expected exactly one observer instrumentation declaration")
+        start = starts[0]; indentation = len(lines[start]) - len(lines[start].lstrip())
+        end = next((index for index in range(start + 1, len(lines)) if
+                    re.match(r"\s*E:", lines[index]) and len(lines[index]) - len(lines[index].lstrip()) <= indentation), len(lines))
+        block = "\n".join(lines[start + 1:end])
+        target = re.findall(r'^\s*A: android:targetPackage\([^)]*\)="([^\"]+)"', block, re.MULTILINE)
+        runner = re.findall(r'^\s*A: android:name\([^)]*\)="([^\"]+)"', block, re.MULTILINE)
+        E.require(expected.get("instrumentation_target") == E.TEST_TARGET and target == [E.TEST_TARGET],
+                  "Observer test instrumentation target mismatch")
+        E.require(expected.get("instrumentation_runner") == E.TEST_RUNNER and runner == [E.TEST_RUNNER],
+                  "Observer test instrumentation runner mismatch")
+        fields += ("instrumentation_target", "instrumentation_runner")
+    return {key: expected[key] for key in fields}
+
+
 def verify_apk(path, expected, sdk):
     E.check_file(path, expected)
     tools = sdk / "build-tools/35.0.0"
-    def run(tool, *args):
-        result = subprocess.run([str(tools / tool), *args, str(path)], capture_output=True, text=True, timeout=45)
+    def run(tool, *args, trailing=()):
+        result = subprocess.run([str(tools / tool), *args, str(path), *trailing], capture_output=True, text=True, timeout=45)
         if tool == "apksigner":
             E.require(result.returncode == 0, "APK signature inspection failed")
         elif tool == "aapt":
@@ -206,15 +240,10 @@ def verify_apk(path, expected, sdk):
             E.require(result.returncode == 0, "APK alignment inspection failed")
         return result.stdout
     signature = run("apksigner", "verify", "--verbose", "--print-certs")
-    certs = re.findall(r"^Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]{64})$", signature, re.MULTILINE)
-    counts = re.findall(r"^Number of signers: (\d+)$", signature, re.MULTILINE)
-    E.require(len(certs) == 1 and certs[0].lower() == expected["certificate_sha256"] and counts == ["1"],
-              "APK must have exactly the pinned signer")
-    # A signing lineage is not an authorized replacement for the original identity.
-    E.require(not re.search(r"(?:past|lineage).*certificate", signature, re.IGNORECASE), "Unexpected signer lineage")
     badging = run("aapt", "dump", "badging")
-    packages = re.findall(r"^package: name='([^']+)' versionCode='(\d+)'", badging, re.MULTILINE)
-    E.require(packages == [(expected["package"], str(expected["version_code"]))], "APK package/version mismatch")
+    manifest = (run("aapt", "dump", "xmltree", trailing=("AndroidManifest.xml",))
+                if expected["package"] == "com.yazsras.astravar.target.test" else None)
+    result = verify_apk_metadata(badging, signature, expected, manifest)
     if expected["package"] == "com.yazsras.astravar":
         E.require("application-debuggable" not in badging.splitlines(), "Owner APK is debuggable")
         E.require("sdkVersion:'26'" in badging.splitlines() and "targetSdkVersion:'36'" in badging.splitlines(),
@@ -228,7 +257,7 @@ def verify_apk(path, expected, sdk):
         systems = re.findall(r'system:\s*(?:"GIT"|GIT)', provenance)
         E.require(revisions == [expected["source_sha"]] and len(systems) == 1,
                   "APK embedded Git provenance mismatch")
-    return {key: expected[key] for key in ("sha256", "package", "version_code", "certificate_sha256")}
+    return result
 
 
 def zip_payload(path):

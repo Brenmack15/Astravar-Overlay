@@ -2,7 +2,7 @@
   "schema": 1,
   "enabled": false,
   "repository": "Brenmack15/Astravar-Overlay",
-  "candidate_source": "e9f73d2df7bca6955ae87d6a0adcea78458339ac",
+  "candidate_source": "de98cb694a2c8bfa03911f8c827ebea370fdc6c7",
   "baseline_source": "7bb03b5e15d639e94947a491e76f37b1b23a1af5",
   "owner_certificate_sha256": "4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847",
   "gates": [
@@ -10,13 +10,13 @@
       "run_id": 0,
       "run_attempt": 0,
       "workflow_path": ".github/workflows/android.yml",
-      "source_sha": "e9f73d2df7bca6955ae87d6a0adcea78458339ac"
+      "source_sha": "de98cb694a2c8bfa03911f8c827ebea370fdc6c7"
     },
     {
       "run_id": 0,
       "run_attempt": 0,
       "workflow_path": ".github/workflows/astravar-3.0.yml",
-      "source_sha": "e9f73d2df7bca6955ae87d6a0adcea78458339ac"
+      "source_sha": "de98cb694a2c8bfa03911f8c827ebea370fdc6c7"
     }
   ],
   "observer_artifact": {
@@ -25,7 +25,7 @@
     "artifact_id": 0,
     "name": "android-verification",
     "digest": "",
-    "source_sha": "e9f73d2df7bca6955ae87d6a0adcea78458339ac",
+    "source_sha": "de98cb694a2c8bfa03911f8c827ebea370fdc6c7",
     "reference_apk_sha256": "",
     "reference_apk_size": 0
   },
@@ -44,7 +44,7 @@
       "package": "com.yazsras.astravar",
       "version_code": 50,
       "certificate_sha256": "4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847",
-      "source_sha": "e9f73d2df7bca6955ae87d6a0adcea78458339ac"
+      "source_sha": "de98cb694a2c8bfa03911f8c827ebea370fdc6c7"
     },
     "observer": {
       "sha256": "",
@@ -52,15 +52,17 @@
       "package": "com.yazsras.astravar.target",
       "version_code": 1,
       "certificate_sha256": "",
-      "source_sha": "e9f73d2df7bca6955ae87d6a0adcea78458339ac"
+      "source_sha": "de98cb694a2c8bfa03911f8c827ebea370fdc6c7"
     },
     "observer-test": {
       "sha256": "",
       "size": 0,
       "package": "com.yazsras.astravar.target.test",
-      "version_code": 1,
+      "version_code": null,
       "certificate_sha256": "",
-      "source_sha": "e9f73d2df7bca6955ae87d6a0adcea78458339ac"
+      "source_sha": "de98cb694a2c8bfa03911f8c827ebea370fdc6c7",
+      "instrumentation_target": "com.yazsras.astravar.target",
+      "instrumentation_runner": "androidx.test.runner.AndroidJUnitRunner"
     }
   },
   "baseline_equivalence": {
