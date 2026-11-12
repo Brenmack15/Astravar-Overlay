@@ -1,5 +1,7 @@
 # Native encounter checkpoint recovery — 12 November 2026
 
+> Follow-up on the child reconstruction branch: [seven missing files have new unverified equivalents](NATIVE_RECONSTRUCTION_20261112.md). The historical recovery status and test evidence below describe the parent checkpoint; they do not verify those new equivalents.
+
 ## Status and preservation boundary
 
 This is a technical handoff reconstructed from the working agent's retained execution history after the execution environment became unavailable. It is **not** a recovered source patch, a blob-verified copy of local commit `991dd4a`, or a passing native release. The initial documentation-only checkpoint is followed by three complete source files reconstructed from retained tool output and recorded patches; their original local blob hashes remain unavailable.
