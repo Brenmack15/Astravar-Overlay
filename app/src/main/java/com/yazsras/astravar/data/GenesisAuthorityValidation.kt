@@ -78,6 +78,8 @@ internal fun genesisAuthorityBackupErrors(
                     else -> {
                         val review = campaignJson.decodeFromString<GenesisActorAuthorityReview>(receipt.requestJson)
                         require(review.fingerprint == genesisActorAuthorityReviewFingerprint(review)) { "Reviewed source proof fingerprint is invalid." }
+                        // Validate the original frozen decision, not today's actor after equipment or advancement changes.
+                        genesisValidateLegacyModifierResolutions(review.playable.character, review.source?.abilities.orEmpty(), review.legacyModifierResolutions)
                         require(actor.actorId == review.actorId && actor.role == review.role && actor.campaignId == review.campaignId && actor.ownerActorId == review.ownerActorId &&
                             actor.revision == Math.addExact(review.expectedAuthorityRevision ?: 0L, 1L)) { "Authority acceptance changed the reviewed association." }
                         val result = requireNotNull(outcome.playable)

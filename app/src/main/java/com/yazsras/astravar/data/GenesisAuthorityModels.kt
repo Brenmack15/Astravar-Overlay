@@ -3,6 +3,8 @@ package com.yazsras.astravar.data
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 
 @Serializable enum class GenesisActorRole { PLAYER, COMPANION, NPC }
 
@@ -48,11 +50,14 @@ data class GenesisAuthorityReceipt(
 )
 
 @Serializable data class GenesisFieldDifference(val field: String, val sourceValue: String, val playableValue: String)
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class GenesisActorAuthorityReview(
     val actorId: String, val role: GenesisActorRole, val campaignId: String?, val ownerActorId: String?,
     val expectedAuthorityRevision: Long?, val playable: ReforgeSavedCharacter,
     val source: ReforgeLegacySnapshot?, val differences: List<GenesisFieldDifference>, val fingerprint: String,
-    val supplementalSourceJson: String = ""
+    val supplementalSourceJson: String = "",
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val legacyModifierResolutions: List<GenesisLegacyModifierResolution> = emptyList()
 )
 @Serializable data class GenesisActorCreationOutcome(
     val actor: GenesisActorAuthority, val profile: CharacterProfile, val playable: ReforgeSavedCharacter?
