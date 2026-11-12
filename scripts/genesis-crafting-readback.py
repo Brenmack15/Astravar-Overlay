@@ -5,6 +5,7 @@ This does not trust UI labels or repository return values. It checks the frozen
 request, immutable children, canonical inventory and source identity, preserving
 the preceding connected journey's records. It is not physical-device evidence.
 """
+# Schema 9 support reconstructed from the recovery handoff; verification pending.
 import argparse
 import copy
 import json
@@ -33,16 +34,21 @@ def saved(row):
             "saveState": "Saved on this device · not synchronized"}
 
 
-def inspect(before_database, database, *, synthetic_emulator=False):
+def inspect(before_database, database, *, synthetic_emulator=False, expected_room_schema=8):
     require(synthetic_emulator, "Only copied fictional emulator records are supported")
+    require(expected_room_schema in (8, 9), "Supported crafting schemas are 8 and 9")
     before_database, database = Path(before_database), Path(database)
     require(before_database.is_file() and database.is_file(), "Both closed database snapshots must exist")
     for path in (before_database, database):
-        COMMON["UPGRADE"]["database_snapshot"](path, "CampaignLedgerDb", 8)
+        COMMON["UPGRADE"]["database_snapshot"](path, "CampaignLedgerDb", expected_room_schema)
     with connect(before_database) as before, connect(database) as db:
         require(not list(db.execute("PRAGMA foreign_key_check")), "A crafting relationship is orphaned")
         def rows(table, connection=db):
             return [dict(row) for row in connection.execute(f'SELECT * FROM "{table}"')]
+        if expected_room_schema == 9:
+            for table in ("genesis_encounters", "genesis_encounter_participants"):
+                require(rows(table, before) == rows(table) == [],
+                        "The crafting snapshots must precede encounter creation")
         def exact(table, key, value):
             return one((row for row in rows(table) if row[key] == value), f"{table} {value}")
         hero = one((row for row in rows("character_profiles") if row["name"] == HERO), "fictional hero")
@@ -200,9 +206,11 @@ def main():
     parser.add_argument("--before-database", required=True, type=Path)
     parser.add_argument("--database", required=True, type=Path)
     parser.add_argument("--synthetic-emulator", action="store_true")
+    parser.add_argument("--expected-room-schema", type=int, choices=(8, 9), default=8)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
-    result = inspect(args.before_database, args.database, synthetic_emulator=args.synthetic_emulator)
+    result = inspect(args.before_database, args.database, synthetic_emulator=args.synthetic_emulator,
+                     expected_room_schema=args.expected_room_schema)
     args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result))
 
