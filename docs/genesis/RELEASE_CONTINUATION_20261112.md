@@ -33,6 +33,35 @@ Owner helper is still disabled/failedde98-pinned: final signing/activation must 
 the actual successful d12 or later source, never an earlier passing gate.
 PR15 unchanged. No Genesis owner APK has been signed, transferred or installed.
 
+Both historicala86 gates are now fully verified SUCCESS. Full43251800831:
+rules166, app932 pervariant(debug929pass/3skip; release915pass/17skip),
+Python320,bridge134; zero failures/errors. Lint81/83warnings+1hint;131hostimages.
+Fullartifact13964004415,51,361,986bytes,SHA256
+`4c48604d4a2fb713a65eca9d67a1bf9d29af88a00d43e9c2557a16fa8caf7f8e`.
+Native43251800807:16stage rows/19testsPASS,0fail; all13 independent
+package/SQLite readbacks reproduced, same-version stores unchanged.
+Nativeartifact13964072482,88,394,607bytes,SHA256
+`0f15ee8159fac0c1cd166c073dafcf13873968f97b411f66db9dd2ec3b059b67`.
+APKpackage50/4.0.0-genesis1,nondebug,min26target36 and zero permission delta
+versus same-run49 verified. Equipment/selectedSpells130px bounds at100/130/200%.
+Source/embeddedAPK and every evidence hash verified. These are a86 historical
+results; finald12 gates still required. d12 rules/debug passed16:41:21.
+
+Root then freshly fetched both a86 current/attempt/job API objects and unique
+nativeartifact metadata; private operator validator independently passed all
+critical non-skipped steps/source/attempt/artifact binding. Public-only signer
+preflight on exactclean a86 PASSED:
+`genesis-private-recovery-resume/public-preflight-a86-20261112/PREFLIGHT_REPORT.json`.
+No key/credentials read, signing or final-candidate acceptance inferred.
+This was the first real-artifact validation of the newly recovered signer.
+
+Important connector constraint: github_fetch rejects direct
+/actions/artifacts/{id}. Use authenticated fetch_workflow_run_artifacts for the
+exact source/receiver run and select the unique already-approved exact artifactID,
+preserving the complete raw API object. All digest/source/timestamp validators
+remain unchanged; receiver's own direct REST API is unaffected.
+Private operator RUNBOOK documents this for native and recipient metadata.
+
 Current standalone coverage draft `genesis-workflow-coverage-a86.md` preserves
 all35 original workflows,32 route rows and9 fixture groups, with test/source
 mappings and explicit gaps. It does not mark1173 lexical sites runtime-passed.
