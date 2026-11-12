@@ -41,8 +41,14 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
     latestCharacter: ReforgeCharacter?, onDismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit
 ) {
     val character = rememberReforgeSnapshot(latestCharacter)
+    val draftCharacterId = rememberSaveable { character?.id ?: UUID.randomUUID().toString() }
     var name by rememberSaveable { mutableStateOf(character?.name ?: "") }
     var level by rememberSaveable { mutableStateOf(character?.level?.toString() ?: "1") }
+    var species by rememberSaveable { mutableStateOf(character?.species.orEmpty()) }
+    var className by rememberSaveable { mutableStateOf(character?.className.orEmpty()) }
+    var subclass by rememberSaveable { mutableStateOf(character?.subclass.orEmpty()) }
+    val backgroundDraft = rememberReforgeDraft(character?.background.orEmpty(), String.serializer())
+    var background by backgroundDraft
     var maxHp by rememberSaveable { mutableStateOf(character?.baseMaxHp?.toString() ?: "") }
     val initialCurrentHp = remember(character) { character?.let { CharacterCalculator.calculate(it).currentHp } }
     var hp by rememberSaveable { mutableStateOf(initialCurrentHp?.toString() ?: "") }
@@ -58,6 +64,8 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
     var scores by rememberSaveable { mutableStateOf(Stat.entries.associate { it.name to (character?.baseAbilities?.get(it)?.toString() ?: "") }) }
     var error by remember { mutableStateOf("") }
     val dirty = name != character?.name.orEmpty() || level != (character?.level?.toString() ?: "1") ||
+        species != character?.species.orEmpty() || className != character?.className.orEmpty() ||
+        subclass != character?.subclass.orEmpty() || background != character?.background.orEmpty() ||
         maxHp != character?.baseMaxHp?.toString().orEmpty() || hp != initialCurrentHp?.toString().orEmpty() ||
         temp != character?.temporaryHp?.toString().orEmpty() || ac != character?.baseAc?.toString().orEmpty() ||
         speed != character?.speed?.toString().orEmpty() || casterLevel != character?.spellcastingClassLevel?.toString().orEmpty() ||
@@ -65,17 +73,21 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
         armorDex != (character?.armorUsesDexterity ?: false) || armorDexCap != character?.armorDexterityCap?.toString().orEmpty() ||
         rules != (character?.rules?.classVersion ?: "unconfigured") ||
         scores.any { (key, value) -> value != Stat.valueOf(key).let { character?.baseAbilities?.get(it)?.toString().orEmpty() } }
-    PlayerSheet(if (character == null) "Create character" else "Character setup", onDismiss, dirty = dirty,
-        actions = {
-            PlayerButton(onClick = {
+    GenesisEditorSheet(if (character == null) "Create character" else "Character setup",
+        sections = listOf("Identity", "Ability scores", "Health & defense", "Spellcasting", "Review"),
+        creating = character == null, context = if (character == null) "Create your character. Optional values can stay unknown until you know them." else "Editing ${character.name}. Review the sections you want to change.",
+        onDismiss = onDismiss, dirty = dirty, saveLabel = "Save character", saveEnabled = name.isNotBlank() && backgroundDraft.canSave, error = error,
+        onSave = {
                 try {
                     require(name.isNotBlank()) { "Enter a character name" }
                     val parsedScores = Stat.entries.associateWith { optionalInt(scores[it.name].orEmpty(), it.name, 0, 100) }
                     val conMod = parsedScores[Stat.CON]?.let { Math.floorDiv(it - 10, 2) }
-                    val base = character ?: ReforgeCharacter(id = UUID.randomUUID().toString(), name = name.trim())
+                    val base = character ?: ReforgeCharacter(id = draftCharacterId, name = name.trim())
                     val baselineEdited = maxHp != (character?.baseMaxHp?.toString() ?: "")
                     val hpEdited = hp != (initialCurrentHp?.toString() ?: "")
-                    val candidate = base.copy(name = name.trim(), level = optionalInt(level, "Level", 1, 20) ?: error("Enter a level"),
+                    val candidate = base.copy(name = name.trim(), species = species.trim(), className = className.trim(),
+                        subclass = subclass.trim(), background = background.trim(),
+                        level = optionalInt(level, "Level", 1, 20) ?: error("Enter a level"),
                         baseAbilities = parsedScores, baseMaxHp = optionalInt(maxHp, "Baseline maximum HP", 1, 10000),
                         baselineConstitutionModifier = if (character == null || baselineEdited) conMod else base.baselineConstitutionModifier,
                         currentHp = if (hpEdited || character == null) optionalInt(hp, "Current HP", 0, 10000) else base.currentHp,
@@ -100,34 +112,70 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
                     require(currentValue == null || maximumValue == null || currentValue <= maximumValue) { "Current HP exceeds the new maximum" }
                     onSave(preserved)
                 } catch (e: Exception) { error = e.message ?: "Check these values" }
-            }) { Text("Save character") }
-        }) {
-        Text("Start with a name and level. Add your statistics whenever you're ready; blank values stay unknown.", color = RebuildPalette.Muted)
-        Field("Name", name, { name = it })
-        Field("Level", level, { level = it })
-        PlayerDisclosure("Ability scores", initiallyOpen = character != null) {
-            Stat.entries.chunked(if (LocalDensity.current.fontScale >= 1.5f) 2 else 3).forEach { row -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { stat -> Field(stat.name, scores[stat.name].orEmpty(), { scores = scores + (stat.name to it) }, Modifier.weight(1f)) }
-            } }
+        }) { section, select ->
+        ReforgeDraftRecovery(backgroundDraft)
+        when (section) {
+            0 -> {
+                if (character == null) LocalGenesisCharacterCreationFields.current()
+                Field("Name", name, { name = it })
+                Field("Level", level, { level = it })
+                Field("Species", species, { species = it })
+                Field("Class", className, { className = it })
+                PlayerDisclosure("Subclass & background") {
+                    Field("Subclass", subclass, { subclass = it })
+                    Field("Background", background, { background = it }, single = false)
+                }
+                Text("Class and species describe your character. Their name alone never grants statistics, features, or spell slots.", color = RebuildPalette.Muted)
+            }
+            1 -> {
+                Text("Record permanent scores before equipment. Leave any unknown score blank.", color = RebuildPalette.Muted)
+                Stat.entries.chunked(if (LocalDensity.current.fontScale >= 1.5f) 2 else 3).forEach { row -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { stat -> Field(stat.name, scores[stat.name].orEmpty(), { scores = scores + (stat.name to it) }, Modifier.weight(1f)) }
+                } }
+            }
+            2 -> {
+                Text("These are your baseline values before equipment effects. No healing or rest is assumed.", color = RebuildPalette.Muted)
+                Field("Unequipped maximum HP", maxHp, { maxHp = it })
+                Field("Current HP (blank = unknown)", hp, { hp = it })
+                Field("Temporary HP", temp, { temp = it })
+                Field("Unequipped Armor Class", ac, { ac = it })
+                Toggle("Add Dexterity modifier to Armor Class", armorDex) { armorDex = it }
+                if (armorDex) Field("Maximum Dexterity bonus (blank = no cap)", armorDexCap, { armorDexCap = it })
+                Field("Walking speed (ft.)", speed, { speed = it })
+                Field("Accepted attunement capacity", attunementLimit, { attunementLimit = it })
+            }
+            3 -> {
+                Text("The Infusions-based Artificer is preserved. Setting its class level enables its slot/preparation table; leave blank for other classes until their capacity is configured.", color = RebuildPalette.Muted)
+                Field("Legacy Artificer class level", casterLevel, { casterLevel = it })
+                Choices("Spellcasting ability", Stat.entries, castingAbility) { castingAbility = it }
+                Field("Pinned class version", rules, { rules = it })
+            }
+            else -> {
+                if (character == null) LocalGenesisCharacterCreationReview.current()
+                GenesisReviewSection("Identity", { select(0) }) {
+                    GenesisReviewValue("Name", name)
+                    GenesisReviewValue("Level", level)
+                    GenesisReviewValue("Species / class", listOf(species, className, subclass).filter(String::isNotBlank).joinToString(" · "))
+                    GenesisReviewValue("Background", background)
+                }
+                GenesisReviewSection("Ability scores", { select(1) }) {
+                    Text(Stat.entries.joinToString(" · ") { "${it.name} ${scores[it.name]?.ifBlank { "?" } ?: "?"}" })
+                }
+                GenesisReviewSection("Health & defense", { select(2) }) {
+                    GenesisReviewValue("Current / baseline maximum HP", "${hp.ifBlank { "?" }} / ${maxHp.ifBlank { "?" }}")
+                    GenesisReviewValue("Temporary HP", temp)
+                    GenesisReviewValue("Baseline AC", ac)
+                    GenesisReviewValue("Dexterity to AC", if (armorDex) "Added · cap ${armorDexCap.ifBlank { "none" }}" else "Not added")
+                    GenesisReviewValue("Walking speed (ft.)", speed)
+                    GenesisReviewValue("Attunement capacity", attunementLimit)
+                }
+                GenesisReviewSection("Spellcasting", { select(3) }) {
+                    GenesisReviewValue("Artificer spellcasting level", casterLevel)
+                    GenesisReviewValue("Casting ability / rule version", "${castingAbility.name} · ${rules.ifBlank { "Not set" }}")
+                }
+                Text("Blank values stay unknown. Saving does not refill resources or complete a rest.", color = RebuildPalette.Muted)
+            }
         }
-        PlayerDisclosure("Health, defense & movement", initiallyOpen = character != null) {
-            Text("These values are your baseline before equipment effects. Blank means unknown.", color = RebuildPalette.Muted)
-            Field("Unequipped maximum HP", maxHp, { maxHp = it })
-            Field("Current HP (blank = unknown)", hp, { hp = it })
-            Field("Temporary HP", temp, { temp = it })
-            Field("Unequipped Armor Class", ac, { ac = it })
-            Toggle("Add Dexterity modifier to Armor Class", armorDex) { armorDex = it }
-            if (armorDex) Field("Maximum Dexterity bonus (blank = no cap)", armorDexCap, { armorDexCap = it })
-            Field("Walking speed (ft.)", speed, { speed = it })
-            Field("Accepted attunement capacity", attunementLimit, { attunementLimit = it })
-        }
-        PlayerDisclosure("Spellcasting & rule versions") {
-            Text("The Infusions-based Artificer is preserved. Setting its class level enables its slot/preparation table; leave blank for other classes until their capacity is configured.", color = RebuildPalette.Muted)
-            Field("Legacy Artificer class level", casterLevel, { casterLevel = it })
-            Choices("Spellcasting ability", Stat.entries, castingAbility) { castingAbility = it }
-            Field("Pinned class version", rules, { rules = it })
-        }
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
     }
 }
 
@@ -193,7 +241,8 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
     val original = remember { character.items.firstOrNull { it.id == existingItemId } }
     val originalDefinition = remember { character.itemDefinitions.firstOrNull { it.id == original?.definitionId } }
     var name by rememberSaveable { mutableStateOf(originalDefinition?.name ?: "") }
-    var description by rememberSaveable { mutableStateOf(originalDefinition?.description ?: "") }
+    val descriptionDraft = rememberReforgeDraft(originalDefinition?.description.orEmpty(), String.serializer())
+    var description by descriptionDraft
     var attune by rememberSaveable { mutableStateOf(originalDefinition?.requiresAttunement ?: false) }
     var slot by rememberSaveable { mutableStateOf(originalDefinition?.equipmentSlot ?: "") }
     var quantity by rememberSaveable { mutableStateOf(original?.quantity?.toString() ?: "1") }
@@ -225,8 +274,13 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
         quantity != (original?.quantity?.toString() ?: "1") || slot != (originalDefinition?.equipmentSlot ?: "") ||
         state != (original?.state ?: ItemState.CARRIED) || favorite != (original?.favorite ?: false) ||
         attune != (originalDefinition?.requiresAttunement ?: false) || effects != originalDefinition?.effects.orEmpty()
-    PlayerSheet(if (original == null) "Add equipment" else "Edit equipment", onDismiss, dirty = dirty, actions = {
-        PlayerButton(enabled = name.isNotBlank() && (effects.isEmpty() || reviewed) && effectsDraft.canSave, onClick = {
+    GenesisEditorSheet(if (original == null) "Add equipment" else "Edit equipment",
+        sections = listOf("Item", "Equipment", "Effects", "Review"), creating = original == null,
+        context = "Inventory owner · ${character.name}", onDismiss = onDismiss,
+        dirty = dirty || effectName.isNotBlank() || amount.isNotBlank(),
+        saveLabel = if (effects.isEmpty()) "Save item" else "Save reviewed item",
+        saveEnabled = name.isNotBlank() && (effects.isEmpty() || reviewed) && effectsDraft.canSave && descriptionDraft.canSave, error = error,
+        onSave = {
             try {
                 val definition = (originalDefinition ?: ItemDefinition(definitionId, name)).copy(name = name.trim(), effects = effects,
                     requiresAttunement = attune, equipmentSlot = slot.trim().ifBlank { null }, description = description)
@@ -236,19 +290,22 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
                 val equipped = GameplayRules.equip(candidate, instanceId, state)
                 onSave(GameplayRules.preserveCapacities(character, equipped))
             } catch (e: Exception) { error = e.message ?: "Check item" }
-        }) { Text(if (effects.isEmpty()) "Save item" else "Save reviewed item") }
-    }) {
-        ReforgeDraftRecovery(effectsDraft)
-        Field("Item name", name, { name = it; reviewed = false })
-        Field("Description", description, { description = it }, single = false)
-        Field("Quantity", quantity, { quantity = it; reviewed = false })
-        PlayerDisclosure("Equipment options", initiallyOpen = original != null) {
+    }) { section, select ->
+        ReforgeDraftRecovery(effectsDraft, descriptionDraft)
+        when (section) {
+        0 -> {
+            Field("Item name", name, { name = it; reviewed = false })
+            Field("Description", description, { description = it }, single = false)
+            Field("Quantity", quantity, { quantity = it; reviewed = false })
+            Text("Create once in ${character.name}'s inventory. You can transfer or move the saved item from its details.", color = RebuildPalette.Muted)
+        }
+        1 -> {
             Field("Slot (optional)", slot, { slot = it; reviewed = false })
             Choices("Location / equipment", ItemState.entries, state) { state = it; reviewed = false }
             Toggle("Favorite", favorite) { favorite = it }
             Toggle("Requires attunement", attune) { attune = it; reviewed = false }
         }
-        PlayerDisclosure("Magic & mechanical effects", initiallyOpen = effects.isNotEmpty()) {
+        2 -> {
             Text("Only effects you explicitly review can change your character's statistics.",
                 color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
             effects.forEachIndexed { index, effect ->
@@ -297,15 +354,37 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
                 } catch (e: Exception) { error = e.message ?: "Check effect" }
             }) { Text("Add effect to review") }
             }
-            if (effects.isNotEmpty()) Toggle("I reviewed these mechanics", reviewed) { reviewed = it }
         }
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+        else -> {
+            GenesisReviewSection("Item", { select(0) }) {
+                GenesisReviewValue("Name", name)
+                GenesisReviewValue("Quantity", quantity)
+                GenesisReviewValue("Description", description)
+            }
+            GenesisReviewSection("Equipment", { select(1) }) {
+                GenesisReviewValue("Owner", character.name)
+                GenesisReviewValue("Location", state.name.lowercase().replaceFirstChar { it.uppercase() })
+                GenesisReviewValue("Slot", slot, "No specific slot")
+                GenesisReviewValue("Attunement", if (attune) "Required · attune separately after saving" else "Not required")
+                GenesisReviewValue("Favorite", if (favorite) "Yes" else "No")
+            }
+            GenesisReviewSection("Effects", { select(2) }) {
+                if (effects.isEmpty()) Text("No mechanical effects.", color = RebuildPalette.Muted)
+                effects.forEach { effect ->
+                    Text("${effect.name} · ${reforgeEffectSummary(effect)}", style = MaterialTheme.typography.bodyMedium)
+                }
+                if (effects.isNotEmpty()) Toggle("I reviewed these mechanics", reviewed) { reviewed = it }
+            }
+            Text("Saving equipment recalculates eligible effects. It does not attune the item or restore spent resources.", color = RebuildPalette.Muted)
+        }
+        }
     }
 }
 
 @Composable internal fun ReforgeAttackEditor(latestCharacter: ReforgeCharacter, onDismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit, existingAttackId: String? = null) {
     val character = requireNotNull(rememberReforgeSnapshot(latestCharacter))
     val original = remember { character.attacks.firstOrNull { it.id == existingAttackId } }
+    val draftId = rememberSaveable { original?.id ?: UUID.randomUUID().toString() }
     var name by rememberSaveable { mutableStateOf(original?.name ?: "") }
     var ability by rememberSaveable { mutableStateOf(original?.ability ?: Stat.STR) }
     var formula by rememberSaveable { mutableStateOf(original?.damage?.firstOrNull()?.formula?.let(SecureDice::format) ?: "") }
@@ -317,10 +396,18 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
     var timing by rememberSaveable { mutableStateOf(original?.actionType ?: "Action") }
     var addAbility by rememberSaveable { mutableStateOf(original?.addAbilityToDamage ?: true) }
     var error by remember { mutableStateOf("") }
-    PlayerSheet(if (original == null) "Add attack" else "Edit attack", onDismiss, dirty = name.isNotBlank(), actions = {
-        PlayerButton(enabled = name.isNotBlank(), onClick = {
+    val dirty = name != original?.name.orEmpty() || ability != (original?.ability ?: Stat.STR) ||
+        formula != (original?.damage?.firstOrNull()?.formula?.let(SecureDice::format) ?: "") ||
+        kind != (original?.damage?.firstOrNull()?.type ?: DamageKind.BLUDGEONING) ||
+        range != (original?.range ?: "5 ft.") || proficient != (original?.proficient ?: true) ||
+        independent != (original?.fixedAttackBonus != null) || fixedBonus != original?.fixedAttackBonus?.toString().orEmpty() ||
+        timing != (original?.actionType ?: "Action") || addAbility != (original?.addAbilityToDamage ?: true)
+    GenesisEditorSheet(if (original == null) "Add attack" else "Edit attack",
+        sections = listOf("Attack", "Accuracy", "Damage", "Review"), creating = original == null,
+        context = "Attacker · ${character.name}", onDismiss = onDismiss, dirty = dirty,
+        saveLabel = "Save attack", saveEnabled = name.isNotBlank(), error = error, onSave = {
             try {
-                val id = original?.id ?: UUID.randomUUID().toString()
+                val id = draftId
                 val dice = SecureDice.parse(formula)
                 val component = (original?.damage?.firstOrNull() ?: DamageComponent("$id:base", name.trim(), kind, dice))
                     .copy(label = name.trim(), type = kind, formula = dice)
@@ -330,9 +417,14 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
                     addAbilityToDamage = addAbility, range = range, actionType = timing)
                 onSave(character.copy(attacks = character.attacks.filterNot { it.id == attack.id } + attack))
             } catch (e: Exception) { error = e.message ?: "Check attack" }
-        }) { Text("Save attack") }
-    }) {
-        Field("Name", name, { name = it })
+    }) { section, select ->
+        when (section) {
+        0 -> {
+            Field("Name", name, { name = it })
+            Choices("Action type", (listOf("Action", "Bonus Action", "Reaction") + listOfNotNull(original?.actionType)).distinct(), timing) { timing = it }
+            Field("Range", range, { range = it })
+        }
+        1 -> {
         Toggle("Use independent attack bonus", independent) { independent = it }
         if (independent) {
             Field("Independent attack bonus", fixedBonus, { fixedBonus = it })
@@ -341,24 +433,41 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
             Choices("Attack ability", Stat.entries, ability) { ability = it }
             Toggle("Proficient", proficient) { proficient = it }
         }
+        }
+        2 -> {
         Field("Base damage dice (for example 1d8)", formula, { formula = it })
         Choices("Damage type", DamageKind.entries, kind) { kind = it }
-        Choices("Action type", (listOf("Action", "Bonus Action", "Reaction") + listOfNotNull(original?.actionType)).distinct(), timing) { timing = it }
         Toggle("Add ability modifier to damage", addAbility) { addAbility = it }
-        Field("Range", range, { range = it })
         Text("Critical hits double eligible dice. Damage bonuses are resolved through active structured effects.", color = RebuildPalette.Muted)
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+        if ((original?.damage?.size ?: 0) > 1) Text("${original!!.damage.size - 1} additional saved damage components are retained.", color = RebuildPalette.Muted)
+        }
+        else -> {
+            GenesisReviewSection("Attack", { select(0) }) {
+                GenesisReviewValue("Name", name)
+                GenesisReviewValue("Timing / range", "$timing · $range")
+            }
+            GenesisReviewSection("Accuracy", { select(1) }) {
+                GenesisReviewValue("To hit", if (independent) "Independent bonus ${fixedBonus.ifBlank { "Not set" }}" else "${ability.name}${if (proficient) " + proficiency" else ""}")
+            }
+            GenesisReviewSection("Damage", { select(2) }) {
+                GenesisReviewValue("Base damage", "${formula.ifBlank { "Not set" }} ${kind.name.lowercase()}${if (addAbility) " + ${ability.name} modifier" else ""}")
+                original?.damage?.drop(1)?.forEach { Text("Retained · ${SecureDice.format(it.formula)} ${it.type.name.lowercase()}") }
+            }
+        }
+        }
     }
 }
 
 @Composable internal fun ReforgeSpellEditor(latestCharacter: ReforgeCharacter, onDismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit, existingSpellId: String? = null) {
     val character = requireNotNull(rememberReforgeSnapshot(latestCharacter))
     val original = remember { character.spells.firstOrNull { it.id == existingSpellId } }
+    val draftId = rememberSaveable { original?.id ?: UUID.randomUUID().toString() }
     var name by rememberSaveable { mutableStateOf(original?.name ?: "") }
     var level by rememberSaveable { mutableStateOf(original?.level?.toString() ?: "") }
     var preparation by rememberSaveable { mutableStateOf(original?.preparation ?: SpellPreparation.KNOWN) }
     var concentration by rememberSaveable { mutableStateOf(original?.concentration ?: false) }
-    var description by rememberSaveable { mutableStateOf(original?.description ?: "") }
+    val descriptionDraft = rememberReforgeDraft(original?.description.orEmpty(), String.serializer())
+    var description by descriptionDraft
     var components by rememberSaveable { mutableStateOf(original?.components ?: "") }
     var range by rememberSaveable { mutableStateOf(original?.range ?: "") }
     var duration by rememberSaveable { mutableStateOf(original?.duration ?: "") }
@@ -369,36 +478,72 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
     var resourceId by rememberSaveable { mutableStateOf(original?.resourceId) }
     var resourceCost by rememberSaveable { mutableStateOf(original?.resourceCost?.toString() ?: "1") }
     var error by remember { mutableStateOf("") }
-    PlayerSheet(if (original == null) "Add spell" else "Edit spell", onDismiss, dirty = name.isNotBlank(), actions = {
-        PlayerButton(enabled = name.isNotBlank(), onClick = {
+    val dirty = name != original?.name.orEmpty() || level != original?.level?.toString().orEmpty() ||
+        preparation != (original?.preparation ?: SpellPreparation.KNOWN) || concentration != (original?.concentration ?: false) ||
+        description != original?.description.orEmpty() || components != original?.components.orEmpty() ||
+        range != original?.range.orEmpty() || duration != original?.duration.orEmpty() ||
+        castingTime != (original?.castingTime ?: "1 Action") || sourceVersion != (original?.sourceVersion ?: "user-owned") ||
+        slotRequired != (original?.slotRequired ?: true) || ritual != (original?.ritual ?: false) ||
+        resourceId != original?.resourceId || resourceCost != (original?.resourceCost?.toString() ?: "1")
+    GenesisEditorSheet(if (original == null) "Add spell" else "Edit spell",
+        sections = listOf("Spell", "Casting", "Reference", "Review"), creating = original == null,
+        context = "Spellbook · ${character.name}", onDismiss = onDismiss, dirty = dirty,
+        saveLabel = "Save spell", saveEnabled = name.isNotBlank() && descriptionDraft.canSave, error = error, onSave = {
             try {
                 val spellLevel = optionalInt(level, "Spell level", 0, 9) ?: error("Enter a spell level")
-                val spell = SpellDefinition(original?.id ?: UUID.randomUUID().toString(), name.trim(), spellLevel, preparation, concentration, castingTime = castingTime,
+                val spell = SpellDefinition(draftId, name.trim(), spellLevel, preparation, concentration, castingTime = castingTime,
                     range = range, components = components, duration = duration, description = description, slotRequired = spellLevel > 0 && slotRequired, sourceVersion = sourceVersion, ritual = ritual, resourceId = resourceId, resourceCost = optionalInt(resourceCost, "Resource cost", 0, 1000) ?: 1)
                 onSave(character.copy(spells = character.spells.filterNot { it.id == spell.id } + spell))
             } catch (e: Exception) { error = e.message ?: "Check spell" }
-        }) { Text("Save spell") }
-    }) {
-        Text("Enter your own spell reference. No commercial compendium is copied or fetched.", color = RebuildPalette.Muted)
+    }) { section, select ->
+        ReforgeDraftRecovery(descriptionDraft)
+        when (section) {
+        0 -> {
         Field("Name", name, { name = it }); Field("Level (0 = cantrip)", level, { level = it })
         Choices("Preparation", SpellPreparation.entries, preparation) { preparation = it }
+        Text("Use your accepted spell description and rules. Preparation determines availability on this character.", color = RebuildPalette.Muted)
+        }
+        1 -> {
         Toggle("Concentration", concentration) { concentration = it }
         Field("Casting time", castingTime, { castingTime = it })
-        Toggle("Requires a spell slot", slotRequired) { slotRequired = it }
+        if (level.trim().toIntOrNull() != 0) Toggle("Requires a spell slot", slotRequired) { slotRequired = it }
+        else Text("Cantrip · no spell slot required", color = RebuildPalette.Muted)
         Toggle("Ritual casting allowed", ritual) { ritual = it }
         Choices("Item or feature resource", listOf<String?>(null) + character.resources.map { it.id }, resourceId,
             display = { id -> character.resources.firstOrNull { it.id == id }?.name ?: "No extra resource" }) { resourceId = it }
         if (resourceId != null) Field("Resource cost", resourceCost, { resourceCost = it })
+        }
+        2 -> {
         Field("Rule version / owned source", sourceVersion, { sourceVersion = it })
         Field("Range", range, { range = it }); Field("Components", components, { components = it }); Field("Duration", duration, { duration = it })
         Field("Description", description, { description = it }, single = false)
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+        }
+        else -> {
+            GenesisReviewSection("Spell", { select(0) }) {
+                GenesisReviewValue("Name", name)
+                GenesisReviewValue("Level / availability", "${level.ifBlank { "Not set" }} · ${preparation.name.lowercase().replace('_', ' ')}")
+            }
+            GenesisReviewSection("Casting", { select(1) }) {
+                GenesisReviewValue("Casting time", castingTime)
+                GenesisReviewValue("Spell slot", if (level.trim().toIntOrNull() != 0 && slotRequired) "Required" else "Not required")
+                GenesisReviewValue("Concentration / ritual", "${if (concentration) "Concentration" else "No concentration"} · ${if (ritual) "Ritual allowed" else "No ritual"}")
+                GenesisReviewValue("Additional resource", resourceId?.let { id -> "${character.resources.firstOrNull { it.id == id }?.name ?: "Missing resource"} · $resourceCost" }.orEmpty(), "None")
+            }
+            GenesisReviewSection("Reference", { select(2) }) {
+                GenesisReviewValue("Source", sourceVersion)
+                GenesisReviewValue("Range / components / duration", listOf(range, components, duration).filter(String::isNotBlank).joinToString(" · "))
+                GenesisReviewValue("Description", description)
+            }
+            Text("Saving adds the spell to this spellbook. Casting and resource spending are separate actions.", color = RebuildPalette.Muted)
+        }
+        }
     }
 }
 
 @Composable internal fun ReforgeResourceEditor(latestCharacter: ReforgeCharacter, onDismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit, existingResourceId: String? = null) {
     val character = requireNotNull(rememberReforgeSnapshot(latestCharacter))
     val original = remember { character.resources.firstOrNull { it.id == existingResourceId } }
+    val draftId = rememberSaveable { original?.id ?: UUID.randomUUID().toString() }
     var name by rememberSaveable { mutableStateOf(original?.name ?: "") }
     var maximum by rememberSaveable { mutableStateOf(original?.maximum?.toString() ?: "") }
     var current by rememberSaveable { mutableStateOf(original?.current?.toString() ?: "") }
@@ -406,23 +551,45 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
     var recovery by rememberSaveable { mutableStateOf(original?.recoveryAmount?.toString() ?: "") }
     var dieSides by rememberSaveable { mutableStateOf(original?.dieSides?.toString() ?: "") }
     var error by remember { mutableStateOf("") }
-    PlayerSheet(if (original == null) "Add resource" else "Edit resource", onDismiss, dirty = name.isNotBlank(), actions = {
-        PlayerButton(enabled = name.isNotBlank(), onClick = {
+    val dirty = name != original?.name.orEmpty() || maximum != original?.maximum?.toString().orEmpty() ||
+        current != original?.current?.toString().orEmpty() || recharge != (original?.recharge ?: Recharge.NONE) ||
+        recovery != original?.recoveryAmount?.toString().orEmpty() || dieSides != original?.dieSides?.toString().orEmpty()
+    GenesisEditorSheet(if (original == null) "Add resource" else "Edit resource",
+        sections = listOf("Resource", "Recovery", "Review"), creating = original == null,
+        context = "Resource owner · ${character.name}", onDismiss = onDismiss, dirty = dirty,
+        saveLabel = "Save resource", saveEnabled = name.isNotBlank(), error = error, onSave = {
             try {
-                val pool = ResourcePool(original?.id ?: UUID.randomUUID().toString(), name.trim(), optionalInt(maximum, "Capacity", 0, 10000),
+                val pool = ResourcePool(draftId, name.trim(), optionalInt(maximum, "Capacity", 0, 10000),
                     optionalInt(current, "Current uses", 0, 10000), recharge, optionalInt(recovery, "Recovered uses", 0, 10000), restoreUnknownOnRest = original?.restoreUnknownOnRest ?: false, dieSides = optionalInt(dieSides, "Hit Die sides", 2, 1000))
                 val currentValue = pool.current
                 val maximumValue = pool.maximum
                 require(currentValue == null || maximumValue == null || currentValue <= maximumValue) { "Current uses exceed capacity" }
                 onSave(character.copy(resources = character.resources.filterNot { it.id == pool.id } + pool))
             } catch (e: Exception) { error = e.message ?: "Check resource" }
-        }) { Text("Save resource") }
-    }) {
+    }) { section, select ->
+        when (section) {
+        0 -> {
         Field("Name", name, { name = it }); Field("Capacity", maximum, { maximum = it }); Field("Current uses (blank = unknown)", current, { current = it })
+        Text("Capacity and current uses are separate values. Leave either blank when unknown.", color = RebuildPalette.Muted)
+        }
+        1 -> {
         Field("Hit Die sides (optional, for example 8)", dieSides, { dieSides = it })
         Choices("Recharge", Recharge.entries, recharge) { recharge = it }
         Field("Uses recovered (blank = full capacity)", recovery, { recovery = it })
         Text("Creating or editing this resource does not complete a rest. Unknown current values remain unknown after recovery.", color = RebuildPalette.Muted)
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+        }
+        else -> {
+            GenesisReviewSection("Resource", { select(0) }) {
+                GenesisReviewValue("Name", name)
+                GenesisReviewValue("Current / capacity", "${current.ifBlank { "?" }} / ${maximum.ifBlank { "?" }}")
+            }
+            GenesisReviewSection("Recovery", { select(1) }) {
+                GenesisReviewValue("Recharge", recharge.name.lowercase().replace('_', ' '))
+                GenesisReviewValue("Uses recovered", recovery, "Full known capacity")
+                GenesisReviewValue("Hit Die sides", dieSides, "Not a Hit Die")
+            }
+            Text("Unknown current values stay unknown. No rest happens when you save this resource.", color = RebuildPalette.Muted)
+        }
+        }
     }
 }

@@ -27,6 +27,7 @@ fun PartyCompanionEditorV2(repository: CampaignLedgerRepository, memberId: Strin
     val items by repository.items.collectAsState(initial = emptyList())
     val state = allStates.firstOrNull { it.companionId == memberId }
     val resources = allResources.filter { it.companionId == memberId }
+    val resourceAccess = rememberGenesisCompanionResourceAccess(memberId)
     val links = allLinks.filter {
         (it.toType == "companion" && it.toId == memberId) ||
             (it.fromType == "companion" && it.fromId == memberId)
@@ -45,6 +46,7 @@ fun PartyCompanionEditorV2(repository: CampaignLedgerRepository, memberId: Strin
     var commandId by rememberSaveable(memberId) { mutableStateOf(UUID.randomUUID().toString()) }
     val staleState = mode == "state" && state?.revision != expectedRevision
     val staleResource = mode == "resource" && resources.firstOrNull { it.id == resourceId }?.revision != expectedRevision
+    val resourceEditable = resourceAccess.editable(resourceId)
 
     fun editState() {
         expectedRevision = state?.revision
@@ -74,11 +76,14 @@ fun PartyCompanionEditorV2(repository: CampaignLedgerRepository, memberId: Strin
     FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
         verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("Known resources", style = MaterialTheme.typography.titleMedium)
-        PlayerTextButton(onClick = { editResource(null) }, enabled = state != null) { Text("Add resource") }
+        PlayerTextButton(onClick = { editResource(null) }, enabled = state != null && resourceAccess.editable(null)) { Text("Add resource") }
     }
+    resourceAccess.explanation(null)?.let { Text(it, color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall) }
     if (resources.isEmpty()) Text(if (state == null) "Record a companion status to add tracked resources." else "No tracked resources yet.", color = RebuildPalette.Muted)
     else resources.forEach { row ->
-        PlayerEntry(row.name, partyHealthLabel(row.current, row.maximum), "Core", onClick = { editResource(row) })
+        PlayerEntry(row.name, partyHealthLabel(row.current, row.maximum) +
+            if (resourceAccess.loaded && resourceAccess.managed && !resourceAccess.editable(row.id)) " · Inactive history" else "",
+            "Core", onClick = { editResource(row) })
     }
     val itemLinks = links.filter { it.fromType == "item" || it.toType == "item" }
     if (itemLinks.isNotEmpty()) PlayerEntry("Historical equipment associations", "${itemLinks.size} relationship(s) · current possession is under Equipment", "Core", onClick = { mode = "links" })
@@ -117,6 +122,7 @@ fun PartyCompanionEditorV2(repository: CampaignLedgerRepository, memberId: Strin
             val revision = expectedRevision
             val confirmedSource = source.trim()
             actions.run {
+                require(resourceAccess.editable(candidate)) { resourceAccess.explanation(candidate) ?: "Resource is not editable." }
                 require(state != null) { "Save $memberName's status before resources." }
                 require(confirmedSource.isNotBlank()) { "Resource source is required." }
                 require(prior?.revision == revision) { "Resource changed. Reopen it before saving." }
@@ -133,14 +139,15 @@ fun PartyCompanionEditorV2(repository: CampaignLedgerRepository, memberId: Strin
                 mode = null
                 "Resource saved locally; no recharge assumed."
             }
-        }, enabled = !actions.busy && !staleResource && resourceName.isNotBlank() && source.isNotBlank()) { Text("Save resource") }
+        }, enabled = !actions.busy && !staleResource && resourceEditable && resourceName.isNotBlank() && source.isNotBlank()) { Text("Save resource") }
     }) {
         if (staleResource) Text("This resource changed. Close and reopen it to review the current revision.", color = MaterialTheme.colorScheme.error)
+        resourceAccess.explanation(resourceId)?.let { Text(it, color = RebuildPalette.Muted) }
         Text("Blank values mean unknown. Never silently restore charges/HP on a rest.", color = RebuildPalette.Muted)
-        Field("Resource name", resourceName, { resourceName = it }, enabled = !actions.busy)
-        Field("Current amount · blank = unknown", resourceCurrent, { resourceCurrent = it }, enabled = !actions.busy)
-        Field("Maximum amount · blank = unknown", resourceMax, { resourceMax = it }, enabled = !actions.busy)
-        Field("Evidence / game event source", source, { source = it }, single = false, enabled = !actions.busy)
+        Field("Resource name", resourceName, { resourceName = it }, enabled = !actions.busy && resourceEditable && !resourceAccess.managed)
+        Field("Current amount · blank = unknown", resourceCurrent, { resourceCurrent = it }, enabled = !actions.busy && resourceEditable)
+        Field("Maximum amount · blank = unknown", resourceMax, { resourceMax = it }, enabled = !actions.busy && resourceEditable && !resourceAccess.managed)
+        Field("Evidence / game event source", source, { source = it }, single = false, enabled = !actions.busy && resourceEditable)
         CompanionEditorFeedback(actions.message, actions.busy)
     }
 

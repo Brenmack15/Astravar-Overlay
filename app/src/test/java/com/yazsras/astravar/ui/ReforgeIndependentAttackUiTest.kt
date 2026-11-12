@@ -37,9 +37,11 @@ class ReforgeIndependentAttackUiTest {
                     AstravarTheme { ReforgeAttackEditor(original, {}, { saved = it }, attack.id) }
                 }
             }
+            compose.onNode(hasText("Accuracy") and hasClickAction()).performScrollTo().performClick()
             compose.onNodeWithText("Attack ability").assertDoesNotExist()
             compose.onNodeWithText("Proficient").assertDoesNotExist()
             compose.onNodeWithText("Independent attack bonus").performScrollTo().performTextReplacement("10")
+            compose.onNode(hasText("Damage") and hasClickAction()).performScrollTo().performClick()
             compose.onNodeWithText("COLD").performScrollTo().performClick()
             compose.onNodeWithText("FIRE").performClick()
             var snapshot: Map<String, List<Any?>> = emptyMap()

@@ -21,6 +21,31 @@ def seed_prompt_settings(db):
     db.execute("INSERT INTO prompt_catalog_state VALUES(?,?,?)", ("fictional-catalog-v1", 1, 11))
 
 
+def seed_canonical_storage(db):
+    """Existing installation-local gameplay/history must survive an unrelated import."""
+    db.execute("INSERT INTO reforge_characters VALUES(?,?,?,?,?,?)", (
+        "fictional-retained-actor", '{ "name": "Fictional retained Åctor" }', 12,
+        '{ "source": "FICTIONAL preexisting native fixture" }', 101, 109))
+    db.execute("INSERT INTO reforge_changes VALUES(?,?,?,?,?,?,?,?,?,?)", (
+        "fictional-retained-change", "fictional-retained-actor", "FICTIONAL operation", "a" * 64,
+        11, 12, 108, None, '{ "unchanged": true }', "APPLIED"))
+    db.execute("INSERT INTO reforge_rolls VALUES(?,?,?,?,?,?,?,?,?)", (
+        "fictional-retained-roll", "fictional-retained-actor", 12, "Fictional player roll", "1d20+2",
+        "[ 7, 2 ]", 1, "PLAYER", 107))
+    db.execute("INSERT INTO reforge_note_drafts VALUES(?,?,?,?)", (
+        "fictional-retained-actor", 12, "Fictional unsaved note — preserve whitespace  \n", 110))
+    db.execute("INSERT INTO genesis_storage_receipt VALUES(?,?,?,?,?,?)", (
+        1, 3, "b" * 64, '{ "reforge_characters": 1 }', 111, "campaign-ledger"))
+
+
+def seed_authority_storage(db):
+    """Opaque retained graph rows: this helper proves retention, not graph approval."""
+    for table in sorted(readback.GENESIS_AUTHORITY_TABLES):
+        columns = list(db.execute(f'PRAGMA table_info("{table}")'))
+        values = [1 if column[2] == "INTEGER" else "Fictional retained " + column[1] for column in columns]
+        db.execute(f'INSERT INTO "{table}" VALUES ({",".join("?" for _ in values)})', values)
+
+
 class IndependentNativeCampaignReadbackTest(unittest.TestCase):
     room_schema = 4
 
@@ -46,6 +71,15 @@ class IndependentNativeCampaignReadbackTest(unittest.TestCase):
                 createdAt INTEGER NOT NULL,updatedAt INTEGER NOT NULL,revision INTEGER NOT NULL);
                 CREATE TABLE prompt_catalog_state(id TEXT NOT NULL PRIMARY KEY,initializedAt INTEGER NOT NULL,recordCount INTEGER NOT NULL);''')
             seed_prompt_settings(db)
+        if self.room_schema >= 7:
+            schema = json.loads((Path(__file__).resolve().parents[2] /
+                f"app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/{self.room_schema}.json").read_text())
+            for entity in schema["database"]["entities"]:
+                if entity["tableName"] in readback.storage_tables(self.room_schema):
+                    db.execute(entity["createSql"].replace("${TABLE_NAME}", entity["tableName"]))
+            seed_canonical_storage(db)
+            if self.room_schema >= 8:
+                seed_authority_storage(db)
         db.commit(); db.close()
         readback.run(self.args("snapshot"))
         records=[]
@@ -98,7 +132,7 @@ class IndependentNativeCampaignReadbackTest(unittest.TestCase):
         with self.assertRaises(KeyError):readback.run(self.args("rolled-back"))
 
     def test_wrong_or_unsupported_room_version_is_rejected(self):
-        for version in (3, 7, 5 if self.room_schema == 4 else 4):
+        for version in (3, 9, 5 if self.room_schema == 4 else 4):
             with self.subTest(version=version):
                 self.mutate(f"PRAGMA user_version={version}")
                 with self.assertRaisesRegex(ValueError, "Expected additive campaign Room schema"):
@@ -135,6 +169,32 @@ class IndependentSchema6NativeCampaignReadbackTest(IndependentNativeCampaignRead
                     seed_prompt_settings(db)
 
 
+class IndependentSchema7NativeCampaignReadbackTest(IndependentSchema6NativeCampaignReadbackTest):
+    room_schema = 7
+
+    def test_every_preexisting_canonical_table_is_in_the_baseline(self):
+        baseline = json.loads(self.manifest.read_text())["tables"]
+        for table in sorted(readback.GENESIS_STORAGE_TABLES):
+            self.assertEqual(1, baseline[table]["count"])
+            with self.subTest(table=table):
+                with sqlite3.connect(self.path) as db:
+                    rows = list(db.execute(f'SELECT * FROM "{table}"'))
+                    db.execute(f'DELETE FROM "{table}"')
+                with self.assertRaisesRegex(AssertionError, "preexisting campaign row changed"):
+                    readback.run(self.args("applied"))
+                with sqlite3.connect(self.path) as db:
+                    db.executemany(f'INSERT INTO "{table}" VALUES ({",".join("?" for _ in rows[0])})', rows)
+
+    def test_schema7_requires_all_canonical_tables_before_capturing_a_baseline(self):
+        for table in sorted(readback.GENESIS_STORAGE_TABLES):
+            with self.subTest(table=table), sqlite3.connect(self.path) as db:
+                db.execute("SAVEPOINT before_tamper")
+                db.execute(f'DROP TABLE "{table}"')
+                with self.assertRaisesRegex(AssertionError, "Canonical storage table missing or malformed"):
+                    readback.validate_storage_tables(db, self.room_schema)
+                db.execute("ROLLBACK TO before_tamper")
+
+
 class IndependentMappedNativeReadbackTest(unittest.TestCase):
     room_schema = 4
 
@@ -161,6 +221,10 @@ class IndependentMappedNativeReadbackTest(unittest.TestCase):
                         sourceStateSha256="fictional-earlier-state", createdAt=1))
             if self.room_schema >= 6:
                 seed_prompt_settings(db)
+            if self.room_schema >= 7:
+                seed_canonical_storage(db)
+            if self.room_schema >= 8:
+                seed_authority_storage(db)
         args = argparse.Namespace(action="snapshot", database=self.database, manifest=self.manifest, synthetic_demo=True, expected_room_schema=self.room_schema)
         readback.run(args)
         self.groups = {"ledger_items": self.source["mapped"]["items"], "ledger_events": self.source["mapped"]["events"]}
@@ -303,7 +367,7 @@ class IndependentMappedSchema5NativeReadbackTest(IndependentMappedNativeReadback
 
     def test_unsupported_mapped_room_schema_is_rejected(self):
         with sqlite3.connect(self.database) as db:
-            db.execute("PRAGMA user_version=7")
+            db.execute("PRAGMA user_version=9")
         with self.assertRaisesRegex(AssertionError, "Unsupported campaign Room schema"):
             self.verify()
 
@@ -320,3 +384,69 @@ class IndependentMappedSchema6NativeReadbackTest(IndependentMappedSchema5NativeR
             db.execute("UPDATE chatgpt_prompts SET content='unexpected replacement'")
         with self.assertRaisesRegex(AssertionError, "preexisting typed row or immutable archive"):
             self.verify()
+
+
+class IndependentMappedSchema7NativeReadbackTest(IndependentMappedSchema6NativeReadbackTest):
+    room_schema = 7
+
+    def test_campaign_import_keeps_all_installation_local_gameplay_and_migration_evidence(self):
+        baseline = json.loads(self.manifest.read_text())["allTables"]
+        self.assertTrue(self.verify(expected_room_schema=self.room_schema)["preexisting_rows_and_archive_evidence_unchanged"])
+        for table in sorted(readback.GENESIS_STORAGE_TABLES):
+            self.assertEqual(1, baseline[table]["count"])
+            with self.subTest(table=table):
+                with sqlite3.connect(self.database) as db:
+                    rows = list(db.execute(f'SELECT * FROM "{table}"'))
+                    db.execute(f'DELETE FROM "{table}"')
+                with self.assertRaisesRegex(AssertionError, "preexisting typed row or immutable archive"):
+                    self.verify()
+                with sqlite3.connect(self.database) as db:
+                    db.executemany(f'INSERT INTO "{table}" VALUES ({",".join("?" for _ in rows[0])})', rows)
+
+    def test_schema7_rejects_missing_or_unexpected_canonical_columns(self):
+        for statement in ('DROP TABLE reforge_characters',
+                          'ALTER TABLE reforge_note_drafts ADD COLUMN unreviewed_value TEXT'):
+            with self.subTest(statement=statement), sqlite3.connect(self.database) as db:
+                db.execute("SAVEPOINT before_tamper")
+                db.execute(statement)
+                with self.assertRaisesRegex(AssertionError, "Canonical storage table missing or malformed"):
+                    readback.validate_storage_tables(db, self.room_schema)
+                db.execute("ROLLBACK TO before_tamper")
+
+
+class IndependentSchema8NativeCampaignReadbackTest(IndependentSchema7NativeCampaignReadbackTest):
+    room_schema = 8
+
+    def test_authority_rows_are_included_in_preservation_and_shape_checks(self):
+        for table in sorted(readback.GENESIS_AUTHORITY_TABLES):
+            with self.subTest(table=table), sqlite3.connect(self.path) as db:
+                self.assertEqual(1, json.loads(self.manifest.read_text())["tables"][table]["count"])
+                db.execute("SAVEPOINT before_tamper")
+                db.execute(f'DROP TABLE "{table}"')
+                with self.assertRaisesRegex(AssertionError, "missing or malformed"):
+                    readback.validate_storage_tables(db, self.room_schema)
+                db.execute("ROLLBACK TO before_tamper")
+            with sqlite3.connect(self.path) as db:
+                rows = list(db.execute(f'SELECT * FROM "{table}"'))
+                db.execute(f'DELETE FROM "{table}"')
+            with self.assertRaisesRegex(AssertionError, "preexisting campaign row changed"):
+                readback.run(self.args("applied"))
+            with sqlite3.connect(self.path) as db:
+                db.executemany(f'INSERT INTO "{table}" VALUES ({",".join("?" for _ in rows[0])})', rows)
+
+
+class IndependentMappedSchema8NativeReadbackTest(IndependentMappedSchema7NativeReadbackTest):
+    room_schema = 8
+
+    def test_mapped_import_cannot_change_existing_authority(self):
+        self.assertTrue(self.verify(expected_room_schema=8)["preexisting_rows_and_archive_evidence_unchanged"])
+        for table in sorted(readback.GENESIS_AUTHORITY_TABLES):
+            self.assertEqual(1, json.loads(self.manifest.read_text())["allTables"][table]["count"])
+            with self.subTest(table=table):
+                with sqlite3.connect(self.database) as db:
+                    rows = list(db.execute(f'SELECT * FROM "{table}"'))
+                    db.execute(f'DELETE FROM "{table}"')
+                with self.assertRaisesRegex(AssertionError, "preexisting typed row or immutable archive"):
+                    self.verify()
+                with sqlite3.connect(self.database) as db:
+                    db.executemany(f'INSERT INTO "{table}" VALUES ({",".join("?" for _ in rows[0])})', rows)

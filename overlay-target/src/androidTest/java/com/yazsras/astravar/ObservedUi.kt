@@ -288,7 +288,7 @@ internal class ObservedUi(private val device: UiDevice) {
         tapText("Tools", packageName)
         val group = when (name) {
             "Armor weapon", "Spell reservoir", "Spell library", "Rules & profile", "Resources & recovery", "Roll history" -> "Advanced combat & magic"
-            "Character sources", "Character backup", "Campaign backup", "Campaign import", "Owner connection", "Weapon backup", "Fictional sync", "Remote Updates" -> "Records, backups & connection"
+            "Character sources", "Character backup", "Campaign backup", "Complete backup", "Campaign import", "Owner connection", "Weapon backup", "Fictional sync", "Remote Updates" -> "Records, backups & connection"
             else -> null
         }
         if (group != null) tapText(group, packageName)
@@ -297,7 +297,21 @@ internal class ObservedUi(private val device: UiDevice) {
 
     fun campaignItems(packageName: String) {
         ensurePrimaryTab(packageName, "Inventory")
-        selectSection(packageName, "Campaign items")
+        // Genesis exposes one consolidated inventory; the original ledger is
+        // an explicit source-record destination. Keep the older tab path for
+        // the historical upgrade fixtures that share this observer.
+        if (device.hasObject(By.text("‹ Inventory").pkg(packageName))) return
+        if (device.hasObject(By.text("My gear").pkg(packageName))) selectSection(packageName, "Campaign items")
+        else tapText("Campaign items", packageName)
+    }
+
+    /** Preserve source-directory journeys through the explicit Genesis Journal tab. */
+    fun campaignJournal(packageName: String) {
+        ensurePrimaryTab(packageName, "Campaign")
+        if (device.hasObject(By.text("‹ Campaign").pkg(packageName))) tapText("‹ Campaign", packageName)
+        // Older frozen builds expose the journal directly. This optional tab
+        // follows only an observed new campaign selector, preserving that route.
+        if (device.hasObject(By.text("Choose campaign").pkg(packageName))) selectSection(packageName, "Journal")
     }
 
     /** Discover a flat section strip through native scrolling, then activate its tab once. */
@@ -305,10 +319,12 @@ internal class ObservedUi(private val device: UiDevice) {
         // Restrict observation to the requested tab family inside its actual
         // horizontal strip. A body heading or unrelated filter is never a tab.
         val families = listOf(
-            listOf("Sheet", "Combat", "Equipment", "Spells", "Resources", "History", "Currency"),
+            listOf("Sheet", "Combat", "Equipment", "Spells", "Features", "Resources", "History", "Currency"),
             listOf("My gear", "Campaign items"),
+            listOf("My items", "All items"),
             listOf("All gear", "Equipped", "Attuned"),
-            listOf("All", "Prepared", "Cantrips")
+            listOf("All", "Prepared", "Cantrips"),
+            listOf("People", "Journal")
         )
         val family = families.singleOrNull { label in it } ?: error("Unknown tab family for $label")
         val deadline = SystemClock.uptimeMillis() + 30_000
@@ -316,9 +332,29 @@ internal class ObservedUi(private val device: UiDevice) {
         val familyPattern = Pattern.compile(family.joinToString("|", transform = Pattern::quote))
         fun matchingNodes(strip: UiObject2, pattern: Pattern): List<UiObject2> =
             strip.findObjects(By.text(pattern).pkg(packageName)) + strip.findObjects(By.desc(pattern).pkg(packageName))
+        fun sectionTabState(node: UiObject2): PrimaryTabState? {
+            var current: UiObject2? = node
+            repeat(12) {
+                val observed = current ?: return null
+                if (observed.isClickable || observed.isSelected) {
+                    // The actual API36 tree puts a quick action's clickable View around
+                    // sibling TextView and Button nodes. Checking only this ancestor's
+                    // class misidentifies its Spells label as a section tab and selects
+                    // the quick-action strip. A selectable Tab has no Button descendant.
+                    if (observed.className == "android.widget.Button" ||
+                        observed.findObjects(By.clazz("android.widget.Button").pkg(packageName)).isNotEmpty()) return null
+                    val bounds = Rect(observed.visibleBounds)
+                    return bounds.takeUnless { it.isEmpty }?.let {
+                        PrimaryTabState(it, observed.isEnabled, observed.isSelected, observed.isClickable)
+                    }
+                }
+                current = observed.parent
+            }
+            return null
+        }
         val labelPattern = Pattern.compile(Pattern.quote(label))
         fun sectionStrip() = device.findObjects(stripSelector).firstOrNull {
-            !it.visibleBounds.isEmpty && matchingNodes(it, familyPattern).any { node -> primaryTabState(node) != null }
+            !it.visibleBounds.isEmpty && matchingNodes(it, familyPattern).any { node -> sectionTabState(node) != null }
         }
         val minimumTap = (48 * InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density).toInt()
         var lastObserved = "No section strip observed"
@@ -332,7 +368,7 @@ internal class ObservedUi(private val device: UiDevice) {
                     scrollForObservation(packageName, Direction.UP)
                 } else {
                     val viewport = Rect(strip.visibleBounds)
-                    val state = matchingNodes(strip, labelPattern).firstNotNullOfOrNull(::primaryTabState)
+                    val state = matchingNodes(strip, labelPattern).firstNotNullOfOrNull(::sectionTabState)
                     lastObserved = "strip=$viewport; $label=$state; direction=$direction"
                     val visibleHeight = minOf(viewport.height(), state?.bounds?.height() ?: viewport.height())
                     if (visibleHeight < minimumTap) {
@@ -372,7 +408,9 @@ internal class ObservedUi(private val device: UiDevice) {
                         snapshot(stripSelector, "selected $label section", timeoutMs = (deadline - SystemClock.uptimeMillis()).coerceAtLeast(1), refreshCache = true) {
                             sectionStrip()?.let { selectedStrip ->
                                 val selectedViewport = Rect(selectedStrip.visibleBounds)
-                                matchingNodes(selectedStrip, labelPattern).firstNotNullOfOrNull(::selectedTabBounds)
+                                matchingNodes(selectedStrip, labelPattern).firstNotNullOfOrNull { node ->
+                                    sectionTabState(node)?.takeIf { it.selected && it.enabled }?.bounds
+                                }
                                     ?.takeIf { bounds -> selectedViewport.contains(bounds) &&
                                         bounds.width() >= minimumTap && bounds.height() >= minimumTap }
                             }

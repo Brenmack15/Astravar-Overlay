@@ -138,6 +138,8 @@ class PartyPlayerFirstTest {
             add.performClick()
             compose.onNodeWithText("Add companion").assertIsDisplayed()
             compose.onNode(hasSetTextAction() and hasText("Companion name")).performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Create companion").assertDoesNotExist()
+            compose.onNodeWithText("Review & save").performClick()
             compose.onNodeWithText("Create companion").assertIsNotEnabled()
             runBlocking { assertEquals("Opening the form must not create an extra record", 1, db.recordsDao().allCompanionStates().size) }
         } finally {
@@ -152,8 +154,10 @@ class PartyPlayerFirstTest {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             activity.get().setContent { PartyTestTheme { PartyPageV2(repo, null) {} } }
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("+ Add companion") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("+ Add companion").performScrollTo().performClick()
             compose.onNode(hasSetTextAction() and hasText("Companion name")).performTextInput("Glimmer")
+            compose.onNodeWithText("Review & save").performClick()
             compose.onNodeWithText("Create companion").performClick()
             waitForText("Glimmer")
             compose.waitUntil(10_000) {

@@ -294,6 +294,7 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
         conflicts += validateState(state, current.archive)
         incoming.mapped?.let {
             require(it.archive == CampaignArchiveState()) { "Mapped records cannot contain another campaign archive." }
+            genesisRequireUnmanagedCampaign(it)
             conflicts += CampaignBackup(db).validate(it, current)
             conflicts += validateMappedIdentities(it, current)
         }
@@ -344,6 +345,7 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
         val state = CampaignArchiveState(references = incomingRows, relations = edges,
             sources = listOf(CampaignArchiveSource(preview.fingerprint, preview.payloadJson)))
         val mapped = incoming.mapped ?: LedgerExport(exportedAt = 0, items = emptyList(), events = emptyList())
+        genesisRequireUnmanagedCampaign(mapped)
         val merge = mapped.copy(archive = state, schema = maxOf(4, mapped.schema))
         val errors = CampaignBackup(db).validate(merge, current) + validateMappedIdentities(mapped, current)
         require(errors.isEmpty()) { errors.joinToString("\n") }
@@ -353,7 +355,7 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
         check(readback.isEmpty()) { "Independent database readback failed: ${readback.joinToString()}" }
         // Read typed rows back independently and validate the supplied snapshots against stored identities/content.
         val after = campaignSnapshot()
-        val mappedErrors = verifyMapped(mapped, after) + verifyMapped(current, after) + verifyMergedCounts(current, merge, after)
+        val mappedErrors = verifyMapped(mapped, after) + verifyMapped(current, after) + verifyMergedCounts(current, merge, after) + connectedRecoveryErrors(after)
         check(mappedErrors.isEmpty()) { "Mapped-record readback failed: ${mappedErrors.joinToString()}" }
         val receipt = CampaignImportReceipt(preview.fingerprint, incoming.campaignId, incoming.title, System.currentTimeMillis(),
             incomingRows.size, edges.size, "APPLIED", stateHash(after), preview.summary)
@@ -413,12 +415,21 @@ class CampaignArchiveRepository(private val db: CampaignLedgerDb) {
     private suspend fun restoreVerifiedSnapshot(metadata: CampaignBackupMetadata) {
         // Decoding ends in its own frame so the serialized text is released before restoring rows.
         val prior = decodeVerifiedSnapshot(metadata)
+        // Archive recovery replaces only the historical campaign tables. It may coexist
+        // with connected gameplay only when those unchanged authorities still validate
+        // against the complete candidate source snapshot, before any row is deleted.
+        val errors = connectedRecoveryErrors(prior)
+        require(errors.isEmpty()) { "Archive recovery conflicts with connected records. Use Complete backup and review the differences: ${errors.take(10).joinToString(" ")}" }
         val sql = db.openHelper.writableDatabase
         ROLLBACK_DELETE_TABLES.forEach { sql.execSQL("DELETE FROM $it") }
         val empty = LedgerExport(exportedAt = 0, items = emptyList(), events = emptyList())
         CampaignBackup(db).mergeRows(prior.copy(archive = prior.archive.copy(backups = emptyList(), receipts = emptyList())), empty)
         // Backup and receipt tables remain untouched, preserving immutable recovery evidence in place.
     }
+
+    private suspend fun connectedRecoveryErrors(candidate: LedgerExport): List<String> =
+        if (!db.genesisAuthorityDao().hasAuthority()) emptyList()
+        else genesisAuthorityBackupErrors(genesisAuthorityBackupRows(db), candidate, genesisPlayableBackupRows(db))
 
     private suspend fun verifyRecords(archive: CampaignArchivePayload, hash: String): List<String> {
         val errors = mutableListOf<String>()

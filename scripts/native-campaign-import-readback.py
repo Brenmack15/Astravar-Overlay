@@ -9,13 +9,39 @@ import sqlite3
 ARCHIVE_TABLES = {"campaign_references", "campaign_reference_relations", "campaign_import_receipts",
                   "campaign_import_backups", "campaign_archive_sources"}
 MARKER = "ASTRAVAR_FICTIONAL_NATIVE_IMPORT_V1"
-SUPPORTED_ROOM_SCHEMAS = (4, 5, 6)
-# Prompt settings add Room tables without changing the campaign backup protocol.
+SUPPORTED_ROOM_SCHEMAS = (4, 5, 6, 7, 8)
+# Prompt settings and unified gameplay storage do not change the campaign backup protocol.
 SUPPORTED_MAPPED_EXPORT_SCHEMAS = (4, 5)
+GENESIS_STORAGE_TABLES = {"reforge_characters", "reforge_changes", "reforge_rolls",
+                          "reforge_note_drafts", "genesis_storage_receipt"}
+
+
+GENESIS_AUTHORITY_TABLES = {"genesis_campaigns", "genesis_actor_authority", "genesis_item_authority", "genesis_authority_receipts"}
+
+
+def storage_tables(room_schema):
+    return GENESIS_STORAGE_TABLES | (GENESIS_AUTHORITY_TABLES if room_schema >= 8 else set())
 
 
 def sha(value):
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def validate_storage_tables(db, room_schema):
+    """A version marker alone cannot establish that canonical storage and authority survived."""
+    if room_schema < 7:
+        return
+    schema_file = Path(__file__).resolve().parents[1] / f"app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/{room_schema}.json"
+    entities = {entry["tableName"]: entry for entry in json.loads(schema_file.read_text())["database"]["entities"]}
+    assert storage_tables(room_schema) <= entities.keys(), "Exported schema lacks canonical storage definitions"
+    for table in sorted(storage_tables(room_schema)):
+        entity = entities[table]
+        primary_keys = entity["primaryKey"]["columnNames"]
+        expected = {field["columnName"]: (field["affinity"], int(field.get("notNull", False)),
+                    primary_keys.index(field["columnName"]) + 1 if field["columnName"] in primary_keys else 0)
+                    for field in entity["fields"]}
+        actual = {row[1]: (row[2], row[3], row[5]) for row in db.execute(f'PRAGMA table_info("{table}")')}
+        assert actual == expected, "Canonical storage table missing or malformed: " + table
 
 
 def normalized(db, *, include_archive=False, omit_keys=None):
@@ -46,6 +72,7 @@ def run(args):
         expected_schema = getattr(args, "expected_room_schema", 4)
         if expected_schema not in SUPPORTED_ROOM_SCHEMAS or room_schema != expected_schema:
             raise ValueError(f"Expected additive campaign Room schema {expected_schema}; found {room_schema}")
+        validate_storage_tables(db, room_schema)
         if args.action == "snapshot":
             result = {"marker": MARKER, "synthetic_only": True, "tables": normalized(db),
                       "allTables": normalized(db, include_archive=True), "roomSchema": room_schema}
@@ -154,6 +181,7 @@ def verify_mapped(database, manifest, fixture, *, rolled_back=False, synthetic_d
         db.row_factory = sqlite3.Row
         room_schema = db.execute("PRAGMA user_version").fetchone()[0]
         assert room_schema in SUPPORTED_ROOM_SCHEMAS, "Unsupported campaign Room schema"
+        validate_storage_tables(db, room_schema)
         if expected_room_schema is not None:
             assert room_schema == expected_room_schema, "Mapped readback Room schema differs from the explicit expected version"
         assert baseline.get("roomSchema", 4) == room_schema, "Campaign Room schema changed since the captured baseline"

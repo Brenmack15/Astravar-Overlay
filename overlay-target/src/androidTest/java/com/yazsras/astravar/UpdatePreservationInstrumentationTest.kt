@@ -66,8 +66,14 @@ class UpdatePreservationInstrumentationTest {
         // The previous native journey created this arbitrary companion through
         // product controls. A new installation must not invent owner companions.
         find("CI Native Ally")
-        assertNotNull("The arbitrary companion source HP survives the ordinary APK update",
-            ui.bounds(By.textContains("HP 4 / 12").pkg(product), "retained fictional companion HP"))
+        assertNotNull("The shared companion source HP survives the ordinary APK update",
+            ui.bounds(By.textContains("HP 6 / 12").pkg(product), "retained fictional companion HP"))
+        tap("CI Native Ally")
+        find("6 / 12")
+        tap("Open playable sheet")
+        ui.descriptionBounds("HP 6 / 12", product)
+        tap("Back to companions")
+        tap("‹ Party")
         // Layout acceptance captures are native emulator output, not a physical Galaxy test.
         device.executeShellCommand("wm size 1080x2400")
         for (scale in listOf("1.0", "1.3", "2.0")) {

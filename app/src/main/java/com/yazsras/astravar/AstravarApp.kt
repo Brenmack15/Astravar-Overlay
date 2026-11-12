@@ -9,8 +9,9 @@ class AstravarApp: Application() {
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
     val repository by lazy { Repository(AstravarDb.open(this),scope) }
     val preferences by lazy { Preferences(this) }
-    // Campaign items are isolated from the existing Room v3 weapon/combat database.
-    val campaignLedger by lazy { CampaignLedgerRepository(CampaignLedgerDb.open(this)) }
+    // Campaign and playable repositories share one Room transaction owner; weapon storage stays unchanged.
+    val genesisStorage by lazy { GenesisApplicationStorage.open(this) }
+    val campaignLedger get() = genesisStorage.campaign
     // Physically isolated fictional public connectivity lab; no campaign record serialization.
     val sandboxSync by lazy { SandboxSyncRepository(SandboxSyncDb.open(this)) }
     // Explicit opt-in, disposable-profile commands; no real campaign serialization.

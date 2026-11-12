@@ -1,6 +1,7 @@
 package com.yazsras.astravar.data
 
 import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.descriptors.SerialKind
 import kotlinx.serialization.descriptors.StructureKind
@@ -17,9 +18,15 @@ import kotlinx.serialization.modules.SerializersModule
 @OptIn(ExperimentalSerializationApi::class)
 internal fun campaignDecodeBackup(text: String): LedgerExport {
     supportedCampaignBackup(text)
+    return campaignDecodeSerializable(text, LedgerExport.serializer())
+}
+
+/** The caller supplies its format-specific document bound; syntax and bounded strings stay shared. */
+@OptIn(ExperimentalSerializationApi::class)
+internal fun <T> campaignDecodeSerializable(text: String, serializer: DeserializationStrategy<T>): T {
     rejectDuplicateJsonMembers(text)
     val cursor = CampaignBackupCursor(text)
-    val result = LedgerExport.serializer().deserialize(CampaignBackupDecoder(cursor))
+    val result = serializer.deserialize(CampaignBackupDecoder(cursor))
     require(cursor.finished()) { "Unexpected content after campaign backup." }
     return result
 }

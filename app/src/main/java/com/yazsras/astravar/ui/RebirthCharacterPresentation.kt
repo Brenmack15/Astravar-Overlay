@@ -159,8 +159,9 @@ import com.yazsras.astravar.rules.reforge.*
 }
 
 @Composable internal fun RebirthItemRow(item: ItemInstance, definition: ItemDefinition?, busy: Boolean,
-    onInspect: () -> Unit, onEquip: () -> Unit) {
+    onInspect: () -> Unit, onEquip: () -> Unit, onManage: () -> Unit) {
     val equipped = item.state in setOf(ItemState.WORN, ItemState.HELD)
+    val stack = !equipped && item.quantity > 1
     Column {
         Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -179,13 +180,21 @@ import com.yazsras.astravar.rules.reforge.*
                 Text("${item.state.name.lowercase().replaceFirstChar { it.uppercase() }}${if (item.attuned) " · Attuned" else ""} · Quantity ${item.quantity}",
                     color = if (equipped) RebuildPalette.Cyan else RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
             }
-            PlayerTextButton(enabled = !busy, onClick = onEquip) { Text(if (equipped) "Unequip" else "Equip") }
+            PlayerTextButton(enabled = !busy && (equipped || item.quantity > 0),
+                onClick = if (stack) onManage else onEquip) {
+                Text(if (equipped) "Unequip" else if (stack) "Split stack" else "Equip")
+            }
         }
+        if (stack || (!equipped && item.quantity == 0)) Text(
+            if (stack) "Split off one item before equipping." else "No items available to equip.",
+            color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(bottom = 8.dp))
         HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .55f))
     }
 }
 
-@Composable internal fun RebirthSpellRow(spell: SpellDefinition, onInspect: () -> Unit, onCast: () -> Unit) {
+@Composable internal fun RebirthSpellRow(spell: SpellDefinition, onInspect: () -> Unit, onCast: () -> Unit,
+    actionLabel: String = "Cast") {
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -206,7 +215,7 @@ import com.yazsras.astravar.rules.reforge.*
                 if (details.isNotEmpty()) Text(details.joinToString(" · "), color = RebuildPalette.Muted,
                     style = MaterialTheme.typography.bodySmall)
             }
-            PlayerOutlinedButton(onClick = onCast) { Text("Cast") }
+            PlayerOutlinedButton(onClick = onCast) { Text(actionLabel) }
         }
         HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .55f))
     }

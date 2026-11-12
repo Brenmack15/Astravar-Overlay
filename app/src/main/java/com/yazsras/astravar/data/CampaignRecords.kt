@@ -278,14 +278,44 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
     fun requirementsFor(projectId: String) = dao.requirementsFor(projectId)
     suspend fun receipt(commandId: String) = dao.receipt(commandId)
 
-    /** Creates the two linked records together. No default HP, ability scores, or lore is invented. */
-    suspend fun createCompanion(name: String): String = db.withTransaction {
+    /** Identity, companion role, optional owner link and retry receipt share one transaction. */
+    suspend fun createCompanion(name: String, ownerProfileId: String? = null,
+        expectedOwnerRevision: Long? = null, commandId: String = UUID.randomUUID().toString()): String = db.withTransaction {
         val displayName = name.trim()
         text(displayName, 120, true)
-        val companionId = "companion-${UUID.randomUUID()}"
-        val provenance = "Player-created local companion"
-        saveProfile(CharacterProfile(id = companionId, name = displayName), source = provenance)
-        saveCompanionState(CompanionState(companionId = companionId, name = displayName), source = provenance)
+        id(commandId)
+        val fingerprint = campaignHash(campaignJson.encodeToString(listOf("companion-create-v2", displayName,
+            ownerProfileId, expectedOwnerRevision?.toString())))
+        val token = campaignHash(commandId).take(40)
+        val companionId = "companion-$token"
+        // Bind the whole creation request to the existing audited profile receipt.
+        // A separate aggregate receipt without an audit cannot survive backup validation.
+        val provenance = "Player-created local companion\nCreation request: $fingerprint"
+        val profile = CharacterProfile(id = companionId, name = displayName)
+        dao.receipt(commandId)?.let { receipt ->
+            require(receipt.kind == "character-profile" && receipt.recordId == companionId && receipt.resultingRevision == 1L) {
+                "Command ID collision. No changes saved."
+            }
+            val original = campaignJson.decodeFromString<CharacterProfile>(receipt.outcomeJson)
+            require(original.source == provenance && original.copy(source = "", updatedAt = 0) == profile) {
+                "The original creation receipt belongs to a different companion request."
+            }
+            // saveProfile verifies the original fingerprint before consulting current
+            // revisions. An identical retry stays valid after the owner or companion changes.
+            saveProfile(profile, source = provenance, commandId = commandId)
+            return@withTransaction companionId
+        }
+        genesisRejectAuthorityCommandReuse(db, commandId)
+        require(db.ledgerDao().event(commandId) == null) { "Command ID already belongs to an inventory operation." }
+        if (ownerProfileId != null) {
+            val owner = dao.characterProfile(ownerProfileId) ?: error("The selected character no longer exists. Choose an owner again.")
+            check(owner.revision == expectedOwnerRevision) { "The selected character changed. Review the owner before creating this companion." }
+        } else require(expectedOwnerRevision == null) { "Choose a character before recording its revision." }
+        saveProfile(profile, source = provenance, commandId = commandId)
+        saveCompanionState(CompanionState(companionId = companionId, name = displayName), source = provenance, commandId = "companion-state-$token")
+        if (ownerProfileId != null) saveLink(CampaignLink(fromType = "companion", fromId = companionId,
+            toType = "character-profile", toId = ownerProfileId, label = "Companion of", id = "companion-owner-$token"),
+            source = provenance, commandId = "companion-owner-$token")
         companionId
     }
 
@@ -312,6 +342,7 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
         id(recordId, 180); id(commandId); source(provenance)
         val fp = campaignHash(campaignJson.encodeToString(listOf("v2", kind, recordId, expected?.toString(), payload, provenance)))
         dao.receipt(commandId)?.let { require(it.fingerprint == fp) { "Command ID collision. No changes saved." }; return it }
+        genesisRejectAuthorityCommandReuse(db, commandId)
         require(db.ledgerDao().event(commandId) == null) { "Command ID already belongs to an inventory operation." }
         check(oldRevision == expected) { "A newer record exists. Reopen it before saving." }
         val revision = (oldRevision ?: 0) + 1
@@ -356,6 +387,7 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
 
     suspend fun saveEntity(value: ConnectionEntity, expectedRevision: Long? = null, source: String,
         commandId: String = UUID.randomUUID().toString()): CommandReceipt = db.withTransaction {
+        routeManagedEntity(db, value, expectedRevision, source, commandId)?.let { return@withTransaction it }
         text(value.name, 120, true); text(value.notes); text(value.aliases, 2000); text(value.relationship, 3000)
         require(value.kind in setOf("Person", "Organization", "Faction", "Creature", "Location", "Other"))
         require(value.imageBase64 == null || value.imageBase64.length <= 1_000_000)
@@ -388,6 +420,7 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
 
     suspend fun saveCompanionState(value: CompanionState, expectedRevision: Long? = null, source: String,
         commandId: String = UUID.randomUUID().toString()): CommandReceipt = db.withTransaction {
+        routeManagedCompanionState(db, value, expectedRevision, source, commandId)?.let { return@withTransaction it }
         text(value.name, 120, true); text(value.condition, 200, true); text(value.notes)
         val old = dao.companion(value.companionId)
         save("companion", value.companionId, expectedRevision, old?.revision, old?.let { campaignJson.encodeToString(it) },
@@ -398,6 +431,7 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
 
     suspend fun saveCompanionResource(value: CompanionResource, expectedRevision: Long? = null, source: String,
         commandId: String = UUID.randomUUID().toString()): CommandReceipt = db.withTransaction {
+        routeManagedCompanionResource(db, value, expectedRevision, source, commandId)?.let { return@withTransaction it }
         text(value.name, 120, true)
         require(value.current == null || value.current in 0..1_000_000)
         require(value.maximum == null || value.maximum in 0..1_000_000)
@@ -421,6 +455,7 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
 
     suspend fun saveProfile(value: CharacterProfile, expectedRevision: Long? = null, source: String,
         commandId: String = UUID.randomUUID().toString()): CommandReceipt = db.withTransaction {
+        routeManagedProfile(db, value, expectedRevision, source, commandId)?.let { return@withTransaction it }
         id(value.id); text(value.name, 120)
         require(value.currentHp == null || value.currentHp in 0..1_000_000)
         require(value.maximumHp == null || value.maximumHp in 0..1_000_000)
@@ -438,6 +473,7 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
     /** Magic modifiers are descriptive and never alter weapon/overlay calculations. */
     suspend fun saveAbility(value: CharacterAbility, expectedRevision: Long? = null, source: String,
         commandId: String = UUID.randomUUID().toString()): CommandReceipt = db.withTransaction {
+        routeManagedAbility(db, value, expectedRevision, source, commandId)?.let { return@withTransaction it }
         id(value.profileId)
         require(value.key in setOf("STR", "DEX", "CON", "INT", "WIS", "CHA"))
         require(value.score == null || value.score in 0..1000)
@@ -461,6 +497,7 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
 
     suspend fun saveLink(value: CampaignLink, expectedRevision: Long? = null, source: String,
         commandId: String = UUID.randomUUID().toString()): CommandReceipt = db.withTransaction {
+        checkManagedLink(db, value, commandId)
         text(value.label, 120, true)
         require(endpoint(value.fromType, value.fromId) && endpoint(value.toType, value.toId)) { "Link targets must already exist." }
         require(value.fromType != value.toType || value.fromId != value.toId) { "A record cannot link to itself." }
@@ -480,6 +517,8 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
             require(it.fingerprint == fingerprint) { "Command ID collision. No changes saved." }
             return@withTransaction it
         }
+        checkManagedUnlink(db, linkId, commandId)
+        genesisRejectAuthorityCommandReuse(db, commandId)
         require(db.ledgerDao().event(commandId) == null) { "Command ID already belongs to an inventory operation." }
         val before = dao.link(linkId) ?: error("The relationship is no longer available.")
         check(before.revision == expectedRevision) { "The relationship changed. Reopen it before removing." }
@@ -498,6 +537,8 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
         id(command.commandId); source(command.source)
         val fp = campaignHash(campaignJson.encodeToString(command.copy(commandId = "")))
         dao.receipt(command.commandId)?.let { require(it.fingerprint == fp) { "Command ID collision." }; return@withTransaction it }
+        genesisRejectAuthorityCommandReuse(db, command.commandId)
+        checkManagedCraft(db, command)
         require(db.ledgerDao().event(command.commandId) == null) { "Command ID collision." }
         val project = dao.project(command.projectId) ?: error("Invention no longer exists.")
         check(project.revision == command.expectedProjectRevision) { "Invention changed. Review it before recording construction." }
@@ -509,6 +550,7 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
         val linkCommand = "craft-link-${campaignHash(command.commandId).take(40)}"
         val materialCommands = command.materials.indices.map { "craft-${campaignHash(command.commandId).take(40)}-$it" }
         for (child in materialCommands + outputCommand + linkCommand) {
+            genesisRejectAuthorityCommandReuse(db, child)
             require(inventory.event(child) == null && dao.receipt(child) == null) { "A craft child command already exists. No materials were consumed." }
         }
         val before = command.materials.map { use ->
@@ -525,6 +567,7 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
         val output = ledger.create(command.output, outputCommand)
         dao.insert(CraftExecution(command.commandId, project.id, output.id, command.source, now))
         command.materials.zip(before).forEachIndexed { index, (use, item) ->
+            genesisRejectAuthorityCommandReuse(db, "${command.commandId}:placement:$index", "${command.commandId}:material:$index")
             val remaining = requireNotNull(item.quantity) - use.quantity
             val priorPlacement = db.partyDao().placement(item.id)
             val depleted = priorPlacement?.takeIf { remaining == 0 }?.let { depletedPlacement(it, command.source, now) }

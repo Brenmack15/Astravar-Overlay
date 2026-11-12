@@ -77,8 +77,7 @@ class VisualRebirthJourneyInstrumentationTest {
         }
     }
     private fun campaignHome() {
-        ui.ensurePrimaryTab(product, "Campaign")
-        if (device.hasObject(By.text("‹ Campaign").pkg(product))) tap("‹ Campaign")
+        ui.campaignJournal(product)
     }
     private fun companionRoster() {
         ui.ensurePrimaryTab(product, "Companions")
@@ -103,6 +102,7 @@ class VisualRebirthJourneyInstrumentationTest {
         enter("Name", "CI Native Charges")
         enter("Capacity", "3")
         enter("Current uses (blank = unknown)", "2")
+        tap("Review & save")
         tap("Save resource")
         find("CI Native Charges")
         find("2 / 3")
@@ -116,8 +116,8 @@ class VisualRebirthJourneyInstrumentationTest {
         find("none")
         capture("resource-persistence", "Character", "1 / 3")
 
-        // Gear belongs to the exact reviewed companion sheet, independently of
-        // its original source record and the selected main character.
+        // Gear belongs to the exact reviewed companion and projects into its
+        // shared source record without changing the selected main character.
         companionRoster()
         capture("companion-selection", "Companions", "CI Native Ally")
         tap("CI Native Ally")
@@ -125,6 +125,7 @@ class VisualRebirthJourneyInstrumentationTest {
         ui.selectSection(product, "Equipment")
         tap("Add item")
         enter("Item name", "CI Native Ally Charm")
+        tap("Review & save")
         tap("Save item")
         find("CI Native Ally Charm")
         tap("Equip")
@@ -133,7 +134,7 @@ class VisualRebirthJourneyInstrumentationTest {
         restart()
         companionRoster()
         tap("CI Native Ally")
-        find("4 / 12")
+        find("6 / 12")
         tap("Open playable sheet")
         ui.selectSection(product, "Equipment")
         find("CI Native Ally Charm")
@@ -182,13 +183,12 @@ class VisualRebirthJourneyInstrumentationTest {
                 capture("spellbook-font-$scale", "Character", "CI Native Signal")
                 // Traversing every direct section also verifies that horizontal
                 // scrolling exposes complete labels at the largest text setting.
-                for (section in listOf("Equipment", "Combat", "Resources", "History", "Sheet")) {
+                for (section in listOf("Equipment", "Combat", "Features", "Resources", "History", "Sheet")) {
                     ui.selectSection(product, section)
                 }
                 // Read-only primary-destination captures retain their upper
                 // headings and actions for the same enlarged-text review.
-                ui.ensurePrimaryTab(product, "Inventory")
-                ui.selectSection(product, "Campaign items")
+                ui.campaignItems(product)
                 capture("inventory-font-$scale", "Inventory", "Equipment, treasures & discoveries")
                 campaignHome()
                 capture("campaign-font-$scale", "Campaign", "Your living world")

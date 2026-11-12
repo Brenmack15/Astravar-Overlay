@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 
 @Serializable data class ReforgeBackup(
-    val format: String = "astravar-reforge", val schema: Int = 1, val exportedAt: Long,
+    val format: String = "astravar-reforge", val schema: Int = 2, val exportedAt: Long,
     val characters: List<ReforgeCharacterRow>, val changes: List<ReforgeChange>, val rolls: List<ReforgeRollRecord>,
     val drafts: List<ReforgeNoteDraft> = emptyList()
 )
@@ -21,7 +21,7 @@ internal fun decodeReforgeBackup(text: String): ReforgeBackup {
 }
 
 internal fun validateReforgeBackup(value: ReforgeBackup) {
-    require(value.format == "astravar-reforge" && value.schema == 1) { "Unsupported Reforge backup format." }
+    require(value.format == "astravar-reforge" && value.schema in 1..2) { "Unsupported Reforge backup format." }
     require(value.characters.size <= 500 && value.changes.size <= 10_000 && value.rolls.size <= 10_000 && value.drafts.size <= 500) { "Backup exceeds the supported record limit." }
     fun unique(ids: List<String>) { require(ids.size == ids.toSet().size) { "Duplicate backup record identity." } }
     unique(value.characters.map { it.profileId }); unique(value.changes.map { it.commandId }); unique(value.rolls.map { it.id }); unique(value.drafts.map { it.profileId })
@@ -44,7 +44,8 @@ internal fun validateReforgeBackup(value: ReforgeBackup) {
     value.changes.forEach { event ->
         checkId(event.commandId)
         require(event.fingerprint.matches(Regex("[0-9a-f]{64}"))) { "Invalid immutable receipt fingerprint." }
-        require(event.outcomeType in setOf("CHARACTER", "ROLL", "ACTION", "RESTORE")) { "Unsupported immutable receipt type." }
+        require(event.outcomeType in setOf("CHARACTER", "ROLL", "ACTION", "RESTORE") ||
+            value.schema >= 2 && event.outcomeType == "INVENTORY") { "Unsupported immutable receipt type." }
         if (event.outcomeType == "RESTORE") {
             require(event.profileId == "*" && event.priorRevision == 0L && event.resultingRevision == 0L)
         } else {
@@ -67,8 +68,23 @@ internal fun validateReforgeBackup(value: ReforgeBackup) {
                     val before = reforgeJson.decodeFromString<ReforgeSavedCharacter>(it)
                     validateCharacter(before.character)
                     require(before.character.id == event.profileId && before.revision == event.priorRevision && before.character.revision == before.revision)
+                    if (event.outcomeType == "INVENTORY") {
+                        val outcome = reforgeJson.decodeFromString<GenesisInventoryOutcome>(event.afterJson)
+                        val review = outcome.review
+                        validateGenesisInventoryReview(review)
+                        require(review.profileId == event.profileId && review.expectedRevision == event.priorRevision &&
+                            genesisInventoryRequestFingerprint(review) == event.fingerprint) { "Inventory receipt source proof is inconsistent." }
+                        val (definition, instance) = genesisCampaignItemMapping(review.source, before.character)
+                        require(definition == review.definition && instance == review.instance) { "Inventory receipt contains an unreviewed item interpretation." }
+                        val expected = before.character.copy(revision = after.revision,
+                            itemDefinitions = before.character.itemDefinitions + definition, items = before.character.items + instance)
+                        require(after.character == expected && after.origin == before.origin && after.createdAt == before.createdAt) {
+                            "Inventory receipt changed unrelated character or source records."
+                        }
+                    }
                 }
                 require((event.priorRevision == 0L) == (event.beforeJson == null)) { "Mechanical history is missing its prior snapshot." }
+                if (event.outcomeType == "INVENTORY") require(event.beforeJson != null && event.priorRevision > 0)
             }
         }
     }
@@ -84,7 +100,7 @@ internal fun validateReforgeBackup(value: ReforgeBackup) {
     }
     // Every character revision is explained exactly once; plain rolls do not create a new revision.
     value.characters.forEach { row ->
-        val mechanical = value.changes.filter { it.profileId == row.profileId && it.outcomeType in setOf("CHARACTER", "ACTION") }
+        val mechanical = value.changes.filter { it.profileId == row.profileId && it.outcomeType in setOf("CHARACTER", "ACTION", "INVENTORY") }
         require(mechanical.map { it.resultingRevision }.toSet().size == mechanical.size) { "Multiple history events claim the same mechanical revision." }
         require(mechanical.map { it.resultingRevision }.sorted() == (1L..row.revision).toList()) { "Character history is incomplete." }
         val last = mechanical.maxByOrNull { it.resultingRevision } ?: error("Character history is missing.")
@@ -108,6 +124,7 @@ internal fun reforgeRestoreConflicts(incoming: ReforgeBackup, current: ReforgeBa
     compare("History", incoming.changes, current.changes) { it.commandId }
     compare("Roll", incoming.rolls, current.rolls) { it.id }
     compare("Notes draft", incoming.drafts, current.drafts) { it.profileId }
+    conflicts += genesisRestoreOwnershipConflicts(incoming, current)
     val currentCommands = current.changes.associateBy { it.commandId }
     incoming.rolls.forEach { roll ->
         currentCommands[roll.id]?.let { command ->
@@ -139,6 +156,7 @@ internal fun reforgeRestoreConflicts(incoming: ReforgeBackup, current: ReforgeBa
 internal fun reforgeChangeCharacter(event: ReforgeChange): ReforgeSavedCharacter = when (event.outcomeType) {
     "CHARACTER" -> reforgeJson.decodeFromString(event.afterJson)
     "ACTION" -> reforgeJson.decodeFromString<ReforgeActionOutcome>(event.afterJson).character
+    "INVENTORY" -> reforgeJson.decodeFromString<GenesisInventoryOutcome>(event.afterJson).character
     else -> error("Receipt does not contain a character outcome.")
 }
 internal fun reforgeChangeRoll(event: ReforgeChange): ReforgeRollRecord? = when (event.outcomeType) {

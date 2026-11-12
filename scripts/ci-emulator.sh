@@ -52,7 +52,7 @@ for astravar_scale in window_animation_scale transition_animation_scale animator
 done
 git rev-parse HEAD >validation/SOURCE_COMMIT.txt
 sha256sum "$astravar_apk" >validation/product-apk.sha256
-timeout -k 5s 35s adb -s "$astravar_serial" install "$astravar_apk"
+timeout -k 5s 35s adb -s "$astravar_serial" install "${ASTRAVAR_BASELINE_APK:-$astravar_apk}"
 timeout -k 5s 35s adb -s "$astravar_serial" install overlay-target/build/outputs/apk/debug/overlay-target-debug.apk
 timeout -k 5s 35s adb -s "$astravar_serial" install overlay-target/build/outputs/apk/androidTest/debug/overlay-target-debug-androidTest.apk
 : >validation/native-stages.tsv
@@ -90,11 +90,62 @@ verify_mapped() {
 import json,runpy,sys
 from pathlib import Path
 helper=runpy.run_path('scripts/native-campaign-import-readback.py')
-result=helper['verify_mapped'](Path(sys.argv[1]),Path(sys.argv[2]),Path(sys.argv[3]),rolled_back=sys.argv[4]=='rollback',synthetic_demo=True,expected_room_schema=6)
+result=helper['verify_mapped'](Path(sys.argv[1]),Path(sys.argv[2]),Path(sys.argv[3]),rolled_back=sys.argv[4]=='rollback',synthetic_demo=True,expected_room_schema=8)
 Path(sys.argv[5]).write_text(json.dumps(result,indent=2)+'\n')
 print(json.dumps(result))
 ASTRAVAR_MAPPED_READBACK
 }
+copy_upgrade_stores() {
+  local astravar_directory=$1 astravar_database astravar_suffix astravar_file
+  mkdir -p "$astravar_directory"
+  for astravar_database in astravar.db astravar-campaign-ledger.db astravar-reforge.db; do
+    for astravar_suffix in '' -wal -shm -journal; do
+      astravar_file="$astravar_database$astravar_suffix"
+      if timeout 5s adb -s "$astravar_serial" shell test -f "/data/user/0/$astravar_product/databases/$astravar_file"; then
+        timeout 60s adb -s "$astravar_serial" pull "/data/user/0/$astravar_product/databases/$astravar_file" "$astravar_directory/$astravar_file" >/dev/null
+      fi
+    done
+    test -s "$astravar_directory/$astravar_database"
+  done
+}
+if [ -n "${ASTRAVAR_BASELINE_APK:-}" ]; then
+  # The workflow builds the frozen code49 source and code50 with the same
+  # disposable CI key. This is a real older-version update; it is distinct from
+  # the later same-version reinstall and from private owner-signing acceptance.
+  sha256sum "$ASTRAVAR_BASELINE_APK" >validation/upgrade-baseline-apk.sha256
+  run_stage GenesisUpgradeInstrumentationTest#seedCode49 1 720 native-genesis-upgrade-seed.txt
+  stop_product
+  timeout 15s adb -s "$astravar_serial" root
+  timeout 15s adb -s "$astravar_serial" wait-for-device
+  timeout 10s adb -s "$astravar_serial" shell dumpsys package "$astravar_product" >validation/genesis-upgrade-package-before.txt
+  snapshot_stores validation/genesis-upgrade-files-before.sha256
+  copy_upgrade_stores validation/genesis-upgrade-before
+  python3 scripts/genesis-upgrade-readback.py validation/genesis-upgrade-before --synthetic-emulator \
+    --output validation/genesis-upgrade-before.json >validation/genesis-upgrade-seed-result.json
+  timeout -k 5s 45s adb -s "$astravar_serial" install -r "$astravar_apk" | tee validation/genesis-upgrade-install.txt
+  grep -q Success validation/genesis-upgrade-install.txt
+  snapshot_stores validation/genesis-upgrade-files-after.sha256
+  diff -u validation/genesis-upgrade-files-before.sha256 validation/genesis-upgrade-files-after.sha256 >validation/genesis-upgrade-file-diff.txt
+  timeout 10s adb -s "$astravar_serial" shell dumpsys package "$astravar_product" >validation/genesis-upgrade-package-after.txt
+  python3 scripts/genesis-package-readback.py \
+    --before validation/genesis-upgrade-package-before.txt \
+    --after validation/genesis-upgrade-package-after.txt --package "$astravar_product" \
+    --old-version 49 --new-version 50 --output validation/genesis-upgrade-package-result.json
+  run_stage GenesisUpgradeInstrumentationTest#verifyAfterUpgrade 1 360 native-genesis-upgrade-readback.txt
+  stop_product
+  copy_upgrade_stores validation/genesis-upgrade-after
+  python3 scripts/genesis-upgrade-readback.py validation/genesis-upgrade-after --synthetic-emulator \
+    --compare validation/genesis-upgrade-before.json --output validation/genesis-upgrade-after.json \
+    >validation/genesis-upgrade-readback-result.json
+  # This write is deliberately separate from the unchanged-cutover comparison:
+  # heal one point in the real UI, restart, and prove only canonical schema8 changed.
+  run_stage GenesisUpgradeInstrumentationTest#canonicalWriteSurvivesRestart 1 240 native-genesis-canonical-write.txt
+  stop_product
+  copy_upgrade_stores validation/genesis-upgrade-after-write
+  python3 scripts/genesis-upgrade-readback.py validation/genesis-upgrade-after-write --synthetic-emulator \
+    --verify-write validation/genesis-upgrade-after.json --output validation/genesis-upgrade-after-write.json \
+    >validation/genesis-upgrade-canonical-write-result.json
+fi
 # Collect independent roll, SQLite and player journeys once before dependent
 # update/import stages. Every failure remains release-blocking.
 astravar_prerequisites_ok=1
@@ -113,7 +164,19 @@ else
 fi
 run_stage PlayerFirstJourneyInstrumentationTest 1 1050 native-player-first.txt || astravar_prerequisites_ok=0
 run_stage VisualRebirthJourneyInstrumentationTest 1 900 native-visual-rebirth.txt || astravar_prerequisites_ok=0
+run_stage GenesisJourneyInstrumentationTest 1 1500 native-genesis.txt || astravar_prerequisites_ok=0
 test "$astravar_prerequisites_ok" = 1
+# Copy only the fresh fictional emulator's closed database and its actual SAF
+# document. The independent host proof must pass before later journeys continue.
+stop_product
+timeout 15s adb -s "$astravar_serial" root
+timeout 15s adb -s "$astravar_serial" wait-for-device
+copy_campaign_database validation/genesis-connected
+timeout 30s adb -s "$astravar_serial" pull /sdcard/Download/astravar-genesis-native-connected.json validation/genesis-connected-backup.json >/dev/null
+python3 scripts/genesis-connected-readback.py \
+  --database validation/genesis-connected/astravar-campaign-ledger.db \
+  --backup-document validation/genesis-connected-backup.json --synthetic-emulator \
+  --output validation/genesis-connected-readback.json
 run_stage UpdateFixtureInstrumentationTest 1 120 native-update-fixture.txt
 stop_product
 timeout 15s adb -s "$astravar_serial" root
@@ -129,18 +192,18 @@ diff -u validation/update-before.sha256 validation/update-after.sha256 >validati
 run_stage UpdatePreservationInstrumentationTest 1 420 native-update-readback.txt
 stop_product
 copy_campaign_database validation/campaign-before
-python3 scripts/native-campaign-import-readback.py snapshot --database validation/campaign-before/astravar-campaign-ledger.db --manifest validation/campaign-before.json --expected-room-schema 6 --synthetic-demo >validation/campaign-baseline-result.json
+python3 scripts/native-campaign-import-readback.py snapshot --database validation/campaign-before/astravar-campaign-ledger.db --manifest validation/campaign-before.json --expected-room-schema 8 --synthetic-demo >validation/campaign-baseline-result.json
 run_stage CampaignImportInstrumentationTest#aDocumentPickerPreviewConfirmationAndLibrary 1 720 native-campaign-import.txt
 stop_product
 copy_campaign_database validation/campaign-applied
 timeout 30s adb -s "$astravar_serial" pull /sdcard/Android/data/com.yazsras.astravar.target/files/native-campaign-fixture.json validation/native-campaign-fixture.json >/dev/null
 timeout 30s adb -s "$astravar_serial" pull /sdcard/Download/astravar-native-preimport-backup.json validation/native-campaign-preimport-backup.json >/dev/null
-python3 scripts/native-campaign-import-readback.py applied --database validation/campaign-applied/astravar-campaign-ledger.db --manifest validation/campaign-before.json --fixture validation/native-campaign-fixture.json --backup-document validation/native-campaign-preimport-backup.json --expected-room-schema 6 --synthetic-demo >validation/campaign-applied-result.json
+python3 scripts/native-campaign-import-readback.py applied --database validation/campaign-applied/astravar-campaign-ledger.db --manifest validation/campaign-before.json --fixture validation/native-campaign-fixture.json --backup-document validation/native-campaign-preimport-backup.json --expected-room-schema 8 --synthetic-demo >validation/campaign-applied-result.json
 run_stage CampaignImportInstrumentationTest#bGuardedRollbackRestoresVerifiedSnapshot 1 240 native-campaign-rollback.txt
 stop_product
 copy_campaign_database validation/campaign-rolled-back
-python3 scripts/native-campaign-import-readback.py rolled-back --database validation/campaign-rolled-back/astravar-campaign-ledger.db --manifest validation/campaign-before.json --fixture validation/native-campaign-fixture.json --expected-room-schema 6 --synthetic-demo >validation/campaign-rollback-result.json
-python3 scripts/native-campaign-import-readback.py snapshot --database validation/campaign-rolled-back/astravar-campaign-ledger.db --manifest validation/campaign-mapped-before.json --expected-room-schema 6 --synthetic-demo >validation/campaign-mapped-baseline-result.json
+python3 scripts/native-campaign-import-readback.py rolled-back --database validation/campaign-rolled-back/astravar-campaign-ledger.db --manifest validation/campaign-before.json --fixture validation/native-campaign-fixture.json --expected-room-schema 8 --synthetic-demo >validation/campaign-rollback-result.json
+python3 scripts/native-campaign-import-readback.py snapshot --database validation/campaign-rolled-back/astravar-campaign-ledger.db --manifest validation/campaign-mapped-before.json --expected-room-schema 8 --synthetic-demo >validation/campaign-mapped-baseline-result.json
 run_stage CampaignImportInstrumentationTest#cMappedCampaignRecordsReachPlayerViews 1 420 native-mapped-campaign-ui.txt
 stop_product
 copy_campaign_database validation/campaign-mapped
@@ -150,4 +213,4 @@ run_stage CampaignImportInstrumentationTest#dMappedCampaignRecordsRollbackAfterR
 stop_product
 copy_campaign_database validation/campaign-mapped-rolled-back
 verify_mapped validation/campaign-mapped-rolled-back/astravar-campaign-ledger.db validation/campaign-mapped-before.json validation/native-mapped-fixture.json rollback validation/native-mapped-rollback-readback.json
-printf '%s\n' 'PASS: 13 native tests in 10 explicitly ordered stages. Visual Rebirth captured the primary destinations and forms, checked resource persistence, companion equipment, journal edits and 400dp layouts at three font scales. Standalone weapon rolls, retired overlay contract, character advancement, reviewed gear, generic companion relationships and direct companion combat passed. Companion-only healing survived restart, with source HP and the default character preserved. Same-version reinstall preserved persisted bytes. Native readback retained rolls and inventory. Large and typed imports and separately consented rollback passed independent host SQLite verification. Native QA SQLite fixtures verified scoped selection above the complete-export ceiling, duplicate and stale rejection, interrupted-write rollback, same-command recovery and backup restore after reopen. Disposable CI signer and emulator only. Physical owner phone acceptance remains pending.' >validation/RELEASE-UI-RESULT.txt
+printf '%s\n' 'PASS: every ordered stage recorded in native-stages.tsv. Genesis exercised guided creation, horizontal page flicks, per-page reading positions, Back, quick-action drag and tap rearrangement, restart persistence, contextual inventory creation and cross-view edits, single-row item identity and Activity rotation. Visual Rebirth captured the primary destinations and forms, checked resource persistence, companion equipment, journal edits and 400dp layouts at three font scales. Standalone weapon rolls, retired overlay contract, character advancement, reviewed gear, generic companion relationships and direct companion combat passed. Companion-only healing survived restart, with source HP and the default character preserved. Same-version reinstall preserved persisted bytes. Native readback retained rolls and inventory. Large and typed imports and separately consented rollback passed independent host SQLite verification. Native QA SQLite fixtures verified scoped selection above the complete-export ceiling, duplicate and stale rejection, interrupted-write rollback, same-command recovery and backup restore after reopen. When a baseline APK is provided, separate genesis-upgrade evidence records code49 to code50 package preservation, unchanged original files, additive schema6 to schema8 cutover with raw row and receipt verification, and a later canonical UI heal that survives restart without changing the retained source. Disposable CI signer and emulator only. Physical owner phone acceptance remains pending.' >validation/RELEASE-UI-RESULT.txt

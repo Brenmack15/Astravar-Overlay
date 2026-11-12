@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.semantics.contentDescription
@@ -142,7 +143,7 @@ val LocalPlayerDismiss = staticCompositionLocalOf<() -> Unit> { {} }
 @OptIn(ExperimentalLayoutApi::class)
 @Composable fun PlayerSheet(
     title: String, onDismiss: () -> Unit, dirty: Boolean = false, showCancel: Boolean = dirty,
-    dismissEnabled: Boolean = true,
+    dismissEnabled: Boolean = true, scrollResetKey: Any? = title,
     actions: @Composable RowScope.() -> Unit = {}, content: @Composable ColumnScope.() -> Unit
 ) {
     var discard by rememberSaveable { mutableStateOf(false) }
@@ -166,15 +167,20 @@ val LocalPlayerDismiss = staticCompositionLocalOf<() -> Unit> { {} }
                             PlayerTextButton(onClick = close, enabled = dismissEnabled, modifier = Modifier.heightIn(min = 48.dp)) { Text("Close") }
                         }
                         HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .4f))
-                        key(title) { Box(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(20.dp)) {
+                        key(scrollResetKey) { Box(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(20.dp)) {
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 // Keep long names readable without consuming the fixed header or hiding actions.
                                 if (titleOverflows) Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
                                 content()
                             }
                         } }
+                        // At enlarged font sizes a late action must not be
+                        // measured into the narrow remainder beside Cancel/Back.
+                        // Give each control a full-width measuring opportunity;
+                        // the content above retains its independent scroll area.
                         FlowRow(Modifier.fillMaxWidth().background(RebuildPalette.Void.copy(alpha = .45f)).padding(horizontal = 12.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.End) {
+                            horizontalArrangement = Arrangement.End,
+                            maxItemsInEachRow = if (LocalDensity.current.fontScale >= 1.5f) 1 else Int.MAX_VALUE) {
                             if (showCancel) PlayerTextButton(onClick = close, enabled = dismissEnabled) { Text("Cancel") }
                             actions()
                         }

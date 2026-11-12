@@ -25,11 +25,13 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
 
     suspend fun preview(text: String): ImportPreview = db.withTransaction {
         try {
+            genesisRequirePartialBackupAllowed(db)
             supportedCampaignBackup(text)
             val header = rejectDuplicateJsonMembers(text)
             require("format" in header && "schema" in header) { "Backup must declare its format and supported schema." }
             // Inspect the actual decoded header. A JSON tree would retain another full copy of source payloads.
             val incoming = campaignDecodeBackup(text)
+            genesisRequireUnmanagedCampaign(incoming)
             // Decode before reading local source payloads so their copies are not retained while
             // constructing a potentially large incoming string. Both reads remain in this transaction.
             val current = snapshot()
@@ -51,6 +53,8 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         require(hash(incoming) == preview.fingerprint) { "Preview content changed. Preview the file again." }
         val fp = campaignHash("RESTORE:v2:${preview.fingerprint}")
         records.receipt(commandId)?.let { require(it.fingerprint == fp) { "Command ID collision." }; return@withTransaction it }
+        genesisRequirePartialBackupAllowed(db)
+        genesisRequireUnmanagedCampaign(incoming)
         require(items.event(commandId) == null) { "Command ID collision." }
         require(incoming.events.none { it.commandId == commandId } && incoming.records.receipts.none { it.commandId == commandId } &&
             incoming.records.audit.none { it.id == commandId }) { "Restore command ID is already present in the backup." }

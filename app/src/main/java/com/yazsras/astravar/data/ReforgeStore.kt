@@ -9,6 +9,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -19,6 +21,8 @@ import java.util.UUID
 const val REFORGE_LOCAL_ONLY = "Saved on this device · not synchronized"
 internal val reforgeJson = Json { encodeDefaults = true; ignoreUnknownKeys = false }
 internal const val REFORGE_MAX_JSON = 8_000_000
+/** Shared with the native SAF backup reader/writer; character count is a different bound. */
+internal const val REFORGE_DOCUMENT_BYTES = 8 * 1024 * 1024
 
 @Serializable data class ReforgeOrigin(
     val label: String = "Created on this device", val sourceProfileId: String? = null,
@@ -103,7 +107,7 @@ class ReforgeConverters {
     @Query("DELETE FROM reforge_note_drafts WHERE profileId=:profileId") suspend fun deleteDraft(profileId: String)
 }
 
-/** New additive store: no existing campaign/weapon table is opened or rewritten during creation. */
+/** Original file schema, retained for recovery and isolated fixtures. Production writes use CampaignLedgerDb. */
 @Database(entities = [ReforgeCharacterRow::class, ReforgeChange::class, ReforgeRollRecord::class, ReforgeNoteDraft::class], version = 1, exportSchema = true)
 @TypeConverters(ReforgeConverters::class)
 abstract class ReforgeDb : RoomDatabase() {
@@ -118,28 +122,56 @@ abstract class ReforgeDb : RoomDatabase() {
 }
 
 /** Changes, previews and rolls are local transactions. No network adapter or campaign grant is implied. */
-class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long = System::currentTimeMillis) {
-    private val dao = db.reforgeDao()
-    companion object { fun open(context: Context): ReforgeRepository = ReforgeRepository(ReforgeDb.open(context)) }
-    fun observe(profileId: String): Flow<ReforgeSavedCharacter?> = dao.observe(profileId).map { it?.saved() }.flowOn(Dispatchers.Default)
-    fun observeAll(): Flow<List<ReforgeSavedCharacter>> = dao.observeAll().map { rows -> rows.map { it.saved() } }.flowOn(Dispatchers.Default)
+class ReforgeRepository private constructor(private val db: RoomDatabase, private val dao: ReforgeDao,
+    private val clock: () -> Long, private val ready: suspend () -> Unit) {
+    /** Historical isolated fixtures remain readable; production opens only the canonical holder. */
+    constructor(db: ReforgeDb, clock: () -> Long = System::currentTimeMillis) : this(db, db.reforgeDao(), clock, {})
+    internal constructor(db: CampaignLedgerDb, clock: () -> Long = System::currentTimeMillis,
+        ready: suspend () -> Unit = {}) : this(db, db.reforgeDao(), clock, ready)
+    companion object { fun open(context: Context): ReforgeRepository = GenesisApplicationStorage.open(context).playable }
+    private fun <T> gated(source: () -> Flow<T>): Flow<T> = flow { ready(); emitAll(source()) }
+    private suspend fun <T> withTransaction(work: suspend () -> T): T { ready(); return db.withTransaction { work() } }
+    /** Same Room instance means source checks and playable receipt share one SQLite transaction. */
+    internal suspend fun <T> withCampaignSnapshot(campaign: CampaignLedgerRepository, work: suspend () -> T): T {
+        if (db is CampaignLedgerDb) {
+            require(db === campaign.transactionDatabase) { "Open campaign and playable records in the same application session before accepting an item." }
+            return withTransaction(work)
+        }
+        ready()
+        return work() // Historical separate-store fixtures retain their explicit non-atomic adapter.
+    }
+    fun observe(profileId: String): Flow<ReforgeSavedCharacter?> = gated { dao.observe(profileId) }.map { it?.saved() }.flowOn(Dispatchers.Default)
+    fun observeAll(): Flow<List<ReforgeSavedCharacter>> = gated { dao.observeAll() }.map { rows -> rows.map { it.saved() } }.flowOn(Dispatchers.Default)
     fun observeActive(): Flow<List<ReforgeSavedCharacter>> = observeAll().map { profiles -> profiles.filterNot { it.character.archived } }
-    fun rollHistory(profileId: String): Flow<List<ReforgeRollRecord>> = dao.rolls(profileId)
-    fun history(profileId: String): Flow<List<ReforgeChange>> = dao.history(profileId)
-    fun historySummaries(profileId: String): Flow<List<ReforgeChangeSummary>> = dao.historySummaries(profileId)
-    suspend fun get(profileId: String): ReforgeSavedCharacter? = withContext(Dispatchers.Default) { dao.character(profileId)?.saved() }
-    suspend fun commandReceipt(commandId: String): ReforgeChange? = dao.change(commandId)
-    /** Lock order for the reviewed identity bridge is Reforge → Campaign. No playable write is implied. */
+    fun rollHistory(profileId: String): Flow<List<ReforgeRollRecord>> = gated { dao.rolls(profileId) }
+    fun history(profileId: String): Flow<List<ReforgeChange>> = gated { dao.history(profileId) }
+    fun historySummaries(profileId: String): Flow<List<ReforgeChangeSummary>> = gated { dao.historySummaries(profileId) }
+    suspend fun get(profileId: String): ReforgeSavedCharacter? = withContext(Dispatchers.Default) { ready(); dao.character(profileId)?.saved() }
+    suspend fun commandReceipt(commandId: String): ReforgeChange? { ready(); return dao.change(commandId) }
+    /** Shared production storage makes identity review atomic; isolated legacy fixtures retain their lock order. */
     internal suspend fun <T> withReviewedIdentitySnapshot(reviewed: ReforgeSavedCharacter,
-        work: suspend () -> T): T = db.withTransaction {
+        work: suspend () -> T): T = withTransaction {
         check(dao.character(reviewed.character.id)?.saved() == reviewed) {
             "This playable sheet changed. Close and review its latest name before creating an identity."
         }
         work()
     }
-    suspend fun readNoteDraft(profileId: String): ReforgeNoteDraft? = dao.draft(profileId)
+    /** A connected identity is proven by explicit activation in this same database session. */
+    internal suspend fun inspectManagedCampaignIdentity(campaign: CampaignLedgerRepository,
+        reviewed: ReforgeSavedCharacter): ReforgeCampaignIdentity? {
+        val canonical = db as? CampaignLedgerDb ?: return null
+        require(canonical === campaign.transactionDatabase) { "Open campaign and playable records in the same application session before using a connected identity." }
+        return withTransaction {
+            val actor = canonical.genesisAuthorityDao().actor(reviewed.character.id)?.takeIf { it.playable }
+                ?: return@withTransaction null
+            check(dao.character(reviewed.character.id)?.saved() == reviewed) { "This connected character changed. Review the current saved sheet before continuing." }
+            genesisRequireAffectedActor(canonical, actor)
+            ReforgeCampaignIdentity(requireNotNull(canonical.recordsDao().characterProfile(actor.actorId)))
+        }
+    }
+    suspend fun readNoteDraft(profileId: String): ReforgeNoteDraft? { ready(); return dao.draft(profileId) }
     suspend fun saveNoteDraft(profileId: String, expectedRevision: Long, text: String,
-        expectedDraftUpdatedAt: Long? = null): ReforgeNoteDraft = db.withTransaction {
+        expectedDraftUpdatedAt: Long? = null): ReforgeNoteDraft = withTransaction {
         checkId(profileId); require(text.length <= 100_000) { "Notes draft is too long." }
         val character = dao.character(profileId) ?: error("Save the character before writing notes.")
         check(character.revision == expectedRevision) { "Character changed. Your recovery draft is retained; review the latest notes before saving." }
@@ -154,7 +186,7 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
     }
     /** Called only after the user reviews recovery text against current notes; it never applies that text itself. */
     suspend fun reviewNoteDraft(profileId: String, expectedDraftUpdatedAt: Long, expectedCurrentRevision: Long,
-        reviewedText: String? = null): ReforgeNoteDraft = db.withTransaction {
+        reviewedText: String? = null): ReforgeNoteDraft = withTransaction {
         checkId(profileId)
         val character = dao.character(profileId) ?: error("The character is no longer available.")
         check(character.revision == expectedCurrentRevision) { "Character changed during review. Review the latest notes again." }
@@ -166,7 +198,7 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
         after
     }
 
-    suspend fun discardNoteDraft(profileId: String, expectedRevision: Long? = null, expectedUpdatedAt: Long? = null): Unit = db.withTransaction {
+    suspend fun discardNoteDraft(profileId: String, expectedRevision: Long? = null, expectedUpdatedAt: Long? = null): Unit = withTransaction {
         checkId(profileId)
         dao.draft(profileId)?.let { draft ->
             check(expectedRevision == null || draft.expectedRevision == expectedRevision) { "Notes draft revision changed; it was retained." }
@@ -177,7 +209,7 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
 
     /** Atomic roll/resource action. No result exists without its mechanics, receipt and exact pre-action revision. */
     suspend fun commitRoll(profileId: String, expectedRevision: Long, nextCharacter: ReforgeCharacter,
-        operation: String, roll: ReforgeRollRecord, commandId: String = roll.id): ReforgeActionOutcome = db.withTransaction {
+        operation: String, roll: ReforgeRollRecord, commandId: String = roll.id): ReforgeActionOutcome = withTransaction {
         checkId(profileId); checkId(commandId); validateCharacter(nextCharacter); validateRoll(roll)
         require(operation.isNotBlank() && operation.length <= 200)
         require(nextCharacter.id == profileId && nextCharacter.revision == expectedRevision &&
@@ -187,7 +219,10 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
         retry(commandId, fp)?.let { return@withTransaction reforgeJson.decodeFromString<ReforgeActionOutcome>(it.afterJson) }
         val before = dao.character(profileId) ?: error("Save the character before rolling an action.")
         check(before.revision == expectedRevision) { "Character changed since this action began. Review the latest state." }
+        (db as? CampaignLedgerDb)?.let { if (!genesisProjectionDeferred(it)) genesisRequireProjection(it, profileId, before.saved()) }
+        checkOwnershipChanges(before.saved().character, nextCharacter)
         require(!before.saved().character.archived && !nextCharacter.archived) { "Restore this archived sheet before recording new actions." }
+        (db as? CampaignLedgerDb)?.let { genesisRejectAuthorityCommandReuse(it, roll.id) }
         require(dao.roll(roll.id) == null && dao.change(roll.id) == null) { "Roll identity already exists." }
         check(expectedRevision < Long.MAX_VALUE)
         val now = maxOf(clock(), Math.addExact(before.updatedAt, 1))
@@ -197,12 +232,13 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
         dao.update(after); dao.insert(roll)
         dao.insert(ReforgeChange(commandId, profileId, operation, fp, expectedRevision, after.revision, now,
             reforgeJson.encodeToString(before.saved()), reforgeJson.encodeToString(outcome), outcomeType = "ACTION"))
+        (db as? CampaignLedgerDb)?.let { if (!genesisProjectionDeferred(it)) genesisProjectCharacter(it, before.saved(), after.saved(), commandId) }
         outcome
     }
 
     /** Optional atomic action path: the exact roll binds the pre-action revision and both receipts commit together. */
     suspend fun saveWithRoll(profileId: String, expectedRevision: Long, character: ReforgeCharacter,
-        operation: String, roll: ReforgeRollRecord, commandId: String = roll.id): ReforgeSavedCharacter = db.withTransaction {
+        operation: String, roll: ReforgeRollRecord, commandId: String = roll.id): ReforgeSavedCharacter = withTransaction {
         require(roll.profileId == profileId && roll.characterRevision == expectedRevision) { "Roll belongs to another character revision." }
         appendRoll(roll, commandId)
         save(profileId, expectedRevision, character, operation, "state:${reforgeHash(commandId)}")
@@ -219,22 +255,39 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
 
     /** Both ownership changes and their immutable revision receipts commit, or neither does. */
     suspend fun transferItem(from: ReforgeCharacter, to: ReforgeCharacter, itemId: String,
-        commandId: String = UUID.randomUUID().toString()): Pair<ReforgeSavedCharacter, ReforgeSavedCharacter> = db.withTransaction {
+        commandId: String = UUID.randomUUID().toString()): Pair<ReforgeSavedCharacter, ReforgeSavedCharacter> = withTransaction {
         checkId(commandId)
         val (nextFrom, nextTo) = InventoryRules.transfer(from, to, itemId)
         val transferId = reforgeHash(commandId)
-        val outgoing = save(from.id, from.revision, nextFrom, "Transfer item out", "transfer-out:$transferId")
-        val incoming = save(to.id, to.revision, nextTo, "Receive transferred item", "transfer-in:$transferId")
-        outgoing to incoming
+        val canonical = db as? CampaignLedgerDb
+        val retrying = dao.change("transfer-out:$transferId") != null
+        if (canonical != null && !retrying) {
+            genesisRequireProjection(canonical, from.id, requireNotNull(get(from.id)))
+            genesisRequireProjection(canonical, to.id, requireNotNull(get(to.id)))
+        }
+        val beforeFrom = if (canonical != null) get(from.id) else null
+        val beforeTo = if (canonical != null) get(to.id) else null
+        suspend fun commitPair(): Pair<ReforgeSavedCharacter, ReforgeSavedCharacter> {
+            val outgoing = save(from.id, from.revision, nextFrom, "Transfer item out", "transfer-out:$transferId")
+            val incoming = save(to.id, to.revision, nextTo, "Receive transferred item", "transfer-in:$transferId")
+            return outgoing to incoming
+        }
+        val result = if (canonical != null) withGenesisProjectionDeferred(canonical) { commitPair() } else commitPair()
+        if (canonical != null && !retrying) {
+            genesisProjectCharacter(canonical, beforeFrom, result.first, "transfer-out:$transferId")
+            genesisProjectCharacter(canonical, beforeTo, result.second, "transfer-in:$transferId")
+        }
+        result
     }
 
-    internal suspend fun createWithOrigin(character: ReforgeCharacter, origin: ReforgeOrigin, operation: String, commandId: String): ReforgeSavedCharacter = db.withTransaction {
+    internal suspend fun createWithOrigin(character: ReforgeCharacter, origin: ReforgeOrigin, operation: String, commandId: String): ReforgeSavedCharacter = withTransaction {
         require(character.revision == 0L) { "A new character must have revision zero." }
         validateCharacter(character); checkId(commandId)
         require(reforgeJson.encodeToString(origin).length <= 2_000_000) { "Reviewed source snapshot is too large for this local copy. Original records are unchanged." }
         val fp = reforgeHash(reforgeJson.encodeToString(listOf(operation, reforgeJson.encodeToString(character), reforgeJson.encodeToString(origin))))
         retry(commandId, fp)?.let { return@withTransaction reforgeJson.decodeFromString<ReforgeSavedCharacter>(it.afterJson) }
         check(dao.character(character.id) == null) { "This character already exists. Open its current saved state." }
+        checkOwnershipChanges(null, character)
         val now = clock()
         val after = ReforgeCharacterRow(character.id, reforgeJson.encodeToString(character.copy(revision = 1)), 1,
             reforgeJson.encodeToString(origin), now, now)
@@ -245,7 +298,7 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
 
     /** The editor/engine must submit the revision it actually read; stale changes never win silently. */
     suspend fun save(profileId: String, expectedRevision: Long, character: ReforgeCharacter, operation: String,
-        commandId: String = UUID.randomUUID().toString()): ReforgeSavedCharacter = db.withTransaction {
+        commandId: String = UUID.randomUUID().toString()): ReforgeSavedCharacter = withTransaction {
         checkId(profileId); checkId(commandId); require(operation.isNotBlank() && operation.length <= 200)
         require(character.id == profileId && character.revision == expectedRevision) { "Character identity or expected revision changed." }
         validateCharacter(character)
@@ -253,6 +306,8 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
         retry(commandId, fp)?.let { return@withTransaction reforgeJson.decodeFromString<ReforgeSavedCharacter>(it.afterJson) }
         val before = dao.character(profileId) ?: error("This character is not saved yet.")
         check(before.revision == expectedRevision) { "Character changed since this action began. Review the latest state." }
+        (db as? CampaignLedgerDb)?.let { if (!genesisProjectionDeferred(it)) genesisRequireProjection(it, profileId, before.saved()) }
+        checkOwnershipChanges(before.saved().character, character)
         check(expectedRevision < Long.MAX_VALUE) { "Character revision limit reached." }
         val now = maxOf(clock(), Math.addExact(before.updatedAt, 1))
         val after = before.copy(characterJson = reforgeJson.encodeToString(character.copy(revision = expectedRevision + 1)),
@@ -260,17 +315,67 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
         dao.update(after)
         dao.insert(ReforgeChange(commandId, profileId, operation, fp, before.revision, after.revision, now,
             reforgeJson.encodeToString(before.saved()), reforgeJson.encodeToString(after.saved())))
+        (db as? CampaignLedgerDb)?.let { if (!genesisProjectionDeferred(it)) genesisProjectCharacter(it, before.saved(), after.saved(), commandId) }
         after.saved()
     }
 
+    /** Repository-owned acquisition: identity, proof, ownership, character and receipt commit together. */
+    internal suspend fun commitReviewedCampaignItem(review: GenesisInventoryReview,
+        commandId: String): GenesisInventoryOutcome = withTransaction {
+        checkId(commandId); validateGenesisInventoryReview(review)
+        val fingerprint = genesisInventoryRequestFingerprint(review)
+        retry(commandId, fingerprint)?.let { return@withTransaction genesisInventoryRetry(it, fingerprint) }
+        val before = dao.character(review.profileId) ?: error("The playable character no longer exists.")
+        check(before.revision == review.expectedRevision) { "The character changed after item review. Review its latest inventory." }
+        val current = before.saved().character
+        (db as? CampaignLedgerDb)?.let { genesisRequireProjection(it, current.id, before.saved()) }
+        require(!current.archived) { "Restore this character before adding equipment." }
+        val (definition, instance) = genesisCampaignItemMapping(review.source, current)
+        require(definition == review.definition && instance == review.instance) { "The reviewed item interpretation changed. No equipment was added." }
+        val next = current.copy(itemDefinitions = current.itemDefinitions + definition, items = current.items + instance)
+        validateCharacter(next)
+        checkOwnershipChanges(current, next)
+        val revision = Math.addExact(before.revision, 1)
+        val now = maxOf(clock(), Math.addExact(before.updatedAt, 1))
+        val after = before.copy(characterJson = reforgeJson.encodeToString(next.copy(revision = revision)), revision = revision, updatedAt = now)
+        val outcome = GenesisInventoryOutcome(after.saved(), review)
+        dao.update(after)
+        dao.insert(ReforgeChange(commandId, current.id, "Add assigned campaign item", fingerprint,
+            before.revision, revision, now, reforgeJson.encodeToString(before.saved()),
+            reforgeJson.encodeToString(outcome), outcomeType = "INVENTORY"))
+        (db as? CampaignLedgerDb)?.let { genesisProjectCharacter(it, before.saved(), after.saved(), commandId, sourceProof = reforgeJson.encodeToString(review)) }
+        // Source proofs and both immutable snapshots increase recovery size. Validate
+        // the complete prospective backup inside this same transaction, so acquisition
+        // cannot commit an otherwise unexportable history. Do not impose this scan on
+        // unrelated HP/rest edits, and do not retain another copy of the export text.
+        try {
+            // This internal recovery proof is not a partial public export: portable managed
+            // records still require Complete backup. Retain the original character/history
+            // guard without reading unrelated campaign archives or relaxing either limit.
+            val recovery = (db as? CampaignLedgerDb)?.let(::genesisPlayableBackupRows) ?: snapshot(0)
+            validateReforgeBackup(recovery)
+            val recoveryText = reforgeJson.encodeToString(recovery)
+            require(recoveryText.length <= REFORGE_MAX_JSON) { "Backup exceeds the supported export size." }
+            validateGenesisBackupDocumentSize(recoveryText)
+            (db as? CampaignLedgerDb)?.genesisAuthorityDao()?.actor(current.id)?.takeIf { it.playable }?.let { actor ->
+                genesisRequireAffectedActor(db as CampaignLedgerDb, actor)
+            }
+        }
+        catch (error: IllegalArgumentException) {
+            throw IllegalArgumentException("This item was not added because a complete character backup could not be validated: ${error.message.orEmpty()} Your previous saved records are unchanged.", error)
+        }
+        outcome
+    }
+
     /** Only explicitly initiated results are submitted. A retry returns the original immutable result. */
-    suspend fun appendRoll(roll: ReforgeRollRecord, commandId: String = roll.id): ReforgeRollRecord = db.withTransaction {
+    suspend fun appendRoll(roll: ReforgeRollRecord, commandId: String = roll.id): ReforgeRollRecord = withTransaction {
         checkId(commandId); validateRoll(roll)
         val fp = reforgeHash("roll:${reforgeJson.encodeToString(roll.copy(createdAt = 0))}")
         retry(commandId, fp)?.let { return@withTransaction reforgeJson.decodeFromString<ReforgeRollRecord>(it.afterJson) }
         val character = dao.character(roll.profileId) ?: error("Save the character before recording a roll.")
         check(character.revision == roll.characterRevision) { "Character changed. Roll again from the latest statistics or record an explicit manual result." }
         require(!character.saved().character.archived) { "Restore this archived sheet before recording new rolls." }
+        (db as? CampaignLedgerDb)?.let { genesisRejectAuthorityCommandReuse(it, roll.id) }
         require(dao.roll(roll.id) == null && dao.change(roll.id) == null) { "Roll identity already exists." }
         dao.insert(roll)
         dao.insert(ReforgeChange(commandId, roll.profileId, "Roll", fp, character.revision, character.revision,
@@ -280,17 +385,19 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
 
     /** Changing state and writing its receipt are one Room transaction. No inferred rest or refill occurs. */
     suspend fun export(): String = exportWithProof().text
-    suspend fun exportWithProof(): ReforgeExportSnapshot = db.withTransaction {
+    suspend fun exportWithProof(): ReforgeExportSnapshot = withTransaction {
+        (db as? CampaignLedgerDb)?.let { genesisRequirePartialBackupAllowed(it) }
         val current = snapshot(0)
         validateReforgeBackup(current)
         val text = reforgeJson.encodeToString(current.copy(exportedAt = clock()))
         require(text.length <= REFORGE_MAX_JSON) { "Backup exceeds the supported export size." }
         ReforgeExportSnapshot(text, reforgeHash(reforgeJson.encodeToString(current)))
     }
-    suspend fun previewRestore(text: String): ReforgeRestorePreview = db.withTransaction {
+    suspend fun previewRestore(text: String): ReforgeRestorePreview = withTransaction {
         val current = snapshot(0)
         try {
             val incoming = decodeReforgeBackup(text)
+            (db as? CampaignLedgerDb)?.let { genesisRequirePartialBackupAllowed(it); genesisRequireUnmanagedPlayable(incoming) }
             val conflicts = reforgeRestoreConflicts(incoming, current)
             ReforgeRestorePreview(conflicts.isEmpty(), "${incoming.characters.size} characters, ${incoming.changes.size} history entries, ${incoming.rolls.size} rolls. Existing different records are never overwritten.",
                 conflicts, reforgeHash(reforgeJson.encodeToString(incoming)), reforgeHash(reforgeJson.encodeToString(current)), incoming)
@@ -298,10 +405,11 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
             ReforgeRestorePreview(false, "This backup could not be validated.", listOf(error.message ?: "Unsupported backup."), "", reforgeHash(reforgeJson.encodeToString(current)))
         }
     }
-    suspend fun restore(preview: ReforgeRestorePreview, commandId: String = UUID.randomUUID().toString()): ReforgeChange = db.withTransaction {
+    suspend fun restore(preview: ReforgeRestorePreview, commandId: String = UUID.randomUUID().toString()): ReforgeChange = withTransaction {
         checkId(commandId)
         require(preview.valid && preview.conflicts.isEmpty()) { "Review a valid backup preview first." }
         val incoming = requireNotNull(preview.backup)
+        (db as? CampaignLedgerDb)?.let { genesisRequirePartialBackupAllowed(it); genesisRequireUnmanagedPlayable(incoming) }
         require(reforgeHash(reforgeJson.encodeToString(incoming)) == preview.fingerprint) { "Backup preview changed. Review it again." }
         val fp = reforgeHash("restore:${preview.fingerprint}")
         retry(commandId, fp)?.let { return@withTransaction it }
@@ -323,8 +431,15 @@ class ReforgeRepository(private val db: ReforgeDb, private val clock: () -> Long
 
     private suspend fun retry(commandId: String, fingerprint: String): ReforgeChange? {
         dao.change(commandId)?.let { require(it.fingerprint == fingerprint) { "Command identity was reused with different content. Nothing changed." }; return it }
+        (db as? CampaignLedgerDb)?.let { genesisRejectAuthorityCommandReuse(it, commandId) }
         require(dao.roll(commandId) == null) { "Command identity belongs to an existing roll." }
         return null
+    }
+    private suspend fun checkOwnershipChanges(before: ReforgeCharacter?, after: ReforgeCharacter) {
+        // HP, spells, rests and ordinary actions do not scan every other aggregate.
+        if (before?.items.orEmpty() == after.items && before?.itemDefinitions.orEmpty() == after.itemDefinitions) return
+        val others = dao.allCharacters().filter { it.profileId != after.id }.map { it.saved().character }
+        validateGenesisItemOwnership(before, after, others)
     }
     private suspend fun snapshot(time: Long) = ReforgeBackup(exportedAt = time, characters = dao.allCharacters(), changes = dao.allChanges(), rolls = dao.allRolls(), drafts = dao.allDrafts())
 }
