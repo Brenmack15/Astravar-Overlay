@@ -8,7 +8,6 @@ import androidx.test.uiautomator.By
 import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
-import androidx.test.uiautomator.Until
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -71,23 +70,35 @@ class GenesisJourneyInstrumentationTest {
         }
         null
     }
-    private fun downloads() {
-        val roots = device.wait(Until.findObject(By.desc(Pattern.compile("(?i)show (roots|navigation drawer)"))), 10_000)
-        assertNotNull("System document picker must expose its locations", roots)
-        roots.click()
-        val folder = device.wait(Until.findObject(By.text("Downloads")), 10_000)
-        assertNotNull("System document picker must expose Downloads", folder)
-        folder.click()
+    private fun downloads(): String {
+        val roots = By.desc(Pattern.compile("(?i)show (roots|navigation drawer)"))
+        val picker = ui.snapshot(roots, "System document picker exposes its locations", timeoutMs = 10_000,
+            refreshCache = true) { it.applicationPackage?.takeIf { name -> name != product } }
+        ui.tap(roots.pkg(picker), "Show document picker locations", timeoutMs = 10_000, refreshCache = true)
+        // DocumentsUI also exposes Downloads in the toolbar and breadcrumb behind
+        // the drawer. Select its real root row from one fresh container snapshot.
+        val rootsList = By.res(picker, "roots_list")
+        ui.tapWithin(rootsList, By.text("Downloads").pkg(picker), "Downloads document root", timeoutMs = 10_000)
+        assertTrue("Downloads must open and the locations drawer must close",
+            ui.snapshot(By.res(picker, "breadcrumb_text").text("Downloads"), "Open Downloads directory",
+                timeoutMs = 10_000, refreshCache = true) { node ->
+                true.takeIf { !node.visibleBounds.isEmpty && !device.hasObject(rootsList) }
+            })
+        return picker
     }
     private fun saveDocument(name: String) {
-        assertNotNull("Actual CreateDocument opens", device.wait(Until.findObject(By.clazz("android.widget.EditText")), 15_000))
-        downloads()
-        val filename = device.wait(Until.findObject(By.clazz("android.widget.EditText")), 10_000)
-        assertNotNull("CreateDocument exposes the filename", filename)
-        filename.text = name
-        val save = device.wait(Until.findObject(By.text(Pattern.compile("(?i)save"))), 10_000)
-        assertNotNull("System document picker exposes Save", save)
-        save.click()
+        assertTrue("Actual CreateDocument opens",
+            ui.snapshot(By.clazz("android.widget.EditText"), "CreateDocument filename", timeoutMs = 15_000,
+                refreshCache = true) { true.takeIf { it.isEnabled && !it.visibleBounds.isEmpty } })
+        val picker = downloads()
+        val filename = By.clazz("android.widget.EditText").pkg(picker)
+        ui.tap(filename, "CreateDocument filename", timeoutMs = 10_000, refreshCache = true)
+        ui.setFocusedField(name, picker, "CreateDocument filename")
+        assertEquals("CreateDocument must retain the exact requested filename", name,
+            ui.snapshot(filename, "CreateDocument filename before saving", timeoutMs = 10_000,
+                refreshCache = true) { it.text?.takeIf { value -> value == name } })
+        ui.tap(By.text(Pattern.compile("(?i)save")).pkg(picker), "Save the document", timeoutMs = 10_000,
+            refreshCache = true)
     }
     private fun openBackup() {
         tap("Tools")
@@ -278,10 +289,9 @@ class GenesisJourneyInstrumentationTest {
         ui.ensurePrimaryTab(product, "Character")
         openBackup()
         tap("Choose backup")
-        downloads()
-        val backup = device.wait(Until.findObject(By.text("astravar-genesis-native-connected.json")), 20_000)
-        assertNotNull("Actual saved connected document is selectable", backup)
-        backup.click()
+        val picker = downloads()
+        ui.tap(By.text("astravar-genesis-native-connected.json").pkg(picker),
+            "Actual saved connected document is selectable", timeoutMs = 20_000, refreshCache = true)
         find("Review complete backup")
         assertFalse("Merge is disabled before a verified current backup", enabled("Confirm merge"))
         tap("Save current backup")

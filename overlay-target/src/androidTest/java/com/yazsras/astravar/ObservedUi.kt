@@ -65,8 +65,8 @@ internal class ObservedUi(private val device: UiDevice) {
     fun bounds(selector: BySelector, description: String, timeoutMs: Long = 30_000, refreshCache: Boolean = false): Rect =
         snapshot(selector, description, timeoutMs, refreshCache = refreshCache) { Rect(it.visibleBounds) }
 
-    fun controlBounds(selector: BySelector, description: String, timeoutMs: Long = 30_000): Rect =
-        snapshot(selector, description, timeoutMs) { interactiveBounds(it) }
+    fun controlBounds(selector: BySelector, description: String, timeoutMs: Long = 30_000, refreshCache: Boolean = false): Rect =
+        snapshot(selector, description, timeoutMs, refreshCache = refreshCache) { interactiveBounds(it) }
 
     fun touch(bounds: Rect, description: String, idleTimeoutMs: Long? = null) {
         assertTrue("Observed control must have visible on-screen bounds: $description", !bounds.isEmpty &&
@@ -76,8 +76,17 @@ internal class ObservedUi(private val device: UiDevice) {
         if (idleTimeoutMs == null) device.waitForIdle() else device.waitForIdle(idleTimeoutMs)
     }
 
-    fun tap(selector: BySelector, description: String, timeoutMs: Long = 30_000) =
-        touch(controlBounds(selector, description, timeoutMs), description)
+    fun tap(selector: BySelector, description: String, timeoutMs: Long = 30_000, refreshCache: Boolean = false) =
+        touch(controlBounds(selector, description, timeoutMs, refreshCache), description)
+
+    /** Match a control inside the current container, never a same-label node behind it. */
+    fun tapWithin(container: BySelector, selector: BySelector, description: String, timeoutMs: Long = 30_000) {
+        val bounds = snapshot(container, description, timeoutMs, refreshCache = true) { root ->
+            root.findObject(selector)?.let(::interactiveBounds)
+                ?.takeIf { Rect(root.visibleBounds).contains(it) }
+        }
+        touch(bounds, description)
+    }
 
     private data class ScrollSnapshot(val viewport: Rect, val content: List<String>)
 
