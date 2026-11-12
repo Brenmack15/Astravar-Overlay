@@ -33,6 +33,30 @@ present in the combined source.
 
 The initial fixture correction reads the actual persisted profile through
 recordsDao.characterProfile after saveProfile. All five existing assertions and
-corruption scenarios remain. Native picker and large-text product fixes are
-being investigated separately. No passing corrected build or signed APK is
-claimed by this checkpoint. Original owner signing and installation remain gates.
+corruption scenarios remain.
+
+## Corrections preserved before runtime verification
+
+- Locala059c17 / publishedd3449e214bf414a3186b90f48079402298c1ee9b fix the
+  authoritative profile fixture. Their complete tree matches exactly.
+- Local3ee6a17 / published79525a8a42ec3bd02ba0398e55756331f6fb366d scope Downloads
+  to the actual document-picker drawer, observe fresh enabled bounds and dispatch
+  each touch once. Filename entry is read back exactly; the real export, verified
+  backup prerequisite, restore and restart assertions remain. No sleep or retry
+  of a write was introduced. Their complete tree also matches exactly.
+- Campaign context now shares the active section's scroll surface. People/Journal
+  tabs remain fixed; the duplicate Campaign heading is removed. Independent saved
+  positions and disclosures survive section changes, detail/Back and recreation.
+  A new actual-shell200% text regression verifies full text bounds and all routes.
+  The failing native visual assertion remains unchanged.
+- Source/signing guards passed82 foundation files,33 protected files and all12
+  immutable schema pins plus additive schema9 checks. No guard was weakened.
+- Original owner key and trusted code49 APK were recovered privately. Full
+  certificate and original APK checksum match their recorded values. No signing
+  or installation has been performed.
+
+The resumed build runtime is available. Focused backend tests are running in a
+separate clean a059 worktree while the UI correction is preserved. Corrected
+compilation/UI/native acceptance remains pending; no signed APK is claimed.
+Direct git push lacked credentials, so the authenticated GitHub connector
+published matching trees without moving PR15 or overwriting old checkpoints.

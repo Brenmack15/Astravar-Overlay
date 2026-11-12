@@ -21,78 +21,82 @@ import com.yazsras.astravar.data.CampaignLedgerRepository
 
 /** A read-only window onto the same saved journal records used by the editors. */
 @Composable fun RebirthCampaignJournal(repository: CampaignLedgerRepository, open: (String) -> Unit) {
+    Page { RebirthCampaignJournalContent(repository, open) }
+}
+
+/** Embed the journal in a parent-owned scroll surface without nesting another page or heading. */
+@Composable internal fun ColumnScope.RebirthCampaignJournalContent(repository: CampaignLedgerRepository,
+    open: (String) -> Unit, showHeading: Boolean = true) {
     val checkpoints by repository.party.checkpoints.collectAsState(initial = emptyList())
     val entities by repository.records.entities.collectAsState(initial = emptyList())
     val projects by repository.records.projects.collectAsState(initial = emptyList())
     val latest = checkpoints.maxByOrNull { it.updatedAt }
     val expandedText = LocalDensity.current.fontScale > 1.15f
-    Page {
-        PlayerHeading("Campaign") {
-            if (!expandedText) PlayerTextButton(onClick = { open("Search everything") }) { Text("Search everything") }
-        }
-        if (expandedText) PlayerTextButton(onClick = { open("Search everything") }) { Text("Search everything") }
-        PlayerArtBanner("THE CHRONICLE", "Your living world", "People, discoveries and the story so far.", R.drawable.rebirth_atlas)
-        val destinations = listOf(Triple("Connections", entities.size, "People"),
-            Triple("Inventions", projects.size, "Settings"), Triple("Checkpoints", checkpoints.size, "Journal"))
-        if (expandedText) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            destinations.forEach { (title, count, icon) -> JournalDestination(title, count.toString(), icon,
-                Modifier.fillMaxWidth(), horizontal = true) { open(title) } }
-        } else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            destinations.forEach { (title, count, icon) -> JournalDestination(title, count.toString(), icon,
-                Modifier.weight(1f)) { open(title) } }
-        }
-        Column(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("LATEST SAVED CHECKPOINT", color = RebuildPalette.GoldBright, style = MaterialTheme.typography.labelMedium)
-            if (latest == null) {
-                Text("Where the story pauses", style = MaterialTheme.typography.headlineSmall, fontFamily = DisplayFace)
-                Text("Save the scene, your last action and the decision waiting for you.", color = RebuildPalette.Muted)
-                PlayerOutlinedButton(onClick = { open("Checkpoints") }) { Text("Record a checkpoint") }
-            } else {
-                Text(latest.title, style = MaterialTheme.typography.headlineSmall, fontFamily = DisplayFace,
-                    modifier = Modifier.semantics { heading() })
-                if (latest.scene.isNotBlank()) Text(latest.scene, color = RebuildPalette.Ice, style = MaterialTheme.typography.titleMedium,
-                    maxLines = 3, overflow = TextOverflow.Ellipsis)
-                if (latest.lastConfirmedAction.isNotBlank()) Text(latest.lastConfirmedAction,
-                    style = MaterialTheme.typography.bodyLarge, maxLines = 5, overflow = TextOverflow.Ellipsis)
-                if (latest.unresolvedChoice.isNotBlank()) {
-                    Column(Modifier.fillMaxWidth().background(RebuildPalette.Elevated, RoundedCornerShape(8.dp)).padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Still unresolved", color = RebuildPalette.GoldBright, style = MaterialTheme.typography.labelLarge)
-                        Text(latest.unresolvedChoice, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                    }
+    if (showHeading) PlayerHeading("Campaign") {
+        if (!expandedText) PlayerTextButton(onClick = { open("Search everything") }) { Text("Search everything") }
+    }
+    if (expandedText || !showHeading) PlayerTextButton(onClick = { open("Search everything") }) { Text("Search everything") }
+    PlayerArtBanner("THE CHRONICLE", "Your living world", "People, discoveries and the story so far.", R.drawable.rebirth_atlas)
+    val destinations = listOf(Triple("Connections", entities.size, "People"),
+        Triple("Inventions", projects.size, "Settings"), Triple("Checkpoints", checkpoints.size, "Journal"))
+    if (expandedText) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        destinations.forEach { (title, count, icon) -> JournalDestination(title, count.toString(), icon,
+            Modifier.fillMaxWidth(), horizontal = true) { open(title) } }
+    } else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        destinations.forEach { (title, count, icon) -> JournalDestination(title, count.toString(), icon,
+            Modifier.weight(1f)) { open(title) } }
+    }
+    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("LATEST SAVED CHECKPOINT", color = RebuildPalette.GoldBright, style = MaterialTheme.typography.labelMedium)
+        if (latest == null) {
+            Text("Where the story pauses", style = MaterialTheme.typography.headlineSmall, fontFamily = DisplayFace)
+            Text("Save the scene, your last action and the decision waiting for you.", color = RebuildPalette.Muted)
+            PlayerOutlinedButton(onClick = { open("Checkpoints") }) { Text("Record a checkpoint") }
+        } else {
+            Text(latest.title, style = MaterialTheme.typography.headlineSmall, fontFamily = DisplayFace,
+                modifier = Modifier.semantics { heading() })
+            if (latest.scene.isNotBlank()) Text(latest.scene, color = RebuildPalette.Ice, style = MaterialTheme.typography.titleMedium,
+                maxLines = 3, overflow = TextOverflow.Ellipsis)
+            if (latest.lastConfirmedAction.isNotBlank()) Text(latest.lastConfirmedAction,
+                style = MaterialTheme.typography.bodyLarge, maxLines = 5, overflow = TextOverflow.Ellipsis)
+            if (latest.unresolvedChoice.isNotBlank()) {
+                Column(Modifier.fillMaxWidth().background(RebuildPalette.Elevated, RoundedCornerShape(8.dp)).padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Still unresolved", color = RebuildPalette.GoldBright, style = MaterialTheme.typography.labelLarge)
+                    Text(latest.unresolvedChoice, maxLines = 4, overflow = TextOverflow.Ellipsis)
                 }
-                PlayerTextButton(onClick = { open("Checkpoints") }) { Text("Read checkpoint") }
             }
+            PlayerTextButton(onClick = { open("Checkpoints") }) { Text("Read checkpoint") }
         }
+    }
+    HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .5f))
+    JournalSectionHeading("People & places", "View all") { open("Connections") }
+    if (entities.isEmpty()) {
+        Text("Keep the people, groups and places you discover in one journal.", color = RebuildPalette.Muted)
+        PlayerTextButton(onClick = { open("Connections") }) { Text("Add a connection") }
+    } else entities.sortedByDescending { it.updatedAt }.take(3).forEach { entity ->
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { open("Connections:${entity.id}") }
+            .padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            PartyPortrait(entity.imageBase64, entity.name, 48.dp)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(entity.name, style = MaterialTheme.typography.titleMedium)
+                Text(entity.relationship.ifBlank { entity.kind }, color = RebuildPalette.Muted,
+                    style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            Text("›", color = RebuildPalette.GoldBright, style = MaterialTheme.typography.titleLarge)
+        }
+    }
+    if (projects.isNotEmpty()) {
         HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .5f))
-        JournalSectionHeading("People & places", "View all") { open("Connections") }
-        if (entities.isEmpty()) {
-            Text("Keep the people, groups and places you discover in one journal.", color = RebuildPalette.Muted)
-            PlayerTextButton(onClick = { open("Connections") }) { Text("Add a connection") }
-        } else entities.sortedByDescending { it.updatedAt }.take(3).forEach { entity ->
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { open("Connections:${entity.id}") }
-                .padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                PartyPortrait(entity.imageBase64, entity.name, 48.dp)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(entity.name, style = MaterialTheme.typography.titleMedium)
-                    Text(entity.relationship.ifBlank { entity.kind }, color = RebuildPalette.Muted,
-                        style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
-                Text("›", color = RebuildPalette.GoldBright, style = MaterialTheme.typography.titleLarge)
-            }
+        JournalSectionHeading("At the workbench", "View all") { open("Inventions") }
+        projects.sortedByDescending { it.updatedAt }.take(3).forEach { project ->
+            PlayerEntry(project.title, project.status, "Settings", { open("Inventions:${project.id}") })
         }
-        if (projects.isNotEmpty()) {
-            HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .5f))
-            JournalSectionHeading("At the workbench", "View all") { open("Inventions") }
-            projects.sortedByDescending { it.updatedAt }.take(3).forEach { project ->
-                PlayerEntry(project.title, project.status, "Settings", { open("Inventions:${project.id}") })
-            }
-        }
-        PlayerDisclosure("Library & source records") {
-            PlayerEntry("Reference Library", "Original lore, discoveries and source history", "Journal", { open("Reference Library") })
-            PlayerEntry("Campaign import", "Review a saved archive before importing", "Settings", { open("Campaign import") })
-        }
+    }
+    PlayerDisclosure("Library & source records") {
+        PlayerEntry("Reference Library", "Original lore, discoveries and source history", "Journal", { open("Reference Library") })
+        PlayerEntry("Campaign import", "Review a saved archive before importing", "Settings", { open("Campaign import") })
     }
 }
 
