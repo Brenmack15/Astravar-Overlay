@@ -4,7 +4,46 @@ This is the current recovery handoff, not a completed release. Read the original
 `docs/genesis/SESSION_RECOVERY.md` at `ee04d5f` first, then this file and the
 linked milestone checkpoints. Later verified facts here supersede older status.
 
-## Active resumed session — Journal test readiness published
+## Release-only resumption — 12 November 2026, original-owner signing next
+
+The owner froze feature scope and requested delivery of the current tested APK.
+The prior runtime/worktrees were unavailable; no recoverable uncommitted source
+was found. Published source, original owner49 APK, private signing recovery,
+signer/operator tools and saved evidence were recovered without resetting or
+cleaning any tree. PR15 and every previous checkpoint remain unchanged.
+
+Selected release source: a86ab0fa87ce47a4f99550dcfa8fe01ed0e22928 on
+feat/astravar-project-genesis-accessible-navigation-20261112. Fresh authenticated
+current/attempt/job/artifact reads reconfirm both successful gates43251800831 and
+43251800807. Native artifact SHA256
+0f15ee8159fac0c1cd166c073dafcf13873968f97b411f66db9dd2ec3b059b67 and full artifact
+4c48604d4a2fb713a65eca9d67a1bf9d29af88a00d43e9c2557a16fa8caf7f8e were downloaded
+again with exact original sizes/hashes. No expensive source verification rerun.
+
+d12bdfec951acb3525ecb9bd280dcf4b85cc3b3a remains preserved: full43256864460 passed;
+native43256864350 failed after12 passed tests. Exact failed XML shows Gboard
+rewrote encounter notes “manual” to “Manual”, violating the observer's exact-text
+predicate. The field was present and complete; app writes notes unchanged.
+The only a86→d12 difference is12 host-test Journal-readiness lines. Production
+app/src/main, rules, overlay-target, workflows and scripts are identical.
+This explicit selection of the latest completely verified APK supersedes the
+earlier session's proposed d12-or-later release requirement; it drops no product
+feature and does not claim the failed d12 run passed or was repaired.
+
+New root: /workspace/scratch/30508fda364e/
+- Astravar-Genesis-Recovered-20261112: clean d12.
+- genesis-release-source-a86-1800: clean detached exact a86.
+- genesis-release-private-1800: recovered signer and protected materials; no secrets in Git.
+- genesis-release-audit-1820: fresh original API evidence/receipts.
+- genesis-owner-upgrade-helper-release: exact published d285 helper, still disabled.
+- genesis-signing-runtime: verified JDK17.0.21+9 and SDK build-tools35.
+
+Next: public preflight, re-sign exact native a86 payload with original owner key,
+then activate the prepared sealed original-owner49→50 emulator verification.
+No owner Genesis APK or owner-key installation is claimed yet. Finish APK first;
+POST_APK_ROADMAP.md remains deferred. No physical Galaxy S26/Android17 acceptance.
+
+## Previous session — Journal test readiness published
 
 Current published source: `d12bdfec951acb3525ecb9bd280dcf4b85cc3b3a`,
 tree `3f76ac55ed168dafe31832d234df706e01d75c04`; local equivalent
