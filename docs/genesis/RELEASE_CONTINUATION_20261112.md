@@ -264,7 +264,7 @@ does not read today's actor/campaign or export the full archive. Two independent
 source reviews found no blocking API/compatibility issue; runtime checks pending.
 Both follow-ups are included in integrated52831.
 
-## Missing local native work: partial source recovery
+## Original local native work and completed reconstruction
 
 [Native recovery handoff](https://github.com/Brenmack15/Astravar-Overlay/blob/a224a9d691fe97e871dc36395ad3f27e778e59ec/docs/genesis/NATIVE_ENCOUNTER_RECOVERY_20261112.md)
 
@@ -278,7 +278,7 @@ Three complete reconstructed files are preserved and fetched back text-equal:
   e926af21e3af5df584891606aeb2f35057c968a4 matches recorded original prefix e926af2.
 
 This proves the reconstructed source survived on GitHub, not full original-commit
-identity. Seven files remain to recover or rebuild:
+identity. At the initial a224 checkpoint these seven files still needed recovery or reconstruction:
 scripts/tests/test_genesis_encounter_readback.py;
 scripts/genesis-connected-readback.py; scripts/genesis-crafting-readback.py;
 scripts/genesis-upgrade-readback.py; scripts/native-campaign-import-readback.py;
