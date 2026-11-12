@@ -32,6 +32,36 @@ Exact remote signing checkout `genesis-release-source-de98cb6` is clean.
 There is no active local Gradle/emulator. No owner signing, encryption/transfer,
 owner49→50 installation or physical handset acceptance has occurred.
 
+### Owner-upgrade helper and original screenshot recovery
+
+The isolated helper is now published at
+`d285e20374c09bf5b72464b48e5067b2648a9ed1` on
+`checkpoint/astravar-genesis-owner-upgrade-envelope-20261112`;
+local `a7dcaa8cffed5da7f0f3164787313050a12d6ecb`, exact tree
+`fe403dbb93943b49a4e0c47956ca1946c66a8a15`. It remains disabled.
+Actual public observer-test APK inspection found AGP omits versionCode.
+The verifier now requires that explicit absence, the sole exact AndroidJUnitRunner
+and target com.yazsras.astravar.target, and the pinned paired certificate.
+Owner49/50 and observer1 remain strict integers. All53 synthetic tests and
+independent review passed; real public observer metadata inspection passed.
+All7 candidate-source config pins now name de98. No source gate/artifact pin is
+filled yet. No owner signing, encryption, transfer or installation occurred.
+Do not activate until BOTH exact candidate gates and concrete artifact proof pass.
+
+Original 3.2 screenshots were recovered unchanged from successful native
+42749359999/artifact13733452732 and full42749360017/artifact13734450883.
+Both artifact hashes/sizes/source3543e83 verified; native used unchanged7bb03
+product, with exact matching app/rules trees. Recovered81 native and105 host PNGs;
+all decoded,105 host entries matched original evidence index. No original
+character/companion/campaign creation form capture found; saved sheets must not
+be relabeled. Evidence guide/manifest: `genesis-before-3.2-3543e83/`.
+Privately preserved screenshot-only bundle
+`Astravar-3.2-original-screen-evidence-3543e83.zip`,37,782,009bytes,
+SHA256 `8711671cab9af6ab7e7f525987b0c79b8fc0084a129b3a23c3e31a4597fd862f`.
+The working report `genesis-release-report-draft-de98.md` and touch evidence
+`genesis-touch-interactions-de98.md` explicitly distinguish pending current
+acceptance, historical API36/fictional CI evidence, and unverified handset scope.
+
 ### Completed e9f verification — full passed, native discovery failed
 
 Full43232146446 passed on exacte9f: rules166, debug931total/928pass/3skip,
