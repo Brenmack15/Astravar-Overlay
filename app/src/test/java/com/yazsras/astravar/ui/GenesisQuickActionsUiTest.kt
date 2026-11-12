@@ -4,9 +4,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.test.*
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.data.ReforgePreferences
+import com.yazsras.astravar.data.Preferences
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -143,5 +147,32 @@ class GenesisQuickActionsUiTest {
             open()
             compose.onNodeWithContentDescription("Move Rest up").assertIsNotEnabled()
         }
+    }
+
+    @Test fun draggingHonorsTheSavedHapticsPreferenceWithoutDisablingReordering() {
+        val id = actor()
+        seed(id, listOf("health", "attack"))
+        val interactionPreferences = Preferences(ApplicationProvider.getApplicationContext())
+        val original = runBlocking { interactionPreferences.flow.first().haptics }
+        val feedback = mutableListOf<HapticFeedbackType>()
+        val observer = object : HapticFeedback {
+            override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) { feedback += hapticFeedbackType }
+        }
+        try {
+            runBlocking { interactionPreferences.haptics(false) }
+            surface({ CompositionLocalProvider(LocalHapticFeedback provides observer) { GenesisQuickActions(id) {} } }) {
+                open()
+                val first = compose.onNodeWithTag("quick-drag-health").fetchSemanticsNode().boundsInRoot
+                val next = compose.onNodeWithTag("quick-drag-attack").fetchSemanticsNode().boundsInRoot
+                compose.onNodeWithTag("quick-drag-health").performTouchInput {
+                    down(center); advanceEventTime(750)
+                    moveBy(Offset(0f, next.center.y - first.center.y + 12f), delayMillis = 200)
+                    up()
+                }
+                compose.onNodeWithText("Save quick actions").performClick()
+                compose.waitUntil(10_000) { saved(id) == listOf("attack", "health") }
+                assertTrue("Disabled haptics must suppress both long-press and reorder feedback", feedback.isEmpty())
+            }
+        } finally { runBlocking { interactionPreferences.haptics(original) } }
     }
 }

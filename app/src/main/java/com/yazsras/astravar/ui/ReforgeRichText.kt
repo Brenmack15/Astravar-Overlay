@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
@@ -64,7 +65,8 @@ import kotlinx.coroutines.withContext
                 }
                 is RecordPresentation.Block.Table -> Column {
                     var visibleRows by remember(block) { mutableIntStateOf(40) }
-                    Column(Modifier.horizontalScroll(rememberScrollState())) {
+                    Column(Modifier.testTag("reforge-rich-table").genesisHorizontalControl()
+                        .horizontalScroll(rememberScrollState())) {
                     block.rows.take(visibleRows).forEachIndexed { index, row ->
                         Row(Modifier.background(if (index == 0) RebuildPalette.Active else Color.Transparent)) {
                             row.forEach { cell -> Box(Modifier.width(156.dp).padding(10.dp)) {

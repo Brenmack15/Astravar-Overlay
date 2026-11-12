@@ -136,6 +136,50 @@ class GenesisPagerTest {
         } finally { activity.pause().stop().destroy() }
     }
 
+    @Test fun richTextTableOwnsHorizontalDraggingAtBothEndsButAllowsVerticalReading() {
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { AstravarTheme {
+                GenesisCharacterPager("fictional-actor") { page ->
+                    if (page == "Sheet") ReforgeRichText("| Name | Range | Duration |\n| --- | --- | --- |\n| Ward | Touch | One hour |")
+                    repeat(30) { Text("$page row $it", Modifier.height(56.dp)) }
+                }
+            } }
+            val table = compose.onNodeWithTag("reforge-rich-table")
+            assertTrue(table.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange].maxValue() > 0f)
+            repeat(3) { table.performTouchInput { swipeLeft() }; compose.waitForIdle() }
+            compose.onNodeWithTag("section-Sheet").assertIsSelected()
+            repeat(3) { table.performTouchInput { swipeRight() }; compose.waitForIdle() }
+            compose.onNodeWithTag("section-Sheet").assertIsSelected()
+            table.performTouchInput { swipeUp() }
+            compose.waitForIdle()
+            assertTrue("Table gestures must not prevent vertical page scrolling", scrollOffset("Sheet") > 0f)
+            compose.onNodeWithTag("genesis-character-pager").performTouchInput { swipeLeft() }
+            compose.waitForIdle()
+            compose.onNodeWithTag("section-Combat").assertIsSelected()
+        } finally { activity.pause().stop().destroy() }
+    }
+
+    @Test fun fittingRichTextTableDoesNotBecomeAnAccidentalPageSwipeRegion() {
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { AstravarTheme {
+                GenesisCharacterPager("fictional-actor") { page ->
+                    if (page == "Sheet") ReforgeRichText("| Name | Range |\n| --- | --- |\n| Ward | Touch |")
+                    Spacer(Modifier.height(1200.dp))
+                }
+            } }
+            val table = compose.onNodeWithTag("reforge-rich-table")
+            assertEquals(0f, table.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange].maxValue(), .5f)
+            table.performTouchInput { swipeLeft() }
+            compose.waitForIdle()
+            compose.onNodeWithTag("section-Sheet").assertIsSelected()
+            compose.onNodeWithTag("genesis-character-pager").performTouchInput { swipeLeft() }
+            compose.waitForIdle()
+            compose.onNodeWithTag("section-Combat").assertIsSelected()
+        } finally { activity.pause().stop().destroy() }
+    }
+
     @Test fun openModalSuspendsPagingWithoutLosingItsCurrentPosition() {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         val modal = mutableStateOf(true)

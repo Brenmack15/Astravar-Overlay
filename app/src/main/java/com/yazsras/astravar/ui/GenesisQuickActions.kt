@@ -21,6 +21,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.data.ReforgePreferences
+import com.yazsras.astravar.data.Preferences
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.map
@@ -73,6 +74,11 @@ internal val genesisQuickActionLabels = linkedMapOf(
     val rowHeights = remember { mutableStateMapOf<String, Int>() }
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
+    val context = LocalContext.current.applicationContext
+    val interactionPreferences = remember(context) { Preferences(context) }
+    val hapticsFlow = remember(interactionPreferences) { interactionPreferences.flow.map { it.haptics } }
+    val hapticsEnabled by hapticsFlow.collectAsState(initial = false)
+    val currentHapticsEnabled by rememberUpdatedState(hapticsEnabled)
     val currentDraft by rememberUpdatedState(draft)
     fun move(action: String, direction: Int) {
         val from = draft.indexOf(action)
@@ -105,7 +111,10 @@ internal val genesisQuickActionLabels = linkedMapOf(
                         .semantics { contentDescription = "Drag ${genesisQuickActionLabels.getValue(action)} to reorder" }
                         .pointerInput(action, busy) {
                             if (!busy) detectDragGesturesAfterLongPress(
-                                onDragStart = { dragging = action; distance = 0f; haptics.performHapticFeedback(HapticFeedbackType.LongPress) },
+                                onDragStart = {
+                                    dragging = action; distance = 0f
+                                    if (currentHapticsEnabled) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                },
                                 onDragEnd = { dragging = null; distance = 0f },
                                 onDragCancel = { dragging = null; distance = 0f }
                             ) { change, delta ->
@@ -117,7 +126,7 @@ internal val genesisQuickActionLabels = linkedMapOf(
                                     val from = currentDraft.indexOf(action)
                                     if (from + direction in currentDraft.indices) {
                                         move(action, direction); distance -= direction * threshold
-                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        if (currentHapticsEnabled) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     } else distance = 0f
                                 }
                             }
