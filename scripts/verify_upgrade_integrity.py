@@ -3,6 +3,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import sqlite3
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +17,7 @@ IMMUTABLE_SCHEMAS = {
     "com.yazsras.astravar.data.CampaignLedgerDb/5.json": "055d82545e23397ef2a785aceb6856534b3d1b50ad918cd4e74e2ef87abf7349",
     "com.yazsras.astravar.data.CampaignLedgerDb/6.json": "e6a8c8388f27cf5188d3574206afe2a91645d9843832d0a8e0d6c57b5917faac",
     "com.yazsras.astravar.data.CampaignLedgerDb/7.json": "e72a80deed9cdea4465cc29c5cde44aab50787653585f982e316d53b58ca7470",
+    "com.yazsras.astravar.data.CampaignLedgerDb/8.json": "c998677689925257d5c5c385d549688e5cf8d9d4df522720061c5309bdca977c",
     "com.yazsras.astravar.data.ReforgeDb/1.json": "8a289404aa8073ef7cfdf40147cd7bc033ab36f1b73bcd0fab12de70ad471719",
     "com.yazsras.astravar.data.SandboxSyncDb/1.json": "23de63787037f830e1295ba7cd7efbc7d62cf18e3ba836c4e511bec8fd6cef03",
 }
@@ -81,6 +83,85 @@ assert genesis_tables.keys() <= authority_tables.keys()
 for table, entity in genesis_tables.items():
     assert authority_tables[table] == entity, f"Historical table changed during explicit authority upgrade: {table}"
 
+# Manual encounter tracking adds references only; existing campaign truth and playable tables stay unchanged.
+encounter_schema = json.loads((ROOT / "app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/9.json").read_text())["database"]
+assert encounter_schema["version"] == 9
+encounter_tables = {entity["tableName"]: entity for entity in encounter_schema["entities"]}
+assert encounter_tables.keys() == authority_tables.keys() | {"genesis_encounters", "genesis_encounter_participants"}
+for table, entity in authority_tables.items():
+    assert encounter_tables[table] == entity, f"Historical table changed during encounter upgrade: {table}"
+
+expected_encounter_fields = {
+    "genesis_encounters": {
+        "id": ("TEXT", True), "campaignId": ("TEXT", True), "title": ("TEXT", True), "notes": ("TEXT", True),
+        "status": ("TEXT", True), "round": ("INTEGER", True), "currentActorId": ("TEXT", False),
+        "revision": ("INTEGER", True), "creationCommandId": ("TEXT", True), "lastCommandId": ("TEXT", True),
+        "createdAt": ("INTEGER", True), "updatedAt": ("INTEGER", True),
+    },
+    "genesis_encounter_participants": {
+        "encounterId": ("TEXT", True), "actorId": ("TEXT", True), "initiative": ("INTEGER", False), "position": ("INTEGER", True),
+    },
+}
+for table, expected_fields in expected_encounter_fields.items():
+    entity = encounter_tables[table]
+    assert {field["columnName"]: (field["affinity"], field.get("notNull", False)) for field in entity["fields"]} == expected_fields, f"Encounter field shape changed: {table}"
+    assert all("defaultValue" not in field for field in entity["fields"]), "Encounter migration must not infer initiative or tracker state"
+    assert entity["primaryKey"] == {"autoGenerate": False, "columnNames": ["id"] if table == "genesis_encounters" else ["encounterId", "actorId"]}
+
+def foreign_keys(entity):
+    return {(key["table"], key["onDelete"], key["onUpdate"], tuple(key["columns"]), tuple(key["referencedColumns"])) for key in entity["foreignKeys"]}
+
+assert foreign_keys(encounter_tables["genesis_encounters"]) == {
+    ("genesis_campaigns", "RESTRICT", "NO ACTION", ("campaignId",), ("id",)),
+}, "Encounter campaign identity must be enforced by a non-destructive foreign key"
+assert foreign_keys(encounter_tables["genesis_encounter_participants"]) == {
+    ("genesis_encounters", "RESTRICT", "NO ACTION", ("encounterId",), ("id",)),
+    ("genesis_actor_authority", "RESTRICT", "NO ACTION", ("actorId",), ("actorId",)),
+}, "Participants must reference existing encounter and authoritative actor identities"
+
+def indices(entity):
+    return {index["name"]: (index["unique"], tuple(index["columnNames"]), tuple(index.get("orders", []))) for index in entity["indices"]}
+
+assert indices(encounter_tables["genesis_encounters"]) == {
+    "index_genesis_encounters_campaignId": (False, ("campaignId",), ()),
+}
+assert indices(encounter_tables["genesis_encounter_participants"]) == {
+    "index_genesis_encounter_participants_actorId": (False, ("actorId",), ()),
+    "index_genesis_encounter_participants_encounterId_position": (True, ("encounterId", "position"), ()),
+}, "Encounter participant order must have a unique indexed position"
+
+# Independently execute the actual additive DDL and compare it with Room's generated schema.
+migration = (ROOT / "app/src/main/java/com/yazsras/astravar/data/GenesisEncounterMigration.kt").read_text()
+assert "Migration(8, 9)" in migration
+statements = re.findall(r'db\.execSQL\("([^"\n]+)"\)', migration)
+assert len(statements) == 5 and all(statement.startswith(("CREATE TABLE IF NOT EXISTS ", "CREATE INDEX IF NOT EXISTS ", "CREATE UNIQUE INDEX IF NOT EXISTS ")) for statement in statements), "Encounter migration must contain only its five additive table/index statements"
+
+def create_entities(connection, entities):
+    for entity in entities:
+        connection.execute(entity["createSql"].replace("${TABLE_NAME}", entity["tableName"]))
+        for index in entity.get("indices", []):
+            connection.execute(index["createSql"].replace("${TABLE_NAME}", entity["tableName"]))
+
+def table_shape(connection, table):
+    table_info = connection.execute(f'PRAGMA table_info("{table}")').fetchall()
+    keys = sorted(connection.execute(f'PRAGMA foreign_key_list("{table}")').fetchall())
+    index_list = connection.execute(f'PRAGMA index_list("{table}")').fetchall()
+    indexes = sorted((row[1], row[2], row[3], row[4], tuple(connection.execute(f'PRAGMA index_info("{row[1]}")').fetchall())) for row in index_list)
+    return table_info, keys, indexes
+
+with sqlite3.connect(":memory:") as migrated, sqlite3.connect(":memory:") as generated:
+    create_entities(migrated, authority_schema["entities"])
+    original_definitions = migrated.execute("SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name").fetchall()
+    for statement in statements:
+        migrated.execute(statement)
+    create_entities(generated, encounter_schema["entities"])
+    retained = migrated.execute("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name NOT IN ('genesis_encounters','genesis_encounter_participants') ORDER BY type,name").fetchall()
+    assert retained == original_definitions, "Encounter migration rewrote a historical schema definition"
+    for table in encounter_tables:
+        assert table_shape(migrated, table) == table_shape(generated, table), f"Encounter migration differs from generated Room9: {table}"
+    for table in expected_encounter_fields:
+        assert migrated.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0] == 0, "Migration must not invent encounter records"
+
 tracked = subprocess.check_output(["git", "-C", str(ROOT), "ls-files", "-z"], text=True).split("\0")
 for name in filter(None, tracked):
     assert not re.search(r"\.(?:jks|keystore|p12|apk|aab|pdf|mht|zip)$", name, re.I), f"Private/distribution artifact in source: {name}"
@@ -92,4 +173,4 @@ for suffix in (".v2uidebug", ".v2statdebug"):
     assert f'applicationIdSuffix = "{suffix}"' in gradle
 manifest = (ROOT / "app/src/main/AndroidManifest.xml").read_text()
 assert 'android:allowBackup="false"' in manifest and 'android:usesCleartextTraffic="false"' in manifest
-print("Verified eleven immutable historical schemas, additive wallet/prompt/Genesis migrations, unchanged campaign and playable tables, package boundaries and private-artifact exclusion")
+print("Verified twelve immutable historical schemas, additive wallet/prompt/Genesis/encounter migrations, exact Room9 references and order constraints, unchanged campaign and playable tables, package boundaries and private-artifact exclusion")
