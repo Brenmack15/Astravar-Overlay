@@ -102,3 +102,35 @@ is extended through primary navigation and a second parcelled Activity recreatio
 Standalone label tests wait for the real journal instead of its loading heading.
 This product correction requires fresh execution; oldb8ce full/native runs
 43220288546/43220288629 predate it and cannot establish release acceptance.
+
+## Verified2798 and observed import-navigation follow-up
+
+Full exact-source run43223390477 passed: debug931 total/928 passed/3 skipped,
+release931 total/914 passed/17 skipped; rules166, Python320 and bridge134 passed.
+Zero test failures/errors and zero lint errors. Full artifact13949762181 SHA256
+`1ca78237dcec3b7a292f2b58b38eb94b13a435142ccceeea746b6a32c23a5bf5`
+was downloaded and independently checked against its source and XML reports.
+
+Native43223390400 passed15 cases across upgrade, overlay, large-campaign/recovery,
+player journey, visual/accessibility, connected Genesis, crafting, encounters,
+update fixture and same-version preservation. Independent captured SQLite proofs
+reproduced schema6→9 retention, canonical write/restart, connected same-file SAF
+restore, crafting and encounter results. Native artifact13951355019 SHA256
+`bac17f56fefa46310657a2098899c08e29a11a33a7c6072b74a2488db738393f`
+matches source2798 and the embedded release APK revision. These are fictional
+CI-signer tests, not original-owner-key or physical-device acceptance.
+
+The later CampaignImport journey failed while returning from a successfully
+saved/verified import to Reference Library. The captured log shows return to
+Campaign, an immediate Library disclosure tap, then unsuccessful target discovery;
+the final screenshot shows the journal after the search scrolled back to its top.
+`campaignEntry` unconditionally toggled the disclosure even though the reconstructed
+journal now preserves its expanded state. It now uses the existing observed-state
+`expandDisclosure` helper: read the exact title row's visible +/− indicator, tap
+once only if collapsed, and verify expanded state before opening the destination.
+All integrity, original-source, attachment, duplicate, recovery, mapped-record and
+database assertions remain unchanged. No product source or timeout changed.
+
+The correction requires fresh exact-source compilation and full/native gates.
+The failed2798 native run is not signing or delivery evidence; dependent import
+rollback/mapped stages did not run. PR15 and earlier checkpoints remain intact.

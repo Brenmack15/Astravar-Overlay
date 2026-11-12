@@ -172,7 +172,7 @@ class CampaignImportInstrumentationTest {
     private fun campaignEntry(name: String) {
         if (name == "Inventory") { ui.campaignItems(product); return }
         ui.campaignJournal(product)
-        if (name in listOf("Campaign import", "Reference Library")) tap("Library & source records")
+        if (name in listOf("Campaign import", "Reference Library")) ui.expandDisclosure(product, "Library & source records")
         tap(name)
     }
 
