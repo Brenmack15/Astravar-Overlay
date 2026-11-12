@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.content.ComponentName
 import android.content.Intent
 import android.os.Looper
+import android.os.Bundle
+import android.os.Parcel
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.room.MultiInstanceInvalidationService
@@ -24,6 +26,7 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.android.controller.ActivityController
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.LooperMode
@@ -46,6 +49,20 @@ class NavigationV2Test {
         }
     }
 
+    /** Recreate from parcelled state so retained hub state is not just a live composition object. */
+    private fun savedState(controller: ActivityController<ComponentActivity>): Bundle {
+        val state = Bundle()
+        controller.pause().saveInstanceState(state).resume()
+        val writer = Parcel.obtain()
+        val bytes = try { state.writeToParcel(writer, 0); writer.marshall() } finally { writer.recycle() }
+        val reader = Parcel.obtain()
+        return try {
+            reader.unmarshall(bytes, 0, bytes.size)
+            reader.setDataPosition(0)
+            Bundle.CREATOR.createFromParcel(reader).also { it.classLoader = ComponentActivity::class.java.classLoader }
+        } finally { reader.recycle() }
+    }
+
     @OptIn(androidx.room.ExperimentalRoomApi::class)
     @Test(timeout = 90_000) fun campaignPagesAndBackupsRemainAccessibleBeforeWeaponOnboardingWithoutChangingWeaponState() {
         val app = ApplicationProvider.getApplicationContext<AstravarApp>()
@@ -56,16 +73,17 @@ class NavigationV2Test {
         val invalidationService = Robolectric.buildService(MultiInstanceInvalidationService::class.java).create()
         shadowOf(app).setComponentNameAndServiceForBindServiceForIntent(invalidationIntent,
             ComponentName(app, MultiInstanceInvalidationService::class.java), invalidationService.get().onBind(invalidationIntent))
-        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        var activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         runBlocking { app.campaignLedger.records.saveProfile(CharacterProfile(id = "eek", name = "Fictional owl"), source = "Synthetic navigation fixture") }
         val beforeRecords = runBlocking { Json.parseToJsonElement(app.campaignLedger.export()).jsonObject.getValue("records") }
         var overlayStarts = 0
         var permissionRequests = 0
         var overlayStops = 0
+        fun mount() { activity.get().setContent {
+            AstravarScreen(app, { overlayStarts++ }, { permissionRequests++ }, { overlayStops++ })
+        } }
         try {
-            activity.get().setContent {
-                AstravarScreen(app, { overlayStarts++ }, { permissionRequests++ }, { overlayStops++ })
-            }
+            mount()
             compose.waitUntil(20_000) {
                 // AstravarApp intentionally owns a Main.immediate scope. Room completes on IO,
                 // then resumes its eager StateFlow through the Android main Handler. PAUSED
@@ -90,6 +108,7 @@ class NavigationV2Test {
             compose.onNodeWithText("Add Item").assertExists()
             capture("v2-inventory", activity.get())
             compose.onNodeWithTag("navigation-Campaign").performClick()
+            compose.onNodeWithTag("section-Journal").performClick()
             compose.onNodeWithText("Connections").performClick()
             compose.onNodeWithContentDescription("Add connection").assertExists()
             capture("v2-connections", activity.get())
@@ -109,6 +128,15 @@ class NavigationV2Test {
             compose.onNodeWithTag("navigation-Campaign").performClick()
             compose.onNodeWithContentDescription("Add connection").assertExists()
             compose.runOnIdle { activity.get().onBackPressedDispatcher.onBackPressed() }
+            compose.onNodeWithText("‹ Campaign").assertDoesNotExist()
+            compose.onNodeWithTag("section-Journal").assertIsSelected()
+            val restoredState = savedState(activity)
+            activity.pause().stop().destroy()
+            activity = Robolectric.buildActivity(ComponentActivity::class.java).create(restoredState).start().resume().visible()
+            mount()
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("section-Journal").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("navigation-Campaign").assertIsSelected()
+            compose.onNodeWithTag("section-Journal").assertIsSelected()
             compose.onNodeWithText("‹ Campaign").assertDoesNotExist()
             compose.onNodeWithText("Inventions").performClick()
             compose.onNodeWithText("Add Invention").assertExists()

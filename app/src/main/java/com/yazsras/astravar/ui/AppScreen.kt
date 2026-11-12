@@ -257,9 +257,10 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                                 openReferences={tab="Campaign";campaignPage="Reference Library"}) {tab="Campaign";campaignPage="Inventory"}
                         "Campaign" -> {
                             val page=campaignPage
-                            if(page==null) GenesisCampaignHub(connected, open = { campaignPage = it },
-                                openActor = { id, companion -> openSearchDestination(ReforgeSearchDestination.Character(id, "Sheet", companion = companion)) })
-                            else Column(Modifier.fillMaxSize()) {
+                            if(page==null) screenStates.SaveableStateProvider("campaign-hub") {
+                                GenesisCampaignHub(connected, open = { campaignPage = it },
+                                    openActor = { id, companion -> openSearchDestination(ReforgeSearchDestination.Character(id, "Sheet", companion = companion)) })
+                            } else Column(Modifier.fillMaxSize()) {
                                 Row(Modifier.fillMaxWidth().padding(horizontal=8.dp),verticalAlignment=Alignment.CenterVertically) {
                                     PlayerTextButton(onClick={campaignPage=null}) {Text("‹ Campaign")}
                                     Spacer(Modifier.weight(1f))
