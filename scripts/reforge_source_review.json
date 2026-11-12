@@ -66,7 +66,7 @@
     },
     "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": {
       "previous_pinned_sha256": "7e5b92d763929c131ddef1f8ee5f08bad520233939f51234feace666b45c77c3",
-      "reviewed_sha256": "ec256d97d5548276686dc539d26675dfac3bd4589707dd80af65d623bb3111a4",
+      "reviewed_sha256": "c42133d1410ebb102ebe2dc06afeb0264ca031bc94ff9dcb7a6dea31ec42b295",
       "authorization": "Owner Astravar comprehensive overhaul directive, 2026-11-07",
       "reason": "Add a transactional, non-destructive companion creation path; original record IDs and source history remain immutable.",
       "exact_replacements": [
@@ -133,6 +133,10 @@
         {
           "before": "        val now = System.currentTimeMillis()\n        val ledger = CampaignLedgerRepository(db)\n        val output = ledger.create(command.output, outputCommand)\n        dao.insert(CraftExecution(command.commandId, project.id, output.id, command.source, now))\n        command.materials.zip(before).forEachIndexed { index, (use, item) ->\n            val remaining = requireNotNull(item.quantity) - use.quantity\n            val priorPlacement = db.partyDao().placement(item.id)\n            val depleted = priorPlacement?.takeIf { remaining == 0 }?.let { depletedPlacement(it, command.source, now) }\n            val after = item.copy(quantity = remaining, itemState = if (remaining == 0) \"Consumed\" else item.itemState,\n                revision = item.revision + 1, updatedAt = now, location = depleted?.let(::placementLocation) ?: item.location)\n",
           "after": "        val now = System.currentTimeMillis()\n        val ledger = CampaignLedgerRepository(db)\n        val output = ledger.create(command.output, outputCommand)\n        dao.insert(CraftExecution(command.commandId, project.id, output.id, command.source, now))\n        command.materials.zip(before).forEachIndexed { index, (use, item) ->\n            genesisRejectAuthorityCommandReuse(db, \"${command.commandId}:placement:$index\", \"${command.commandId}:material:$index\")\n            val remaining = requireNotNull(item.quantity) - use.quantity\n            val priorPlacement = db.partyDao().placement(item.id)\n            val depleted = priorPlacement?.takeIf { remaining == 0 }?.let { depletedPlacement(it, command.source, now) }\n            val after = item.copy(quantity = remaining, itemState = if (remaining == 0) \"Consumed\" else item.itemState,\n                revision = item.revision + 1, updatedAt = now, location = depleted?.let(::placementLocation) ?: item.location)\n"
+        },
+        {
+          "before": "    @Query(\"SELECT * FROM craft_executions ORDER BY commandId\") suspend fun allCrafts(): List<CraftExecution>\n    @Query(\"SELECT * FROM craft_consumptions ORDER BY id\") suspend fun allConsumptions(): List<CraftConsumption>\n",
+          "after": "    @Query(\"SELECT * FROM craft_executions ORDER BY commandId\") suspend fun allCrafts(): List<CraftExecution>\n    @Query(\"SELECT * FROM craft_executions WHERE commandId=:commandId\") suspend fun craft(commandId: String): CraftExecution?\n    @Query(\"SELECT * FROM craft_consumptions ORDER BY id\") suspend fun allConsumptions(): List<CraftConsumption>\n    @Query(\"SELECT * FROM craft_consumptions WHERE executionId=:executionId ORDER BY id\") suspend fun craftConsumptions(executionId: String): List<CraftConsumption>\n"
         }
       ],
       "genesis_review": {
@@ -140,11 +144,15 @@
         "previous_reviewed_sha256": "b45360ddfe84b0446c8617dd66fc36b790db09c8a729c09d1db23fb16107f702",
         "authorization": "Owner Project Genesis reconstruction directive, 2026-11-10; additive source changes with campaign history, original schema and signing boundaries retained.",
         "reason": "Create companion identity, role and optional exact owner link in one existing Room transaction. Reuse the existing audited profile receipt with full request provenance for idempotent retries and backup compatibility; no new receipt kind or validator relaxation."
+      },
+      "genesis_crafting_review": {
+        "authorization": "Owner Project Genesis directive: reconstruct connected creation and crafting while preserving existing records, mechanics, source provenance and signing identity.",
+        "reason": "Expose the unchanged ledger draft validator for read-only review and query existing craft receipts by exact identity; no schema, accounting or signing changes."
       }
     },
     "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": {
       "previous_pinned_sha256": "4508292bc1910e269340be58d0fcb83cef3a3dd32af02fc6464424fd433e0fa2",
-      "reviewed_sha256": "20f2dd4ae0945672637c0ccc874e3a308098e70c45d1ee4572c302ebc3af3f03",
+      "reviewed_sha256": "6319e82fd40f6357dbffd2fc8cdb99f18fca1418d3a2c96fb3b20e9e7c0a4994",
       "exact_replacements": [
         {
           "before": "    abstract fun promptDao(): ChatGptPromptDao\n",
@@ -201,6 +209,10 @@
         {
           "before": "    private fun originalOutcome(event: LedgerEvent): LedgerItem =\n        event.afterJson?.let { json.decodeFromString<LedgerItem>(it) }\n            ?: error(\"Original command outcome is unavailable. Review history before retrying.\")\n\n    private suspend fun recordReceipt(commandId: String, kind: String, fp: String, before: LedgerItem?, after: LedgerItem, source: String) {\n        val out = json.encodeToString(after)\n        db.recordsDao().insert(CommandReceipt(commandId, fp, kind, after.id, after.revision, after.updatedAt, outcomeJson = out))\n        db.recordsDao().insert(CampaignAudit(commandId, commandId, \"item\", after.id, kind, source,\n            before?.revision ?: 0, after.revision, after.updatedAt, before?.let { json.encodeToString(it) }, out))\n    }\n",
           "after": "    private fun originalOutcome(event: LedgerEvent): LedgerItem =\n        event.afterJson?.let { json.decodeFromString<LedgerItem>(it) }\n            ?: error(\"Original command outcome is unavailable. Review history before retrying.\")\n\n    private suspend fun recordReceipt(commandId: String, kind: String, fp: String, before: LedgerItem?, after: LedgerItem, source: String) {\n        genesisRejectAuthorityCommandReuse(db, commandId)\n        val out = json.encodeToString(after)\n        db.recordsDao().insert(CommandReceipt(commandId, fp, kind, after.id, after.revision, after.updatedAt, outcomeJson = out))\n        db.recordsDao().insert(CampaignAudit(commandId, commandId, \"item\", after.id, kind, source,\n            before?.revision ?: 0, after.revision, after.updatedAt, before?.let { json.encodeToString(it) }, out))\n    }\n"
+        },
+        {
+          "before": "    }\n\n    private fun LedgerItem.draft() = LedgerDraft(\n",
+          "after": "    }\n    /** Read-only validation for connected command previews; creation uses the same contract. */\n    internal fun validatedDraft(input: LedgerDraft): LedgerDraft = validate(input)\n\n    private fun LedgerItem.draft() = LedgerDraft(\n"
         }
       ],
       "genesis_review": {
@@ -212,6 +224,10 @@
       "genesis_storage_review": {
         "baseline": "a3f35400e911690fa70e37c6c72dc209172d4581",
         "reason": "Additive campaign schema 7 retains existing entity tables and co-locates unchanged playable tables with an installation-local recovery receipt. Shared transaction database handle exposes no gameplay approval. Non-deleting corruption handling retains the canonical authority and original recovery data."
+      },
+      "genesis_crafting_review": {
+        "authorization": "Owner Project Genesis directive: reconstruct connected creation and crafting while preserving existing records, mechanics, source provenance and signing identity.",
+        "reason": "Expose the unchanged ledger draft validator for read-only review and query existing craft receipts by exact identity; no schema, accounting or signing changes."
       }
     },
     "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": {

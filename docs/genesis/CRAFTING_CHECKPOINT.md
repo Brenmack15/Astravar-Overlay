@@ -24,6 +24,15 @@ native crafting journey compiles and its independent SQLite helper passed13
 adversarial host tests (plus17 existing connected-readback tests). Native
 execution of that new journey remains pending.
 
+The first combined push `9c3aa1a2` started full run43139100663 and native
+run43139100801. The full run passed272 Python tests and the protected-source
+check, then correctly rejected two missing reversible source-review additions.
+The four added validator/query lines in CampaignLedger/CampaignRecords are now
+recorded as exact reversals; the original baseline hashes, schemas, assets,
+signing configuration and verifier code remain unchanged. All four source-review
+tests and every source/schema/artwork/signing guard passed locally after this
+record update. The new commit needs fresh combined workflows.
+
 B's separate source `9f64619` completed full run `43132381262`: debug868 passed
 and3 skipped (871 total), release854 passed and17 skipped (871 total), rules166,
 Python259 and bridge134 passed; lint had no errors. The skips are the absent
