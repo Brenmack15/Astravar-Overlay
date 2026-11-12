@@ -144,8 +144,18 @@ in a fresh hash-pinned dependency environment; independent reviews found no
 remaining blocker. The config now points toe9f but still has unset concrete pins.
 Pinned sender Python:
 `/workspace/scratch/30508fda364e/genesis-owner-transport-test-venv/bin/python`.
-A small safe-diagnostic follow-up is in progress; inspect status before checkout.
-This isolated helper work does not change the application candidate.
+The safe-diagnostic increment local
+`4361b0bc69511cf54f43fcfe86d16e3ecb9254a0` is preserved as
+`aebf1440ea993535a09bc03af3bd56e30a1d13b9`, exact tree
+`9da9c7cbf1a8b4a4f1ab538e3e901c6e7163cbea`; worktree is clean.
+Forty-four synthetic tests passed, including an independent root rerun.
+Diagnostics emit only source-check identifiers or fixed exception categories.
+Evidence is under `genesis-owner-upgrade-helper-evidence`; the source-only
+diagnostic catalog maps identifiers without reading owner files. Full review and
+scoped follow-up review passed. No owner encryption, signing or CI receiver
+launch has occurred. This isolated helper work does not change the application
+candidate. A disabled checkpoint workflow may appear as a skipped job; that is
+not verification acceptance.
 
 Planned accelerated CI route uses a short-lived public transport recipient and
 only encrypted owner49/50 APK chunks on a separate transfer branch. The original
