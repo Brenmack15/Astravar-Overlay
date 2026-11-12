@@ -121,7 +121,7 @@ import java.util.UUID
         PlayerHeading("Complete backup")
         PlayerCard {
             Text("Keep connected records together", style = MaterialTheme.typography.titleLarge)
-            Text("Campaigns and source history, characters and companions, inventory and equipment, playable mechanics, relationships, reviews and recovery drafts.", color = RebuildPalette.Muted)
+            Text("Campaigns and source history, characters and companions, inventory and equipment, playable mechanics, relationships, reviews and saved note drafts.", color = RebuildPalette.Muted)
             PlayerButton(onClick = ::saveCurrent, enabled = !busy && pendingExport == null,
                 modifier = Modifier.testTag("genesis-export-backup")) { Text("Save complete backup") }
         }
@@ -132,6 +132,7 @@ import java.util.UUID
                 enabled = !busy && pendingExport == null, modifier = Modifier.testTag("genesis-choose-backup")) { Text("Choose backup") }
         }
         Text("Existing campaign and character backup files can be reviewed here. The separate Weapon backup remains available in Tools. Files stay at your chosen destination; this screen uploads nothing.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+        Text("Settings, quick-action layouts, connection setup and other unfinished editor drafts are not included. Keep portrait files selected from another app separately; select them again when restoring on a new device.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
         Text("Complete backup files support up to 64 MiB. Larger records remain on the device; a failed export never clears them.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (status.isNotBlank()) Text(status, color = if (failure) MaterialTheme.colorScheme.error else RebuildPalette.Ice,
