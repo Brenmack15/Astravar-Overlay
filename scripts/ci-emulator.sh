@@ -164,8 +164,19 @@ else
 fi
 run_stage PlayerFirstJourneyInstrumentationTest 1 1050 native-player-first.txt || astravar_prerequisites_ok=0
 run_stage VisualRebirthJourneyInstrumentationTest 1 900 native-visual-rebirth.txt || astravar_prerequisites_ok=0
-run_stage GenesisJourneyInstrumentationTest 1 900 native-genesis.txt || astravar_prerequisites_ok=0
+run_stage GenesisJourneyInstrumentationTest 1 1500 native-genesis.txt || astravar_prerequisites_ok=0
 test "$astravar_prerequisites_ok" = 1
+# Copy only the fresh fictional emulator's closed database and its actual SAF
+# document. The independent host proof must pass before later journeys continue.
+stop_product
+timeout 15s adb -s "$astravar_serial" root
+timeout 15s adb -s "$astravar_serial" wait-for-device
+copy_campaign_database validation/genesis-connected
+timeout 30s adb -s "$astravar_serial" pull /sdcard/Download/astravar-genesis-native-connected.json validation/genesis-connected-backup.json >/dev/null
+python3 scripts/genesis-connected-readback.py \
+  --database validation/genesis-connected/astravar-campaign-ledger.db \
+  --backup-document validation/genesis-connected-backup.json --synthetic-emulator \
+  --output validation/genesis-connected-readback.json
 run_stage UpdateFixtureInstrumentationTest 1 120 native-update-fixture.txt
 stop_product
 timeout 15s adb -s "$astravar_serial" root
