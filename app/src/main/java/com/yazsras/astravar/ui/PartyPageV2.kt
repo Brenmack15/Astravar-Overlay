@@ -85,8 +85,11 @@ fun PartyPageV2(
         .collectAsState(initial = false to emptyList<CharacterProfile>())
     val profiles = profileState.second
     val connected = LocalGenesisConnectedEnvironment.current
-    val associations by remember(connected?.authority) { connected?.authority?.actorAssociations ?: flowOf(emptyList()) }
-        .collectAsState(initial = emptyList())
+    val associationState by remember(connected?.authority) {
+        connected?.authority?.actorAssociations?.map { true to it }
+            ?: flowOf(true to emptyList<GenesisActorAuthority>())
+    }.collectAsState(initial = false to emptyList<GenesisActorAuthority>())
+    val associations = associationState.second
     val states by repository.records.companionStates.collectAsState(initial = emptyList())
     val sheets by repository.party.sheets.collectAsState(initial = emptyList())
     val roster = remember(profiles, states, associations) { partyRoster(profiles, states, associations) }
@@ -122,8 +125,9 @@ fun PartyPageV2(
                 val owner = profiles.firstOrNull { it.id == activeProfileId }
                 newOwnerId = owner?.id; newOwnerRevision = owner?.revision; initialOwnerId = owner?.id
                 creationCommand = UUID.randomUUID().toString(); adding = true
-            }, enabled = profileState.first && actorSelection.first) { Text("+ Add companion") }
-            if (!profileState.first || !actorSelection.first) Text("Loading companion context…", color = RebuildPalette.Muted)
+            }, enabled = profileState.first && actorSelection.first && associationState.first && connected?.selectionLoaded != false) { Text("+ Add companion") }
+            if (!profileState.first || !actorSelection.first || !associationState.first || connected?.selectionLoaded == false)
+                Text("Loading companion context…", color = RebuildPalette.Muted)
             Text("Your companions, ready for the next chapter.", color = RebuildPalette.Muted)
             if (roster.isNotEmpty()) PlayerSearch(query, { query = it }, "Find a companion")
             val visibleRoster = roster.filter { member ->
