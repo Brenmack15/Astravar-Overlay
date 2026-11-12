@@ -2,7 +2,7 @@
 
 ## Status and preservation boundary
 
-This is a technical handoff reconstructed from the working agent's retained execution history after the execution environment became unavailable. It is **not** a recovered source patch, a blob-verified copy of local commit `991dd4a`, or a passing native release. No source file is recreated in this documentation-only checkpoint.
+This is a technical handoff reconstructed from the working agent's retained execution history after the execution environment became unavailable. It is **not** a recovered source patch, a blob-verified copy of local commit `991dd4a`, or a passing native release. The initial documentation-only checkpoint is followed by two complete source files reconstructed from retained tool output and a recorded patch; their original local blob hashes remain unavailable.
 
 - Repository: `Brenmack15/Astravar-Overlay`.
 - New recovery branch: `checkpoint/astravar-genesis-native-recovery-20261112`.
@@ -13,11 +13,11 @@ This is a technical handoff reconstructed from the working agent's retained exec
 - Local HEAD immediately before that commit was `3856bb5` (`test(genesis): make encounter coroutine tests JUnit compatible`). Do not assume this local ancestor was published as part of the remote base above.
 - A read-only `git show 991dd4a:...` recovery attempt returned `No usable execution environment is available`. There was no reset, clean, overwrite or reinitialization.
 - Some full file text and diffs remain in conversation history, but all ten original blobs cannot currently be recovered or independently hashed. Treat reconstruction as new, unverified work until compared with the original checkout if it returns.
-- Existing published D/C branches and PR #15 were not moved or edited by this recovery. No owner data, private exports, keys, credentials or APKs are included. No CI was dispatched, and the documentation commit uses `[skip ci]`.
+- Existing published D/C branches and PR #15 were not moved or edited by this recovery. No owner data, private exports, keys, credentials or APKs are included. No CI was dispatched, and every recovery commit uses `[skip ci]`.
 
 ## What survived on GitHub
 
-The verified base includes generated `app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/9.json` and the additive encounter integrity guard. Reported generated schema9 SHA-256 is `268860d5fc88e9f2a79406649230bc9fc71a59e19aefefcdec9a2a4330286111`; Room identity hash is `bde66989e7d5999afcd1960e94e04758`. All 40 schema8 entities were unchanged; schema9 adds two entities, 42 total. The backend and UI source at that base remain the reconstruction starting point. The native additions and helper updates below belong to local `991dd4a` and are not supplied by this handoff.
+The verified base includes generated `app/schemas/com.yazsras.astravar.data.CampaignLedgerDb/9.json` and the additive encounter integrity guard. Reported generated schema9 SHA-256 is `268860d5fc88e9f2a79406649230bc9fc71a59e19aefefcdec9a2a4330286111`; Room identity hash is `bde66989e7d5999afcd1960e94e04758`. All 40 schema8 entities were unchanged; schema9 adds two entities, 42 total. The backend and UI source at that base remain the reconstruction starting point. The native additions and helper updates below belong to local `991dd4a` and are only partially supplied by this recovery branch, as recorded below.
 
 ## File inventory for local 991dd4a
 
@@ -35,6 +35,21 @@ The verified base includes generated `app/schemas/com.yazsras.astravar.data.Camp
 | `scripts/tests/test_native_campaign_import_readback.py` | Retain schema8 classes; add schema9 subclasses and deletion rejection; unsupported sentinel9 becomes10 |
 
 No app production source, app test source, generated schema, signing configuration or historical code49 fixtures were changed by local `991dd4a`.
+
+## Files partially recovered after the handoff
+
+Two complete files are now preserved at their normal repository paths on this separate recovery branch. They are reconstructed from recorded tool output/writes, **not verified against original991dd4a blobs**, and have not been compiled or tested in the unavailable environment:
+
+| File | Recovery commit | New GitHub blob | Basis |
+| --- | --- | --- | --- |
+| `overlay-target/src/androidTest/java/com/yazsras/astravar/GenesisEncounterInstrumentationTest.kt` | `c3206cca7764fe3d6e1bfd1e9233076b39aa22b2` | `ba01680bbc7c08bbdd9272e1527ec59dafb78194` | Full 148-line recorded readback |
+| `scripts/genesis-encounter-readback.py` | `96e546ec7730c1d5d53156348382b4a8e7735516` | `572c96b9828b00df9c090c288cc4df6426cd01e3` | Full recorded readback plus the exact later proof-strengthening patch; 177 lines |
+
+Both GitHub files were fetched again and matched the submitted recovery text exactly. This proves remote preservation of the reconstructed text, not equality with the inaccessible original commit.
+
+The other **eight** files in the inventory remain missing from the local991 change set: the 17-test encounter suite, CI stage wiring, and the six pre-existing helper/test updates. Their complete final contents were not retained in accessible history. The branch keeps the published base versions rather than committing truncated or invented replacements. The reconstructed files are not a runnable release or complete schema9 native gate until those dependencies and tests are recovered or rebuilt and verified.
+
+The standalone private-signing helper's full source also did not survive in accessible history. It is not recreated here. Its existence or earlier reported checks are not a recovered signing capability; no key/configuration/credential was read or published.
 
 ## Native journey contract
 
