@@ -41,8 +41,10 @@ e023321 and803668e. No force-push or replacement of existing dirty files.
   `9213d24044be7c03b1c5d3cbafbe1f27f48dc6a7`.
   Branches `checkpoint/astravar-genesis-route-recovery-20261112` and
   `feat/astravar-project-genesis-route-fix-20261112`.
-  The feature branch was created for full/native verification. Dispatch and final
-  results must be checked; no passing result is recorded for this source here.
+  Exact push runs are full43150255995 and native43150256068, both observed
+  in progress on this SHA. No final passing result is recorded for this source here.
+  https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43150255995
+  https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43150256068
 - Last fully built C:
   `e4ab3e6895300aed66e87cf64fce669252d934b6` on
   `feat/astravar-project-genesis-native-fixes-20261112` and
