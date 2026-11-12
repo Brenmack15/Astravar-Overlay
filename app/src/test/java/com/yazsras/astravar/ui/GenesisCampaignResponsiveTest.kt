@@ -18,8 +18,6 @@ import com.yazsras.astravar.AstravarApp
 import com.yazsras.astravar.data.CampaignCheckpoint
 import com.yazsras.astravar.data.ReforgePreferences
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -109,7 +107,7 @@ class GenesisCampaignResponsiveTest {
                     title = "Fictional observatory pause", scene = "A fictional hilltop", lastConfirmedAction = "Read the map",
                     unresolvedChoice = "Choose the next path"), source = "Synthetic responsive campaign fixture")
             }
-            val beforeRecords = runBlocking { Json.parseToJsonElement(app.campaignLedger.export()).jsonObject.getValue("records") }
+            val beforeRecords = runBlocking { app.genesisStorage.authority.backup.exportWithProof().currentFingerprint }
             mount()
             compose.waitUntil(20_000) {
                 shadowOf(Looper.getMainLooper()).idle()
@@ -209,8 +207,8 @@ class GenesisCampaignResponsiveTest {
             compose.onNode(hasText("Campaign import") and hasClickAction()).assertIsDisplayed()
             assertEquals("An expanded library and its reading position survive section changes",
                 expandedLibraryPosition, scrollPosition("Journal"), 1f)
-            assertEquals("Navigation must not change retained campaign records", beforeRecords,
-                runBlocking { Json.parseToJsonElement(app.campaignLedger.export()).jsonObject.getValue("records") })
+            assertEquals("Navigation must not change retained connected campaign records", beforeRecords,
+                runBlocking { app.genesisStorage.authority.backup.exportWithProof().currentFingerprint })
         } finally {
             activity.pause().stop().destroy()
             invalidationService.destroy()
