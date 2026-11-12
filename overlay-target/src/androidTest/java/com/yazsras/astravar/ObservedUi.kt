@@ -337,9 +337,12 @@ internal class ObservedUi(private val device: UiDevice) {
             repeat(12) {
                 val observed = current ?: return null
                 if (observed.isClickable || observed.isSelected) {
-                    // Quick actions can have the same label (Spells, Resources),
-                    // but are Buttons. A section is a native selectable Tab.
-                    if (observed.className == "android.widget.Button") return null
+                    // The actual API36 tree puts a quick action's clickable View around
+                    // sibling TextView and Button nodes. Checking only this ancestor's
+                    // class misidentifies its Spells label as a section tab and selects
+                    // the quick-action strip. A selectable Tab has no Button descendant.
+                    if (observed.className == "android.widget.Button" ||
+                        observed.findObjects(By.clazz("android.widget.Button").pkg(packageName)).isNotEmpty()) return null
                     val bounds = Rect(observed.visibleBounds)
                     return bounds.takeUnless { it.isEmpty }?.let {
                         PrimaryTabState(it, observed.isEnabled, observed.isSelected, observed.isClickable)
