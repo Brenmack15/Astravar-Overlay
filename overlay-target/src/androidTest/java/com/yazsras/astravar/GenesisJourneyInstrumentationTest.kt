@@ -89,7 +89,7 @@ class GenesisJourneyInstrumentationTest {
     private fun saveDocument(name: String) {
         assertTrue("Actual CreateDocument opens",
             ui.snapshot(By.clazz("android.widget.EditText"), "CreateDocument filename", timeoutMs = 15_000,
-                refreshCache = true) { true.takeIf { it.isEnabled && !it.visibleBounds.isEmpty } })
+                refreshCache = true) { node -> true.takeIf { node.isEnabled && !node.visibleBounds.isEmpty } })
         val picker = downloads()
         val filename = By.clazz("android.widget.EditText").pkg(picker)
         ui.tap(filename, "CreateDocument filename", timeoutMs = 10_000, refreshCache = true)
