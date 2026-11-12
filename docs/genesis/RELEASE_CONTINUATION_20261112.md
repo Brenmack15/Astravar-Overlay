@@ -42,8 +42,8 @@ Library section. The log showed an immediate toggle on return; the product now
 retains its expanded state. Helper observes the exact row's visible +/−, taps
 once only if collapsed, and verifies expansion. All import/content/attachment/
 duplicate/rollback/mapped assertions and timeouts remain unchanged. No product
-source changed. Local observer test APK compilation is running in session55860;
-log `genesis-resume-evidence/import-disclosure-compile-1.log`. Fresh gates required.
+source changed. Local observer test APK compilation passed in42seconds; session55860 is finished.
+Log `genesis-resume-evidence/import-disclosure-compile-1.log`. Fresh gates required.
 
 ### Recovered environment and preserved work
 
@@ -134,9 +134,18 @@ Local worktree `Astravar-Owner-Upgrade-Envelope`, branch
 `7f3ea5877b146850cb4a8e39f507f9c9dc53eea4`. This preserves only disabled
 transport config, RSA3072/OAEP-SHA256 + AES256-GCM primitives and17 synthetic
 tests; no workflow, owner APK, credential or signing key was published.
-Author is continuing receiver/native orchestration; inspect uncommitted files
-before any checkout. Independent security/provenance review is active.
-This isolated helper work does not change the frozen2798 application candidate.
+The completed next checkpoint local
+`faeb29f4cba9374ffabca168515eba115d2dad65` is published as
+`1146c1a5f6f2e0ee871bffcd22204e365428e533`, exact tree
+`a9525406a3035667bad4c97289aadd773558158f`, on that same isolated branch.
+It includes disabled workflow/config, sender, authenticated receiver, unchanged
+native upgrade runner and strict publication guards. Forty synthetic tests passed
+in a fresh hash-pinned dependency environment; independent reviews found no
+remaining blocker. The config now points toe9f but still has unset concrete pins.
+Pinned sender Python:
+`/workspace/scratch/30508fda364e/genesis-owner-transport-test-venv/bin/python`.
+A small safe-diagnostic follow-up is in progress; inspect status before checkout.
+This isolated helper work does not change the application candidate.
 
 Planned accelerated CI route uses a short-lived public transport recipient and
 only encrypted owner49/50 APK chunks on a separate transfer branch. The original
@@ -156,7 +165,7 @@ Next: monitor both exacte9f gates, investigate failures without
 weaker assertions. Download/check exact successful native artifact and all native
 stages, privately sign that same payload, test actual owner-key update if environment
 permits, preserve reports/screenshots and deliver with honest remaining scope.
-Read [RESUME_VERIFICATION_20261112.md](https://github.com/Brenmack15/Astravar-Overlay/blob/2798fc6f19210333c086d548759c09297ec7f380/docs/genesis/RESUME_VERIFICATION_20261112.md).
+Read [RESUME_VERIFICATION_20261112.md](https://github.com/Brenmack15/Astravar-Overlay/blob/e9f73d2df7bca6955ae87d6a0adcea78458339ac/docs/genesis/RESUME_VERIFICATION_20261112.md).
 Physical Galaxy S26/Android17 acceptance remains separate and unverified.
 
 ## Prior outage checkpoint — integrated source saved after outage
