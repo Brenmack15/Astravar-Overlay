@@ -525,7 +525,10 @@ private enum class SpellbookFilter(val label: String) {
                                             Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium, color = RebuildPalette.Purple)
                                         Column {
                                             spells.forEach { spell -> key(spell.id) {
-                                                RebirthSpellRow(spell, onInspect = { dialog = "InspectSpell:${spell.id}" }, onCast = { dialog = "Cast:${spell.id}" })
+                                                val needsPreparation = spell.level > 0 && spell.preparation == SpellPreparation.KNOWN
+                                                RebirthSpellRow(spell, onInspect = { dialog = "InspectSpell:${spell.id}" },
+                                                    onCast = { dialog = "${if (needsPreparation) "InspectSpell" else "Cast"}:${spell.id}" },
+                                                    actionLabel = if (needsPreparation) "Prepare" else "Cast")
                                             } }
                                         }
                                     }
@@ -734,9 +737,15 @@ private enum class SpellbookFilter(val label: String) {
         }
         dialog?.takeIf { it.startsWith("InspectSpell:") }?.substringAfter(':')?.let { spellId ->
             character.spells.firstOrNull { it.id == spellId }?.let { spell ->
+                val needsPreparation = spell.level > 0 && spell.preparation == SpellPreparation.KNOWN
+                fun prepare() {
+                    try { change("Change spell preparation", GameplayRules.prepareSpell(character, spell.id, true), false) }
+                    catch (e: Exception) { error = e.message ?: "Preparation unavailable" }
+                }
                 PlayerSheet(spell.name, { dialog = null }, actions = {
                     PlayerTextButton(onClick = { dialog = "Spell:$spellId" }) { Text("Edit") }
-                    PlayerButton(onClick = { dialog = "Cast:$spellId" }) { Text("Cast") }
+                    if (needsPreparation) PlayerButton(enabled = !busy, onClick = ::prepare) { Text("Prepare") }
+                    else PlayerButton(enabled = !busy, onClick = { dialog = "Cast:$spellId" }) { Text("Cast") }
                 }) {
                     Text(if (spell.level == 0) "Cantrip" else "Level ${spell.level}", color = RebuildPalette.Purple, style = MaterialTheme.typography.titleMedium)
                     Text(listOf(spell.castingTime, spell.range, spell.components, spell.duration).filter(String::isNotBlank).joinToString(" · "), color = RebuildPalette.Muted)
@@ -748,10 +757,11 @@ private enum class SpellbookFilter(val label: String) {
                         SpellPreparation.PREPARED -> "Prepared"
                         SpellPreparation.ALWAYS_PREPARED -> "Always prepared"
                     }, color = RebuildPalette.Cyan)
-                    if (spell.preparation != SpellPreparation.ALWAYS_PREPARED && spell.level > 0) PlayerOutlinedButton(onClick = {
-                        try { change("Change spell preparation", GameplayRules.prepareSpell(character, spell.id, spell.preparation != SpellPreparation.PREPARED), false) }
+                    if (needsPreparation) Text("Prepare this spell before casting.", color = RebuildPalette.Muted)
+                    if (spell.preparation == SpellPreparation.PREPARED && spell.level > 0) PlayerOutlinedButton(enabled = !busy, onClick = {
+                        try { change("Change spell preparation", GameplayRules.prepareSpell(character, spell.id, false), false) }
                         catch (e: Exception) { error = e.message ?: "Preparation unavailable" }
-                    }) { Text(if (spell.preparation == SpellPreparation.PREPARED) "Unprepare" else "Prepare") }
+                    }) { Text("Unprepare") }
                     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
                 }
             }

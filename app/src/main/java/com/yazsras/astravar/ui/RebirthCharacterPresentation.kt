@@ -193,7 +193,8 @@ import com.yazsras.astravar.rules.reforge.*
     }
 }
 
-@Composable internal fun RebirthSpellRow(spell: SpellDefinition, onInspect: () -> Unit, onCast: () -> Unit) {
+@Composable internal fun RebirthSpellRow(spell: SpellDefinition, onInspect: () -> Unit, onCast: () -> Unit,
+    actionLabel: String = "Cast") {
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -214,7 +215,7 @@ import com.yazsras.astravar.rules.reforge.*
                 if (details.isNotEmpty()) Text(details.joinToString(" · "), color = RebuildPalette.Muted,
                     style = MaterialTheme.typography.bodySmall)
             }
-            PlayerOutlinedButton(onClick = onCast) { Text("Cast") }
+            PlayerOutlinedButton(onClick = onCast) { Text(actionLabel) }
         }
         HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .55f))
     }
