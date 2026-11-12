@@ -172,6 +172,10 @@ internal fun genesisAuthorityBackupErrors(
         require(last.copy(playableRevision = null, projectionFingerprint = null) == actor.copy(playableRevision = null, projectionFingerprint = null)) { "Current association differs from its latest immutable decision." }
         if (actor.playable) {
             val current = requireNotNull(saved[actor.actorId]) { "Managed playable sheet is missing." }
+            val original = requireNotNull(activation.playable)
+            require(current.origin == original.origin && current.createdAt == original.createdAt) {
+                "Connected actor origin differs from its activation decision."
+            }
             errors += genesisProjectionErrors(actor, current, campaign)
             current.character.items.forEach { item -> require(items[item.id]?.ownerActorId == actor.actorId) { "Managed equipment ${item.id} is missing its physical authority." } }
         } else require(actor.playableRevision == null && actor.projectionFingerprint == null) { "Source-only membership cannot claim a playable projection." }
