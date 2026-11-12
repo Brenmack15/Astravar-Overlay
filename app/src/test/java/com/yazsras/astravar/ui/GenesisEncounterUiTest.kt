@@ -249,4 +249,122 @@ class GenesisEncounterUiTest {
             }
         }
     }
+
+    @Test fun savedSetupLoadsExactMembershipRevisionsAndEditsSurviveRecreationAndReopen() = fixture { f ->
+        val members = runBlocking {
+            listOf(hero, f.npc).map { id ->
+                val current = requireNotNull(f.env.authority.actor(id))
+                f.env.authority.updateActorAssociation(id, current.revision, current.role, current.campaignId, current.ownerActorId)
+            }
+        }
+        assertTrue(members.all { it.revision > 1 })
+        val original = runBlocking {
+            f.env.authority.encounters.saveDraft("fictional-existing-editor", null, f.campaign.id,
+                "Fictional saved setup", "Retained setup notes",
+                listOf(GenesisEncounterParticipantInput(hero, members[0].revision, 9),
+                    GenesisEncounterParticipantInput(f.npc, members[1].revision, null)))
+        }
+        val before = runBlocking { f.env.local.get(hero) }
+        // Delay the repository's real first emission, without replacing Room or
+        // inventing actor rows. The editor must not initialize from its empty
+        // loading list when this readiness gate opens.
+        val ready = CompletableDeferred<Unit>()
+        val environment = f.env.copy(authority = GenesisAuthorityRepository(f.db) { ready.await() })
+        var registry = SaveableStateRegistry(null) { true }
+        val visible = mutableStateOf(true)
+        var outcome: GenesisEncounterSnapshot? = null
+        show({
+            if (visible.value) CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
+                GenesisEncounterEditor(environment, original, f.campaign.id, {}, {
+                    outcome = it; visible.value = false
+                })
+            }
+        }) { activity ->
+            awaitText("Encounter name")
+            compose.onNodeWithText("Encounter name").assertIsNotEnabled()
+            assertNull(outcome)
+            compose.runOnIdle { ready.complete(Unit) }
+            compose.waitUntil(15_000) {
+                compose.onAllNodes(hasText("Encounter name") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithText("Encounter name").performTextReplacement("Fictional edited setup")
+            click("Next")
+            awaitText("1. Fictional Hero")
+            compose.onNodeWithText("Initiative: Fictional Hero").performScrollTo().assertTextContains("9")
+            compose.onNodeWithText("Initiative: Fictional Hero").performTextReplacement("17")
+            click("Move Fictional Scout up", scroll = true)
+
+            var saved: Map<String, List<Any?>> = emptyMap()
+            compose.runOnIdle { saved = registry.performSave(); visible.value = false }
+            compose.waitForIdle()
+            compose.runOnIdle { registry = SaveableStateRegistry(saved) { true }; visible.value = true }
+            awaitText("1. Fictional Scout")
+            compose.onNodeWithText("Initiative: Fictional Hero").performScrollTo().assertTextContains("17")
+            click("Review & save")
+            compose.onNodeWithText("Fictional edited setup").assertExists()
+            compose.onNodeWithText("1. Fictional Scout").assertExists()
+            compose.onNodeWithText("Initiative: Not entered").assertExists()
+            compose.onNodeWithText("Review changed campaign membership before saving.").assertDoesNotExist()
+            capture("genesis-encounter-existing-setup-review", activity)
+            click("Save encounter")
+            compose.waitUntil(15_000) { outcome != null }
+        }
+        val saved = requireNotNull(outcome)
+        assertEquals(original.record.id, saved.record.id)
+        assertEquals(original.record.revision + 1, saved.record.revision)
+        assertEquals(original.record.creationCommandId, saved.record.creationCommandId)
+        assertEquals("Fictional edited setup", saved.record.title)
+        assertEquals("Retained setup notes", saved.record.notes)
+        assertEquals(GenesisEncounterStatus.DRAFT, saved.record.status)
+        assertEquals(listOf(f.npc, hero), saved.participants.map { it.actorId })
+        assertEquals(listOf(null, 17), saved.participants.map { it.initiative })
+        runBlocking {
+            assertEquals(saved, f.env.authority.encounters.get(saved.record.id))
+            assertEquals(1, f.env.authority.encounters.observe(f.campaign.id).first().size)
+            assertEquals(before, f.env.local.get(hero))
+            assertNull(f.env.local.get(f.npc))
+            assertEquals(members, members.map { requireNotNull(f.env.authority.actor(it.actorId)) })
+            val backup = f.env.authority.backup.exportWithProof()
+            assertTrue(f.env.authority.backup.previewRestore(backup.text).valid)
+        }
+        f.db.close()
+        val reopened = Room.databaseBuilder(ApplicationProvider.getApplicationContext<Context>(), CampaignLedgerDb::class.java,
+            f.databaseName).allowMainThreadQueries().build()
+        try {
+            runBlocking {
+                assertEquals(saved, GenesisAuthorityRepository(reopened).encounters.get(saved.record.id))
+                assertEquals(before, ReforgeRepository(reopened).get(hero))
+                assertNull(ReforgeRepository(reopened).get(f.npc))
+            }
+        } finally { reopened.close() }
+    }
+
+    @Test fun editingSavedSetupDoesNotSilentlyRefreshAChangedMembershipRevision() = fixture { f ->
+        val member = runBlocking { requireNotNull(f.env.authority.actor(hero)) }
+        val original = runBlocking {
+            f.env.authority.encounters.saveDraft("fictional-existing-membership", null, f.campaign.id,
+                "Fictional membership setup", "",
+                listOf(GenesisEncounterParticipantInput(hero, member.revision, 8)))
+        }
+        val before = runBlocking { f.env.local.get(hero) }
+        var outcome: GenesisEncounterSnapshot? = null
+        show({ GenesisEncounterEditor(f.env, original, f.campaign.id, {}, { outcome = it }) }) {
+            compose.waitUntil(15_000) {
+                compose.onAllNodes(hasText("Encounter name") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithText("Encounter name").performTextReplacement("Fictional pending edit")
+            click("Review & save")
+            compose.onNodeWithText("Save encounter").assertIsEnabled()
+            runBlocking {
+                f.env.authority.updateActorAssociation(hero, member.revision, member.role, member.campaignId, member.ownerActorId)
+            }
+            awaitText("Review changed campaign membership before saving.")
+            compose.onNodeWithText("Save encounter").assertIsNotEnabled()
+            assertNull(outcome)
+            runBlocking {
+                assertEquals(original, f.env.authority.encounters.get(original.record.id))
+                assertEquals(before, f.env.local.get(hero))
+            }
+        }
+    }
 }

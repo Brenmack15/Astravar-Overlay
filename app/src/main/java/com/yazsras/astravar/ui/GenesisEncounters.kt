@@ -245,8 +245,10 @@ private fun encounterName(id: String, profiles: List<CharacterProfile>, loaded: 
     val profileState by remember(environment.campaign) { environment.campaign.records.characterProfiles.map { true to it } }
         .collectAsState(initial = false to emptyList<CharacterProfile>())
     val profiles = profileState.second
-    val actorState by remember(environment.authority) { environment.authority.actorAssociations.map { true to it } }
-        .collectAsState(initial = false to emptyList<GenesisActorAuthority>())
+    // Initialize saved participant revisions from the same snapshot as readiness.
+    // A later IO emission must not make the effect trust its earlier empty list.
+    val actorState = remember(environment.authority) { environment.authority.actorAssociations.map { true to it } }
+        .collectAsState(initial = false to emptyList<GenesisActorAuthority>()).value
     val actors = actorState.second
     var initialized by rememberSaveable { mutableStateOf(existing == null) }
     val draftState = rememberReforgeDraft(GenesisEncounterUiDraft(existing?.record?.id ?: UUID.randomUUID().toString(),
