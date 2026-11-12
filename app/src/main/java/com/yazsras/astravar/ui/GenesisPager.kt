@@ -31,6 +31,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.yazsras.astravar.rules.reforge.CharacterProjection
 import com.yazsras.astravar.rules.reforge.ReforgeCharacter
 import kotlinx.coroutines.launch
@@ -83,7 +84,9 @@ data class GenesisCharacterRoute(val profileId: String, val section: String = "S
                 PlayerTabs(pages, pages[state.currentPage], { label ->
                     scope.launch { moveTo(pages.indexOf(label)) }
                 }, Modifier.padding(horizontal = 4.dp).testTag("genesis-character-tabs"))
-                if (showPageHint) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp),
+                // Keep the page hint in the same foreground layer as PlayerTabs;
+                // partially scrolled controls must not hide it from accessibility.
+                if (showPageHint) Row(Modifier.fillMaxWidth().zIndex(1f).padding(horizontal = 16.dp, vertical = 3.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
                     Text("Swipe between sections", modifier = Modifier.weight(1f).padding(end = 12.dp),

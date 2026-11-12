@@ -1,5 +1,9 @@
 package com.yazsras.astravar.ui
 
+import android.graphics.Rect
+import android.view.View
+import android.view.ViewGroup
+import android.view.accessibility.AccessibilityNodeProvider
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Spacer
@@ -9,7 +13,10 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
@@ -22,6 +29,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.annotation.LooperMode
+import kotlin.math.roundToInt
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w400dp-h1000dp")
@@ -195,6 +203,83 @@ class GenesisPagerTest {
             compose.waitForIdle()
             compose.onNodeWithTag("section-Combat").assertIsSelected()
         } finally { activity.pause().stop().destroy() }
+    }
+
+    @Test fun scrolledPageControlsDoNotOccludeNativeSectionTouchTargets() {
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        var pixelsPerDp = 0f
+        try {
+            activity.get().setContent { AstravarTheme {
+                pixelsPerDp = LocalDensity.current.density
+                GenesisCharacterPager("fictional-scrolled-spellbook", requestedSection = "Spells") { page ->
+                    if (page == "Spells") PlayerDisclosure("Spell slots & preparation") {
+                        Text("Prepared spell controls")
+                    }
+                    repeat(30) { Text("$page reading row $it", Modifier.height(56.dp)) }
+                }
+            } }
+            compose.onNodeWithTag("section-Spells").assertIsSelected()
+            // Leave the first real disclosure partly visible at the page's top.
+            // Compose 1.10 expands its native touch bounds 24 dp above the scroll
+            // viewport, which previously occluded the adjacent fixed tab strip.
+            compose.onNodeWithTag("genesis-page-Spells").performSemanticsAction(SemanticsActions.ScrollBy) {
+                assertTrue(it(0f, 38f * pixelsPerDp))
+            }
+            compose.waitForIdle()
+            val readingOffset = scrollOffset("Spells")
+            assertEquals(38f * pixelsPerDp, readingOffset, 1f)
+            val viewport = compose.onNodeWithTag("genesis-page-Spells").fetchSemanticsNode().boundsInRoot
+            val disclosure = compose.onNodeWithText("Spell slots & preparation").fetchSemanticsNode()
+            assertTrue("The regression must exercise a partly clipped real disclosure",
+                disclosure.positionInRoot.y < viewport.top && disclosure.boundsInRoot.bottom > viewport.top)
+
+            // Read Android's accessibility provider, not just Compose's original
+            // layout rectangle: sibling occlusion affects only these final bounds.
+            val equipmentId = compose.onNodeWithTag("section-Equipment").fetchSemanticsNode().id
+            val spellsId = compose.onNodeWithTag("section-Spells").fetchSemanticsNode().id
+            val hint = compose.onNodeWithText("Swipe between sections").fetchSemanticsNode()
+            val indicator = compose.onNodeWithTag("genesis-page-indicator").fetchSemanticsNode()
+            compose.runOnIdle {
+                val provider = requireNotNull(findAccessibilityProvider(activity.get().window.decorView))
+                for ((id, selected) in listOf(equipmentId to false, spellsId to true)) {
+                    val info = requireNotNull(provider.createAccessibilityNodeInfo(id))
+                    val bounds = Rect().also(info::getBoundsInScreen)
+                    assertTrue("Native section bounds must retain 48 dp after body scrolling: $bounds",
+                        bounds.height() >= (48f * pixelsPerDp).roundToInt())
+                    assertTrue("Native section width must retain 48 dp: $bounds",
+                        bounds.width() >= (48f * pixelsPerDp).roundToInt())
+                    assertTrue(info.isEnabled)
+                    assertTrue(info.isVisibleToUser)
+                    assertEquals(selected, info.isSelected)
+                    if (!selected) assertTrue(info.isClickable)
+                }
+                for (chrome in listOf(hint, indicator)) {
+                    val info = requireNotNull(provider.createAccessibilityNodeInfo(chrome.id))
+                    val bounds = Rect().also(info::getBoundsInScreen)
+                    assertTrue("The native page hint must remain wholly readable: $bounds",
+                        info.isVisibleToUser && bounds.height() >= chrome.boundsInRoot.height.roundToInt() &&
+                            bounds.width() >= chrome.boundsInRoot.width.roundToInt())
+                }
+                assertEquals("Spells, page 4 of 7", provider.createAccessibilityNodeInfo(indicator.id)?.stateDescription)
+            }
+            compose.onNodeWithTag("section-Equipment").performTouchInput {
+                click(Offset(centerX, height - 1f))
+            }
+            compose.onNodeWithTag("section-Equipment").assertIsSelected()
+            compose.onNodeWithTag("section-Spells").performClick()
+            compose.onNodeWithTag("section-Spells").assertIsSelected()
+            assertEquals("Navigation must retain the spellbook reading position", readingOffset, scrollOffset("Spells"), 1f)
+            compose.onNodeWithText("Spell slots & preparation").performClick()
+            compose.onNodeWithText("Prepared spell controls").assertIsDisplayed()
+        } finally { activity.pause().stop().destroy() }
+    }
+
+    private fun findAccessibilityProvider(view: View): AccessibilityNodeProvider? {
+        view.accessibilityNodeProvider?.let { return it }
+        if (view is ViewGroup) for (index in 0 until view.childCount) {
+            findAccessibilityProvider(view.getChildAt(index))?.let { return it }
+        }
+        return null
     }
 
     private fun scrollOffset(page: String): Float = compose.onNodeWithTag("genesis-page-$page")

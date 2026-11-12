@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.zIndex
 
 /** Astravar 3.1: calm, legible fantasy UI. Art is a supporting detail, never a control. */
 object RebuildPalette {
@@ -255,7 +256,10 @@ val LocalPlayerDismiss = staticCompositionLocalOf<() -> Unit> { {} }
             }
         }
     }
-    Column(modifier.fillMaxWidth()) {
+    // Navigation owns its visible strip above adjacent scrolling content. In
+    // Compose 1.10, a clipped body control's expanded accessibility touch bounds
+    // can otherwise occlude these tabs despite its drawing staying in the page.
+    Column(modifier.fillMaxWidth().zIndex(1f)) {
         Row(Modifier.fillMaxWidth().onGloballyPositioned {
             val left = it.positionInRoot().x
             viewport = left to (left + it.size.width)
