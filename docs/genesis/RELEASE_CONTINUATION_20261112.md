@@ -35,9 +35,22 @@ logs and source hashes. Its RED-test source was transparently reconstructed by
 reversing post-failure hint assertions/rounding refinement; raw XML/log and Git
 production baseline were retained. No native acceptance inferred from host tests.
 
-Root local broader shared-tab tests/lint/debug APK/native-test APK are running
-in session60940; log `genesis-resume-evidence/shared-tabs-verification-a86-1.log`.
-Do not start another local Gradle while that invocation owns the runtime lock.
+Local broader shared-tab run60940 FINISHED:48tests,47pass,1failure,0errors/skips.
+NavigationV2Test:168 immediately expected Checkpoints after returning to Campaign;
+zero nodes were found. Lint/debug/native APK tasks did not execute after that
+failure. Original XML/hash summary preserved in
+`genesis-resume-evidence/shared-tabs-verification-a86-1-results/`; raw log
+`genesis-resume-evidence/shared-tabs-verification-a86-1.log`.
+The failure artifact lacks a semantics tree; a transient loading state is a
+source-supported hypothesis, not yet verified. Whole CampaignHub starts with
+journalSnapshot=null/loaded=false and intentionally withholds content until ready.
+A diagnostic-only focused reproduction is running in session88426, temporarily
+printing an immutable unmerged tree before the unchanged assertion; no product
+edit, retry or wait added. Log
+`genesis-resume-evidence/navigation-journal-readiness-diagnostic-a86-1.log`.
+Do not start another local Gradle while that diagnostic owns the runtime lock.
+Exact remote signing checkout `genesis-release-source-a86ab0f` is clean.
+Both new CI gates continue; old de98 full also continues without cancellation.
 No owner signing has occurred. Owner helper remains DISABLED and still pins
 failedde98; update every source/artifact/gate pin to a final successful candidate
 before activation. Do not sign de98 or reuse its failed native artifact.
