@@ -1,6 +1,7 @@
 package com.yazsras.astravar
 
 import android.os.Bundle
+import android.os.SystemClock
 import android.graphics.Rect
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -36,9 +37,48 @@ class VisualRebirthJourneyInstrumentationTest {
     }
     private fun capture(name: String, tab: String, marker: String, interactiveMarker: Boolean = false) {
         // Interactive captures measure only a fully revealed native target.
-        // Static text retains the existing rendered-marker acceptance checks.
-        if (interactiveMarker) assertTouch(marker) else find(marker)
+        // Static labels must also be revealed before the unchanged ink/frame checks.
+        if (interactiveMarker) assertTouch(marker) else {
+            find(marker)
+            revealStaticMarker(marker)
+        }
         ui.captureStablePage(File(files, "rebirth-$name.png"), product, tab, listOf(By.text(marker).pkg(product)))
+    }
+    private fun revealStaticMarker(text: String) {
+        val deadline = SystemClock.uptimeMillis() + 30_000
+        repeat(6) { attempt ->
+            val remaining = deadline - SystemClock.uptimeMillis()
+            assertTrue("Reveal $text within the bounded observation window", remaining > 0)
+            val (bounds, viewport) = ui.snapshot(By.text(text).pkg(product),
+                "fresh static label and nearest vertical viewport for $text", timeoutMs = remaining,
+                refreshCache = true) { label ->
+                val scroll = generateSequence(label.parent) { it.parent }.take(12)
+                    .firstOrNull { it.className == "android.widget.ScrollView" }
+                Rect(label.visibleBounds) to scroll?.let { Rect(it.visibleBounds) }
+            }
+            assertTrue("$text must remain visible on the native screen: $bounds", !bounds.isEmpty &&
+                bounds.left >= 0 && bounds.top >= 0 && bounds.right <= device.displayWidth &&
+                bounds.bottom <= device.displayHeight)
+            if (viewport == null) return
+            val atTop = bounds.top <= viewport.top
+            val atBottom = bounds.bottom >= viewport.bottom
+            assertTrue("$text must fit inside its observed viewport: bounds=$bounds viewport=$viewport",
+                !viewport.isEmpty && viewport.contains(bounds) && !(atTop && atBottom))
+            if (!atTop && !atBottom) return
+            assertTrue("$text must be fully revealed after bounded native scrolling: bounds=$bounds viewport=$viewport",
+                attempt < 5)
+            assertTrue("$text requires a usable vertical viewport for reveal", viewport.height() > 9)
+            // visibleBounds can expose only a few clipped pixels. Move that edge
+            // toward the viewport center, then reacquire the full label afresh.
+            val start = viewport.centerY()
+            val end = (start + viewport.centerY() - bounds.centerY())
+                .coerceIn(viewport.top + 4, viewport.bottom - 5)
+            assertTrue("$text needs a usable vertical reveal gesture", start != end)
+            assertTrue("Reveal $text with one gesture in its observed viewport",
+                device.swipe(viewport.centerX(), start, viewport.centerX(), end, 60))
+            val idleRemaining = deadline - SystemClock.uptimeMillis()
+            if (idleRemaining > 0) device.waitForIdle(minOf(1_000L, idleRemaining))
+        }
     }
     private fun assertTouch(text: String) {
         val minimum = (48 * instrumentation.targetContext.resources.displayMetrics.density).toInt()

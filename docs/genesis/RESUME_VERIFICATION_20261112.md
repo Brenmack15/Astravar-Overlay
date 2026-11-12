@@ -55,8 +55,17 @@ corruption scenarios remain.
   certificate and original APK checksum match their recorded values. No signing
   or installation has been performed.
 
-The resumed build runtime is available. Focused backend tests are running in a
-separate clean a059 worktree while the UI correction is preserved. Corrected
-compilation/UI/native acceptance remains pending; no signed APK is claimed.
+The resumed build runtime is available. Focused backend verification at locala059
+passed all60 app cases and166 rules cases with zero failures/errors/skips. App
+production and test Kotlin compilation passed. XML is preserved separately before
+subsequent tests. The clean verification worktree advanced to locala4c to test the
+actual200% layout, navigation, lint, QA APK and native-test compilation.
+
+Native visual capture now also reveals a static label clipped at its observed
+ScrollView edge before the unchanged stable-pixel checks. It reacquires bounds
+and uses at most five restrained gestures in30seconds, failing if the text cannot
+fit. No font,48dp, pixel-ink or stable-frame threshold changed. This complements
+the product layout correction; it does not bypass it. Final UI/native acceptance
+remains pending; no signed APK is claimed.
 Direct git push lacked credentials, so the authenticated GitHub connector
 published matching trees without moving PR15 or overwriting old checkpoints.
