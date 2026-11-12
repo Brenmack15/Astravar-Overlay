@@ -4,7 +4,40 @@ This is the current recovery handoff, not a completed release. Read the original
 `docs/genesis/SESSION_RECOVERY.md` at `ee04d5f` first, then this file and the
 linked milestone checkpoints. Later verified facts here supersede older status.
 
-## Active resumed session — accessible navigation fix published
+## Active resumed session — Journal test readiness published
+
+Current published source: `d12bdfec951acb3525ecb9bd280dcf4b85cc3b3a`,
+tree `3f76ac55ed168dafe31832d234df706e01d75c04`; local equivalent
+`a23676702745d7e033ab3dfaf6b2a9b210be4bc1`, clean existing main worktree.
+Checkpoint `checkpoint/astravar-genesis-resumed-verification-20261112` advanced
+by guarded fast-forward; new branch
+`feat/astravar-project-genesis-journal-readiness-20261112`.
+Fresh full43256864460 / native43256864350, both attempt1 PENDING.
+Only NavigationV2Test changed: selected Journal and bounded10s exactly-one real
+loaded scroll surface at first entry, parcelled Activity recreation and final
+primary return. Every original action/assertion remains; no product change.
+The asynchronous Room boundary is source-established; the exact original failed
+frame was not captured. This is deterministic readiness, not a rerun-as-fix claim.
+Focused2/2passed,0fail/errors/skips. Evidence:
+`genesis-resume-evidence/navigation-journal-readiness-fixed-a86-1-results/`.
+Prior clean641 separate lintDebug passed0errors68warnings1hint; debug APK and
+observer instrumentation assembled. `shared-tabs-lint-build-a86-1-results/`.
+No local Gradle active. Exact remote signing checkout
+`genesis-release-source-d12bdfe` is being prepared, without touching old worktrees.
+a86 full rules/debug passed16:16:09; release/lint continues. a86 native emulator
+continues. Do not cancel either: their source-specific evidence remains useful.
+Owner helper is still disabled/failedde98-pinned: final signing/activation must use
+the actual successful d12 or later source, never an earlier passing gate.
+PR15 unchanged. No Genesis owner APK has been signed, transferred or installed.
+
+Current standalone coverage draft `genesis-workflow-coverage-a86.md` preserves
+all35 original workflows,32 route rows and9 fixture groups, with test/source
+mappings and explicit gaps. It does not mark1173 lexical sites runtime-passed.
+It identifies retained weapon-state recovery dependency and incomplete general
+container-picker UX; carry these into final scope limitations.
+Private gallery/report preparations are pending actual final successful artifacts.
+
+## Prior a86 checkpoint — accessible navigation fix published
 
 Current published source: `a86ab0fa87ce47a4f99550dcfa8fe01ed0e22928`,
 tree `abbebf572d53b38afd28c164a61fa7095978ccb8`; local equivalent
