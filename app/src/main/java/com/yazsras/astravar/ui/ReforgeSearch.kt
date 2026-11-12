@@ -18,6 +18,7 @@ import com.yazsras.astravar.data.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.withContext
 
 /** Navigation only: opening a search result never approves mechanics or executes gameplay. */
@@ -47,9 +48,9 @@ internal fun reforgeSearchCatalog(
     items: List<LedgerItem> = emptyList(), people: List<ConnectionEntity> = emptyList(),
     projects: List<InventionProject> = emptyList(), profiles: List<CharacterProfile> = emptyList(),
     sources: List<CampaignReferenceRecord> = emptyList(), characters: List<ReforgeSavedCharacter> = emptyList(),
-    companions: List<CompanionState> = emptyList()
+    companions: List<CompanionState> = emptyList(), associations: List<GenesisActorAuthority> = emptyList()
 ): List<ReforgeSearchEntry> = buildList {
-    val companionIds = partyRoster(profiles, companions).map { it.id }.filterNot { it == "local-player" }.toSet()
+    val companionIds = partyRoster(profiles, companions, associations).map { it.id }.filterNot { it == "local-player" }.toSet()
     fun addEntry(namespace: String, id: String, kind: String, title: String, body: String,
         origin: ReforgeSearchOrigin, context: String, destination: ReforgeSearchDestination? = null,
         ownerId: String = "") {
@@ -75,7 +76,7 @@ internal fun reforgeSearchCatalog(
             if (it.id in companionIds) ReforgeSearchDestination.Companion(it.id) else null)
     }
     // Some historical companions have status records but no character profile.
-    companions.filter { state -> profiles.none { it.id == state.companionId } }.forEach {
+    companions.filter { state -> profiles.none { it.id == state.companionId } && state.companionId in companionIds }.forEach {
         addEntry("companion-source", it.companionId, "Companion source", it.name,
             "${it.condition}\n${it.notes}", ReforgeSearchOrigin.CAMPAIGN, "Saved companion record",
             ReforgeSearchDestination.Companion(it.companionId))
@@ -132,11 +133,12 @@ private data class SearchCampaignRecords(val items: List<LedgerItem>, val people
 @Composable fun ReforgeGlobalSearch(repository: CampaignLedgerRepository, open: ((ReforgeSearchDestination) -> Unit)? = null) {
     val context = LocalContext.current
     val reforge = remember(context.applicationContext) { ReforgeRepository.open(context) }
-    val entriesFlow = remember(repository, reforge) {
+    val authority = LocalGenesisConnectedEnvironment.current?.authority
+    val entriesFlow = remember(repository, reforge, authority) {
         val legacy = combine(repository.items, repository.records.entities, repository.records.projects,
             repository.records.characterProfiles, repository.archive.references, ::SearchCampaignRecords)
-        combine(legacy, reforge.observeAll(), repository.records.companionStates) { records, characters, companions ->
-            reforgeSearchCatalog(records.items, records.people, records.projects, records.profiles, records.sources, characters, companions)
+        combine(legacy, reforge.observeAll(), repository.records.companionStates, authority?.actorAssociations ?: flowOf(emptyList())) { records, characters, companions, associations ->
+            reforgeSearchCatalog(records.items, records.people, records.projects, records.profiles, records.sources, characters, companions, associations)
         }.flowOn(Dispatchers.Default)
     }
     val entries by entriesFlow.collectAsState(initial = emptyList())

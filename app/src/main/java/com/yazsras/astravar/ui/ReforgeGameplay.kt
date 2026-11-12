@@ -116,6 +116,7 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
         ReforgeDraftRecovery(backgroundDraft)
         when (section) {
             0 -> {
+                if (character == null) LocalGenesisCharacterCreationFields.current()
                 Field("Name", name, { name = it })
                 Field("Level", level, { level = it })
                 Field("Species", species, { species = it })
@@ -150,6 +151,7 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
                 Field("Pinned class version", rules, { rules = it })
             }
             else -> {
+                if (character == null) LocalGenesisCharacterCreationReview.current()
                 GenesisReviewSection("Identity", { select(0) }) {
                     GenesisReviewValue("Name", name)
                     GenesisReviewValue("Level", level)

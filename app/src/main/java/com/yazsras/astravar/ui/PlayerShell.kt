@@ -152,6 +152,7 @@ val rebuildDestinations = listOf("Character", "Inventory", "Companions", "Campai
             PlayerEntry("Roll history", "Saved dice and rolls", "History", { open("Roll history") })
         }
         PlayerDisclosure("Records, backups & connection") {
+            PlayerEntry("Complete backup", "Keep connected campaign and playable records together", "History", { open("Complete backup") })
             PlayerEntry("Character sources", "Original campaign values and revisions", "History", { open("Character sources") })
             PlayerEntry("Character backup", "Backup your playable sheets", "History", { open("Character backup") })
             PlayerEntry("Campaign backup", "Backup campaign records", "History", { open("Campaign backup") })

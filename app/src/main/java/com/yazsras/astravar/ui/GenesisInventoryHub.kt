@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.data.*
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 
 private data class GenesisInventoryView(
     val entries: List<GenesisInventoryEntry>, val profiles: List<ReforgeSavedCharacter>,
@@ -31,9 +32,11 @@ private data class GenesisInventoryView(
     val context = LocalContext.current.applicationContext
     val preferences = remember(context) { ReforgePreferences.open(context) }
     var error by remember { mutableStateOf<String?>(null) }
-    val flow = remember(repository, local, preferences) {
-        val campaign = combine(repository.records.characterProfiles, repository.records.companionStates) { profiles, states ->
-            profiles.associate { it.id to it.name } to partyRoster(profiles, states).map { it.id }.filterNot { it == "local-player" }.toSet()
+    val authority = LocalGenesisConnectedEnvironment.current?.authority
+    val flow = remember(repository, local, preferences, authority) {
+        val campaign = combine(repository.records.characterProfiles, repository.records.companionStates,
+            authority?.actorAssociations ?: flowOf(emptyList())) { profiles, states, associations ->
+            profiles.associate { it.id to it.name } to partyRoster(profiles, states, associations).map { it.id }.filterNot { it == "local-player" }.toSet()
         }
         combine(local.observeInventory(repository), local.observeAll(), preferences.activeProfileId, campaign) { entries, profiles, selected, records ->
             val active = profiles.filterNot { it.character.archived }

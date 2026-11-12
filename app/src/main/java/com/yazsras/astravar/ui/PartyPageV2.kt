@@ -25,6 +25,9 @@ import com.yazsras.astravar.data.CharacterProfile
 import com.yazsras.astravar.data.CompanionState
 import com.yazsras.astravar.data.ReforgeRepository
 import com.yazsras.astravar.data.ReforgePreferences
+import com.yazsras.astravar.data.GenesisActorAuthority
+import com.yazsras.astravar.data.GenesisActorRole
+import kotlinx.coroutines.flow.flowOf
 import java.util.UUID
 import com.yazsras.astravar.data.PartySheetData
 import com.yazsras.astravar.rules.Campaign
@@ -46,7 +49,8 @@ internal fun partyMemberName(id: String?, profiles: List<CharacterProfile> = emp
     ?: if (id == null) "Unknown holder" else id
 
 /** Display saved party identities only; opening an empty app never invents a campaign roster. */
-internal fun partyRoster(profiles: List<CharacterProfile>, states: List<CompanionState>): List<AstravarPartyMember> {
+internal fun partyRoster(profiles: List<CharacterProfile>, states: List<CompanionState>,
+    associations: List<GenesisActorAuthority> = emptyList()): List<AstravarPartyMember> {
     val byProfile = profiles.associateBy { it.id }
     val byState = states.associateBy { it.companionId }
     val known = astravarPartyMembers.filter { it.id in byProfile || it.id in byState }.map { member ->
@@ -58,7 +62,12 @@ internal fun partyRoster(profiles: List<CharacterProfile>, states: List<Companio
         .filterNot { id -> known.any { it.id == id } || id == "local-player" }
         .map { id -> AstravarPartyMember(id, byProfile[id]?.name?.takeIf(String::isNotBlank)
             ?: byState[id]?.name?.takeIf(String::isNotBlank) ?: "Unnamed companion", "Companion") }
-    return known + additional.sortedBy { it.label.lowercase() }
+    val legacy = (known + additional.sortedBy { it.label.lowercase() }).filter { member ->
+        associations.firstOrNull { it.actorId == member.id }?.role.let { it == null || it == GenesisActorRole.COMPANION }
+    }
+    val connected = associations.filter { it.role == GenesisActorRole.COMPANION && legacy.none { member -> member.id == it.actorId } }
+        .map { actor -> AstravarPartyMember(actor.actorId, byProfile[actor.actorId]?.name ?: "Unnamed companion", "Companion") }
+    return legacy + connected.sortedBy { it.label.lowercase() }
 }
 
 /** Stable profile IDs share the existing status, abilities, inventory and audit stores. */
@@ -75,14 +84,18 @@ fun PartyPageV2(
     val profileState by remember(repository) { repository.records.characterProfiles.map { true to it } }
         .collectAsState(initial = false to emptyList<CharacterProfile>())
     val profiles = profileState.second
+    val connected = LocalGenesisConnectedEnvironment.current
+    val associations by remember(connected?.authority) { connected?.authority?.actorAssociations ?: flowOf(emptyList()) }
+        .collectAsState(initial = emptyList())
     val states by repository.records.companionStates.collectAsState(initial = emptyList())
     val sheets by repository.party.sheets.collectAsState(initial = emptyList())
-    val roster = remember(profiles, states) { partyRoster(profiles, states) }
+    val roster = remember(profiles, states, associations) { partyRoster(profiles, states, associations) }
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
     var section by rememberSaveable { mutableStateOf("Sheet") }
     var detailsOpen by rememberSaveable { mutableStateOf(false) }
     var adding by rememberSaveable { mutableStateOf(false) }
+    var membershipOpen by rememberSaveable { mutableStateOf(false) }
     var newName by rememberSaveable { mutableStateOf("") }
     var newOwnerId by rememberSaveable { mutableStateOf<String?>(null) }
     var newOwnerRevision by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -153,6 +166,7 @@ fun PartyPageV2(
                 PlayerEntry("Party source dossiers", "Original profiles, homebrew and imported references", "Journal", openReferences)
             }
         } else {
+            if (connected != null) PlayerOutlinedButton(onClick = { membershipOpen = true }) { Text("Campaign membership") }
             PlayerTabs(listOf("Sheet", "Equipment", "Currency", "History"), section, { section = it })
             when (section) {
                 "Sheet" -> {
@@ -184,7 +198,13 @@ fun PartyPageV2(
     if (detailsOpen && current?.id == "eek") RebuildToolSheet("Eek details", onDismiss = { detailsOpen = false }) {
         EekPageV2(repository)
     }
-    if (adding) GenesisEditorSheet("Add companion", sections = listOf("Identity", "Association", "Review"), creating = true,
+    if (membershipOpen && current != null && connected != null) GenesisActorMembershipEditor(connected, current.id, { membershipOpen = false }, initialRole = GenesisActorRole.COMPANION)
+    if (adding && connected != null) GenesisSourceActorEditor(
+        connected.copy(selectedCampaignId = if (associations.any { it.actorId == newOwnerId }) associations.first { it.actorId == newOwnerId }.campaignId else connected.selectedCampaignId),
+        GenesisActorRole.COMPANION,
+        onDismiss = { adding = false }, onSaved = { outcome -> selected = outcome.actor.actorId; section = "Sheet"; adding = false },
+        initialOwnerId = newOwnerId)
+    if (adding && connected == null) GenesisEditorSheet("Add companion", sections = listOf("Identity", "Association", "Review"), creating = true,
         context = "Campaign companions", onDismiss = { if (!creating) adding = false },
         dirty = newName.isNotBlank() || newOwnerId != initialOwnerId, saveLabel = "Create companion", saveEnabled = newName.isNotBlank(),
         busy = creating, error = creationError, onSave = {

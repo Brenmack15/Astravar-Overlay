@@ -58,6 +58,7 @@ private enum class SpellbookFilter(val label: String) {
     val preferences = remember(context) { Preferences(context) }
     val preferencesState by preferences.flow.collectAsState(initial = OverlayPrefs())
     val local = remember(localRepository, context) { localRepository ?: ReforgeRepository.open(context) }
+    val connected = LocalGenesisConnectedEnvironment.current
     val profilesState by remember(local) { local.observeAll().map { true to it } }.collectAsState(initial = false to emptyList<ReforgeSavedCharacter>())
     val all = profilesState.second
     val active = all.filterNot { it.character.archived }
@@ -73,6 +74,7 @@ private enum class SpellbookFilter(val label: String) {
     var status by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var adopting by remember { mutableStateOf<ReforgeAdoptionPreview?>(null) }
+    var pendingMembershipReviewId by rememberSaveable { mutableStateOf<String?>(null) }
     var proposedChange by remember { mutableStateOf<Pair<String, ReforgeCharacter>?>(null) }
     var cast by remember { mutableStateOf<CastPreview?>(null) }
     var rollRequest by rememberSaveable(stateSaver = Saver<ReforgeRollRequest?, String>(
@@ -97,7 +99,7 @@ private enum class SpellbookFilter(val label: String) {
     // A pending dialog or rolled preview belongs to the actor that opened it.
     // Restore it on recreation; dismiss it only when the selected actor actually changes.
     var lastActor by rememberSaveable { mutableStateOf(chosenId) }
-    LaunchedEffect(chosenId, profilesState.first, actorSelection.first) {
+    LaunchedEffect(chosenId, profilesState.first, actorSelection.first, pendingMembershipReviewId, all) {
         if (!profilesState.first || (companionProfileId == null && !actorSelection.first)) return@LaunchedEffect
         if (lastActor != null && lastActor != chosenId) {
             dialog = null; inspecting = null; proposedChange = null; cast = null; rollRequest = null
@@ -105,6 +107,10 @@ private enum class SpellbookFilter(val label: String) {
             openSection(initialSection)
         }
         lastActor = chosenId
+        if (connected != null && pendingMembershipReviewId == chosenId && active.any { it.character.id == chosenId }) {
+            dialog = "CampaignConnections"
+            pendingMembershipReviewId = null
+        }
     }
     val saved = active.firstOrNull { it.character.id == chosenId }
     val character = saved?.character
@@ -588,7 +594,11 @@ private enum class SpellbookFilter(val label: String) {
         SnackbarHost(rollNotice, Modifier.align(Alignment.BottomCenter).widthIn(max = 600.dp))
         }
     }
-    if (dialog == "Create") ReforgeCharacterEditor(null, { dialog = null }) { next -> action("Character saved on this device") { local.create(next); selectProfile(next.id); dialog = null } }
+    if (dialog == "Create") {
+        if (connected != null) GenesisConnectedCharacterEditor(connected, onDismiss = { dialog = null },
+            onSaved = { next -> selectProfile(next.character.id); dialog = null })
+        else ReforgeCharacterEditor(null, { dialog = null }) { next -> action("Character saved on this device") { local.create(next); selectProfile(next.id); dialog = null } }
+    }
     if (dialog == "Adopt") adopting?.let { preview ->
         var mechanicsReviewed by rememberSaveable(preview.legacyFingerprint) { mutableStateOf(false) }
         PlayerSheet("Review campaign profile", { dialog = null }) {
@@ -601,7 +611,12 @@ private enum class SpellbookFilter(val label: String) {
         PlayerButton(onClick = { dialog = "AdoptEdit" }, enabled = mechanicsReviewed) { Text("Review baselines & create sheet") }
     } }
     if (dialog == "AdoptEdit") adopting?.let { preview -> ReforgeCharacterEditor(preview.character, { dialog = null }) { reviewed ->
-        action("Reviewed sheet saved on this device") { local.adopt(repository, preview, reviewed); selectProfile(reviewed.id); dialog = null; adopting = null }
+        action("Reviewed sheet saved on this device") {
+            local.adopt(repository, preview, reviewed)
+            dialog = null; adopting = null
+            if (connected != null) pendingMembershipReviewId = reviewed.id
+            selectProfile(reviewed.id)
+        }
     } }
     if (dialog == "Characters") PlayerSheet("Characters & companions", { dialog = null }) {
         active.forEach { profile ->
@@ -657,9 +672,12 @@ private enum class SpellbookFilter(val label: String) {
             "Notes" -> ReforgeNotesEditor(saved!!, local, { dialog = null })
             "Advance" -> ReforgeAdvancementDialog(character, { dialog = null }) { change("Confirmed character advancement", it) }
             "Setup" -> ReforgeCharacterEditor(character, { dialog = null }) { change("Edit character setup", it) }
-            "CampaignConnections" -> ReforgeCampaignConnectionsDialog(saved!!, local, repository, { dialog = null })
+            "CampaignConnections" -> if (connected != null) GenesisActorMembershipEditor(connected, saved!!.character.id, { dialog = null },
+                initialRole = if (companionProfileId == null) GenesisActorRole.PLAYER else GenesisActorRole.COMPANION)
+                else ReforgeCampaignConnectionsDialog(saved!!, local, repository, { dialog = null })
             "Training" -> ReforgeTrainingEditor(character, { dialog = null }) { change("Edit training", it) }
-            "Item" -> ReforgeItemEditor(character, { dialog = null }, onSave = { change("Add reviewed equipment", it) })
+            "Item" -> if (connected != null) GenesisConnectedItemEditor(connected, saved!!, { dialog = null }, onSaved = { dialog = null })
+                else ReforgeItemEditor(character, { dialog = null }, onSave = { change("Add reviewed equipment", it) })
             "ImportItem" -> GenesisCampaignItemPicker(saved!!, local, repository) { dialog = null }
             "Attack" -> ReforgeAttackEditor(character, { dialog = null }, onSave = { change("Add attack", it) })
             "Spell" -> ReforgeSpellEditor(character, { dialog = null }, onSave = { change("Add spell", it) })
