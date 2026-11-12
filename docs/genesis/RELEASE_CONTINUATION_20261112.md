@@ -4,20 +4,26 @@ This is the current recovery handoff, not a completed release. Read the original
 `docs/genesis/SESSION_RECOVERY.md` at `ee04d5f` first, then this file and the
 linked milestone checkpoints. Later verified facts here supersede older status.
 
-## Active resumed session — all30 focused UI cases passed
+## Active resumed session — full exact-source CI passed, native pending
 
 Current published source: `2798fc6f19210333c086d548759c09297ec7f380`,
 tree `2d102002b922f9cf0f58ab6f6b43a60fddf7371b`. Branches:
 - `checkpoint/astravar-genesis-resumed-verification-20261112`
 - `feat/astravar-project-genesis-resume-verification-20261112`
 
-Fresh exact-source gates started13:01:57UTC and remain pending overall:
+Fresh exact-source gates started13:01:57UTC:
 - Full: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43223390477
 - Native: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43223390400
 
-At13:22UTC, full Rules/debug Room+Compose PASSED (13:21:39), release/lint/APK
-running. Native fresh baseline+candidate APK build PASSED (13:21:32), actual
-API36 ordered emulator journeys now running. Final counts/artifacts are pending.
+At13:43UTC, FULL passed. Independently downloaded artifact13949762181,
+51,353,629bytes, SHA256 `1ca78237dcec3b7a292f2b58b38eb94b13a435142ccceeea746b6a32c23a5bf5`.
+Source2798/tree2d102, all indexed bytes/hashes and XML counters verified.
+Rules166 passed; debug931 total/928 passed/3 skipped; release931 total/914 passed/
+17 skipped; zero failures/errors. Python320 and bridge134 passed. Lint has zero
+errors (debug81 warnings+1hint, release83+1). 131 captures are HOST screenshots.
+Skipped identities are in `genesis-resume-evidence/2798fc6f/full/verified-summary.json`.
+Native build passed13:21:32; at13:46:43 its actual API36 emulator stage remained
+running with no failed step. Native acceptance remains pending.
 
 ### Recovered environment and preserved work
 
@@ -98,7 +104,35 @@ Keep original code49 owner APK unchanged; fictional baseline seed, normal instal
 native retention/canonical-write and independent DB readback remain required.
 No OS bypasses, data clearing or uninstall.
 
-Next: monitor both2798 gates, investigate failures without
+### Recoverable original-owner upgrade verification tooling
+
+Local worktree `Astravar-Owner-Upgrade-Envelope`, branch
+`checkpoint/genesis-owner-upgrade-envelope`, commit
+`9dcc69cc268a0018854f2e51da4e26d897b8b433` has been published as
+`4bc0a9dc210b5d8710784b44f939facc936deedf` on
+`checkpoint/astravar-genesis-owner-upgrade-envelope-20261112`, identical tree
+`7f3ea5877b146850cb4a8e39f507f9c9dc53eea4`. This preserves only disabled
+transport config, RSA3072/OAEP-SHA256 + AES256-GCM primitives and17 synthetic
+tests; no workflow, owner APK, credential or signing key was published.
+Author is continuing receiver/native orchestration; inspect uncommitted files
+before any checkout. Independent security/provenance review is active.
+This isolated helper work does not change the frozen2798 application candidate.
+
+Planned accelerated CI route uses a short-lived public transport recipient and
+only encrypted owner49/50 APK chunks on a separate transfer branch. The original
+app signing key stays local. Receiver must verify exact successful gates,
+artifact digest/source, owner APK hashes/full certificate, tested payload
+equality and package49→50, then unchanged synthetic upgrade+SQL readbacks.
+Private transport keys and plaintext APKs must never enter logs/artifacts/Git.
+No real owner APK signing, encryption, transfer or receiver run has occurred.
+
+Actual owner49 embedded `META-INF/version-control-info.textproto` revision is
+`7bb03b5e15d639e94947a491e76f37b1b23a1af5`, not frozen test baseline3543.
+Fresh local comparison confirms both app trees
+`0da5fc7f0e3ed99862ed709c6723c304dab533f3` and both rules trees
+`f6e4d084f0c6b349883eefee2f2aa5669a7d24ac`. Keep these provenance roles distinct.
+
+Next: monitor native2798, investigate failures without
 weaker assertions. Download/check exact successful native artifact and all native
 stages, privately sign that same payload, test actual owner-key update if environment
 permits, preserve reports/screenshots and deliver with honest remaining scope.
