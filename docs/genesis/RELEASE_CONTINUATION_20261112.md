@@ -44,13 +44,21 @@ failure. Original XML/hash summary preserved in
 The failure artifact lacks a semantics tree; a transient loading state is a
 source-supported hypothesis, not yet verified. Whole CampaignHub starts with
 journalSnapshot=null/loaded=false and intentionally withholds content until ready.
-A diagnostic-only focused reproduction is running in session88426, temporarily
-printing an immutable unmerged tree before the unchanged assertion; no product
-edit, retry or wait added. Log
-`genesis-resume-evidence/navigation-journal-readiness-diagnostic-a86-1.log`.
-Do not start another local Gradle while that diagnostic owns the runtime lock.
+Focused diagnostic88426 passed with Journal selected, scroll content and Checkpoints
+present. Its preassert tree capture could alter timing; it does not prove the
+original failed frame was loading. Diagnostic source/tree/XML retained in
+`genesis-resume-evidence/navigation-journal-readiness-diagnostic-a86-1-results/`.
+Temporary println was removed, main checkout returned clean6412843.
+A same48-case batch with failure-only tree capture is now delegated to the UI
+agent; it will retain original actions/assertions and separately run lint/APK
+tasks even if the tests fail. No acceptance test has been weakened.
 Exact remote signing checkout `genesis-release-source-a86ab0f` is clean.
-Both new CI gates continue; old de98 full also continues without cancellation.
+Both a86 gates continue. Historical de98 full completed SUCCESS15:55:23UTC:
+rules166, debug931total/928pass/3skip, release931total/914pass/17skip, Python320,
+bridge134,0failures/errors. Artifact13960386406,51,342,938bytes,SHA256
+`3d425991b91345f5b7f0bc1514af69f2ffab3be304aa630efce62dc93aef50ce`.
+Source/tree, all132 indexed entries, XMLs and131 host screenshots independently
+verified at `genesis-resume-evidence/de98cb69/full/`. Native de98 remains FAILED.
 No owner signing has occurred. Owner helper remains DISABLED and still pins
 failedde98; update every source/artifact/gate pin to a final successful candidate
 before activation. Do not sign de98 or reuse its failed native artifact.
@@ -64,8 +72,7 @@ tree `25ac8d5012b0a0daba86d82dba63c61d93a2baaf`. Local equivalent
 - `feat/astravar-project-genesis-resume-verification-20261112`
 
 Exactde98 native gate FAILED. Do not sign, activate the owner transport, or
-label de98 a release candidate. Full gate still running release/lint after its
-rules/debug stage passed15:21:13. Native build passed15:11:54, then10 native tests
+label de98 a release candidate. Full gate passed15:55:23; see active-session verified totals above. Native build passed15:11:54, then10 native tests
 passed and VisualRebirth failed at line227 / ObservedUi460.
 
 Actual failure PNG/XML/settings show font_scale=1.0, density432. Tab strip
