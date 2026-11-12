@@ -4,7 +4,30 @@ This is the current recovery handoff, not a completed release. Read the original
 `docs/genesis/SESSION_RECOVERY.md` at `ee04d5f` first, then this file and the
 linked milestone checkpoints. Later verified facts here supersede older status.
 
-## Release-only resumption — 12 November 2026, original-owner signing next
+## Original-owner APK signed — upgrade verification running
+
+Verified original-owner APK now exists: Astravar-4.0.0-genesis1-code50-owner-signed.apk,
+13,184,678bytes, SHA256
+2c14bd7ec186122a94b5273e072ea262efeae60b00af96c65ecc21c49ce0e9b1.
+Package com.yazsras.astravar; exact release source a86ab0f; min26/target36,
+nondebuggable, 16KiB alignment; original owner certificate
+4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847.
+APK v2/v3 verified. Every ZIP entry matches the tested native APK byte-for-byte.
+No rebuild. Private key/config never entered Git or CI.
+
+Durable private APK: Library libfile_758c61e4f78c81919956e5cbcd7e960f.
+Signing report: libfile_5e26744b67a081919a2c78672fb52b8e.
+Local complete output: genesis-release-private-1800/owner-signed-a86/.
+
+Owner49→50 emulator verification started:
+https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43323086598
+Exact receiver commit22b5d26f93b0e7488e569cb08ea2109e1847ce84, tree
+4d15e636efc90a33cef8a6a26650485bc7fbf2f6. Config contains exact a86 successful
+gates and all owner/observer APK pins. Waiting for public recipient artifact,
+then sealed APK-only transfer to the fresh receiver. No owner-key installation
+pass claimed until run/evidence verification completes.
+
+## Release-only resumption — 12 November 2026
 
 The owner froze feature scope and requested delivery of the current tested APK.
 The prior runtime/worktrees were unavailable; no recoverable uncommitted source
