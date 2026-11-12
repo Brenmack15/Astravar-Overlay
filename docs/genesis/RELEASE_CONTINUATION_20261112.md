@@ -4,10 +4,54 @@ This is the current recovery handoff, not a completed release. Read the original
 `docs/genesis/SESSION_RECOVERY.md` at `ee04d5f` first, then this file and the
 linked milestone checkpoints. Later verified facts here supersede older status.
 
-## Latest continuation point — integrated source saved after outage
+## Active resumed session — runtime recovered
 
-Start new work from `52831db4963639eca07956c3e485f45cfe673431` after first
-checking the recoverable local worktrees below. Tree
+Latest published correction: `64790c6f0d03350d9d6f51c668522a220f994691` on
+`checkpoint/astravar-genesis-resumed-verification-20261112`, tree
+`6a2ebd9245c57b251761cd4f744da0631c6eeb35`; exact local tree at
+`a4c1eca811dc48f9f9af531352e0aea41c48e818`.
+
+The environment works again, but the old worktrees/runtime/private directory
+were not found after read-only searches. New checkout:
+`/workspace/scratch/30508fda364e/Astravar-Genesis-Resume-20261112`.
+No original tree was reset or cleaned. Source52831 and all checkpoint histories
+were restored from GitHub; only unavailable local bytes remain unrecovered.
+
+The failed52831 full gate passed320 Python,134 bridge and166 rules, then stopped
+at test compilation because saveProfile's CommandReceipt was treated as a profile.
+That fixture now reads the saved profile from the authoritative DAO. The native
+failure at the document picker is fixed with scoped fresh observations and one-shot
+touches, preserving export/backup/restore assertions. The observed200% Campaign
+clipping is addressed by scrollable context, one heading and independent saved
+People/Journal positions/disclosures, with a real full-shell responsive regression.
+
+Matching trees have been published before testing. Local a059 maps to remote
+d3449e214bf414a3186b90f48079402298c1ee9b; local3ee6a17 maps to
+79525a8a42ec3bd02ba0398e55756331f6fb366d; locala4c1eca maps to64790c6.
+Direct git push lacks credentials; guarded GitHub connector writes preserve refs.
+
+A clean verification worktree at `genesis-resume-backend-verification` is running
+focused tests using `genesis-build-runtime-resume/run_gradle.py`. Source/schema/
+signing guards pass. Corrected app/UI/native gates remain pending at this update.
+Both52831 artifacts have been downloaded/source/digest checked. Independent copied
+DB verification passed actual synthetic schema6→9 retention, canonical healing,
+original source retention, package UID and first-install time. Native9 passed
+nine tests but failed VisualRebirth and Genesis; later journeys did not execute.
+
+Original private key and trusted owner code49 APK have been recovered into
+`genesis-private-recovery-resume` with matching full certificate/checksum.
+No signing or owner-key installation has occurred. No KVM is available.
+Do not run the software emulator concurrently with Gradle.
+
+Read [RESUME_VERIFICATION_20261112.md](https://github.com/Brenmack15/Astravar-Overlay/blob/64790c6f0d03350d9d6f51c668522a220f994691/docs/genesis/RESUME_VERIFICATION_20261112.md)
+before older sections below. Continue from the new correction, inspect active
+local sessions, preserve further changes, then obtain fresh exact-source gates
+and complete private signing/installation verification. PR15 remains unchanged.
+
+## Prior outage checkpoint — integrated source saved after outage
+
+At the prior interruption the combined source was `52831db4963639eca07956c3e485f45cfe673431`.
+The active resumed-session section above supersedes this older starting point. Tree
 `74780088b1c4048fde8c865b17e65761deb21cd0`; branches
 `checkpoint/astravar-genesis-encounter-integrated-20261112` and
 `feat/astravar-project-genesis-encounter-verification-20261112`.
