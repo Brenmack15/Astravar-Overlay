@@ -37,9 +37,10 @@ class GenesisEncounterMembershipProofTest {
         val other = authority.createCampaign("Fictional later campaign", commandId = "proof-other-world")
         val actor = when (kind) {
             "register-actor" -> {
-                val profile = CampaignLedgerRepository(db).records.saveProfile(
+                CampaignLedgerRepository(db).records.saveProfile(
                     CharacterProfile(id = "fictional-registered-witness", name = "Fictional witness"),
                     source = "Fictional source-only proof", commandId = "proof-source-profile")
+                val profile = requireNotNull(db.recordsDao().characterProfile("fictional-registered-witness"))
                 authority.registerActorAssociation(profile.id, profile.revision, GenesisActorRole.NPC,
                     world.id, null, "proof-membership").actor
             }
