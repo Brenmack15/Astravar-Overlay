@@ -152,7 +152,7 @@
     },
     "app/src/main/java/com/yazsras/astravar/data/CampaignLedger.kt": {
       "previous_pinned_sha256": "4508292bc1910e269340be58d0fcb83cef3a3dd32af02fc6464424fd433e0fa2",
-      "reviewed_sha256": "6319e82fd40f6357dbffd2fc8cdb99f18fca1418d3a2c96fb3b20e9e7c0a4994",
+      "reviewed_sha256": "3f0449ee8c44efe3d9ca896a57eab575772113dfec1e2fb38e126fabe1bc9d19",
       "exact_replacements": [
         {
           "before": "    abstract fun promptDao(): ChatGptPromptDao\n",
@@ -213,6 +213,14 @@
         {
           "before": "    }\n\n    private fun LedgerItem.draft() = LedgerDraft(\n",
           "after": "    }\n    /** Read-only validation for connected command previews; creation uses the same contract. */\n    internal fun validatedDraft(input: LedgerDraft): LedgerDraft = validate(input)\n\n    private fun LedgerItem.draft() = LedgerDraft(\n"
+        },
+        {
+          "before": "    GenesisItemAuthority::class, GenesisAuthorityReceipt::class], version = 8, exportSchema = true)\n@TypeConverters(PartyConverters::class, ReforgeConverters::class, GenesisAuthorityConverters::class)\nabstract class CampaignLedgerDb : RoomDatabase() {\n",
+          "after": "    GenesisItemAuthority::class, GenesisAuthorityReceipt::class,\n    GenesisEncounterRecord::class, GenesisEncounterParticipant::class], version = 9, exportSchema = true)\n@TypeConverters(PartyConverters::class, ReforgeConverters::class, GenesisAuthorityConverters::class, GenesisEncounterConverters::class)\nabstract class CampaignLedgerDb : RoomDatabase() {\n    abstract fun genesisEncounterDao(): GenesisEncounterDao\n"
+        },
+        {
+          "before": "CAMPAIGN_MIGRATION_6_7, CAMPAIGN_MIGRATION_7_8).build()",
+          "after": "CAMPAIGN_MIGRATION_6_7, CAMPAIGN_MIGRATION_7_8, CAMPAIGN_MIGRATION_8_9).build()"
         }
       ],
       "genesis_review": {
@@ -228,6 +236,11 @@
       "genesis_crafting_review": {
         "authorization": "Owner Project Genesis directive: reconstruct connected creation and crafting while preserving existing records, mechanics, source provenance and signing identity.",
         "reason": "Expose the unchanged ledger draft validator for read-only review and query existing craft receipts by exact identity; no schema, accounting or signing changes."
+      },
+      "genesis_encounter_review": {
+        "authorization": "Owner Project Genesis directive: implement connected encounters while preserving existing identities, mechanics, source provenance, databases and signing compatibility.",
+        "previous_reviewed_sha256": "6319e82fd40f6357dbffd2fc8cdb99f18fca1418d3a2c96fb3b20e9e7c0a4994",
+        "reason": "Register the additive schema 9 encounter tables, DAO, converter and migration in the existing Room database. Reversing these exact registrations reproduces the prior reviewed schema 8 source; historical schemas and destructive-recovery prohibition remain unchanged."
       }
     },
     "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": {
