@@ -300,7 +300,15 @@ class PlayerFirstJourneyInstrumentationTest {
         tap("Heal")
         find("Saved on this device")
         stat("HP 6 / 12")
-        // Compose returns to the roster in the same window. Verify the destination rather than a window change.
+        // The pager consumes the first Back from Combat to return to Sheet.
+        // Verify that destination and its saved health before leaving the actor.
+        device.pressBack()
+        ui.snapshot(By.text("Sheet").pkg(product), "Back from companion Combat selects Sheet", refreshCache = true) { node ->
+            true.takeIf { generateSequence(node) { it.parent }.take(12).any { it.isSelected && it.isEnabled } }
+        }
+        stat("HP 6 / 12")
+        capture("companion-back-to-sheet")
+        // The second Back follows the surrounding companion route to the roster.
         device.pressBack()
         find("Go to combat")
         find("6 / 12")
