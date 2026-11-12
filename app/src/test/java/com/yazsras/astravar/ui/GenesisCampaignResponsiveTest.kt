@@ -16,6 +16,7 @@ import androidx.room.MultiInstanceInvalidationService
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.AstravarApp
 import com.yazsras.astravar.data.CampaignCheckpoint
+import com.yazsras.astravar.data.ReforgePreferences
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -95,8 +96,15 @@ class GenesisCampaignResponsiveTest {
             ComponentName(app, MultiInstanceInvalidationService::class.java), invalidationService.get().onBind(invalidationIntent))
         var activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         fun mount() { activity.get().setContent { AstravarScreen(app, {}, {}, {}) } }
+        val campaignName = "Genesis Fictional Coast of the Amber Observatory"
+        fun awaitCampaignContext() = compose.waitUntil(10_000) {
+            compose.onAllNodesWithText(campaignName).fetchSemanticsNodes().isNotEmpty()
+        }
         try {
             runBlocking {
+                val campaign = app.genesisStorage.authority.createCampaign(campaignName,
+                    notes = "Synthetic responsive campaign fixture", commandId = "fictional-responsive-campaign")
+                ReforgePreferences.open(app).selectCampaign(campaign.id)
                 app.campaignLedger.party.saveCheckpoint(CampaignCheckpoint(id = "fictional-responsive-checkpoint",
                     title = "Fictional observatory pause", scene = "A fictional hilltop", lastConfirmedAction = "Read the map",
                     unresolvedChoice = "Choose the next path"), source = "Synthetic responsive campaign fixture")
@@ -110,12 +118,38 @@ class GenesisCampaignResponsiveTest {
             }
             compose.onNodeWithTag("navigation-Campaign").performClick()
             compose.onNodeWithTag("section-Journal").assertIsDisplayed().performClick()
+            awaitCampaignContext()
             // There is one page heading plus the bottom navigation label, never a
             // second nested Campaign heading taking space above the journal.
             compose.onAllNodesWithText("Campaign", useUnmergedTree = true).assertCountEquals(2)
+            // Bring-into-view scrolls only as far as necessary; it need not hide
+            // the selector. Prove that campaign chrome moves with this viewport
+            // using actual pixel geometry, while the section tabs stay fixed.
+            val selector = compose.onNode(hasText("Choose campaign") and hasClickAction()).assertIsDisplayed()
+            val selectorBefore = selector.fetchSemanticsNode().boundsInRoot
+            val viewportBefore = compose.onNodeWithTag("genesis-campaign-viewport").fetchSemanticsNode().boundsInRoot
+            val tabsBefore = compose.onNodeWithTag("section-Journal").fetchSemanticsNode().boundsInRoot
+            val scrollBefore = scrollPosition("Journal")
+            val requestedScroll = minOf(selectorBefore.height / 2f, (selectorBefore.top - viewportBefore.top) / 2f)
+            assertTrue("There must be room to observe campaign chrome scrolling before it clips", requestedScroll > 1f)
+            compose.onNodeWithTag("genesis-campaign-scroll-Journal")
+                .performSemanticsAction(SemanticsActions.ScrollBy) { assertTrue(it(0f, requestedScroll)) }
+            val actualScroll = scrollPosition("Journal") - scrollBefore
+            val selectorAfter = selector.assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertTrue("The journal viewport must actually scroll", actualScroll > 1f)
+            assertEquals("Campaign chrome must move by the same distance as journal content",
+                actualScroll, selectorBefore.top - selectorAfter.top, 1f)
+            assertEquals("The selector remains whole while its movement is measured", selectorBefore.height, selectorAfter.height, 1f)
+            assertEquals("Section navigation must remain fixed", tabsBefore,
+                compose.onNodeWithTag("section-Journal").fetchSemanticsNode().boundsInRoot)
+            assertEquals("Scrolling must not resize or move the content viewport", viewportBefore,
+                compose.onNodeWithTag("genesis-campaign-viewport").fetchSemanticsNode().boundsInRoot)
+            compose.onNodeWithText(campaignName).performScrollTo()
+            assertWholeText(campaignName)
+            compose.onNode(hasText("Encounters") and hasClickAction()).performScrollTo()
+            assertWholeText("Encounters")
             compose.onNodeWithText("Your living world").performScrollTo()
             assertWholeText("Your living world")
-            compose.onNodeWithText("Choose campaign").assertIsNotDisplayed()
             compose.onNodeWithTag("section-Journal").assertIsDisplayed().assertIsSelected()
             capture("genesis-campaign-journal-font200-readable", activity.get())
 
@@ -126,6 +160,7 @@ class GenesisCampaignResponsiveTest {
             }
             compose.onNodeWithText("Fictional observatory pause").performScrollTo()
             assertWholeText("Fictional observatory pause")
+            compose.onNodeWithText("Choose campaign").assertIsNotDisplayed()
             val journalPosition = scrollPosition("Journal")
             assertTrue("The journal must actually have been scrolled", journalPosition > 0f)
             compose.onNodeWithTag("section-People").performClick()
@@ -144,10 +179,12 @@ class GenesisCampaignResponsiveTest {
             compose.onNode(hasText("Connections") and hasClickAction()).performClick()
             compose.onNodeWithContentDescription("Add connection").assertExists()
             compose.runOnIdle { activity.get().onBackPressedDispatcher.onBackPressed() }
+            awaitCampaignContext()
             compose.onNodeWithTag("section-Journal").assertIsSelected()
             assertEquals(beforeDetail, scrollPosition("Journal"), 1f)
             compose.onNodeWithTag("navigation-Companions").performClick()
             compose.onNodeWithTag("navigation-Campaign").performClick()
+            awaitCampaignContext()
             compose.onNodeWithTag("section-Journal").assertIsSelected()
             assertEquals(beforeDetail, scrollPosition("Journal"), 1f)
 
@@ -156,6 +193,7 @@ class GenesisCampaignResponsiveTest {
             activity = Robolectric.buildActivity(ComponentActivity::class.java).create(state).start().resume().visible()
             mount()
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("genesis-campaign-scroll-Journal").fetchSemanticsNodes().isNotEmpty() }
+            awaitCampaignContext()
             compose.onNodeWithTag("navigation-Campaign").assertIsSelected()
             compose.onNodeWithTag("section-Journal").assertIsSelected()
             assertEquals(beforeDetail, scrollPosition("Journal"), 1f)

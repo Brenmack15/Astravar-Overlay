@@ -69,3 +69,12 @@ the product layout correction; it does not bypass it. Final UI/native acceptance
 remains pending; no signed APK is claimed.
 Direct git push lacked credentials, so the authenticated GitHub connector
 published matching trees without moving PR15 or overwriting old checkpoints.
+
+Local focused UI verification at local56d3729 / publishedb724e3b passed29 of30
+cases. The new responsive test passed full-text visibility but incorrectly
+expected a minimal bring-into-view scroll to hide the campaign selector. Its
+correction measures actual selector displacement against viewport scrolling,
+retains the offscreen check after deeper scrolling, and adds a selected long
+campaign name. All existing route, bounds and restoration assertions remain.
+This follow-up still requires execution. Backend60/rules166 results above remain
+valid for their recorded source; no broad release acceptance is implied.
