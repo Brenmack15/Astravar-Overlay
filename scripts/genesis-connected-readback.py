@@ -41,7 +41,17 @@ def sha(text):
 
 
 def compact(value, ascii_only=False):
-    return json.dumps(value, separators=(",", ":"), ensure_ascii=ascii_only, allow_nan=False)
+    encoded = json.dumps(value, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    if not ascii_only:
+        return encoded
+    # Match CampaignStreamCodec's UTF-16 escaping, including raw ASCII DEL.
+    # Python ensure_ascii=True also escapes DEL, which the Android writer retains.
+    def ascii_char(char):
+        if ord(char) <= 0x7f:
+            return char
+        utf16 = char.encode("utf-16-be", errors="surrogatepass")
+        return "".join("\\u" + utf16[offset:offset + 2].hex() for offset in range(0, len(utf16), 2))
+    return "".join(map(ascii_char, encoded))
 
 
 def index(values, key):
@@ -129,9 +139,13 @@ def inspect(database, backup_document, *, synthetic_emulator=False):
         require(npc_entity["name"] == NPC, "NPC connection name differs from campaign membership")
         companion_state = one((row for row in rows("companion_states") if row["companionId"] == companion["actorId"]), "same-ID companion")
         require(companion_state["name"] == COMPANION, "Companion identity differs from its campaign member")
-        one((row for row in rows("campaign_links") if row["fromType"] == "companion" and
+        owner_link = one((row for row in rows("campaign_links") if row["fromType"] == "companion" and
              row["fromId"] == companion["actorId"] and row["toType"] == "character-profile" and
              row["toId"] == hero["actorId"]), "explicit companion owner relationship")
+        for domain, key, row in (("entities", "id", npc_entity), ("companionStates", "companionId", companion_state),
+                                 ("links", "id", owner_link)):
+            exported = index(backup["campaign"]["records"][domain], key)
+            require(exported.get(row[key]) == row, f"Backup lost exact source {domain} relationships")
         saved = playable[hero["actorId"]]
         character = decode(saved["characterJson"])
         require(character["id"] == hero["actorId"] and character["name"] == HERO and

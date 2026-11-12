@@ -73,7 +73,9 @@ class GenesisConnectedReadbackTest(unittest.TestCase):
             rows = lambda table: [dict(row) for row in db.execute(f'SELECT * FROM "{table}"')]
             self.backup = {"format": "astravar-connected-campaign", "schema": 1, "exportedAt": 6,
                            "campaign": {"exportedAt": 6, "items": rows("ledger_items"),
-                                        "records": {"characterProfiles": rows("character_profiles"), "placements": rows("item_placements")}},
+                                        "records": {"characterProfiles": rows("character_profiles"), "placements": rows("item_placements"),
+                                                    "entities": rows("connection_entities"), "companionStates": rows("companion_states"),
+                                                    "links": rows("campaign_links")}},
                            "playable": {"exportedAt": 6, "characters": rows("reforge_characters")},
                            "authority": {"campaigns": rows("genesis_campaigns"), "actors": rows("genesis_actor_authority"),
                                          "items": rows("genesis_item_authority"), "receipts": rows("genesis_authority_receipts")}}
@@ -110,6 +112,15 @@ class GenesisConnectedReadbackTest(unittest.TestCase):
         del self.backup["authority"]
         self.document.write_text(compact(self.backup))
         with self.assertRaisesRegex(ValueError, "domain is missing"):
+            self.inspect()
+
+    def test_ascii_fingerprint_encoding_matches_android_utf16_and_del_rules(self):
+        self.assertEqual('"\\u03a9\x7f\\ud83e\\udded"', compact("Ω\x7f🧭", ascii_only=True))
+
+    def test_backup_cannot_omit_source_companion_relationship(self):
+        self.backup["campaign"]["records"]["links"] = []
+        self.document.write_text(compact(self.backup))
+        with self.assertRaisesRegex(ValueError, "Backup lost exact source links"):
             self.inspect()
 
     def test_backup_cannot_omit_an_actor(self):
