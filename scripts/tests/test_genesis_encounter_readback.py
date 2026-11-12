@@ -132,7 +132,12 @@ class GenesisEncounterReadbackTest(unittest.TestCase):
             self.inspect()
 
     def test_sorting_by_initiative_instead_of_manual_order_fails(self):
-        self.update("UPDATE genesis_encounter_participants SET initiative=19 WHERE actorId='hero'")
+        # Swap only positions while preserving both explicitly entered initiative values.
+        # Use a temporary free position to respect the actual unique index.
+        with sqlite3.connect(self.after) as db:
+            db.execute("UPDATE genesis_encounter_participants SET position=2 WHERE actorId='hero'")
+            db.execute("UPDATE genesis_encounter_participants SET position=0 WHERE actorId='witness'")
+            db.execute("UPDATE genesis_encounter_participants SET position=1 WHERE actorId='hero'")
         with self.assertRaisesRegex(ValueError, "Manual participant order"):
             self.inspect()
 
@@ -215,6 +220,29 @@ class GenesisEncounterReadbackTest(unittest.TestCase):
         self.assertEqual(9, result["room_schema"])
         with self.assertRaisesRegex(ValueError, "Wrong database version"):
             CONNECTED["HELPER"]["inspect"](self.before, self.fixture.document, synthetic_emulator=True)
+
+    def test_schema_nine_crafting_uses_empty_encounter_snapshots_and_rejects_early_tracker(self):
+        crafting = runpy.run_path(str(ROOT / "scripts/tests/test_genesis_crafting_readback.py"))
+        fixture = crafting["GenesisCraftingReadbackTest"]()
+        fixture.setUp()
+        try:
+            promote_to_nine(fixture.before)
+            promote_to_nine(fixture.after)
+            result = crafting["HELPER"]["inspect"](
+                fixture.before, fixture.after, synthetic_emulator=True, expected_room_schema=9)
+            self.assertEqual("PASS", result["status"])
+            with self.assertRaisesRegex(ValueError, "Wrong database version"):
+                crafting["HELPER"]["inspect"](fixture.before, fixture.after, synthetic_emulator=True)
+            with sqlite3.connect(fixture.after) as db:
+                UPGRADE["insert"](db, "genesis_encounters", id="premature-tracker", campaignId="campaign",
+                                  title="Premature fictional tracker", notes="", status="DRAFT", round=0,
+                                  currentActorId=None, revision=1, creationCommandId="premature-create",
+                                  lastCommandId="premature-create", createdAt=20, updatedAt=20)
+            with self.assertRaisesRegex(ValueError, "snapshots must precede encounter creation"):
+                crafting["HELPER"]["inspect"](
+                    fixture.before, fixture.after, synthetic_emulator=True, expected_room_schema=9)
+        finally:
+            fixture.tearDown()
 
     def test_import_verifier_requires_both_actual_schema_nine_table_shapes(self):
         helper = runpy.run_path(str(ROOT / "scripts/native-campaign-import-readback.py"))
