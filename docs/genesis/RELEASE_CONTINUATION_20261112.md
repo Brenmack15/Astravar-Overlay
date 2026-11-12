@@ -4,89 +4,97 @@ This is the current recovery handoff, not a completed release. Read the original
 `docs/genesis/SESSION_RECOVERY.md` at `ee04d5f` first, then this file and the
 linked milestone checkpoints. Later verified facts here supersede older status.
 
-## Active resumed session — corrections published, verification underway
+## Active resumed session — all30 focused UI cases passed
 
-Latest published correction: `2798fc6f19210333c086d548759c09297ec7f380` on
-`checkpoint/astravar-genesis-resumed-verification-20261112`, tree
-`2d102002b922f9cf0f58ab6f6b43a60fddf7371b`; exact local tree at
-`46c194e45d3b239fba033ab3dc63f9b23580ab83`.
+Current published source: `2798fc6f19210333c086d548759c09297ec7f380`,
+tree `2d102002b922f9cf0f58ab6f6b43a60fddf7371b`. Branches:
+- `checkpoint/astravar-genesis-resumed-verification-20261112`
+- `feat/astravar-project-genesis-resume-verification-20261112`
 
-The environment works again, but read-only searches did not recover the previous
-worktrees/runtime/private directory. New checkout:
-`/workspace/scratch/30508fda364e/Astravar-Genesis-Resume-20261112`.
-No original tree was reset or cleaned. All published histories remain intact;
-local991dd4a/e023321/803668e original bytes are still unavailable. Do not recreate
-feature work already present in combined52831.
+Fresh exact-source gates started13:01:57UTC and remain pending:
+- Full: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43223390477
+- Native: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43223390400
 
-The actual failed52831 gates were investigated from complete logs and downloaded,
-hash/source-verified artifacts. Full43152318166 stopped at test compilation because
-saveProfile returns CommandReceipt; the fixture now reads its persisted profile.
-Native43152318129 failed a clipped200% Campaign marker and a stale document-picker
-Downloads object. Corrections provide scrollable campaign context with one heading,
-independent saved section positions, fresh scoped picker observations, and bounded
-static-marker reveal before unchanged stable-pixel assertions. No test thresholds,
-gameplay, backup or retention assertions were removed.
+### Recovered environment and preserved work
 
-Local backend verification passed60 app tests and166 rules tests (zero failures,
-errors or skips). Source/signing/migration guards passed. UI at local56d3729 passed
-29 of30; full text bounds already passed, while a new test incorrectly assumed
-minimal bring-into-view must hide the selector. Latest source replaces this with
-measured scroll displacement and additionally checks a selected long campaign name.
-It retains the selector-offscreen assertion after deeper scrolling and all route,
-state and recreation checks. The corrected responsive test is pending execution.
-Lint/debug assemble/native Kotlin compilation are running in the clean verification
-worktree `genesis-resume-backend-verification` at local56d3729. Check active sessions
-and logs under `genesis-resume-evidence` before continuing or starting another build.
+The environment works again. Read-only searches did not recover old worktrees,
+runtime/private directories or original local991dd4a/e023321/803668e bytes.
+Do not reconstruct feature work already present in combined52831.
+New main checkout `/workspace/scratch/30508fda364e/Astravar-Genesis-Resume-20261112`
+is clean at local `46c194e45d3b239fba033ab3dc63f9b23580ab83`, tree-identical to2798.
+Clean verification tree: `genesis-resume-backend-verification`, same local46c.
+Clean exact remote signing-source tree: `genesis-release-source-2798fc6`.
+Earlier `genesis-release-source-b8ce9b5` is preserved but superseded.
+No reset, clean or overwrite occurred. Direct git push lacks credentials; guarded
+GitHub connector writes publish exactly matching complete trees. All checkpoints
+survive. PR15 is still draft/unmerged at7e229; do not move until relevant gates pass.
 
-Matching complete trees have been published with guarded GitHub connector writes
-because direct git push lacks credentials. PR15 remains draft/unmerged at7e229;
-all older checkpoints are preserved. Fresh exact-source push gates are running on
-`feat/astravar-project-genesis-resume-verification-20261112`:
-- Full: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43220288546
-- Native: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43220288629
-Both are pending at this update. Do not claim the earlier passing subsets establish the final release.
+### Actual corrections and results
 
-Original private key and trusted code49 owner APK are recovered with matching
-full certificate/checksum. A newly reconstructed signing helper passed23 synthetic
-tests and independent review and was durably saved privately without key/config/APK.
-It requires successful full/native gates at the exact final commit, native artifact
-digest, tested APK digest/source, clean source, original certificate and byte-equality
-of every ZIP entry. No real preflight/signing or owner-key install has occurred.
-No KVM; one bounded normal AOSP API36 emulator is prepared but not started. Do not
-run it concurrently with Gradle. Both share the runtime build lock.
+Failed52831 full43152318166 stopped at test compilation: saveProfile returns
+CommandReceipt. The fixture now reads its persisted profile from the DAO.
+Native43152318129 failed a clipped200% Campaign marker and stale Downloads object.
+Both artifacts were downloaded and verified by SHA/source. Independent captured
+DB readbacks passed synthetic schema6→9 retention, later canonical heal with
+original source unchanged, and package UID/first-install-time retention.
 
-Read [RESUME_VERIFICATION_20261112.md](https://github.com/Brenmack15/Astravar-Overlay/blob/b8ce9b5c30b15070a948e05ee6d49fd788ddbee0/docs/genesis/RESUME_VERIFICATION_20261112.md).
-Next finish current local checks, inspect captures, launch exact-source full/native
-gates on a new feature verification branch, then privately sign that passing payload
-and verify owner-key in-place installation. Physical Samsung/Android17 remains
-unverified. Continue without resetting, overwriting, or repeating recovery.
+Corrections preserve all gameplay, backup, identity and visual thresholds:
+- scrollable Campaign context, one heading, separate saved section positions;
+- scoped fresh DocumentsUI observations and one-shot touches;
+- bounded static-label reveal before unchanged stable-pixel checks;
+- real-shell200% test with long selected campaign name and geometry checks;
+- loaded journal snapshot retained above section switches; scrolling content
+  mounts after actual records load, eliminating the observed4521→4398 clamp.
 
-## Latest local gate observations — 12:50 UTC
+Local exact evidence:
+- At a059/d344:60backend cases +166rules, zero failures/errors/skips.
+- At46c/2798:30UI cases, zero failures/errors/skips. Includes campaign creation,
+  connected character/item/companion flows, seven encounter cases, character/
+  inventory/encounter routing,200% text, exact expanded-library reading positions
+  across tabs, primary navigation and parcelled Activity recreation, plus unchanged
+  complete connected-backup fingerprint. XML preserved under
+  `genesis-resume-evidence/ui-native-focused-5-results`; captures under
+  `genesis-resume-ui-screenshots-5`. Host captures were visually inspected.
+- Source/signing guards pass82foundation/33protected files plus12schema pins.
+- Earlier local lintDebug/QA assemble passed; lint had0errors/69warnings/1hint.
+- Corrected native observer and observer-test APKs compiled/assembled successfully.
 
-Local lintDebug passed with0errors/69warnings/1hint, and QA assembleDebug passed.
-Native test compilation caught a nested implicit-lambda variable shadow in the
-fresh filename observer. Explicit UiObject2 naming fixes it; published3a04fa6.
-The new long-campaign fixture correctly made legacy partial export fail closed.
-Its before/after assertion now compares the complete connected-backup proof,
-published5bd8509. No production safety boundary was weakened.
+Current root Gradle session97248 is finishing lintDebug/QA APK/observer assembly
+on46c;30UI cases are already complete. Log:
+`genesis-resume-evidence/ui-native-focused-5.log`. Inspect before another build.
+Do not start the software emulator while Gradle owns the shared runtime lock.
 
-The corrected responsive test reached its final expanded-library assertion:
-all whole-text, header geometry, routes, section positions, detail/Back and
-Activity recreation checks before it passed. Returning People→Journal at the
-bottom then shifted scroll4521→4398. This is a real transient-content/scroll
-restoration issue under investigation; keep that assertion. The fix is now committed/published at2798fc6: retain a combined loaded journal
-snapshot above section switching and withhold restored scrolling content until
-actual campaign context/records load. Expanded-library regression now also checks
-primary navigation and parcelled Activity recreation, preserving exact position
-and complete connected-backup fingerprint assertions. All source/schema/signing
-guards pass; main checkout is clean at local46c194e.
-Root session97248 runs30 focused UI cases, lintDebug, QA APK and observer assembly;
-log `genesis-resume-evidence/ui-native-focused-5.log`. Inspect it before any build.
-The prior corrected native observer APKs compiled/assembled successfully.
-b8ce native43220288629 failed its expected shadowing compilation; no emulator
-ran. Full43220288546 was still in Rules/debug at12:56UTC. Both old runs predate
-latest fixes and cannot qualify. Do not sign any old APK. Current final-source
-feature ref has not yet advanced while local focused verification runs.
+Intermediate b8ce runs are superseded, not release evidence:
+full43220288546 cancelled during debug tests after the new fixture correctly hit
+the partial-backup boundary; native43220288629 failed an implicit-lambda shadow
+in the observer. Explicit node naming and complete-backup proof fixed both test
+issues. Actual focused results above supersede them. No assertions were dropped.
+
+### Private signing and next actions
+
+Original owner key and trusted code49 APK are recovered privately and match the
+full certificate/checksum recorded below. New private signing helper passed23
+synthetic cases and independent review, with a durable helper-only backup. No real
+preflight, signing, owner-key installation or physical handset acceptance yet.
+Helper requires exact successful full/native receipts, native artifact/product
+digests, embedded commit, clean exact source, original owner certificate and
+byte-equality of every ZIP entry. Never sign a failed or superseded payload.
+
+No KVM. One normal AOSP API36 emulator is prepared, not started, under
+`genesis-owner-upgrade-emulator`. Its supervisor and Gradle share a lock.
+After local build finishes, use one bounded persistent supervisor session for
+every adb action; do not spawn adb in another execution namespace. Prefer starting
+when fresh hosted gates are advanced enough to finish within the60minute maximum.
+Keep original code49 owner APK unchanged; fictional baseline seed, normal install-r,
+native retention/canonical-write and independent DB readback remain required.
+No OS bypasses, data clearing or uninstall.
+
+Next: finish local lint/build, monitor both2798 gates, investigate failures without
+weaker assertions. Download/check exact successful native artifact and all native
+stages, privately sign that same payload, test actual owner-key update if environment
+permits, preserve reports/screenshots and deliver with honest remaining scope.
+Read [RESUME_VERIFICATION_20261112.md](https://github.com/Brenmack15/Astravar-Overlay/blob/2798fc6f19210333c086d548759c09297ec7f380/docs/genesis/RESUME_VERIFICATION_20261112.md).
+Physical Galaxy S26/Android17 acceptance remains separate and unverified.
 
 ## Prior outage checkpoint — integrated source saved after outage
 
