@@ -1,5 +1,5 @@
 {
-  "note": "GitHub connector publication retains exact trees. Local commits remain intact; no reset or forced ref updates were used. This map covers implementation checkpoints before the recovery report commit.",
+  "note": "GitHub connector publication retains exact trees. Local commits remain intact; no reset or forced ref updates were used. This map covers checkpoints before the final local verification report.",
   "branch": "checkpoint/astravar-genesis-recovery-20261112",
   "mappings": [
     {
@@ -96,6 +96,31 @@
       "local": "d85f9c7f17268387320af946e4d13e3d1eb3b846",
       "remote": "fb1f58e66781665e8e4b01f8c9ae0719e0209e0c",
       "tree": "01d4e692a777e51bb3c96251d01e6b4c58756803"
+    },
+    {
+      "local": "e4343e83bd93584dbec9f108cd22d0162cb2a3de",
+      "remote": "77da997e59838936cddabc5427ea80644fa11d76",
+      "tree": "86ef3b734dac8d5ebe76a39a19ec80972a56a10b"
+    },
+    {
+      "local": "aa1b5f2436f0081f7fe1237d1b7ed278f9c7d7ff",
+      "remote": "1305f5fefb657a62b59a7fa1318e2f9ca4b01b1f",
+      "tree": "4b4b8860f4222e5b9d728ef4957cd68f86ff2fd9"
+    },
+    {
+      "local": "6c12a29bbd2e8000153985db6c82998b1aa45074",
+      "remote": "de0dc7d5dc868153183847233e593eca107f6a5e",
+      "tree": "ef6cb352543197a3a7fd0a6f9ff6d2505b82a90b"
+    },
+    {
+      "local": "23f4b0ec425c1c2c849a874d409c8c02a60fd0ff",
+      "remote": "12ccf37fa809eaab08d6af114855a0263ff46888",
+      "tree": "a668c305bf894838ff531dbe81808a362206ad75"
+    },
+    {
+      "local": "41b5160d5eed97e30de2b154195f128d8620715a",
+      "remote": "40dbf496aa6115e55e7cb57c966e22c8fb3a2302",
+      "tree": "c01755f9a13fac7863b5d88e808e6fbab435997a"
     }
   ]
 }
