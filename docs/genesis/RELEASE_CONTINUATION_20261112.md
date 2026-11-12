@@ -49,9 +49,19 @@ present. Its preassert tree capture could alter timing; it does not prove the
 original failed frame was loading. Diagnostic source/tree/XML retained in
 `genesis-resume-evidence/navigation-journal-readiness-diagnostic-a86-1-results/`.
 Temporary println was removed, main checkout returned clean6412843.
-A same48-case batch with failure-only tree capture is now delegated to the UI
-agent; it will retain original actions/assertions and separately run lint/APK
-tasks even if the tests fail. No acceptance test has been weakened.
+A same48-case batch with failure-only capture finished48/48 PASS,0fail/errors/skips.
+No failure frame was captured; this does not erase the first47/48 result.
+Evidence: `genesis-resume-evidence/shared-tabs-readiness-capture-a86-2-results/`.
+Temporary catch was removed and main returned clean6412843. Separate lintDebug,
+assembleDebug and observer-test APK tasks run in session17156,
+`genesis-resume-evidence/shared-tabs-lint-build-a86-1.log`.
+After that, the UI agent is authorized to add a bounded observed Journal-readiness
+helper at the three data-dependent entry/recreation boundaries, preserving every
+original action/assertion. Source proves asynchronous loading; the exact old
+failure frame remains unproven. This test-only correction needs focused execution
+and a new published exact-source candidate/gates; do not cancel a86.
+Current a86 native build passed16:04:46; Android36 journeys are running.
+No acceptance test has been weakened.
 Exact remote signing checkout `genesis-release-source-a86ab0f` is clean.
 Both a86 gates continue. Historical de98 full completed SUCCESS15:55:23UTC:
 rules166, debug931total/928pass/3skip, release931total/914pass/17skip, Python320,
@@ -59,6 +69,15 @@ bridge134,0failures/errors. Artifact13960386406,51,342,938bytes,SHA256
 `3d425991b91345f5b7f0bc1514af69f2ffab3be304aa630efce62dc93aef50ce`.
 Source/tree, all132 indexed entries, XMLs and131 host screenshots independently
 verified at `genesis-resume-evidence/de98cb69/full/`. Native de98 remains FAILED.
+Local regression/operator preparation bundle is privately preserved:
+`Astravar-Genesis-a86-local-recovery-evidence-20261112.zip`,59,150bytes,SHA256
+`d8b505d013ea768b840006dd2e03cc41a77afbbe3b8ca9402037ba4e8d4936eb`.
+Private operator script `genesis-owner-upgrade-operator/prepare_config.py`
+derives all7 final-source pins and validates saved API gates before APK inspection;
+six synthetic tests and independent review passed. It writes only a new disabled
+config outside Git. No real input run, signing, activation or encryption occurred.
+Actual Git blob512KiB/base64 upload was verified using synthetic bytes only,
+without creating a branch/tree; owner ciphertext transport remains unexecuted.
 No owner signing has occurred. Owner helper remains DISABLED and still pins
 failedde98; update every source/artifact/gate pin to a final successful candidate
 before activation. Do not sign de98 or reuse its failed native artifact.
