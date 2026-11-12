@@ -53,7 +53,9 @@ class GenesisCraftingRepository(private val db: CampaignLedgerDb, private val re
             val authority = requireNotNull(db.genesisAuthorityDao().actor(id)) { "Connect each affected actor before crafting." }
             require(authority.playable) { "Configure and review the output owner's playable inventory before crafting." }
             genesisRequireAffectedActor(db, authority)
-            GenesisCraftActorReview(authority, requireNotNull(playable.get(id)), requireNotNull(db.recordsDao().characterProfile(id)))
+            val saved = requireNotNull(playable.get(id))
+            require(!saved.character.archived) { "Restore each affected actor before using its inventory in crafting." }
+            GenesisCraftActorReview(authority, saved, requireNotNull(db.recordsDao().characterProfile(id)))
         }
         val recipient = actors.single { it.authority.actorId == outputOwnerActorId }
         outputContainerItemId?.let { containerId ->
@@ -73,6 +75,39 @@ class GenesisCraftingRepository(private val db: CampaignLedgerDb, private val re
         draft.copy(fingerprint = genesisCraftReviewFingerprint(draft))
     }
 
+    /** Recover only a proven earlier outcome. This never retries or approves a pending craft. */
+    suspend fun completed(projectId: String, reviewFingerprint: String, commandId: String): GenesisCraftingOutcome? = transaction {
+        checkId(projectId); checkId(commandId)
+        require(reviewFingerprint.matches(Regex("[0-9a-f]{64}"))) { "The saved craft review identity is invalid." }
+        val receipt = readGenesisAuthorityReceipt(db, commandId)
+        if (receipt == null) {
+            val child = genesisCraftCommandId(commandId)
+            require(db.recordsDao().receipt(commandId) == null && db.ledgerDao().event(commandId) == null &&
+                db.reforgeDao().change(commandId) == null && db.reforgeDao().roll(commandId) == null &&
+                db.recordsDao().receipt(child) == null && db.recordsDao().craft(child) == null && db.recordsDao().craftConsumptions(child).isEmpty() &&
+                db.ledgerDao().event("craft-output-${campaignHash(child).take(40)}") == null &&
+                db.recordsDao().receipt("craft-link-${campaignHash(child).take(40)}") == null) {
+                "This pending craft identity has conflicting or incomplete saved records. Preserve it and review complete recovery before continuing."
+            }
+            return@transaction null
+        }
+        require(receipt.kind == "craft-items" && receipt.fingerprint == genesisAuthorityFingerprint(receipt.kind, receipt.requestJson)) {
+            "The pending craft identity belongs to a different or invalid saved operation."
+        }
+        rejectDuplicateJsonMembers(receipt.requestJson); rejectDuplicateJsonMembers(receipt.outcomeJson)
+        val review = campaignJson.decodeFromString<GenesisCraftingReview>(receipt.requestJson)
+        require(review.project.id == projectId && review.fingerprint == reviewFingerprint && review.fingerprint == genesisCraftReviewFingerprint(review)) {
+            "The saved craft belongs to a different project or frozen review."
+        }
+        val outcome = genesisValidateCraftReceipt(receipt, genesisCraftEvidence(db, receipt))
+        val physical = requireNotNull(readGenesisAuthorityItem(db, outcome.outputId)) { "The recorded crafted output authority is missing. Review complete recovery." }
+        require(physical.activationCommandId == commandId && db.ledgerDao().getItem(outcome.outputId) != null &&
+            physical.sourceProofJson == campaignJson.encodeToString(genesisCraftProof(commandId, review, outcome))) {
+            "The crafted output's original evidence is incomplete. Review complete recovery."
+        }
+        outcome
+    }
+
     suspend fun accept(review: GenesisCraftingReview, commandId: String = UUID.randomUUID().toString()): GenesisCraftingOutcome = transaction {
         checkId(commandId)
         val request = campaignJson.encodeToString(review)
@@ -80,7 +115,7 @@ class GenesisCraftingRepository(private val db: CampaignLedgerDb, private val re
         val fingerprint = genesisAuthorityFingerprint("craft-items", request)
         readGenesisAuthorityReceipt(db, commandId)?.let {
             require(it.kind == "craft-items" && it.requestJson == request && it.fingerprint == fingerprint) { "Command identity was reused with different craft content. Nothing changed." }
-            return@transaction campaignJson.decodeFromString<GenesisCraftingOutcome>(it.outcomeJson)
+            return@transaction requireNotNull(completed(review.project.id, review.fingerprint, commandId))
         }
         require(db.recordsDao().receipt(commandId) == null && db.ledgerDao().event(commandId) == null &&
             db.reforgeDao().change(commandId) == null && db.reforgeDao().roll(commandId) == null) { "Craft command identity belongs to another operation." }
@@ -93,8 +128,8 @@ class GenesisCraftingRepository(private val db: CampaignLedgerDb, private val re
         val craftReceipt = withGenesisProjectionDeferred(db) { campaign.records.confirmCraft(genesisCraftLegacyCommand(review, commandId)) }
         val outputId = requireNotNull(craftReceipt.outputId)
         val sourceOutput = requireNotNull(db.ledgerDao().getItem(outputId))
-        val execution = db.recordsDao().allCrafts().single { it.commandId == childCommand }
-        val consumptions = db.recordsDao().allConsumptions().filter { it.executionId == childCommand }.sortedBy { it.id }
+        val execution = requireNotNull(db.recordsDao().craft(childCommand))
+        val consumptions = db.recordsDao().craftConsumptions(childCommand)
         val outputLink = requireNotNull(db.recordsDao().link("craft-output-link-${campaignHash(childCommand).take(40)}"))
         val saved = withGenesisProjectionDeferred(db) {
             genesisCraftCharacters(review, sourceOutput).map { character ->

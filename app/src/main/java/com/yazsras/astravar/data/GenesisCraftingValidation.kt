@@ -83,6 +83,7 @@ internal fun genesisValidateCraftReceipt(receipt: GenesisAuthorityReceipt, evide
     review.actors.forEach { actor ->
         val id = actor.authority.actorId
         require(actor.authority.playable && actor.playable.character.id == id && actor.profile.id == id &&
+            !actor.playable.character.archived &&
             actor.authority.playableRevision == actor.playable.revision && actor.authority.projectionFingerprint == genesisProjectionFingerprint(actor.playable))
         val change = requireNotNull(evidence.changes.singleOrNull { it.commandId == genesisCraftPlayableCommand(receipt.commandId, id) })
         val saved = outcome.actors.single { it.character.id == id }
@@ -113,7 +114,7 @@ internal fun genesisValidateCraftReceipt(receipt: GenesisAuthorityReceipt, evide
     return outcome
 }
 
-internal suspend fun genesisRequireCraftCommand(db: CampaignLedgerDb, receipt: GenesisAuthorityReceipt) {
+internal suspend fun genesisCraftEvidence(db: CampaignLedgerDb, receipt: GenesisAuthorityReceipt): GenesisCraftingEvidence {
     val review = campaignJson.decodeFromString<GenesisCraftingReview>(receipt.requestJson)
     val outcome = campaignJson.decodeFromString<GenesisCraftingOutcome>(receipt.outcomeJson)
     val sql = db.openHelper.writableDatabase
@@ -135,15 +136,22 @@ internal suspend fun genesisRequireCraftCommand(db: CampaignLedgerDb, receipt: G
         ReforgeChange(it.text("commandId"), it.text("profileId"), it.text("operation"), it.text("fingerprint"), it.long("priorRevision"),
             it.long("resultingRevision"), it.long("createdAt"), it.optionalText("beforeJson"), it.text("afterJson"), it.text("outcomeType"))
     } }
-    val evidence = GenesisCraftingEvidence(events, audits, listOfNotNull(db.recordsDao().receipt(child),
-        db.recordsDao().receipt("craft-link-${campaignHash(child).take(40)}")), db.recordsDao().allCrafts().filter { it.commandId == child },
-        db.recordsDao().allConsumptions().filter { it.executionId == child }, changes, listOfNotNull(db.recordsDao().link(outcome.outputLink.id)))
+    return GenesisCraftingEvidence(events, audits, listOfNotNull(db.recordsDao().receipt(child),
+        db.recordsDao().receipt("craft-link-${campaignHash(child).take(40)}")), listOfNotNull(db.recordsDao().craft(child)),
+        db.recordsDao().craftConsumptions(child), changes, listOfNotNull(db.recordsDao().link(outcome.outputLink.id)))
+}
+
+internal suspend fun genesisRequireCraftCommand(db: CampaignLedgerDb, receipt: GenesisAuthorityReceipt) {
+    val review = campaignJson.decodeFromString<GenesisCraftingReview>(receipt.requestJson)
+    val outcome = campaignJson.decodeFromString<GenesisCraftingOutcome>(receipt.outcomeJson)
+    val child = genesisCraftCommandId(receipt.commandId)
+    val evidence = genesisCraftEvidence(db, receipt)
     require(genesisValidateCraftReceipt(receipt, evidence) == outcome)
     require(db.recordsDao().project(review.project.id) == campaignJson.decodeFromString<InventionProject>(outcome.craftReceipt.outcomeJson)) {
         "The completed craft project failed current-record readback."
     }
     review.materials.forEachIndexed { index, material ->
-        val event = events.single { it.commandId == "craft-${campaignHash(child).take(40)}-$index" }
+        val event = evidence.events.single { it.commandId == "craft-${campaignHash(child).take(40)}-$index" }
         require(db.ledgerDao().getItem(material.item.id) == campaignJson.decodeFromString<LedgerItem>(requireNotNull(event.afterJson))) {
             "The consumed source material failed current-quantity readback."
         }

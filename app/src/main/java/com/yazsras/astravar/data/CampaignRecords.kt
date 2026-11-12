@@ -240,7 +240,9 @@ interface CampaignRecordsDao {
     @Query("SELECT * FROM command_receipts WHERE commandId=:id") suspend fun receipt(id: String): CommandReceipt?
     @Query("SELECT * FROM command_receipts ORDER BY commandId") suspend fun allReceipts(): List<CommandReceipt>
     @Query("SELECT * FROM craft_executions ORDER BY commandId") suspend fun allCrafts(): List<CraftExecution>
+    @Query("SELECT * FROM craft_executions WHERE commandId=:commandId") suspend fun craft(commandId: String): CraftExecution?
     @Query("SELECT * FROM craft_consumptions ORDER BY id") suspend fun allConsumptions(): List<CraftConsumption>
+    @Query("SELECT * FROM craft_consumptions WHERE executionId=:executionId ORDER BY id") suspend fun craftConsumptions(executionId: String): List<CraftConsumption>
     @Upsert suspend fun put(value: InventionProject)
     @Upsert suspend fun put(value: ProjectStage)
     @Upsert suspend fun put(value: MaterialRequirement)

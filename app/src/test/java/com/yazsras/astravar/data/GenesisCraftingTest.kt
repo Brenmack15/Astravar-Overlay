@@ -346,4 +346,56 @@ class GenesisCraftingTest {
             assertTrue(target.genesisAuthorityDao().allItems().isEmpty())
         } finally { target.close() }
     }
+
+    @Test fun archivedMaterialOwnerOrOutputOwnerCannotStartOrAcceptCrafting() = runBlocking {
+        fixture()
+        val frozen = review()
+        val materialOwner = playable.get(secondId)!!
+        val archived = playable.save(secondId, materialOwner.revision, materialOwner.character.copy(archived = true), "Archive fictional actor", "archive-material-owner")
+        rejectUnchanged { review() }
+        rejectUnchanged { crafting.accept(frozen, "archived-material-craft") }
+        playable.save(secondId, archived.revision, archived.character.copy(archived = false), "Restore fictional actor", "restore-material-owner")
+        val recipient = playable.get(firstId)!!
+        playable.save(firstId, recipient.revision, recipient.character.copy(archived = true), "Archive fictional output owner", "archive-output-owner")
+        rejectUnchanged { review() }
+        assertTrue(db.recordsDao().allCrafts().isEmpty())
+    }
+
+    @Test fun completionLookupBindsOriginalReviewAndSurvivesLaterTransferEditsAndArchive() = runBlocking {
+        fixture()
+        val frozen = review()
+        val before = authority.backup.snapshot()
+        assertNull(crafting.completed(projectId, frozen.fingerprint, "completion-craft"))
+        assertEquals(before, authority.backup.snapshot())
+        val outcome = crafting.accept(frozen, "completion-craft")
+        val from = playable.get(firstId)!!; val to = playable.get(secondId)!!
+        val transfer = playable.transferItem(from.character, to.character, outcome.outputId, "completion-transfer")
+        val current = transfer.second
+        playable.save(secondId, current.revision, current.character.copy(archived = true,
+            itemDefinitions = current.character.itemDefinitions.map { if (it.id == outcome.outputId) it.copy(name = "Later fictional crafted name") else it }),
+            "Retain later output edits and archive", "completion-later-archive")
+        val after = authority.backup.snapshot()
+        assertEquals(outcome, crafting.completed(projectId, frozen.fingerprint, "completion-craft"))
+        assertEquals(outcome, crafting.accept(frozen, "completion-craft"))
+        assertEquals(after, authority.backup.snapshot())
+        rejectUnchanged { crafting.completed("different-project", frozen.fingerprint, "completion-craft") }
+        rejectUnchanged { crafting.completed(projectId, "0".repeat(64), "completion-craft") }
+        val document = authority.backup.exportWithProof().text
+        reopen()
+        assertEquals(outcome, crafting.completed(projectId, frozen.fingerprint, "completion-craft"))
+        assertTrue(document.contains("Later fictional crafted name"))
+    }
+
+    @Test fun completionLookupRejectsOtherDomainOrOrphanedChildrenWithoutDiscardingEvidence() = runBlocking {
+        fixture()
+        val frozen = review()
+        rejectUnchanged { crafting.completed(projectId, frozen.fingerprint, "craft-project-create") }
+        val material = db.ledgerDao().getItem(sourceMaterial)!!
+        val project = db.recordsDao().project(projectId)!!
+        campaign.records.confirmCraft(CraftCommand(projectId, project.revision,
+            listOf(MaterialConsumption(material.id, material.revision, 1)), output(), source, genesisCraftCommandId("orphaned-parent")))
+        rejectUnchanged { crafting.completed(projectId, frozen.fingerprint, "orphaned-parent") }
+        assertNotNull(db.recordsDao().receipt(genesisCraftCommandId("orphaned-parent")))
+        assertNull(readGenesisAuthorityReceipt(db, "orphaned-parent"))
+    }
 }
