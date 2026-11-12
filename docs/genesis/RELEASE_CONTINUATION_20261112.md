@@ -6,10 +6,10 @@ linked milestone checkpoints. Later verified facts here supersede older status.
 
 ## Active resumed session — corrections published, verification underway
 
-Latest published correction: `b8ce9b5c30b15070a948e05ee6d49fd788ddbee0` on
+Latest published correction: `5bd8509250120e778de36315eeff7741bd4cea9b` on
 `checkpoint/astravar-genesis-resumed-verification-20261112`, tree
-`b384aaee3e151991a03184a591d6ba8a25f5488d`; exact local tree at
-`e99130421cf58b77fe0e21ee8ed7ddbb57deeded`.
+`9183720d8633c4dcb4320401d4b4512ffc991d7a`; exact local tree at
+`253fa8d1204f266cc68383f1d9d880fd240b3601`.
 
 The environment works again, but read-only searches did not recover the previous
 worktrees/runtime/private directory. New checkout:
@@ -60,6 +60,25 @@ Next finish current local checks, inspect captures, launch exact-source full/nat
 gates on a new feature verification branch, then privately sign that passing payload
 and verify owner-key in-place installation. Physical Samsung/Android17 remains
 unverified. Continue without resetting, overwriting, or repeating recovery.
+
+## Latest local gate observations — 12:50 UTC
+
+Local lintDebug passed with0errors/69warnings/1hint, and QA assembleDebug passed.
+Native test compilation caught a nested implicit-lambda variable shadow in the
+fresh filename observer. Explicit UiObject2 naming fixes it; published3a04fa6.
+The new long-campaign fixture correctly made legacy partial export fail closed.
+Its before/after assertion now compares the complete connected-backup proof,
+published5bd8509. No production safety boundary was weakened.
+
+The corrected responsive test reached its final expanded-library assertion:
+all whole-text, header geometry, routes, section positions, detail/Back and
+Activity recreation checks before it passed. Returning People→Journal at the
+bottom then shifted scroll4521→4398. This is a real transient-content/scroll
+restoration issue under investigation; keep that assertion. The connected UI
+agent is editing the main checkout. Preserve any dirty work before continuing.
+The b8ce full/native runs above predate these test fixes and are not candidates.
+Do not sign any old APK. Root local native assembly continues with --continue
+in session68375; log `genesis-resume-evidence/responsive-native-4.log`.
 
 ## Prior outage checkpoint — integrated source saved after outage
 
