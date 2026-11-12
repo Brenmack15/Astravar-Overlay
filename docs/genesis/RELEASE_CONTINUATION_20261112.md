@@ -6,10 +6,10 @@ linked milestone checkpoints. Later verified facts here supersede older status.
 
 ## Active resumed session — corrections published, verification underway
 
-Latest published correction: `5bd8509250120e778de36315eeff7741bd4cea9b` on
+Latest published correction: `2798fc6f19210333c086d548759c09297ec7f380` on
 `checkpoint/astravar-genesis-resumed-verification-20261112`, tree
-`9183720d8633c4dcb4320401d4b4512ffc991d7a`; exact local tree at
-`253fa8d1204f266cc68383f1d9d880fd240b3601`.
+`2d102002b922f9cf0f58ab6f6b43a60fddf7371b`; exact local tree at
+`46c194e45d3b239fba033ab3dc63f9b23580ab83`.
 
 The environment works again, but read-only searches did not recover the previous
 worktrees/runtime/private directory. New checkout:
@@ -74,11 +74,19 @@ The corrected responsive test reached its final expanded-library assertion:
 all whole-text, header geometry, routes, section positions, detail/Back and
 Activity recreation checks before it passed. Returning People→Journal at the
 bottom then shifted scroll4521→4398. This is a real transient-content/scroll
-restoration issue under investigation; keep that assertion. The connected UI
-agent is editing the main checkout. Preserve any dirty work before continuing.
-The b8ce full/native runs above predate these test fixes and are not candidates.
-Do not sign any old APK. Root local native assembly continues with --continue
-in session68375; log `genesis-resume-evidence/responsive-native-4.log`.
+restoration issue under investigation; keep that assertion. The fix is now committed/published at2798fc6: retain a combined loaded journal
+snapshot above section switching and withhold restored scrolling content until
+actual campaign context/records load. Expanded-library regression now also checks
+primary navigation and parcelled Activity recreation, preserving exact position
+and complete connected-backup fingerprint assertions. All source/schema/signing
+guards pass; main checkout is clean at local46c194e.
+Root session97248 runs30 focused UI cases, lintDebug, QA APK and observer assembly;
+log `genesis-resume-evidence/ui-native-focused-5.log`. Inspect it before any build.
+The prior corrected native observer APKs compiled/assembled successfully.
+b8ce native43220288629 failed its expected shadowing compilation; no emulator
+ran. Full43220288546 was still in Rules/debug at12:56UTC. Both old runs predate
+latest fixes and cannot qualify. Do not sign any old APK. Current final-source
+feature ref has not yet advanced while local focused verification runs.
 
 ## Prior outage checkpoint — integrated source saved after outage
 
