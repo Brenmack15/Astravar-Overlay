@@ -59,10 +59,10 @@ Local exact evidence:
 - Earlier local lintDebug/QA assemble passed; lint had0errors/69warnings/1hint.
 - Corrected native observer and observer-test APKs compiled/assembled successfully.
 
-Current root Gradle session97248 is finishing lintDebug/QA APK/observer assembly
-on46c;30UI cases are already complete. Log:
-`genesis-resume-evidence/ui-native-focused-5.log`. Inspect before another build.
-Do not start the software emulator while Gradle owns the shared runtime lock.
+Local Gradle session97248 completed BUILD SUCCESSFUL in11m31s: all30UI cases,
+lintDebug (0errors/69warnings/1hint), QA APK, observer and observer-test APKs.
+The exact result is in `genesis-resume-evidence/ui-native-focused-5-results/FINAL_LOCAL_RESULT.json`.
+No Gradle process is active.
 
 Intermediate b8ce runs are superseded, not release evidence:
 full43220288546 cancelled during debug tests after the new fixture correctly hit
@@ -80,8 +80,12 @@ Helper requires exact successful full/native receipts, native artifact/product
 digests, embedded commit, clean exact source, original owner certificate and
 byte-equality of every ZIP entry. Never sign a failed or superseded payload.
 
-No KVM. One normal AOSP API36 emulator is prepared, not started, under
-`genesis-owner-upgrade-emulator`. Its supervisor and Gradle share a lock.
+No KVM. A normal AOSP API36 software emulator was launched13:08:19UTC using the
+prepared supervisor, boot timeout1200s and maximum lifetime3600s. Persistent exec
+session80618; evidence `genesis-owner-upgrade-emulator/evidence/attempt-20261112T130819Z`.
+At launch it was booting; no APK installed. Poll only that session and send all
+adb operations as supervisor JSON lines through the same session. Do not launch
+another adb client or Gradle concurrently. It owns the shared runtime lock.
 After local build finishes, use one bounded persistent supervisor session for
 every adb action; do not spawn adb in another execution namespace. Prefer starting
 when fresh hosted gates are advanced enough to finish within the60minute maximum.
