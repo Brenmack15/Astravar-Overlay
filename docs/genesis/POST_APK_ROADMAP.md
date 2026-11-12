@@ -167,7 +167,22 @@ For each intention, add a row here:
 
 | Intended feature or fix | Current evidence/implementation | Exact missing work | Dependencies/risks | Acceptance test | Priority |
 | --- | --- | --- | --- | --- | --- |
-| [Current Codex: populate after inspecting live state] | [commit/path/CI] | [remaining task] | [risk] | [observable proof] | [P0–P2] |
+| Owner-signed upgrade acceptance | Owner APK code50 is signed and statically validated; test-signed native upgrade passed on a86 | Complete original-owner49→50 emulator check if separately authorized | Automatic approval rejected encrypted APK upload; no signing key or campaign data is in the prepared envelope | Exact signed APK installs over code49; UID, records and later write survive | P0 verification |
+| Stable encounter text fixture | d12 native run43256864350 failed on manual→Manual text mismatch; focused field exists and IME autocorrection was enabled | Isolate deterministic keyboard input without weakening exact assertions | Preserve failed evidence and d12 host-test readiness fix | Exact text, save/reopen and unchanged actor mechanics pass | P1 |
+| Owner device acceptance | a86 passed19 native tests on Android16/API36 | Evaluate Galaxy S26/Android17 navigation, Back/keyboard, campaign opening and persistence | No physical-device claim; preserve real records | Owner feedback on actual installed release | P1 |
+| Remaining Genesis product work | Existing sections3–4 retain progression, historical editors, inventory/container/favorites and wider crafting/encounter scope | Choose one small slice after owner feedback | Scope remains frozen for release delivery | Relevant end-to-end acceptance test | P1–P2 |
+
+### Release handoff — November 12, 2026
+
+- Deliverable: Astravar-4.0.0-genesis1-code50-owner-signed.apk; package com.yazsras.astravar. [Owner download](https://chatgpt.com/library?file_id=libfile_758c61e4f78c81919956e5cbcd7e960f&account_id=personal).
+- APK SHA-256: `2c14bd7ec186122a94b5273e072ea262efeae60b00af96c65ecc21c49ce0e9b1`. Original owner certificate SHA-256: `4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847`.
+- Exact release source: `feat/astravar-project-genesis-accessible-navigation-20261112`, `a86ab0fa87ce47a4f99550dcfa8fe01ed0e22928`. Latest development source remains `d12bdfec951acb3525ecb9bd280dcf4b85cc3b3a` on the journal-readiness branch; it differs only by12 host-test readiness lines. No newer production work was dropped.
+- Reused passing runs43251800831 and43251800807: rules166, debug929 pass/3 skip, release915 pass/17 skip, Python320, bridge134, native19 pass; lint0 errors. Thirteen independent package/SQLite readbacks reproduced. Backup/restore, migration6→9 and persistence checks passed with fictional records and CI signatures. No expensive suite was rerun.
+- The signed APK has the same210 ZIP entry contents as the tested product; only signing changed. minSdk26, targetSdk36, non-debuggable and16KiB alignment verified.
+- Original-owner upgrade run43323086598 did not reach installation: automatic approval rejected uploading the encrypted APK envelope. It is not a passing owner-key installation result. Local emulator fallback is unavailable. Explicit transfer approval is required; a fresh attempt may be needed after recipient expiry.
+- Four recovered worktrees were clean. No new uncommitted production source needed preserving. PR15 and all existing checkpoints remain unchanged; earlier unavailable original worktree history remains described in recovery documents.
+- Emulator-covered flows include swipes/taps, quick actions, connected creation/editing, equipment/companions, restricted crafting, manual encounter tracking, large-campaign selection and backup/import. Full progression/multiclass, some historical editors, general containers and inventory drag/reorder/favorites remain partial. Complete connected backup remains limited to64MiB and does not include weapon backup, settings, connection configuration, some drafts or external portrait bytes.
+- Next product milestone must be selected from Brendan's hands-on feedback. No further feature development is authorized by this handoff itself.
 
 Also record:
 - The newest protected source commit and branch at APK handoff.
