@@ -177,6 +177,15 @@ python3 scripts/genesis-connected-readback.py \
   --database validation/genesis-connected/astravar-campaign-ledger.db \
   --backup-document validation/genesis-connected-backup.json --synthetic-emulator \
   --output validation/genesis-connected-readback.json
+# Craft only after the complete-backup proof has compared its unchanged snapshot.
+# This stage uses the same fictional hero and adds its own material and invention.
+run_stage GenesisCraftingInstrumentationTest 1 900 native-genesis-crafting.txt
+stop_product
+copy_campaign_database validation/genesis-crafting
+python3 scripts/genesis-crafting-readback.py \
+  --before-database validation/genesis-connected/astravar-campaign-ledger.db \
+  --database validation/genesis-crafting/astravar-campaign-ledger.db --synthetic-emulator \
+  --output validation/genesis-crafting-readback.json
 run_stage UpdateFixtureInstrumentationTest 1 120 native-update-fixture.txt
 stop_product
 timeout 15s adb -s "$astravar_serial" root
