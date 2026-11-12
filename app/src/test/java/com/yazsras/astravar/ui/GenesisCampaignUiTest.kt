@@ -30,6 +30,14 @@ import java.util.UUID
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class GenesisCampaignUiTest {
     @get:Rule val compose = createAstravarComposeRule()
+    private var captureActivity: ComponentActivity? = null
+    private fun capture(name: String) {
+        if (System.getProperty("astravar.screenshots") == null) return
+        compose.runOnIdle { invalidateNativeCaptureWindows() }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.runOnIdle { captureNativeTestWindows(name, requireNotNull(captureActivity)) }
+    }
     private fun fixture(block: (GenesisConnectedEnvironment, CampaignLedgerDb) -> Unit) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val databaseName = "fictional-genesis-ui-${UUID.randomUUID()}.db"
@@ -41,9 +49,19 @@ class GenesisCampaignUiTest {
         finally { runBlocking { scope.coroutineContext[Job]!!.cancelAndJoin() }; db.close(); context.deleteDatabase(databaseName); preferenceFile.delete() }
     }
     private fun show(content: @Composable () -> Unit, block: () -> Unit) {
+        val previous = System.getProperty("robolectric.windowManager.useRequestedSize")
+        System.setProperty("robolectric.windowManager.useRequestedSize", "true")
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
-        try { controller.get().setContent { AstravarTheme { content() } }; block() }
-        finally { controller.pause().stop().destroy() }
+        try {
+            captureActivity = controller.get()
+            controller.get().setContent { AstravarTheme { content() } }
+            block()
+        } finally {
+            captureActivity = null
+            controller.pause().stop().destroy()
+            if (previous == null) System.clearProperty("robolectric.windowManager.useRequestedSize")
+            else System.setProperty("robolectric.windowManager.useRequestedSize", previous)
+        }
     }
     private fun click(text: String) = compose.onNode(hasText(text) and hasClickAction()).performScrollTo().performClick()
     private fun awaitText(text: String) = compose.waitUntil(15_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
@@ -53,7 +71,9 @@ class GenesisCampaignUiTest {
         show({ GenesisCampaignEditor(env.authority, {}, { result = it }) }) {
             compose.onNodeWithText("Campaign name").performTextInput("Fictional Amber Shore")
             compose.onNodeWithText("Campaign notes").performTextInput("Fictional campaign fixture")
+            capture("genesis-connected-campaign-editor")
             click("Review & save")
+            capture("genesis-connected-campaign-review")
             click("Save campaign")
             compose.waitUntil(15_000) { result != null }
             val saved = requireNotNull(result)
@@ -68,13 +88,21 @@ class GenesisCampaignUiTest {
     @Test fun sourceNpcCreatesSameIdentityInCampaignAndConnectionsWithoutInventedStats() = fixture { env, db ->
         val world = runBlocking { env.authority.createCampaign("Fictional NPC Coast") }
         var result: GenesisActorCreationOutcome? = null
-        show({ GenesisSourceActorEditor(env.copy(selectedCampaignId = world.id), GenesisActorRole.NPC, {}, { result = it }) }) {
+        val editorOpen = mutableStateOf(true)
+        show({
+            if (editorOpen.value) GenesisSourceActorEditor(env.copy(selectedCampaignId = world.id), GenesisActorRole.NPC, {}, { result = it; editorOpen.value = false })
+            else GenesisCampaignHub(env.copy(selectedCampaignId = world.id), open = {}, openActor = { _, _ -> })
+        }) {
             compose.onNodeWithText("NPC name").performTextInput("Fictional Harbor Keeper")
             click("Review & save")
             compose.onNodeWithText(world.name).assertExists()
+            capture("genesis-connected-npc-review")
             click("Create NPC")
             compose.waitUntil(15_000) { result != null }
             val saved = requireNotNull(result)
+            awaitText(saved.profile.name)
+            compose.onNodeWithText(saved.profile.name).assertExists()
+            capture("genesis-connected-campaign-people")
             assertEquals(world.id, saved.actor.campaignId)
             assertEquals(GenesisActorRole.NPC, saved.actor.role)
             assertFalse(saved.actor.playable)
@@ -96,6 +124,7 @@ class GenesisCampaignUiTest {
             compose.onNodeWithText("Companion name").performTextInput("Fictional Brass Finch")
             click("Review & save")
             compose.onNodeWithText(owner.profile.name).assertExists()
+            capture("genesis-connected-companion-review")
             click("Create companion")
             compose.waitUntil(15_000) { created != null }
             val result = requireNotNull(created)
@@ -123,7 +152,9 @@ class GenesisCampaignUiTest {
             else GenesisConnectedItemEditor(env, requireNotNull(saved), {}, { itemSaved = true })
         }) {
             compose.onNodeWithText("Name").performTextInput("Fictional Copper Ranger")
+            capture("genesis-connected-character-editor")
             click("Review & save")
+            capture("genesis-connected-character-review")
             click("Save character")
             compose.waitUntil(15_000) { saved != null }
             val actor = requireNotNull(saved)
@@ -134,6 +165,7 @@ class GenesisCampaignUiTest {
             compose.runOnIdle { addingItem.value = true }
             compose.onNodeWithText("Item name").performTextInput("Fictional Brass Compass")
             click("Review & save")
+            capture("genesis-connected-equipment-review")
             click("Save item")
             compose.waitUntil(15_000) { itemSaved }
             runBlocking {
@@ -172,6 +204,7 @@ class GenesisCampaignUiTest {
             click("Review shared values")
             awaitText("I reviewed these values and membership")
             compose.onNode(hasText("Accept reviewed values") and hasClickAction()).assertIsNotEnabled()
+            capture("genesis-shared-character-review")
             runBlocking { env.local.save(original.character.id, original.revision, original.character.copy(currentHp = 9), "Fictional later damage") }
             click("I reviewed these values and membership")
             click("Accept reviewed values")
