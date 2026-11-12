@@ -4,7 +4,45 @@ This is the current recovery handoff, not a completed release. Read the original
 `docs/genesis/SESSION_RECOVERY.md` at `ee04d5f` first, then this file and the
 linked milestone checkpoints. Later verified facts here supersede older status.
 
-## Active resumed session — observed tab discovery correction published
+## Active resumed session — accessible navigation fix published
+
+Current published source: `a86ab0fa87ce47a4f99550dcfa8fe01ed0e22928`,
+tree `abbebf572d53b38afd28c164a61fa7095978ccb8`; local equivalent
+`6412843b528efa24370c7cd30b1b035bdb3a6b26` in the existing main worktree.
+Checkpoint: `checkpoint/astravar-genesis-resumed-verification-20261112`.
+Fresh CI branch: `feat/astravar-project-genesis-accessible-navigation-20261112`.
+The prior resume feature branch stays at de98 to let its full run finish;
+no running gate was cancelled and no PR15/source history was overwritten.
+Fresh gates created15:48:38UTC, both PENDING:
+- Full43251800831: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43251800831
+- Native43251800807: https://github.com/Brenmack15/Astravar-Overlay/actions/runs/43251800807
+
+Three files changed: shared PlayerTabs and Genesis page hint now have explicit
+zIndex(1f) above adjacent scrolling content; GenesisPagerTest adds an actual
+Android AccessibilityNodeProvider regression. Layout sizes, page/state/Back and
+native48dp assertions are unchanged. Pinned Compose1.10 expands ancestor clipping
+by24dp for touch semantics and subtracts those bounds from siblings; another
+clipToBounds alone would not fix the observed939→874 occlusion. Both reviewers
+confirmed the same mechanism in actual failed and older native XML.
+
+RED against unchanged de98 product: Equipment native bounds46px instead of48dp
+at density1. GREEN: all8 GenesisPagerTest cases passed,0failures/errors/skips,
+including provider bounds, full hint/indicator accessibility, bottom-edge pointer
+tap, retained reading offset, usable disclosure, nested gestures and restoration.
+Logs `genesis-pager-accessibility-{red,green}-20261112.log`; evidence manifest
+`genesis-pager-accessibility-evidence-20261112/manifest.json` preserves both XMLs,
+logs and source hashes. Its RED-test source was transparently reconstructed by
+reversing post-failure hint assertions/rounding refinement; raw XML/log and Git
+production baseline were retained. No native acceptance inferred from host tests.
+
+Root local broader shared-tab tests/lint/debug APK/native-test APK are running
+in session60940; log `genesis-resume-evidence/shared-tabs-verification-a86-1.log`.
+Do not start another local Gradle while that invocation owns the runtime lock.
+No owner signing has occurred. Owner helper remains DISABLED and still pins
+failedde98; update every source/artifact/gate pin to a final successful candidate
+before activation. Do not sign de98 or reuse its failed native artifact.
+
+## Prior de98 checkpoint — retained failed native evidence
 
 Current published source: `de98cb694a2c8bfa03911f8c827ebea370fdc6c7`,
 tree `25ac8d5012b0a0daba86d82dba63c61d93a2baaf`. Local equivalent
