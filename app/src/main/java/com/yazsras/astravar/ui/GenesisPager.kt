@@ -193,6 +193,10 @@ internal fun Modifier.genesisHorizontalControl(): Modifier = nestedScroll(Genesi
             if (onSwitch != null) PlayerTextButton(onClick = onSwitch,
                 modifier = Modifier.widthIn(max = if (largeText) 156.dp else 112.dp)
                     .semantics { contentDescription = "Switch character" }) { Text("Switch character") }
+            if (onControls != null) IconButton(onClick = onControls, modifier = Modifier.size(48.dp)
+                .testTag("genesis-character-controls").semantics { contentDescription = "Character controls" }) {
+                ArcaneIcon("Settings", Modifier.size(24.dp), RebuildPalette.GoldBright)
+            }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(Modifier.weight(if (largeText) 1.5f else 2f).heightIn(min = 48.dp)

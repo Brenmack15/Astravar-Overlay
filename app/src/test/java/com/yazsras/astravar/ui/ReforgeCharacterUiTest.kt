@@ -382,6 +382,17 @@ class ReforgeCharacterUiTest {
         assertCharacterChromeUsesCanvas()
     }
 
+    @Test fun portraitHeaderOpensOptionalControlsWithoutRestoringShortcutRow() = withSheet { repository ->
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("quick-health").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Character controls").assertIsDisplayed().performClick()
+        compose.onNodeWithContentDescription("Customize quick actions").assertIsDisplayed()
+        compose.onNodeWithText("Health").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Damage or healing amount").assertIsDisplayed()
+        assertEquals(40, runBlocking { repository.get(fixture().id) }!!.character.currentHp)
+        capture("genesis-portrait-character-controls-health")
+    }
+
     private fun assertCharacterChromeUsesCanvas() {
         listOf("quick-health", "quick-attack", "quick-spells", "quick-inventory").forEach {
             compose.onNodeWithTag(it).assertDoesNotExist()
