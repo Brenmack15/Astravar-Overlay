@@ -31,15 +31,28 @@ import org.robolectric.annotation.LooperMode
 class GenesisArmorElementResponsiveTest {
     @get:Rule val compose = createAstravarComposeRule()
 
-    private fun assertSingleReadableLine(text: String) {
+    private fun assertSingleReadableLine(text: String, fontScale: Float) {
         val node = compose.onNodeWithText(text, useUnmergedTree = true).assertIsDisplayed()
         val layouts = mutableListOf<TextLayoutResult>()
         node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
         val result = layouts.single()
-        assertEquals("$text must not be squeezed into fragments", 1, result.lineCount)
-        assertFalse("$text must remain fully visible: width=${result.didOverflowWidth}, height=${result.didOverflowHeight}, " +
+        val bounds = node.fetchSemanticsNode().boundsInRoot
+        val diagnostic = "$text: width=${result.didOverflowWidth}, height=${result.didOverflowHeight}, " +
             "size=${result.size}, paragraph=${result.multiParagraph.width}x${result.multiParagraph.height}, " +
-            "line=${result.getLineLeft(0)}..${result.getLineRight(0)}, bounds=${node.fetchSemanticsNode().boundsInRoot}", result.hasVisualOverflow)
+            "constraints=${result.layoutInput.constraints}, line=${result.getLineLeft(0)},${result.getLineTop(0)}.." +
+            "${result.getLineRight(0)},${result.getLineBottom(0)}, bounds=$bounds"
+        if (text == "Active element") println(diagnostic)
+        assertEquals("$text must retain the requested text scale", fontScale, result.layoutInput.density.fontScale, .01f)
+        assertEquals("$text must not be squeezed into fragments: $diagnostic", 1, result.lineCount)
+        // Text can retain a wider paragraph allocation than its shrink-wrapped node:
+        // at 200%, the measured node is 170px, paragraph 224px, rendered line 169.36px.
+        // Inspect the complete rendered line and actual node bounds, not that allocation flag.
+        assertTrue("$text is clipped horizontally: $diagnostic",
+            result.getLineLeft(0) >= 0f && result.getLineRight(0) <= result.size.width)
+        assertTrue("$text is clipped vertically: $diagnostic",
+            result.getLineTop(0) >= 0f && result.getLineBottom(0) <= result.size.height)
+        assertTrue("$text is obscured by its container: $diagnostic", bounds.width >= result.size.width && bounds.height >= result.size.height)
+        assertEquals(text.length, result.getLineEnd(0, visibleEnd = true))
         assertFalse(result.isLineEllipsized(0))
     }
 
@@ -59,9 +72,9 @@ class GenesisArmorElementResponsiveTest {
                 compose.mainClock.advanceTimeByFrame(); compose.waitForIdle()
                 compose.runOnIdle { captureNativeTestWindows(screenshot, controller.get()) }
             }
-            assertSingleReadableLine("Active element")
-            assertSingleReadableLine("Lightning")
-            assertSingleReadableLine("Change element")
+            assertSingleReadableLine("Active element", fontScale)
+            assertSingleReadableLine("Lightning", fontScale)
+            assertSingleReadableLine("Change element", fontScale)
             compose.onNodeWithTag("genesis-active-element-art").assertIsDisplayed().assertWidthIsEqualTo(52.dp)
             val label = compose.onNodeWithText("Active element").fetchSemanticsNode().boundsInRoot
             val value = compose.onNodeWithText("Lightning").fetchSemanticsNode().boundsInRoot
