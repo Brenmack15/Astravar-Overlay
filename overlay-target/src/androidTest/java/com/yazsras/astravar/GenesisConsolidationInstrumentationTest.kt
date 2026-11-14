@@ -50,6 +50,17 @@ class GenesisConsolidationInstrumentationTest {
         return ui.snapshot(By.text(Pattern.compile("d20 .*" )).pkg(product),
             "current armor attack's exact raw dice", refreshCache = true) { it.text?.takeIf { value -> value.startsWith("d20 ") } }
     }
+    private fun assertSkillOrder(first: String, second: String, message: String) {
+        find(first); find(second)
+        // Reveal both rows, then compare one fresh viewport. Rectangles from
+        // before and after a discovery swipe cannot establish visual order.
+        val positions = ui.snapshot(By.text(second).pkg(product), message, refreshCache = true) { later ->
+            val earlier = device.findObject(By.text(first).pkg(product)) ?: return@snapshot null
+            val a = Rect(earlier.visibleBounds); val b = Rect(later.visibleBounds)
+            (a to b).takeIf { !a.isEmpty && !b.isEmpty }
+        }
+        assertTrue(message, positions.first.top < positions.second.top)
+    }
     private fun committedArmorRoll() {
         assertTrue("Automatic roll transaction finishes before reading its saved result",
             device.wait(Until.gone(By.text("Armor roll").pkg(product)), 30_000))
@@ -198,12 +209,14 @@ class GenesisConsolidationInstrumentationTest {
         enter("Additional bonus", "1")
         enter("Notes (optional)", "Fictional custom skill persistence")
         tap("Save skill")
+        // Editor save restores the Sheet reading position; the newly inserted
+        // skill may be below the viewport. Discover its real row before touch.
+        find("Alchemy native")
         ui.tap(By.desc("Pin Alchemy native custom skill").pkg(product), "Pin custom skill")
+        find("Arcana")
         ui.tap(By.desc("Pin Arcana").pkg(product), "Pin standard skill")
         find("Pinned · A–Z")
-        val custom = ui.textBounds("Alchemy native", product)
-        val standard = ui.textBounds("Arcana", product)
-        assertTrue("Pinned skills sort alphabetically", custom.top < standard.top)
+        assertSkillOrder("Alchemy native", "Arcana", "Pinned skills sort alphabetically")
         restart(); ui.selectSection(product, "Sheet")
         find("Alchemy native")
         ui.bounds(By.desc("Unpin Alchemy native custom skill").pkg(product), "persisted custom pin")
@@ -212,8 +225,7 @@ class GenesisConsolidationInstrumentationTest {
         enter("Skill name", "Zoology native")
         tap("Save skill")
         find("Zoology native")
-        assertTrue("Renaming a pinned skill reorders within the group",
-            ui.textBounds("Arcana", product).top < ui.textBounds("Zoology native", product).top)
+        assertSkillOrder("Arcana", "Zoology native", "Renaming a pinned skill reorders within the group")
         tap("Zoology native")
         tap("Enter physical dice faces")
         enter("Faces in order (comma separated)", "13")

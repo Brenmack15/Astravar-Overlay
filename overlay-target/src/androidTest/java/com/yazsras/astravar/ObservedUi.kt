@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.os.SystemClock
 import android.os.Build
 import android.view.KeyEvent
+import android.view.accessibility.AccessibilityWindowInfo
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.*
 import org.junit.Assert.assertEquals
@@ -747,11 +748,54 @@ internal class ObservedUi(private val device: UiDevice) {
             })
     }
 
-    /** Fixture editing uses Android key dispatch, with independent exact AX readback. */
+    /** Exact fixture content uses one accessible edit, outside native IME composition. */
     fun setFocusedField(value: String, packageName: String, description: String) {
-        // Compose can acknowledge ACTION_SET_TEXT during an IME/scroll transition
-        // without committing the text. Exercise the same InputConnection as a
-        // keyboard user; each action is dispatched once and must read back exactly.
-        enterFocusedField(value, packageName, description)
+        require(value.matches(Regex("[A-Za-z0-9 .;_-]+"))) { "Native fixture input must use the controlled ASCII alphabet" }
+        val selector = By.clazz("android.widget.EditText").focused(true).pkg(packageName)
+        fun keyboardShown(): Boolean = InstrumentationRegistry.getInstrumentation().uiAutomation.windows.any { window ->
+            window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD &&
+                !Rect().also { window.getBoundsInScreen(it) }.isEmpty
+        }
+        // Observe the real IME before Back so a late keyboard cannot turn this
+        // into navigation. This does not change any Gboard settings or app data.
+        snapshot(selector, "visible native keyboard before fixture edit: $description", timeoutMs = 10_000, refreshCache = true) {
+            true.takeIf { it.isFocused && it.isEnabled && !it.visibleBounds.isEmpty && keyboardShown() }
+        }
+        assertTrue("Dismiss the observed native keyboard once: $description", device.pressBack())
+        var stable: Pair<Rect, String>? = null
+        var stableSince = 0L
+        val settled = snapshot(selector, "stable focused field after keyboard dismissal: $description", timeoutMs = 10_000, refreshCache = true) {
+            if (keyboardShown() || !it.isFocused || !it.isEnabled || it.visibleBounds.isEmpty) {
+                stable = null
+                null
+            } else {
+                val observed = Rect(it.visibleBounds) to it.text.orEmpty()
+                val now = SystemClock.uptimeMillis()
+                if (stable != observed) { stable = observed; stableSince = now }
+                observed.first.takeIf { now - stableSince >= 120 }
+            }
+        }
+        // Acquire a fresh node and mutate exactly once, outside the retrying
+        // observation helper. A stale action fails; it is never repeated.
+        clearObservationCache()
+        val field = checkNotNull(device.findObject(selector)) { "Focused fixture field disappeared: $description" }
+        check(!keyboardShown() && field.isFocused && field.isEnabled && Rect(field.visibleBounds) == settled) {
+            "Focused fixture field changed after the stable observation: $description"
+        }
+        field.text = value
+        snapshot(selector, "exact fixture text with keyboard dismissed: $description", timeoutMs = 10_000, refreshCache = true) {
+            true.takeIf { !keyboardShown() && it.isFocused && it.text.orEmpty() == value }
+        }
+        // Keep the caller's existing native Back/geometry contract. Reopening
+        // the IME after ACTION_SET_TEXT creates no partial composing word.
+        val reopen = snapshot(selector, "fixture edit before reopening native keyboard: $description", timeoutMs = 10_000, refreshCache = true) {
+            Rect(it.visibleBounds).takeIf { bounds -> it.text.orEmpty() == value && !bounds.isEmpty }
+        }
+        touch(reopen, "Reopen the native keyboard after exact fixture edit: $description", idleTimeoutMs = 1_000)
+        snapshot(selector, "exact fixture text after native keyboard returns: $description", timeoutMs = 10_000, refreshCache = true) {
+            true.takeIf { keyboardShown() && it.isFocused && it.text.orEmpty() == value }
+        }
+        // enterFocusedField is deliberately unchanged: dedicated distance/IME
+        // geometry tests still dispatch real keys and check exact text afterward.
     }
 }
