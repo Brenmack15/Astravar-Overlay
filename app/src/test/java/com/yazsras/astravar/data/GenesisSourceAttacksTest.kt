@@ -79,17 +79,24 @@ class GenesisSourceAttacksTest {
                 base.copy(id = "mixed", damageFormula = "2d6 cold + 1d4 fire"),
                 base.copy(id = "critical", criticalRule = "Triple dice"),
                 base.copy(id = "multi", multiattack = "Two strikes"),
-                base.copy(id = "unknown", attackBonus = null),
-                base.copy(id = "duplicate"), base.copy(id = "duplicate"))
+                base.copy(id = "unknown", attackBonus = null))
             val before = seed(legacy, local, sources)
             val review = local.reviewSourceAttacks(legacy, before)
             val rows = sourceAttackCandidates(review)
-            assertEquals(9, rows.size); assertEquals(listOf("zero"), rows.filter { it.problem == null }.map { it.source.id })
+            assertEquals(7, rows.size); assertEquals(listOf("zero"), rows.filter { it.problem == null }.map { it.source.id })
             assertTrue(runCatching { local.commitSourceAttack(legacy, review, "cost", choices) }.isFailure)
             assertTrue(runCatching { local.commitSourceAttack(legacy, review, "zero", choices.copy(noAdditionalCost = false)) }.isFailure)
             assertTrue(runCatching { local.commitSourceAttack(legacy, review, "zero", choices.copy(actionType = "")) }.isFailure)
             assertEquals(before, local.get(id))
             assertEquals(0, sourceAttackDefinition(review, "zero", choices).damage.single().formula.flat)
+            // The source repository already rejects duplicate IDs. Exercise the importer's
+            // independent defensive check with a constructed malformed snapshot, not a bad save.
+            val duplicateSheet = review.sheet.copy(contentJson = campaignJson.encodeToString(
+                PartySheetData(attacks = listOf(base.copy(id = "duplicate"), base.copy(id = "duplicate")))))
+            val malformed = review.copy(sheet = duplicateSheet, fingerprint = reforgeHash(reforgeJson.encodeToString(duplicateSheet)))
+            assertTrue(sourceAttackCandidates(malformed).all { it.problem == "The source repeats this attack identity." })
+            assertTrue(runCatching { sourceAttackDefinition(malformed, "duplicate", choices) }.isFailure)
+            assertEquals(before, local.get(id))
         } finally { database.close() }
     }
 
