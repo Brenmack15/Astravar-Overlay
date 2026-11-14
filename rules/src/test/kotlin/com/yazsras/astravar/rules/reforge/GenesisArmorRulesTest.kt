@@ -134,4 +134,27 @@ class GenesisArmorRulesTest {
         assertFalse(legacy.contains("conditionAttackAdjustment"))
         assertEquals(0, BackupCodec.json.decodeFromString<Profile>(legacy).conditionAttackAdjustment)
     }
+
+    @Test fun reservoirLoadAndPurgeRespectConditionsAndUnknownSlotAccounting() {
+        val template = Template("second-level", "Fictional burst", 2, 2,
+            listOf(TypedDice(Dice(2, 6), DamageType.FIRE)), DamageType.FIRE, approved = true)
+        val owner = adopted(source().copy(templates = listOf(template)))
+        assertThrows(IllegalArgumentException::class.java) {
+            GenesisArmorRules.load(owner.copy(conditions = setOf("stunned")), template.id, "blocked", SourceKind.SLOT, manualSlot = true)
+        }
+        assertThrows(IllegalArgumentException::class.java) { GenesisArmorRules.load(owner, template.id, "unknown", SourceKind.SLOT) }
+        val loaded = GenesisArmorRules.load(owner, template.id, "loaded", SourceKind.SLOT, manualSlot = true)
+        assertNull(loaded.spellSlots[2])
+        assertTrue(loaded.turn.spellSlotSpent)
+        assertFalse(loaded.turn.bonusActionAvailable)
+        assertThrows(IllegalArgumentException::class.java) {
+            GenesisArmorRules.plan(loaded, "second-slot", Ability.SPELL, immediate = template, manualSlotConfirmed = true)
+        }
+        val next = GameplayRules.nextTurn(loaded)
+        assertThrows(IllegalArgumentException::class.java) { GenesisArmorRules.purge(next.copy(conditions = setOf("paralyzed")), "loaded") }
+        val purged = GenesisArmorRules.purge(next, "loaded")
+        assertNull(purged.spellSlots[2])
+        assertTrue(purged.armor!!.campaign.installed!!.payloads.isEmpty())
+        assertFalse(purged.turn.bonusActionAvailable)
+    }
 }

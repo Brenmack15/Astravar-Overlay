@@ -27,6 +27,7 @@ import java.util.UUID
     onRoll: (ReforgeCharacter, ReforgeRollRecord) -> Unit,
     onHistory: () -> Unit, saving: Boolean = false) {
     val armor = character.armor ?: return
+    val feedback = LocalGenesisEditorFeedback.current
     val stateResult = runCatching { GenesisArmorRules.runtime(character) }
     val state = stateResult.getOrNull()
     var ability by rememberSaveable(character.id) { mutableStateOf(if (armor.elements.isEmpty()) Ability.ARCANE else Ability.ELEMENTAL) }
@@ -186,6 +187,7 @@ import java.util.UUID
             if (pending.plan.blast) Text("Exhausts the internal nexus for 600 game seconds. Target saves are recorded after saving this roll.")
             if (stale) Text("The character changed after this roll. These faces are retained, but this action cannot spend resources against a different revision.", color = MaterialTheme.colorScheme.error)
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+            if (feedback.error.isNotBlank()) Text(feedback.error, color = MaterialTheme.colorScheme.error)
         }
     }
 }
@@ -236,14 +238,21 @@ internal fun genesisArmorRollRecord(character: ReforgeCharacter, pending: Pendin
     var targets by targetDraft
     var outcome by rememberSaveable { mutableStateOf(pending.rolled?.suggestedOutcome) }
     var error by remember { mutableStateOf("") }
+    val feedback = LocalGenesisEditorFeedback.current
+    var submitted by remember { mutableStateOf<Resolution?>(null) }
+    val revision = rememberSaveable { character.revision }
+    val stale = character.revision != revision
+    LaunchedEffect(character.revision, pending.result) {
+        if (submitted != null && pending.result == submitted) onDismiss()
+    }
     PlayerSheet("Record Discharge saves", onDismiss, dirty = targets.isNotEmpty(), dismissEnabled = !saving,
         actions = {
-            PlayerButton(enabled = !saving && targetDraft.canSave, onClick = {
+            PlayerButton(enabled = !saving && !stale && targetDraft.canSave, onClick = {
                 try {
                     val state = GenesisArmorRules.runtime(character)
                     val result = DiceRoller.resolution(pending.plan, requireNotNull(pending.rolled), outcome, targets)
+                    submitted = result
                     onSave(GenesisArmorRules.apply(character, Engine.resolve(state, pending.plan.id, result)), "Recorded Discharge saves")
-                    onDismiss()
                 } catch (e: Exception) { error = e.message ?: "Record each actual save result." }
             }) { Text("Save target results") }
         }) {
@@ -265,5 +274,7 @@ internal fun genesisArmorRollRecord(character: ReforgeCharacter, pending: Pendin
         }
         PlayerOutlinedButton(enabled = targets.size < 200, onClick = { targets = targets + TargetSave("Creature ${targets.size + 1}", null) }) { Text("Add affected creature") }
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+        if (feedback.error.isNotBlank()) Text(feedback.error, color = MaterialTheme.colorScheme.error)
+        if (stale && pending.result != submitted) Text("Character changed. Your entered saves remain here; close and reopen the current result before saving.", color = MaterialTheme.colorScheme.error)
     }
 }

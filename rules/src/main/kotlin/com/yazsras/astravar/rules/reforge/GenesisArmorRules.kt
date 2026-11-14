@@ -153,6 +153,22 @@ object GenesisArmorRules {
         return apply(character, Engine.chargeGauntlet(runtime(character)))
     }
 
+    fun load(character: ReforgeCharacter, templateId: String, payloadId: String, source: SourceKind,
+        manualSlot: Boolean = false, scrollId: String? = null, overwriteId: String? = null): ReforgeCharacter {
+        requireAction(character)
+        val state = runtime(character)
+        val template = state.templates.singleOrNull { it.id == templateId } ?: error("Select a current spell template.")
+        val coreId = state.installedId ?: error("Review the internal nexus configuration first.")
+        return apply(character, Engine.charge(state, coreId, template, payloadId, source, true, manualSlot, scrollId, overwriteId))
+    }
+
+    fun purge(character: ReforgeCharacter, payloadId: String): ReforgeCharacter {
+        requireAction(character)
+        val state = runtime(character)
+        val coreId = state.installedId ?: error("Review the internal nexus configuration first.")
+        return apply(character, Engine.purge(state, coreId, payloadId))
+    }
+
     /** A retried save retains these exact faces; it never draws another set of dice. */
     fun commitRolled(character: ReforgeCharacter, plan: ShotPlan, roll: ShotRoll): ReforgeCharacter {
         val before = runtime(character)
