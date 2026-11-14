@@ -332,7 +332,7 @@ internal class ObservedUi(private val device: UiDevice) {
             listOf("Sheet", "Combat", "Equipment", "Spells", "Features", "Resources", "Currency", "History"),
             listOf("My gear", "Campaign items"),
             listOf("My items", "All items"),
-            listOf("All gear", "Equipped", "Attuned"),
+            listOf("All gear", "Equipped", "Attuned", "Favorites"),
             listOf("All", "Prepared", "Cantrips"),
             listOf("All rolls", "Character", "Armor"),
             listOf("People", "Journal")

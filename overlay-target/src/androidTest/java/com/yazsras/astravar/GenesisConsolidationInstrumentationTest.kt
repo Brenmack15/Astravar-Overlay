@@ -173,6 +173,23 @@ class GenesisConsolidationInstrumentationTest {
         find("Armor features"); find("Engineering upgrades")
         capture("connected-armor-features")
 
+        // Favorites are the next deferred slice: exercise the same physical
+        // item and its persisted character state without changing equipment.
+        ui.selectSection(product, "Equipment")
+        find("CI Native Strength Band"); find("Carried · Quantity 1")
+        ui.tap(By.desc("Add CI Native Strength Band to favorites").pkg(product), "Favorite existing equipment")
+        ui.selectSection(product, "Favorites")
+        find("CI Native Strength Band"); find("Carried · Quantity 1")
+        restart(); ui.selectSection(product, "Equipment")
+        ui.selectSection(product, "Favorites")
+        find("CI Native Strength Band")
+        ui.tap(By.desc("Remove CI Native Strength Band from favorites").pkg(product), "Unfavorite equipment")
+        find("No matching equipment")
+        ui.selectSection(product, "All gear")
+        find("CI Native Strength Band"); find("Carried · Quantity 1")
+        ui.tap(By.desc("Add CI Native Strength Band to favorites").pkg(product), "Retain favorite for complete backup")
+        capture("equipment-favorite")
+
         ui.selectSection(product, "Sheet")
         assertFalse("No duplicate Health shortcut row", device.hasObject(By.text("Health").pkg(product)))
         tap("Add skill")
@@ -227,6 +244,6 @@ class GenesisConsolidationInstrumentationTest {
         ui.tap(By.desc("Pin Alchemy native custom skill").pkg(product), "Retain a pinned custom skill for backup")
         ui.descriptionBounds("HP 31 / 37", product)
         instrumentation.sendStatus(0, Bundle().apply { putString("stream",
-            "\nCHECKPOINT: candidate native consolidation reviewed existing armor into one character; real attack dice, one-shot advantage, keyboard/rotation, retained element, reservoir load, Features, custom skill CRUD and standard/custom pins persisted through restart. HP unchanged. Historical baseline rolls and backup/SQLite proofs remain independent stages.\n") })
+            "\nCHECKPOINT: candidate native consolidation reviewed existing armor into one character; real attack dice, one-shot advantage, keyboard/rotation, retained element, reservoir load, Features, equipment favorites, custom skill CRUD and standard/custom pins persisted through restart. HP unchanged. Historical baseline rolls and backup/SQLite proofs remain independent stages.\n") })
     }
 }
