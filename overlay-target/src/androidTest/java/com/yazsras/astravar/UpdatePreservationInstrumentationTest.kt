@@ -5,6 +5,7 @@ import android.graphics.Rect
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import org.junit.Assert.*
@@ -43,6 +44,7 @@ class UpdatePreservationInstrumentationTest {
         ui.tap(By.desc("Switch character").pkg(product), "Select the adopted armor owner")
         tap("CI Native Hero Revised")
         ui.selectSection(product, "Sheet")
+        ui.textBounds("Pinned · A–Z", product, scrollAttempts = 14, firstDirection = Direction.UP)
         find("Alchemy native")
         ui.bounds(By.desc("Unpin Alchemy native custom skill").pkg(product), "custom skill and pin survive APK update")
         find("Arcana")

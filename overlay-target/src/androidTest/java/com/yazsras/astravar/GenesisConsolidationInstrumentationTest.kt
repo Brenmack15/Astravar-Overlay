@@ -10,6 +10,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import org.junit.Assert.*
@@ -30,6 +31,15 @@ class GenesisConsolidationInstrumentationTest {
     private val files get() = instrumentation.targetContext.getExternalFilesDir(null)!!
     private fun tap(label: String) = ui.tapText(label, product, scrollAttempts = 24, preferLast = true)
     private fun find(label: String) = ui.textBounds(label, product, scrollAttempts = 24)
+    private fun findPinnedHeading() = ui.textBounds("Pinned · A–Z", product,
+        scrollAttempts = 24, firstDirection = Direction.UP)
+    private fun assertPinnedSkill(name: String, custom: Boolean = false) {
+        // Pinning moves the row into the known upper group. Discover that
+        // anchor first, then read the actual saved state without another tap.
+        findPinnedHeading(); find(name)
+        ui.bounds(By.desc("Unpin $name${if (custom) " custom skill" else ""}").pkg(product),
+            "Saved pin for $name", refreshCache = true)
+    }
     private fun enter(label: String, value: String) {
         tap(label); ui.setFocusedField(value, product, label)
         device.pressBack(); ui.assertFocusedField(value, product, label)
@@ -51,6 +61,7 @@ class GenesisConsolidationInstrumentationTest {
             "current armor attack's exact raw dice", refreshCache = true) { it.text?.takeIf { value -> value.startsWith("d20 ") } }
     }
     private fun assertSkillOrder(first: String, second: String, message: String) {
+        findPinnedHeading()
         find(first); find(second)
         // Reveal both rows, then compare one fresh viewport. Rectangles from
         // before and after a discovery swipe cannot establish visual order.
@@ -213,17 +224,21 @@ class GenesisConsolidationInstrumentationTest {
         // skill may be below the viewport. Discover its real row before touch.
         find("Alchemy native")
         ui.tap(By.desc("Pin Alchemy native custom skill").pkg(product), "Pin custom skill")
+        assertPinnedSkill("Alchemy native", custom = true)
         find("Arcana")
         ui.tap(By.desc("Pin Arcana").pkg(product), "Pin standard skill")
-        find("Pinned · A–Z")
+        assertPinnedSkill("Arcana")
+        findPinnedHeading()
         assertSkillOrder("Alchemy native", "Arcana", "Pinned skills sort alphabetically")
         restart(); ui.selectSection(product, "Sheet")
+        findPinnedHeading()
         find("Alchemy native")
         ui.bounds(By.desc("Unpin Alchemy native custom skill").pkg(product), "persisted custom pin")
         ui.bounds(By.desc("Unpin Arcana").pkg(product), "persisted standard pin")
         ui.tap(By.desc("Edit Alchemy native custom skill").pkg(product), "Edit persisted custom skill")
         enter("Skill name", "Zoology native")
         tap("Save skill")
+        findPinnedHeading()
         find("Zoology native")
         assertSkillOrder("Arcana", "Zoology native", "Renaming a pinned skill reorders within the group")
         tap("Zoology native")
@@ -240,6 +255,7 @@ class GenesisConsolidationInstrumentationTest {
         restart(); ui.selectSection(product, "Sheet")
         assertFalse("Removed custom skill stays removed after restart",
             device.hasObject(By.desc("Edit Zoology native custom skill").pkg(product)))
+        findPinnedHeading()
         find("Arcana")
         ui.bounds(By.desc("Unpin Arcana").pkg(product), "Official skill and its pin remain intact")
         ui.selectSection(product, "History")
@@ -254,6 +270,7 @@ class GenesisConsolidationInstrumentationTest {
         tap("Save skill")
         find("Alchemy native")
         ui.tap(By.desc("Pin Alchemy native custom skill").pkg(product), "Retain a pinned custom skill for backup")
+        assertPinnedSkill("Alchemy native", custom = true)
         ui.descriptionBounds("HP 31 / 37", product)
         instrumentation.sendStatus(0, Bundle().apply { putString("stream",
             "\nCHECKPOINT: candidate native consolidation reviewed existing armor into one character; real attack dice, one-shot advantage, keyboard/rotation, retained element, reservoir load, Features, equipment favorites, custom skill CRUD and standard/custom pins persisted through restart. HP unchanged. Historical baseline rolls and backup/SQLite proofs remain independent stages.\n") })

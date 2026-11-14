@@ -171,7 +171,14 @@ class GenesisJourneyInstrumentationTest {
         find("Genesis Native Campaign")
         find("Genesis Native Hero")
         tap("Create companion")
-        find("Genesis Native Familiar")
+        // Creation opens the new sheet at its header. Await the exact saved
+        // name before scrolling; discovery swipes can otherwise leave that
+        // known header while the asynchronous save is finishing.
+        assertEquals("Created companion opens with its exact saved name", "Genesis Native Familiar",
+            ui.snapshot(By.text("Genesis Native Familiar").pkg(product),
+                "New companion's saved name", refreshCache = true) { node ->
+                node.text?.takeIf { name -> name == "Genesis Native Familiar" && !node.visibleBounds.isEmpty }
+            })
         ui.ensurePrimaryTab(product, "Character")
         find("Genesis Native Hero")
 
