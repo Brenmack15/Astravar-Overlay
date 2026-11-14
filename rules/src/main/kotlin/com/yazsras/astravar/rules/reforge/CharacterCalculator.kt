@@ -197,6 +197,12 @@ object CharacterCalculator {
         require(c.resources.all { (it.maximum==null || it.maximum in 0..1_000_000) && (it.current==null || it.current in 0..1_000_000) && (it.recoveryAmount==null || it.recoveryAmount in 0..1_000_000) && (it.dieSides==null || it.dieSides in 2..1000) })
         require(c.spells.all { it.level in 0..9 && it.resourceCost>=0 })
         require(c.attacks.all { it.fixedAttackBonus==null || it.fixedAttackBonus in -1000..1000 })
+        c.attacks.forEach { attack -> attack.recordedSource?.let { source ->
+            require(source.profileId == c.id && source.attackId == attack.id && source.sheetRevision > 0)
+            require(source.sheetSource.length <= 100_000 && source.attackJson.length in 1..100_000)
+            require(source.reviewedSheetConflicts.size <= 1000 && source.reviewedSheetConflicts.sumOf { it.length.toLong() } <= 100_000)
+            require(source.fingerprint.matches(Regex("[0-9a-f]{64}")))
+        } }
         require(c.spellcastingClassLevel==null || c.spellcastingClassLevel in 1..20)
         require(c.slotMaximaOverride?.all { (level,max)->level in 1..9 && max in 0..100 }!=false)
         require(c.spellSlots.all { (level,count)->level in 1..9 && (count==null || count in 0..100) })

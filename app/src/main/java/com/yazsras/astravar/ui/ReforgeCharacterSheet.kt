@@ -385,6 +385,7 @@ private enum class SpellbookFilter(val label: String) {
                                     } },
                                     onHistory = { openSection("History") }, saving = busy)
                                 RebirthSectionLabel("Attacks") { PlayerTextButton(onClick = { dialog = "Attack" }) { Text("Add attack") } }
+                                GenesisSourceAttackReviewButton(repository, local, requireNotNull(saved))
                                 if (character.attacks.isEmpty()) PlayerEmpty("Set up your attacks", "Add an attack using your accepted damage dice and ability.", "Weapon")
                                 Column {
                                     character.attacks.forEach { attack -> key(attack.id) {
@@ -398,6 +399,7 @@ private enum class SpellbookFilter(val label: String) {
                                             }
                                             if (attack.damage.isNotEmpty()) Text("Base damage · ${attack.damage.joinToString(" + ") { "${SecureDice.format(it.formula)} ${it.type.name.lowercase()}" }}",
                                                 color = RebuildPalette.Silver, style = MaterialTheme.typography.bodyMedium)
+                                            GenesisRecordedAttackEvidence(attack)
                                             PlayerOutlinedButton(onClick = { openRoll(ReforgeRollRequest(attack.name, null, RollKind.ATTACK, attack.id, attack.id)) },
                                                 modifier = Modifier.fillMaxWidth()) {
                                                 ArcaneIcon("d20", Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Roll attack & damage")

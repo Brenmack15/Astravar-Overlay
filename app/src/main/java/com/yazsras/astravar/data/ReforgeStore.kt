@@ -461,6 +461,7 @@ internal fun reforgeHash(text: String): String = campaignHash(text)
 /** Structural bounds complement the rules engine: unknown scores/resources remain nullable. */
 internal fun validateCharacter(value: ReforgeCharacter) {
     CharacterCalculator.validate(value)
+    validateRecordedAttackSources(value)
     checkId(value.id); require(value.name.isNotBlank() && value.name.length <= 160) { "Enter a character name." }
     require(value.schemaVersion == 1 && value.revision >= 0 && value.level in 1..1000) { "Unsupported character version, revision or level." }
     require(value.baseAbilities.values.all { it == null || it in 0..1000 }) { "Ability scores must be known whole numbers or unknown." }

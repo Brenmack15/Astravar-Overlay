@@ -74,12 +74,20 @@ import kotlinx.serialization.ExperimentalSerializationApi
     val containerId: String? = null, val donorInstanceIds: Set<String> = emptySet(),
     val favorite: Boolean = false
 )
+/** Original descriptive evidence remains immutable when a reviewed attack is later edited. */
+@Serializable data class RecordedAttackSource(
+    val profileId: String, val attackId: String, val sheetRevision: Long,
+    val sheetSource: String, val attackJson: String, val fingerprint: String,
+    val reviewedSheetConflicts: List<String> = emptyList()
+)
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class AttackDefinition(
     val id: String, val name: String, val ability: Stat = Stat.STR, val proficient: Boolean = true,
     val attackBonus: Int = 0, val tags: Set<String> = emptySet(),
     val damage: List<DamageComponent> = emptyList(), val addAbilityToDamage: Boolean = true,
     val actionType: String = "Action", val range: String = "5 ft.",
-    val requiredItemId: String? = null, val fixedAttackBonus:Int? = null
+    val requiredItemId: String? = null, val fixedAttackBonus:Int? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val recordedSource: RecordedAttackSource? = null
 )
 @Serializable enum class SpellPreparation { KNOWN, PREPARED, ALWAYS_PREPARED }
 @Serializable data class SpellDefinition(
