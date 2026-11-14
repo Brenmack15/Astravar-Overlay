@@ -440,13 +440,14 @@ private enum class SpellbookFilter(val label: String) {
                                 Text("Attuned · ${character.items.filter { it.attuned }.sumOf { instance -> character.itemDefinitions.firstOrNull { it.id == instance.definitionId }?.attunementCost ?: 0 }} / ${character.attunementLimit}",
                                     color = RebuildPalette.GoldBright, style = MaterialTheme.typography.bodyMedium)
                                 PlayerSearch(gearQuery, setGearQuery, "Find equipment")
-                                PlayerTabs(listOf("All gear", "Equipped", "Attuned"), gearFilter, setGearFilter, Modifier.genesisHorizontalControl())
+                                PlayerTabs(listOf("All gear", "Equipped", "Attuned", "Favorites"), gearFilter, setGearFilter, Modifier.genesisHorizontalControl())
                                 val visibleItems = character.items.filter { item ->
                                     val definition = character.itemDefinitions.firstOrNull { it.id == item.definitionId }
                                     (gearQuery.isBlank() || definition?.name?.contains(gearQuery.trim(), ignoreCase = true) == true) &&
                                         when (gearFilter) {
                                             "Equipped" -> item.state in setOf(ItemState.WORN, ItemState.HELD)
                                             "Attuned" -> item.attuned
+                                            "Favorites" -> item.favorite
                                             else -> true
                                         }
                                 }
@@ -460,7 +461,11 @@ private enum class SpellbookFilter(val label: String) {
                                                 val next = GameplayRules.equip(character, item.id, if (item.state in setOf(ItemState.WORN, ItemState.HELD)) ItemState.CARRIED else ItemState.WORN)
                                                 proposedChange = "${if (item.state in setOf(ItemState.WORN, ItemState.HELD)) "Unequip" else "Equip"} ${definition?.name ?: "item"}" to next
                                             } catch (e: Exception) { error = e.message ?: "Item requirements not met" }
-                                        }, onManage = { error = ""; dialog = "ManageItem:${item.id}" })
+                                        }, onManage = { error = ""; dialog = "ManageItem:${item.id}" },
+                                            onFavorite = { favorite ->
+                                                change(if (favorite) "Favorite equipment" else "Unfavorite equipment",
+                                                    character.copy(items = character.items.map { if (it.id == item.id) it.copy(favorite = favorite) else it }), false)
+                                            })
                                     } }
                                 }
                                 PlayerOutlinedButton(onClick = { dialog = "ImportItem" }) {
