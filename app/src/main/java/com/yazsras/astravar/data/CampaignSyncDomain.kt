@@ -150,6 +150,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
                     runtime.getOrNull()?.let { state ->
                         put("campaign", BackupCodec.json.encodeToJsonElement(state.copy(pending = emptyList())))
                         put("activeElements", BackupCodec.json.encodeToJsonElement(armor.elements))
+                        put("unknownSpellSlotLevels", JsonArray(character.spellSlots.filterValues { it == null }.keys.sorted().map(::JsonPrimitive)))
                     }
                     if (runtime.isFailure) put("reason", "Current character statistics, armor configuration or connected records need review on this device. No archived configuration was substituted.")
                 })

@@ -131,4 +131,16 @@ class GenesisArmorSyncProjectionTest {
             assertFalse("Unrelated field $field must not enter combat configuration", text.contains("\"$field\""))
         }
     }
+
+    @Test fun unknownSlotsRemainExplicitlyUnknownInPublishedCombatState() = runBlocking {
+        val campaign = GenesisAuthorityRepository(db).createCampaign("Fictional campaign", commandId = "fictional-campaign")
+        val adopted = adopt(campaign.id)
+        ReforgeRepository(db).save(adopted.character.id, adopted.revision,
+            adopted.character.copy(spellSlots = mapOf(1 to null, 2 to 0)), "Record unknown first-level slots")
+        val configuration = domain.snapshot(campaign.id).configuration()
+        assertEquals("current", configuration.fields.getValue("status").jsonPrimitive.content)
+        assertEquals(JsonArray(listOf(JsonPrimitive(1))), configuration.fields.getValue("unknownSpellSlotLevels"))
+        val state = BackupCodec.json.decodeFromJsonElement<Campaign>(configuration.fields.getValue("campaign"))
+        assertFalse(state.slots.containsKey(1)); assertEquals(0, state.slots[2])
+    }
 }
