@@ -12,6 +12,10 @@ import com.yazsras.astravar.rules.reforge.ReforgeCharacter
 import com.yazsras.astravar.rules.reforge.TurnEconomy
 import java.util.UUID
 
+/** Revision alone is bookkeeping; any saved configuration or resource state deserves explicit review. */
+internal fun genesisArmorReviewSource(legacy: Campaign?, elements: List<DamageType>): Campaign? =
+    legacy?.takeIf { elements.isNotEmpty() || it.copy(revision = 0, notes = it.notes.trim()) != Campaign() }
+
 /** Default reconciliation cannot restore a spent action or bonus; the owner may explicitly choose the current sheet. */
 internal fun genesisReviewedArmorTurn(character: ReforgeCharacter, legacy: Campaign, sheetOnly: Boolean): TurnEconomy {
     val current = character.turn
@@ -37,7 +41,7 @@ internal fun genesisReviewedArmorTurn(character: ReforgeCharacter, legacy: Campa
     var baseline by rememberSaveable(character.id) { mutableLongStateOf(character.revision) }
     var legacyRevision by rememberSaveable(character.id) { mutableStateOf<Long?>(null) }
     var error by remember { mutableStateOf("") }
-    val recorded = legacyCampaign?.takeIf { it.onboarded || it.cores.isNotEmpty() || it.templates.isNotEmpty() }
+    val recorded = genesisArmorReviewSource(legacyCampaign, legacyElements)
     if (alreadyAdoptedBy != null) {
         Text("Saved Astravar systems are connected to $alreadyAdoptedBy.", color = RebuildPalette.Muted)
         return
