@@ -83,8 +83,13 @@ import java.util.UUID
     var baseline by rememberSaveable(character.id) { mutableLongStateOf(character.revision) }
     var seconds by rememberSaveable(character.id) { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
-    var submittedAt by remember { mutableStateOf<Long?>(null) }
-    LaunchedEffect(character.revision) { if (submittedAt != null && character.revision > submittedAt!!) { open = false; submittedAt = null } }
+    var submittedState by remember { mutableStateOf<ReforgeCharacter?>(null) }
+    LaunchedEffect(character.revision) {
+        val submitted = submittedState
+        if (submitted != null && character.revision > submitted.revision && character == submitted.copy(revision = character.revision)) {
+            open = false; submittedState = null
+        }
+    }
     PlayerEntry("Astravar recovery", campaign.installed?.readiness(campaign.gameSeconds) ?: "Internal nexus not configured", "Core", {
         baseline = character.revision; seconds = ""; error = ""; open = true
     })
@@ -93,8 +98,9 @@ import java.util.UUID
             try {
                 val elapsed = seconds.intValue("Elapsed seconds", 0, 31536000).toLong()
                 val after = Engine.advance(campaign, elapsed)
-                submittedAt = character.revision
-                onSave(GenesisArmorRules.apply(character, after), "Recorded elapsed game time for Astravar recovery")
+                val next = GenesisArmorRules.apply(character, after)
+                submittedState = next
+                onSave(next, "Recorded elapsed game time for Astravar recovery")
             } catch (failure: Exception) { error = failure.message ?: "Check the elapsed time." }
         }) { Text("Confirm elapsed time") }
     }) {

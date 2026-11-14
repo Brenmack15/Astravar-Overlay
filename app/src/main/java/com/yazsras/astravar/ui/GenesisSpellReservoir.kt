@@ -31,13 +31,16 @@ import java.util.UUID
     var dialog by rememberSaveable(character.id) { mutableStateOf<String?>(null) }
     var templateId by rememberSaveable(character.id) { mutableStateOf<String?>(null) }
     var query by rememberSaveable(character.id) { mutableStateOf("") }
-    var submittedAt by remember { mutableStateOf<Long?>(null) }
+    var submittedState by remember { mutableStateOf<ReforgeCharacter?>(null) }
     var actionError by remember { mutableStateOf("") }
     LaunchedEffect(character.revision) {
-        if (submittedAt != null && character.revision > submittedAt!!) { dialog = null; submittedAt = null }
+        val submitted = submittedState
+        if (submitted != null && character.revision > submitted.revision && character == submitted.copy(revision = character.revision)) {
+            dialog = null; submittedState = null
+        }
     }
     fun save(next: ReforgeCharacter, label: String) {
-        submittedAt = character.revision
+        submittedState = next
         onSave(next, label)
     }
     RebirthSectionLabel("Spell reservoir")
