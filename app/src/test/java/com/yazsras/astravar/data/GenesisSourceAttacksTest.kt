@@ -1,5 +1,6 @@
 package com.yazsras.astravar.data
 
+import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.rules.reforge.*
@@ -10,6 +11,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.util.UUID
 
 @RunWith(RobolectricTestRunner::class) @Config(sdk = [35])
 class GenesisSourceAttacksTest {
@@ -29,8 +31,11 @@ class GenesisSourceAttacksTest {
         return local.save(id, adopted.revision, adopted.character.copy(notes = "Already adopted, edited character"), "Later edit")
     }
 
-    @Test fun alreadyAdoptedReviewPreservesExactAttacksAndOriginalEvidenceAcrossRestartBackupAndIdempotentRetry() = runBlocking {
-        val database = db(); val restoredDb = db()
+    @Test fun alreadyAdoptedReviewPreservesExactAttacksAndOriginalEvidenceAcrossDatabaseReopenBackupAndIdempotentRetry() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val databaseName = "fictional-source-attack-${UUID.randomUUID()}.db"
+        var database = Room.databaseBuilder(context, CampaignLedgerDb::class.java, databaseName).build()
+        val restoredDb = db()
         try {
             val legacy = CampaignLedgerRepository(database); val local = ReforgeRepository(database)
             val before = seed(legacy, local)
@@ -52,20 +57,24 @@ class GenesisSourceAttacksTest {
             val spent = AttackRules.commitHit(next.character, preview)
             assertFalse(spent.turn.actionAvailable); assertEquals(0, spent.turn.attacksUsed)
             assertEquals(before.character.spellSlots, spent.spellSlots)
+            database.close()
+            database = Room.databaseBuilder(context, CampaignLedgerDb::class.java, databaseName).build()
             val reopened = ReforgeRepository(database)
+            val reopenedLegacy = CampaignLedgerRepository(database)
             assertEquals(next, reopened.get(id))
+            assertEquals(sourceBefore, reopenedLegacy.readCharacterSnapshot(id))
             val edited = reopened.save(id, next.revision, next.character.copy(notes = "Later state"), "Later edit")
-            assertEquals(next, reopened.commitSourceAttack(legacy, review, attack().id, choices, "review-command"))
+            assertEquals(next, reopened.commitSourceAttack(reopenedLegacy, review, attack().id, choices, "review-command"))
             assertEquals(edited, reopened.get(id))
-            assertTrue(runCatching { reopened.commitSourceAttack(legacy, review, attack().id, choices.copy(magical = false), "review-command") }.isFailure)
-            val fresh = reopened.reviewSourceAttacks(legacy, edited)
-            assertTrue(runCatching { reopened.commitSourceAttack(legacy, fresh, attack().id, choices) }.isFailure)
+            assertTrue(runCatching { reopened.commitSourceAttack(reopenedLegacy, review, attack().id, choices.copy(magical = false), "review-command") }.isFailure)
+            val fresh = reopened.reviewSourceAttacks(reopenedLegacy, edited)
+            assertTrue(runCatching { reopened.commitSourceAttack(reopenedLegacy, fresh, attack().id, choices) }.isFailure)
             val restored = ReforgeRepository(restoredDb)
             val restore = restored.previewRestore(reopened.export())
             assertTrue(restore.conflicts.toString(), restore.valid)
             restored.restore(restore, "restore-source-fixture")
             assertEquals(edited, restored.get(id))
-        } finally { database.close(); restoredDb.close() }
+        } finally { database.close(); restoredDb.close(); context.deleteDatabase(databaseName) }
     }
 
     @Test fun unsupportedSourceRowsStayVisibleAndCannotBeActivated() = runBlocking {
