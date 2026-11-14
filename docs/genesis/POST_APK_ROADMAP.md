@@ -242,3 +242,23 @@ Append actual commit/test/artifact evidence after execution. The new directive
 authorizes development and release preparation; it does not permit invented
 physical-device testing, private signing-material publication or destructive
 data migration.
+
+
+### Implementation checkpoint after consolidation coding
+
+Recoverable commits now implement character-owned custom/pinned skills, a shared
+armor adapter and atomic Combat rolls, explicit original-system adoption,
+reservoir/payload controls in Spells, reviewed armor configuration in Features,
+contextual recovery/history, and removal of the ordinary redundant Tools routes
+and prominent shortcut row. The next small deferred slice also adds persisted
+Equipment favorites and a Favorites filter (`3099b0a`, `da7fae6`); broader
+container and reorder workflows remain open.
+
+See the implementation checkpoint table in
+[CONSOLIDATION_AUDIT_20261114.md](CONSOLIDATION_AUDIT_20261114.md) for exact commits,
+first observed failures, preserved assertions, native upgrade sequence and
+remaining product limits. Initial focused evidence is **180/181 rules passed**
+and **55/57 application tests passed**, followed by fixes and additional coverage
+awaiting rerun. Native compilation was corrected after observer API errors;
+compilation and emulator acceptance are distinct gates. None of these partial
+results is a completed owner-compatible release or physical-device claim.

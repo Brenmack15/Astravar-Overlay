@@ -146,3 +146,64 @@ and [RESUME_VERIFICATION_20261112.md](RESUME_VERIFICATION_20261112.md) for earli
 source-specific diagnostics. Latest historical release continuation lives on
 `checkpoint/astravar-genesis-release-verification-20261112`; its old freeze
 instructions are superseded by the owner's November 14 continuation directive.
+
+
+## Recoverable implementation checkpoint — November 14
+
+The following are source checkpoints on the continuation branch, not a release
+acceptance claim. The baseline classification above remains useful historical
+evidence and is deliberately not overwritten with the new implementation.
+
+| Checkpoint | Implemented behavior | Verification status at this checkpoint |
+| --- | --- | --- |
+| `6fa473d` | Character-owned custom skills with stable IDs, training/bonus/notes/manual baseline override; standard/custom pins, deterministic pinned A–Z then unpinned A–Z; Sheet CRUD, roll, delete confirmation | All nine `SkillRulesTest` cases passed in the first rules run. Repository/restart/complete-backup and Compose interaction cases are included in the focused application batch; final rerun is pending. |
+| `f7e6943`, `0a3b518` | Native Genesis Combat adapter to the retained armor engine; character-derived accuracy/resources, mode/options/elements, atomic dice/cost commit, exact saved results and condition accuracy snapshots | Original engine regression tests ran alongside six new armor cases. First rules batch was 180 pass / 1 fail; the failing armor fixture is being corrected and rerun. No native pass is inferred. |
+| `9f9f8eb`, `27e64f9`, `55731af` | Reviewed character adoption, shared slot/time/action accounting, reservoir load/overwrite/purge and connected payload library, retained unresolved roll drafts | First focused run passed reservoir repository 2/2 and reservoir UI 4/4. Later conservative action-budget adoption and condition guards add coverage and require the final rerun. |
+| `a9018be` | Character Features presents retained armor artwork and reviewed damage/melee/engineering/attunement configuration without changing independent resources or original evidence | Pure validation and UI coverage added. One staged-save UI idling failure occurred in the first batch; final validation is pending its correction. |
+| `d395d10`, `d31491a` | Retired ordinary legacy Tools entries; contextual character routes; removed prominent quick-action strip; original source inspection; unified character/armor History; unique armor ownership checked in saves and restore | Focused navigation/ownership/restore tests added. The first ownership fixture failed before its intended assertion and is being corrected. Original source stores and history remain preserved. |
+| `3099b0a`, `da7fae6` | Next deferred slice: accessible Equipment favorite toggle and Favorites filter persisted through the existing character transaction | UI semantics/reversibility/busy-state coverage added. Final focused and broader results pending. General container editing and inventory drag/reorder remain deferred. |
+| `12d1d3e` | Real native candidate journey covers reviewed adoption, automatic armor rolls and one-shot advantage, keyboard/rotation, element restart, reservoir loading, Features, custom-skill CRUD/pinning and retained activity. Existing import, quick-action-customization and upgrade-preservation journeys follow consolidated routes | Native Kotlin compilation initially found four invalid observer arguments; all were fixed. Compilation rerun and actual emulator execution are pending. Existing exact formula/persistence/assertion coverage is retained. |
+
+The first application focused batch was **55 pass / 2 fail (57 total)**. The
+failures are explicitly retained above; changes made after that batch are not
+covered by its passing counts. Local evidence files are
+`astravar-runtime/rules-consolidation.log`,
+`astravar-runtime/focused-consolidation-app.log`, and
+`astravar-runtime/focused-consolidation.log` beside the repository. These are
+transient engineering logs, not published release artifacts. Record final
+commands, exact source, results and public CI evidence at the release checkpoint.
+
+### Native preservation sequence
+
+The unchanged legacy weapon journey runs on the frozen code49 baseline before
+seeding/snapshotting the upgrade fixture. Its two real automatic rolls are then
+part of the retained source history during code49→50→new-version verification.
+The new candidate has a separate consolidated-character journey after the
+existing Player First character-creation flow. The later update check reads all
+four exact old/new armor formulas through Character History, the pinned skills,
+loaded reservoir and current element. Separate stopped SQLite and complete
+backup checks remain independent of UI success.
+
+This sequencing preserves the old engine's genuine interaction coverage without
+restoring retired Tools entries. Historical `ci-player-first-emulator.sh` is
+used by old Android2.1 workflows; the active Genesis workflow uses
+`ci-emulator.sh`. Do not cite the old harness as candidate acceptance.
+
+### Remaining product limits
+
+- Guided class/subclass progression and multiclass rules, general container
+  management, broad encounter automation and unrestricted crafting are not
+  delivered by this consolidation slice.
+- Armor adoption is explicit and source-reviewed. Unknown character slot counts
+  require a visible reconciliation choice; spent action state is retained
+  conservatively. No identity is inferred from a matching display name.
+- Payload templates and ordinary spells retain separate identities with explicit
+  links. Name matching does not merge potentially different mechanics.
+- Existing unresolved source disagreements stay visible. In particular, no new
+  upgraded Discharge formula or charged-gauntlet damage type is invented.
+- Newly adopted armor/configuration and custom skills travel in character and
+  complete connected backup records. The original separate weapon archive is
+  retained; the broader historical exclusions (settings, connection setup,
+  external portrait files and some drafts) still need separate coverage.
+- Owner-key artifact, in-place install, broad tests and emulator acceptance are
+  pending; Galaxy S26/Android17 physical testing has not been performed here.
