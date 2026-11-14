@@ -56,6 +56,14 @@ class GenesisPackageReadbackTest(unittest.TestCase):
         self.assertEqual(["userId"], result["before_identity_fields"])
         self.assertTrue(result["same_android_uid"])
 
+    def test_installed_genesis50_to_genesis51_preserves_android_identity(self):
+        result = readback.verify_upgrade(dump(50), dump(51), PACKAGE, old_version=50, new_version=51)
+        self.assertEqual((50, 51), (result["old_version"], result["new_version"]))
+        self.assertTrue(result["same_android_uid"])
+        self.assertTrue(result["same_first_install_time"])
+        with self.assertRaises(AssertionError):
+            readback.verify_upgrade(dump(50), dump(50), PACKAGE, old_version=50, new_version=51)
+
     def test_legacy_to_current_format_and_crlf_preserve_the_same_identity(self):
         self.assertTrue(self.verify(dump(identity="userId=10234", legacy=True).replace("\n", "\r\n"),
                                     dump(50))["same_android_uid"])

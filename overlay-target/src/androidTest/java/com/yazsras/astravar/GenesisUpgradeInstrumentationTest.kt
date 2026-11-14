@@ -17,6 +17,7 @@ class GenesisUpgradeInstrumentationTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val device get() = UiDevice.getInstance(instrumentation)
     private val product get() = InstrumentationRegistry.getArguments().getString("astravarPackage") ?: "com.yazsras.astravar"
+    private val candidateVersion get() = InstrumentationRegistry.getArguments().getString("astravarExpectedVersion")?.toInt() ?: 51
     private val ui get() = ObservedUi(device)
     private val files get() = instrumentation.targetContext.getExternalFilesDir(null)!!
     private fun tap(label: String) = ui.tapText(label, product, scrollAttempts = 18)
@@ -100,12 +101,12 @@ class GenesisUpgradeInstrumentationTest {
     @Test fun verifyAfterUpgrade() {
         launch()
         assertTrue("Candidate has a newer version code",
-            device.executeShellCommand("dumpsys package $product").contains("versionCode=50 "))
+            device.executeShellCommand("dumpsys package $product").contains("versionCode=$candidateVersion "))
         ui.ensurePrimaryTab(product, "Character")
         find("Genesis Legacy Retention Actor")
         ui.descriptionBounds("HP 17 / 32", product)
         find("Temp HP 3")
-        ui.captureStablePage(File(files, "genesis-after-code50-sheet.png"), product, "Character",
+        ui.captureStablePage(File(files, "genesis-after-code$candidateVersion-sheet.png"), product, "Character",
             listOf(By.text("Genesis Legacy Retention Actor").pkg(product)))
         ui.selectSection(product, "Equipment")
         find("Genesis Legacy Retention Compass")
@@ -133,7 +134,7 @@ class GenesisUpgradeInstrumentationTest {
     @Test fun canonicalWriteSurvivesRestart() {
         launch()
         assertTrue("Canonical write proof requires the candidate build",
-            device.executeShellCommand("dumpsys package $product").contains("versionCode=50 "))
+            device.executeShellCommand("dumpsys package $product").contains("versionCode=$candidateVersion "))
         ui.ensurePrimaryTab(product, "Character")
         find("Genesis Legacy Retention Actor")
         ui.descriptionBounds("HP 17 / 32", product)

@@ -16,8 +16,8 @@ jobs:
     timeout-minutes: 100
     env:
       GENESIS_GATE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') }}
-      EXPECTED_VERSION_NAME: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '4.0.0-genesis1' || '3.2.0-rc1' }}
-      EXPECTED_VERSION_CODE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '50' || '49' }}
+      EXPECTED_VERSION_NAME: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '4.0.0-genesis2' || '3.2.0-rc1' }}
+      EXPECTED_VERSION_CODE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '51' || '49' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

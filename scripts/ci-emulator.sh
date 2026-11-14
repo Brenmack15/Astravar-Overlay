@@ -58,9 +58,10 @@ timeout -k 5s 35s adb -s "$astravar_serial" install overlay-target/build/outputs
 : >validation/native-stages.tsv
 run_stage() {
   local astravar_class=$1 astravar_count=$2 astravar_budget=$3 astravar_log=$4
+  local astravar_expected_version=${5:-${EXPECTED_VERSION_CODE:-51}}
   # Each named stage runs exactly once. A failed prerequisite stops its dependents;
   # no JUnit hash order, automatic retry, assertion suppression or data reset.
-  if timeout -k 5s "${astravar_budget}s" adb -s "$astravar_serial" shell am instrument -w -r -e astravarPackage "$astravar_product" -e class "com.yazsras.astravar.$astravar_class" com.yazsras.astravar.target.test/androidx.test.runner.AndroidJUnitRunner | tee "validation/$astravar_log"; then
+  if timeout -k 5s "${astravar_budget}s" adb -s "$astravar_serial" shell am instrument -w -r -e astravarPackage "$astravar_product" -e astravarExpectedVersion "$astravar_expected_version" -e class "com.yazsras.astravar.$astravar_class" com.yazsras.astravar.target.test/androidx.test.runner.AndroidJUnitRunner | tee "validation/$astravar_log"; then
     if grep -Eq "^OK \\($astravar_count tests?\\)" "validation/$astravar_log" && ! grep -Eq 'FAILURES|INSTRUMENTATION_FAILED|Process crashed' "validation/$astravar_log"; then
       printf 'PASS\t%s\t%s\n' "$astravar_class" "$astravar_log" >>validation/native-stages.tsv
       return 0
@@ -109,7 +110,7 @@ copy_upgrade_stores() {
   done
 }
 if [ -n "${ASTRAVAR_BASELINE_APK:-}" ]; then
-  # The workflow builds the frozen code49 source and code50 with the same
+  # The workflow builds frozen code49, installed code50 and the candidate with the same
   # disposable CI key. This is a real older-version update; it is distinct from
   # the later same-version reinstall and from private owner-signing acceptance.
   sha256sum "$ASTRAVAR_BASELINE_APK" >validation/upgrade-baseline-apk.sha256
@@ -122,21 +123,41 @@ if [ -n "${ASTRAVAR_BASELINE_APK:-}" ]; then
   copy_upgrade_stores validation/genesis-upgrade-before
   python3 scripts/genesis-upgrade-readback.py validation/genesis-upgrade-before --synthetic-emulator --expected-room-schema 9 \
     --output validation/genesis-upgrade-before.json >validation/genesis-upgrade-seed-result.json
+  # A fresh ordinary code49→code50 update proves the original cutover before
+  # testing the exact installed Genesis generation→candidate transition.
+  : "${ASTRAVAR_GENESIS_BASELINE_APK:?Verified code50 baseline is required}"
+  timeout -k 5s 45s adb -s "$astravar_serial" install -r "$ASTRAVAR_GENESIS_BASELINE_APK" | tee validation/genesis-code50-install.txt
+  grep -q Success validation/genesis-code50-install.txt
+  snapshot_stores validation/genesis-code50-files-installed.sha256
+  diff -u validation/genesis-upgrade-files-before.sha256 validation/genesis-code50-files-installed.sha256 >validation/genesis-code50-install-file-diff.txt
+  run_stage GenesisUpgradeInstrumentationTest#verifyAfterUpgrade 1 360 native-genesis-code50-readback.txt 50
+  stop_product
+  copy_upgrade_stores validation/genesis-code50
+  python3 scripts/genesis-upgrade-readback.py validation/genesis-code50 --synthetic-emulator --expected-room-schema 9 \
+    --compare validation/genesis-upgrade-before.json --output validation/genesis-code50.json \
+    >validation/genesis-code50-cutover-result.json
+  timeout 10s adb -s "$astravar_serial" shell dumpsys package "$astravar_product" >validation/genesis-code50-package.txt
+  python3 scripts/genesis-package-readback.py \
+    --before validation/genesis-upgrade-package-before.txt --after validation/genesis-code50-package.txt \
+    --package "$astravar_product" --old-version 49 --new-version 50 --output validation/genesis-code50-package-result.json
+  snapshot_stores validation/genesis-code50-files-before-candidate.sha256
   timeout -k 5s 45s adb -s "$astravar_serial" install -r "$astravar_apk" | tee validation/genesis-upgrade-install.txt
   grep -q Success validation/genesis-upgrade-install.txt
   snapshot_stores validation/genesis-upgrade-files-after.sha256
-  diff -u validation/genesis-upgrade-files-before.sha256 validation/genesis-upgrade-files-after.sha256 >validation/genesis-upgrade-file-diff.txt
+  diff -u validation/genesis-code50-files-before-candidate.sha256 validation/genesis-upgrade-files-after.sha256 >validation/genesis-upgrade-file-diff.txt
   timeout 10s adb -s "$astravar_serial" shell dumpsys package "$astravar_product" >validation/genesis-upgrade-package-after.txt
   python3 scripts/genesis-package-readback.py \
-    --before validation/genesis-upgrade-package-before.txt \
+    --before validation/genesis-code50-package.txt \
     --after validation/genesis-upgrade-package-after.txt --package "$astravar_product" \
-    --old-version 49 --new-version 50 --output validation/genesis-upgrade-package-result.json
+    --old-version 50 --new-version "${EXPECTED_VERSION_CODE:-51}" --output validation/genesis-upgrade-package-result.json
   run_stage GenesisUpgradeInstrumentationTest#verifyAfterUpgrade 1 360 native-genesis-upgrade-readback.txt
   stop_product
   copy_upgrade_stores validation/genesis-upgrade-after
   python3 scripts/genesis-upgrade-readback.py validation/genesis-upgrade-after --synthetic-emulator --expected-room-schema 9 \
     --compare validation/genesis-upgrade-before.json --output validation/genesis-upgrade-after.json \
     >validation/genesis-upgrade-readback-result.json
+  python3 scripts/genesis-same-schema-readback.py --before validation/genesis-code50.json \
+    --after validation/genesis-upgrade-after.json --output validation/genesis-code50-candidate-readback.json
   # This write is deliberately separate from the unchanged-cutover comparison:
   # heal one point in the real UI, restart, and prove only canonical schema9 changed.
   run_stage GenesisUpgradeInstrumentationTest#canonicalWriteSurvivesRestart 1 240 native-genesis-canonical-write.txt
@@ -230,4 +251,4 @@ run_stage CampaignImportInstrumentationTest#dMappedCampaignRecordsRollbackAfterR
 stop_product
 copy_campaign_database validation/campaign-mapped-rolled-back
 verify_mapped validation/campaign-mapped-rolled-back/astravar-campaign-ledger.db validation/campaign-mapped-before.json validation/native-mapped-fixture.json rollback validation/native-mapped-rollback-readback.json
-printf '%s\n' 'PASS: every ordered stage recorded in native-stages.tsv. Genesis exercised guided creation, horizontal page flicks, per-page reading positions, Back, quick-action drag and tap rearrangement, restart persistence, contextual inventory creation and cross-view edits, single-row item identity and Activity rotation. Visual Rebirth captured the primary destinations and forms, checked resource persistence, companion equipment, journal edits and 400dp layouts at three font scales. Standalone weapon rolls, retired overlay contract, character advancement, reviewed gear, generic companion relationships and direct companion combat passed. Companion-only healing survived restart, with source HP and the default character preserved. Same-version reinstall preserved persisted bytes. Native readback retained rolls and inventory. Large and typed imports and separately consented rollback passed independent host SQLite verification. Native QA SQLite fixtures verified scoped selection above the complete-export ceiling, duplicate and stale rejection, interrupted-write rollback, same-command recovery and backup restore after reopen. When a baseline APK is provided, separate genesis-upgrade evidence records code49 to code50 package preservation, unchanged original files, additive schema6 to schema9 cutover with raw row and receipt verification, and a later canonical UI heal that survives restart without changing the retained source. Disposable CI signer and emulator only. Physical owner phone acceptance remains pending.' >validation/RELEASE-UI-RESULT.txt
+printf '%s\n' 'PASS: every ordered stage recorded in native-stages.tsv. Genesis exercised guided creation, horizontal page flicks, per-page reading positions, Back, quick-action drag and tap rearrangement, restart persistence, contextual inventory creation and cross-view edits, single-row item identity and Activity rotation. Visual Rebirth captured the primary destinations and forms, checked resource persistence, companion equipment, journal edits and 400dp layouts at three font scales. Standalone weapon rolls, retired overlay contract, character advancement, reviewed gear, generic companion relationships and direct companion combat passed. Companion-only healing survived restart, with source HP and the default character preserved. Same-version reinstall preserved persisted bytes. Native readback retained rolls and inventory. Large and typed imports and separately consented rollback passed independent host SQLite verification. Native QA SQLite fixtures verified scoped selection above the complete-export ceiling, duplicate and stale rejection, interrupted-write rollback, same-command recovery and backup restore after reopen. When a baseline APK is provided, separate genesis-upgrade evidence records code49 to code50 and code50 to candidate package preservation, unchanged original files, additive schema6 to schema9 cutover with raw row and receipt verification, and a later canonical UI heal that survives restart without changing the retained source. Disposable CI signer and emulator only. Physical owner phone acceptance remains pending.' >validation/RELEASE-UI-RESULT.txt

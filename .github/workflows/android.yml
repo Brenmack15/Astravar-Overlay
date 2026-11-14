@@ -36,8 +36,8 @@ jobs:
       # regression batch before the first touch on every 3.1 candidate.
       REFORGE_FULL_GATE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-3.1-') || startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') }}
       GENESIS_GATE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') }}
-      EXPECTED_VERSION_NAME: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '4.0.0-genesis1' || '3.2.0-rc1' }}
-      EXPECTED_VERSION_CODE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '50' || '49' }}
+      EXPECTED_VERSION_NAME: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '4.0.0-genesis2' || '3.2.0-rc1' }}
+      EXPECTED_VERSION_CODE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '51' || '49' }}
       INVENTORY_BETA: ${{ github.head_ref == 'feat/astravar-inventory-mvp-v170' || github.ref_name == 'feat/astravar-inventory-mvp-v170' || github.head_ref == 'feat/astravar-2.0-integrated' || github.ref_name == 'feat/astravar-2.0-integrated' || github.head_ref == 'feat/astravar-2.0-ui-rebuild' || github.ref_name == 'feat/astravar-2.0-ui-rebuild' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -154,6 +154,24 @@ jobs:
             test "$astravar_baseline_certificate" = "$astravar_candidate_certificate"
             sha256sum validation/upgrade-baseline/*.apk > validation/upgrade-baseline/SHA256SUMS.txt
             echo 'ASTRAVAR_BASELINE_APK=validation/upgrade-baseline/code49-ci.apk' >> "$GITHUB_ENV"
+            # Retain the schema6 cutover proof, then test the owner's installed
+            # Genesis version50 as an intermediate, byte-preserving update.
+            astravar_genesis_baseline_sha=a86ab0fa87ce47a4f99550dcfa8fe01ed0e22928
+            astravar_genesis_baseline_tree="$RUNNER_TEMP/astravar-genesis-code50"
+            timeout -k 5s 45s git fetch --depth=1 origin "$astravar_genesis_baseline_sha"
+            git worktree add --detach "$astravar_genesis_baseline_tree" "$astravar_genesis_baseline_sha"
+            test "$(git -C "$astravar_genesis_baseline_tree" rev-parse HEAD)" = "$astravar_genesis_baseline_sha"
+            ASTRAVAR_VERSION_CODE=50 ASTRAVAR_VERSION_NAME=4.0.0-genesis1 \
+              timeout -k 10s 1200s bash "$astravar_genesis_baseline_tree/gradlew" -p "$astravar_genesis_baseline_tree" --no-daemon --console=plain \
+              :app:assembleRelease
+            cp "$astravar_genesis_baseline_tree/app/build/outputs/apk/release/app-release.apk" validation/upgrade-baseline/code50-ci.apk
+            printf '%s\n' "$astravar_genesis_baseline_sha" > validation/upgrade-baseline/GENESIS_SOURCE_COMMIT.txt
+            python3 scripts/inspect_release_apk.py validation/upgrade-baseline/code50-ci.apk --sdk "$ANDROID_HOME" --package com.yazsras.astravar --version-name 4.0.0-genesis1 --version-code 50 --output validation/upgrade-baseline/genesis-package.json
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs validation/upgrade-baseline/code50-ci.apk > validation/upgrade-baseline/genesis-signature.txt
+            astravar_genesis_certificate=$(awk -F': ' '/certificate SHA-256 digest:/ { print $2 }' validation/upgrade-baseline/genesis-signature.txt)
+            test "$astravar_genesis_certificate" = "$astravar_candidate_certificate"
+            sha256sum validation/upgrade-baseline/*.apk > validation/upgrade-baseline/SHA256SUMS.txt
+            echo 'ASTRAVAR_GENESIS_BASELINE_APK=validation/upgrade-baseline/code50-ci.apk' >> "$GITHUB_ENV"
           fi
       - name: Reuse verified product and build current overlay tests
         if: env.REUSE_RUN_ID != '0'
