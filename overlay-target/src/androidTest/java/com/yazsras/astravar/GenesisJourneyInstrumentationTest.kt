@@ -193,7 +193,11 @@ class GenesisJourneyInstrumentationTest {
         device.pressBack()
         assertSection("Sheet")
 
-        // Both drag and accessible taps change the same persisted quick-action order.
+        // Optional shortcuts now live in Character controls, away from the
+        // primary page strip. Preserve their drag/tap and persistence coverage.
+        assertFalse("The primary sheet has no redundant Health shortcut", device.hasObject(By.text("Health").pkg(product)))
+        assertFalse("The primary sheet has no redundant Actions shortcut", device.hasObject(By.text("Actions").pkg(product)))
+        ui.tap(By.desc("Character controls").pkg(product), "Open optional character controls")
         ui.tap(By.desc("Customize quick actions").pkg(product), "Customize quick actions")
         val health = ui.bounds(By.desc("Drag Health to reorder").pkg(product), "Health drag handle", refreshCache = true)
         val actions = ui.bounds(By.desc("Drag Actions to reorder").pkg(product), "Actions drag handle", refreshCache = true)
@@ -208,6 +212,8 @@ class GenesisJourneyInstrumentationTest {
         restart()
         ui.ensurePrimaryTab(product, "Character")
         find("Genesis Native Hero")
+        assertFalse("Restart does not restore the redundant primary shortcut row", device.hasObject(By.text("Health").pkg(product)))
+        ui.tap(By.desc("Character controls").pkg(product), "Reopen saved character controls")
         val quickActions = ui.bounds(By.text("Actions").pkg(product), "persisted Actions shortcut", refreshCache = true)
         val quickHealth = ui.bounds(By.text("Health").pkg(product), "persisted Health shortcut", refreshCache = true)
         assertTrue("Quick-action order survives process restart", quickActions.left < quickHealth.left)

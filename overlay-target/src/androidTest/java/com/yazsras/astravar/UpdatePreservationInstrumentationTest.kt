@@ -30,30 +30,48 @@ class UpdatePreservationInstrumentationTest {
             else ui.tapText(text, product, scrollAttempts = 14)
         }
         fun captureArmor(name: String) {
-            find("Active element"); find("Core systems")
-            ui.captureStableDialog(File(files, name), product, "Armor systems",
-                listOf(By.text("Active element").pkg(product), By.text("Core systems").pkg(product)))
+            find("Active element"); find("Change element")
+            ui.captureStablePage(File(files, name), product, "Character",
+                listOf(By.text("Active element").pkg(product), By.text("Change element").pkg(product)))
         }
         fun captureParty(name: String) = ui.captureStablePage(File(files, name), product, "Companions",
             listOf(By.text("CI Native Ally").pkg(product)))
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
         ui.awaitMainAfterSavedDialogs(product)
         assertTrue("The saved labeled demo survived", device.hasObject(By.text("DEMO").pkg(product)))
-        ui.openTool(product, "Roll history")
-        find("Recent rolls")
+        ui.ensurePrimaryTab(product, "Character")
+        ui.tap(By.desc("Switch character").pkg(product), "Select the adopted armor owner")
+        tap("CI Native Hero Revised")
+        ui.selectSection(product, "Sheet")
+        find("Alchemy native")
+        ui.bounds(By.desc("Unpin Alchemy native custom skill").pkg(product), "custom skill and pin survive APK update")
+        find("Arcana")
+        ui.bounds(By.desc("Unpin Arcana").pkg(product), "standard skill pin survives APK update")
+        ui.selectSection(product, "Spells")
+        find("1 / 1 stored spells")
+        find("CI Native Stored Bolt")
+        ui.selectSection(product, "History")
+        find("Roll history")
+        ui.selectSection(product, "Armor")
         val firstFormula = File(files, "saved-first-roll.txt").readText()
         val savedFormula = File(files, "saved-roll.txt").readText()
-        val historyFormulas = ui.texts(By.text(Pattern.compile("d20 .*")).pkg(product), "history after same-key APK update")
-        assertEquals("Both committed attacks survive the APK update", 2, historyFormulas.size)
-        assertEquals("The APK update preserves both original raw rolls and their modes",
-            listOf(firstFormula, savedFormula).sorted(), historyFormulas.sorted())
+        val expectedFormulas = listOf(firstFormula, savedFormula,
+            File(files, "consolidation-first-roll.txt").readText(), File(files, "consolidation-second-roll.txt").readText())
+        val historyFormulas = expectedFormulas.map { expected ->
+            find(expected)
+            val matches = ui.texts(By.text(expected).pkg(product), "unique retained armor roll after APK update")
+            assertEquals("Each historical or current attack appears once", listOf(expected), matches)
+            matches.single()
+        }
+        assertEquals("Both original and both consolidated attacks survive the APK update", 4, historyFormulas.size)
+        assertEquals("The APK update preserves original and consolidated raw rolls and modes",
+            expectedFormulas.sorted(), historyFormulas.sorted())
         assertEquals("The first attack retains its one-shot advantage", 1,
-            historyFormulas.count { it.contains("advantage") })
+            historyFormulas.take(2).count { it.contains("advantage") })
         assertEquals("The second attack retains its normal single-d20 result", 1,
-            historyFormulas.count { !it.contains(" / ") && !it.contains("advantage") })
+            historyFormulas.take(2).count { !it.contains(" / ") && !it.contains("advantage") })
         find(savedFormula)
         assertTrue(device.takeScreenshot(File(files, "same-key-update-history.png")))
-        tap("Close")
         ui.campaignItems(product)
         tap("CI FICTIONAL update-preservation crystal")
         find("Quantity not set")
@@ -79,9 +97,9 @@ class UpdatePreservationInstrumentationTest {
         for (scale in listOf("1.0", "1.3", "2.0")) {
             device.executeShellCommand("settings put system font_scale $scale")
             device.waitForIdle()
-            ui.openTool(product, "Armor systems")
+            ui.ensurePrimaryTab(product, "Character")
+            ui.selectSection(product, "Combat")
             captureArmor("armor-font-$scale.png")
-            tap("Close")
             tap("Companions", preferLast = true)
             find("CI Native Ally")
             captureParty("party-font-$scale.png")
@@ -97,10 +115,11 @@ class UpdatePreservationInstrumentationTest {
         for (width in listOf(1080, 972)) {
             device.executeShellCommand("wm size ${width}x2400")
             device.waitForIdle()
-            ui.openTool(product, "Armor systems")
+            ui.ensurePrimaryTab(product, "Character")
+            ui.selectSection(product, "Combat")
             captureArmor("element-width-$width-armor.png")
             device.dumpWindowHierarchy(File(files, "element-width-$width-armor.xml"))
-            tap("Active element")
+            tap("Change element")
             find("Choose an element")
             val outer = listOf("Fire", "Cold", "Lightning", "Acid", "Poison", "Thunder", "Necrotic", "Psychic", "Radiant")
             outer.forEach { name ->
@@ -119,7 +138,6 @@ class UpdatePreservationInstrumentationTest {
                 device.wait(Until.gone(By.text("Choose an element").pkg(product)), 5000))
             assertTrue(device.takeScreenshot(File(files, "element-wheel-closed-width-$width.png")))
             device.dumpWindowHierarchy(File(files, "element-wheel-closed-width-$width.xml"))
-            tap("Close")
         }
         device.executeShellCommand("wm density reset")
         device.executeShellCommand("wm size reset")

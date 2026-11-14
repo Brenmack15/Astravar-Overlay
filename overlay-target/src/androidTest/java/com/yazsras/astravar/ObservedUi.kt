@@ -297,7 +297,7 @@ internal class ObservedUi(private val device: UiDevice) {
         tapText("Tools", packageName)
         val group = when (name) {
             "Armor weapon", "Spell reservoir", "Spell library", "Rules & profile", "Resources & recovery", "Roll history" -> "Advanced combat & magic"
-            "Character sources", "Character backup", "Campaign backup", "Complete backup", "Campaign import", "Owner connection", "Weapon backup", "Fictional sync", "Remote Updates" -> "Records, backups & connection"
+            "Character sources", "Character backup", "Campaign backup", "Complete backup", "Campaign import", "Owner connection", "Weapon backup", "Original armor archive", "Fictional sync", "Remote Updates" -> "Records, backups & connection"
             else -> null
         }
         if (group != null) tapText(group, packageName)
@@ -334,6 +334,7 @@ internal class ObservedUi(private val device: UiDevice) {
             listOf("My items", "All items"),
             listOf("All gear", "Equipped", "Attuned"),
             listOf("All", "Prepared", "Cantrips"),
+            listOf("All rolls", "Character", "Armor"),
             listOf("People", "Journal")
         )
         val family = families.singleOrNull { label in it } ?: error("Unknown tab family for $label")

@@ -726,11 +726,13 @@ class CampaignImportInstrumentationTest {
         tap("Confirm local import")
         awaitText("Import saved. Independent database readback passed.")
 
-        ui.openTool(product, "Armor systems")
+        // Imported source values remain inspectable without adopting them as
+        // current mechanics or reopening the retired Armor Systems interface.
+        ui.openTool(product, "Character sources")
         find("Fictional Mapped Operator")
-        assertTrue("Armor must display the imported manual ability independently of weapon mechanics",
+        assertTrue("Character sources must display the imported manual ability independently of weapon mechanics",
             device.wait(Until.hasObject(By.descContains("Intelligence score 14").pkg(product)), 10_000))
-        captureMapped("armor", "Character", "Fictional Mapped Operator", "Ability scores", dialogTitle = "Armor systems")
+        captureMapped("armor", "Character", "Fictional Mapped Operator", "Ability scores", dialogTitle = "Character sources")
         openMappedSourceEntry("Armor source references")
         find("1 of 1 references")
         observations.put(JSONObject().put("route", "armor-source-entry").put("primaryTab", "Campaign")
