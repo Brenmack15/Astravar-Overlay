@@ -37,7 +37,9 @@ class GenesisArmorElementResponsiveTest {
         node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
         val result = layouts.single()
         assertEquals("$text must not be squeezed into fragments", 1, result.lineCount)
-        assertFalse("$text must remain fully visible", result.hasVisualOverflow)
+        assertFalse("$text must remain fully visible: width=${result.didOverflowWidth}, height=${result.didOverflowHeight}, " +
+            "size=${result.size}, paragraph=${result.multiParagraph.width}x${result.multiParagraph.height}, " +
+            "line=${result.getLineLeft(0)}..${result.getLineRight(0)}, bounds=${node.fetchSemanticsNode().boundsInRoot}", result.hasVisualOverflow)
         assertFalse(result.isLineEllipsized(0))
     }
 
@@ -52,6 +54,11 @@ class GenesisArmorElementResponsiveTest {
                     } }
                 }
             }
+            if (System.getProperty("astravar.screenshots") != null) {
+                compose.runOnIdle { invalidateNativeCaptureWindows() }
+                compose.mainClock.advanceTimeByFrame(); compose.waitForIdle()
+                compose.runOnIdle { captureNativeTestWindows(screenshot, controller.get()) }
+            }
             assertSingleReadableLine("Active element")
             assertSingleReadableLine("Lightning")
             assertSingleReadableLine("Change element")
@@ -65,11 +72,6 @@ class GenesisArmorElementResponsiveTest {
             else assertTrue("Normal width keeps the action beside the element", actionBounds.top < value.bottom && actionBounds.bottom > label.top)
             action.performClick()
             assertEquals(1, changes)
-            if (System.getProperty("astravar.screenshots") != null) {
-                compose.runOnIdle { invalidateNativeCaptureWindows() }
-                compose.mainClock.advanceTimeByFrame(); compose.waitForIdle()
-                compose.runOnIdle { captureNativeTestWindows(screenshot, controller.get()) }
-            }
         } finally { controller.pause().stop().destroy() }
     }
 
