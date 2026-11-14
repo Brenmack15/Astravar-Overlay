@@ -170,7 +170,7 @@ import java.util.UUID
         GenesisArmorSaveResolution(character, shot, { resolve = null }, onSave, saving)
     } }
     draft?.let { pending ->
-        val stale = pending.plan.revision != character.revision
+        val stale = pending.plan.revision != GenesisArmorRules.revision(character)
         PlayerSheet("Armor roll", { if (stale) draft = null }, dirty = false, dismissEnabled = stale && !saving,
             actions = {
                 PlayerButton(enabled = !saving && !stale && rollDraft.canSave, onClick = {

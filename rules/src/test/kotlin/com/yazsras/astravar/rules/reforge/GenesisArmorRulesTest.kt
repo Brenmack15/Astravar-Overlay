@@ -54,6 +54,7 @@ class GenesisArmorRulesTest {
             val plan = GenesisArmorRules.plan(owner, "roll-$index", Ability.ELEMENTAL)
             val rolled = DiceRoller.roll(plan, RollOptions(advantage = true, disadvantage = true), die = { sides -> minOf(10, sides) })
             owner = GenesisArmorRules.commitRolled(owner, plan, rolled)
+            CharacterCalculator.validate(owner)
             assertEquals(index + 1, owner.turn.attacksUsed)
             assertEquals(RollMode.NORMAL, owner.armor!!.campaign.pending.last().rolled!!.mode)
         }
@@ -158,5 +159,48 @@ class GenesisArmorRulesTest {
         assertNull(purged.spellSlots[2])
         assertTrue(purged.armor!!.campaign.installed!!.payloads.isEmpty())
         assertFalse(purged.turn.bonusActionAvailable)
+    }
+
+    @Test fun highRevisionHistoricalPlansSurviveAdoptionAndLaterCharacterCommitsUnchanged() {
+        val prior = source().copy(revision = 200)
+        val oldPlan = Engine.plan(prior, "historic-shot", Ability.ARCANE)
+        val legacy = DiceRoller.fire(prior, oldPlan, die = { 1 })
+        val owner = GenesisArmorRules.adopt(character().copy(revision = 1), legacy, emptyList(), "Reviewed older weapon archive")
+            .let { it.copy(revision = 2) } // The repository commits the adoption.
+        assertEquals(201L, GenesisArmorRules.revision(owner))
+        val newPlan = GenesisArmorRules.plan(owner, "current-shot", Ability.ARCANE)
+        assertEquals(201L, newPlan.revision)
+        val acted = GenesisArmorRules.commitRolled(owner, newPlan, DiceRoller.roll(newPlan, die = { 2 }))
+        CharacterCalculator.validate(acted)
+        val committed = acted.copy(revision = 3)
+        assertEquals(202L, GenesisArmorRules.runtime(committed).revision)
+        assertEquals(legacy.pending.single(), committed.armor!!.campaign.pending.first())
+        assertEquals(legacy, committed.armor!!.originalCampaign)
+        val restored = Json.decodeFromString<ReforgeCharacter>(Json.encodeToString(committed))
+        CharacterCalculator.validate(restored)
+        assertEquals(200L, restored.armor!!.campaign.pending.first().plan.revision)
+        assertEquals(201L, restored.armor!!.campaign.pending.last().plan.revision)
+    }
+
+    @Test fun canonicalCountersOutsideLegacyEnvelopeBoundsSurviveRoundTripWithoutExtraActions() {
+        var owner = adopted().copy(spellSlots = mapOf(1 to 100, 2 to null))
+        owner = GenesisArmorRules.apply(owner, Engine.advance(GenesisArmorRules.runtime(owner), 30))
+        CharacterCalculator.validate(owner)
+        assertEquals(100, owner.spellSlots[1])
+        assertTrue(owner.armor!!.campaign.slots.isEmpty())
+        repeat(3) { index ->
+            val plan = GenesisArmorRules.plan(owner, "extra-$index", Ability.ARCANE)
+            owner = GenesisArmorRules.commitRolled(owner, plan, DiceRoller.roll(plan, die = { 1 }))
+                .let { it.copy(revision = it.revision + 1) }
+            CharacterCalculator.validate(owner)
+            owner = Json.decodeFromString(Json.encodeToString(owner))
+            assertEquals(index + 1, owner.turn.attacksUsed)
+            assertEquals(index + 1, GenesisArmorRules.runtime(owner).turn.attacks)
+            assertEquals(100, GenesisArmorRules.runtime(owner).slots[1])
+        }
+        assertFalse(owner.turn.actionAvailable)
+        assertThrows(IllegalArgumentException::class.java) { GenesisArmorRules.plan(owner, "fourth-again", Ability.ARCANE) }
+        assertEquals(4, owner.armor!!.originalCampaign.slots[1])
+        assertEquals(0, owner.armor!!.campaign.turn.attacks)
     }
 }

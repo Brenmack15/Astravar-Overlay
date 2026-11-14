@@ -21,6 +21,14 @@ import kotlinx.serialization.Serializable
 )
 
 object GenesisArmorRules {
+    /** The old weapon clock may be far ahead of a newly adopted character's revision. */
+    fun revision(character: ReforgeCharacter): Long {
+        val armor = requireNotNull(character.armor) { "Connect the saved armor records first." }
+        val elapsed = Math.subtractExact(character.revision, armor.adoptedAtCharacterRevision)
+        require(elapsed >= 0) { "Character revision predates its saved armor adoption." }
+        return Math.addExact(armor.originalCampaign.revision.coerceAtLeast(1), elapsed)
+    }
+
     fun attackContext(ability: Ability): CalculationContext = CalculationContext(attackId = "armor:${ability.name}",
         tags = if (ability in listOf(Ability.GAUNTLET, Ability.SPELL_GAUNTLET, Ability.GUARDIAN)) setOf("melee", "weapon") else setOf("ranged", "weapon"))
 
@@ -81,7 +89,7 @@ object GenesisArmorRules {
         }
         val newTurn = armor.lastCharacterTurnNumber != character.turnNumber
         val savedTurn = if (newTurn) Turn(number = saved.turn.number + 1) else saved.turn
-        return saved.copy(revision = character.revision,
+        return saved.copy(revision = revision(character),
             profile = profile.copy(character = character.name, level = character.level,
                 intelligence = intelligence, proficiency = projection.proficiencyBonus, melee = melee,
                 conditionAttackAdjustment = attackAdjustment),
@@ -117,8 +125,13 @@ object GenesisArmorRules {
             },
             bonusActionAvailable = if (after.turn.bonus != before.turn.bonus) !after.turn.bonus else character.turn.bonusActionAvailable,
             spellSlotSpent = character.turn.spellSlotSpent || spentSlot)
-        // Keep accepted profile values, including explicit fixed overrides, as the configuration baseline.
-        val retained = HistoryRetention.campaign(after.copy(profile = armor.campaign.profile))
+        // The legacy envelope is a compatibility container, not a second slot/action authority.
+        // Its historical bounds (99 slots, two attacks) cannot narrow the canonical character.
+        // Remove only those redundant working shadows; runtime reconstructs them from the sheet.
+        // Original balances/budgets remain byte-for-byte represented by originalCampaign, and
+        // this action's real balances and counters remain on the character and immutable audit.
+        val retained = HistoryRetention.campaign(after.copy(profile = armor.campaign.profile, slots = emptyMap(),
+            turn = after.turn.copy(attacks = 0, fullAction = false, bonus = false)))
         return character.copy(spellSlots = slots, turn = turn,
             gameSeconds = Math.subtractExact(after.gameSeconds, armor.gameTimeOffset),
             armor = armor.copy(campaign = retained, lastCharacterTurnNumber = character.turnNumber))
