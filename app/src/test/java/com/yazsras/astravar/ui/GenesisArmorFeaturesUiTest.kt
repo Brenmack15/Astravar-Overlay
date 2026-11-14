@@ -63,6 +63,7 @@ class GenesisArmorFeaturesUiTest {
             assertEquals("Approved test dice", next.armor!!.configurationSources["damage:default"])
             assertEquals(4, next.armor!!.campaign.profile.baseDamageDiceCount)
             compose.runOnIdle { character = next.copy(revision = 1) }
+            compose.waitForIdle()
             compose.waitUntil(5_000) { dismissed }
         }
     }
