@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.graphics.Rect
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.accessibility.AccessibilityWindowInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -89,7 +90,30 @@ class OverlayInstrumentationTest {
             assertTrue(geometry.first.bottom <= geometry.second.top)
             screenshot("standalone-keyboard")
             device.pressBack()
+            // Keyboard dismissal moves the modal's footer. Observe the exact
+            // typed value and settled closed-IME geometry before touching Save.
+            var settledDistance: Rect? = null
+            var settledSince = 0L
+            ui.snapshot(By.clazz("android.widget.EditText").focused(true).pkg(product),
+                "distance remains exact after native keyboard dismissal", refreshCache = true) { field ->
+                val keyboardShown = instrumentation.uiAutomation.windows.any {
+                    it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD && !Rect().also(it::getBoundsInScreen).isEmpty
+                }
+                val bounds = Rect(field.visibleBounds)
+                if (keyboardShown || field.text != "60" || bounds.isEmpty) {
+                    settledDistance = null
+                    null
+                } else {
+                    if (settledDistance != bounds) { settledDistance = bounds; settledSince = SystemClock.uptimeMillis() }
+                    true.takeIf { SystemClock.uptimeMillis() - settledSince >= 120 }
+                }
+            }
             tap("Save")
+            // Saving preferences is asynchronous. Rotation begins only after
+            // the actual save closes its modal and exposes the same raw roll.
+            assertTrue("Attack options save must close its modal before rotation",
+                device.wait(Until.gone(By.text("Attack options").pkg(product)), 30_000))
+            ui.textBounds(second, product)
             device.setOrientationLeft()
             device.waitForIdle()
             ui.textBounds(second, product)
