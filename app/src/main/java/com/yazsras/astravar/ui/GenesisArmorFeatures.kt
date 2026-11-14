@@ -33,6 +33,10 @@ import kotlinx.serialization.json.Json
         PlayerEntry("Gauntlet mechanics", profile.melee?.let { "${if (it.approved) "Confirmed" else "Needs review"} · ${it.force} Force" }
             ?: "Configure accepted melee and Guardian values", "Weapon", { editor = "melee" })
         PlayerEntry("Engineering upgrades", "Calibration, internal DC and confirmed capabilities", "Core", { editor = "upgrades" })
+        PlayerDisclosure("Armor notes") {
+            Text(armor.campaign.notes.ifBlank { "Add weapon-specific notes and references." }, color = RebuildPalette.Muted)
+            PlayerTextButton(onClick = { editor = "notes" }) { Text("Edit armor notes") }
+        }
         PlayerDisclosure("Armor rules & sources") {
             Text(armor.source, color = RebuildPalette.Muted)
             armor.configurationSources.forEach { (section, source) -> Text("$section · $source", color = RebuildPalette.Muted) }
@@ -45,8 +49,47 @@ import kotlinx.serialization.json.Json
         }
     }
     editor?.let { mode -> key(character.id, mode) {
-        GenesisArmorConfigurationEditor(character, mode, { editor = null }, onSave)
+        if (mode == "notes") GenesisArmorNotesEditor(character, { editor = null }, onSave)
+        else GenesisArmorConfigurationEditor(character, mode, { editor = null }, onSave)
     } }
+}
+
+/** The saved weapon notes stay with their armor record, with the same revision guard as rules edits. */
+@Composable internal fun GenesisArmorNotesEditor(latestCharacter: ReforgeCharacter, onDismiss: () -> Unit,
+    onSave: (ReforgeCharacter, String) -> Unit) {
+    val character = requireNotNull(rememberReforgeSnapshot(latestCharacter))
+    val armor = character.armor ?: return
+    var notes by rememberSaveable { mutableStateOf(armor.campaign.notes) }
+    var submittedJson by rememberSaveable { mutableStateOf<String?>(null) }
+    var error by rememberSaveable { mutableStateOf("") }
+    val submitted = remember(submittedJson) { submittedJson?.let { Json.decodeFromString<ReforgeCharacter>(it) } }
+    val stale = character != latestCharacter
+    val feedback = LocalGenesisEditorFeedback.current
+    LaunchedEffect(latestCharacter, submitted) {
+        if (submitted != null && latestCharacter.revision > submitted.revision &&
+            latestCharacter == submitted.copy(revision = latestCharacter.revision)) onDismiss()
+    }
+    GenesisEditorSheet("Armor notes", listOf("Notes", "Review"), creating = true, context = character.name,
+        onDismiss = onDismiss, dirty = notes != armor.campaign.notes, saveLabel = "Save armor notes",
+        saveEnabled = !stale && notes != armor.campaign.notes && notes.length <= 20000,
+        error = if (stale) "The character changed while this draft was open. Close and reopen to review the latest values." else error,
+        onSave = {
+            try {
+                check(!stale) { "The character changed. Reopen the notes." }
+                require(notes.length <= 20000) { "Armor notes can contain up to 20,000 characters." }
+                val next = character.copy(armor = armor.copy(campaign = armor.campaign.copy(notes = notes)))
+                submittedJson = Json.encodeToString(next)
+                onSave(next, "Updated armor notes")
+            } catch (failure: Exception) { error = failure.message ?: "Unable to save armor notes." }
+        }) { step, select ->
+        if (step == 0) {
+            Text("Weapon-specific notes and references.", color = RebuildPalette.Muted)
+            Field("Armor notes", notes, { notes = it }, single = false, enabled = !feedback.busy)
+            if (notes.length > 20000) Text("Armor notes can contain up to 20,000 characters.", color = MaterialTheme.colorScheme.error)
+        } else GenesisReviewSection("Armor notes", { select(0) }) {
+            Text(notes.ifBlank { "No armor notes" }, color = RebuildPalette.Muted)
+        }
+    }
 }
 
 private fun DamageType.displayName() = name.lowercase().replaceFirstChar(Char::titlecase)

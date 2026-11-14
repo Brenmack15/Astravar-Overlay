@@ -99,4 +99,25 @@ class GenesisArmorFeaturesUiTest {
             assertEquals(12, GenesisArmorRules.runtime(saved.copy(baseAbilities = saved.baseAbilities + (Stat.INT to 22))).profile.melee!!.attackBonus)
         }
     }
+
+    @Test fun originalWeaponNotesRemainEditableWithoutChangingCharacterNotesOrResources() {
+        val original = fixture().let { actor -> actor.copy(notes = "Character journal", armor = actor.armor!!.copy(
+            campaign = actor.armor!!.campaign.copy(notes = "Original weapon note"))) }
+        var character by mutableStateOf(original)
+        var dismissed by mutableStateOf(false)
+        var pending: ReforgeCharacter? = null
+        withUi({ if (!dismissed) GenesisArmorNotesEditor(character, { dismissed = true }) { next, _ -> pending = next } }) {
+            compose.onNodeWithText("Original weapon note").assertExists()
+            compose.onNode(hasSetTextAction()).performTextReplacement("Updated weapon reference")
+            review()
+            compose.onNodeWithText("Save armor notes").assertIsEnabled().performClick()
+            assertFalse(dismissed)
+            val next = requireNotNull(pending)
+            assertEquals("Updated weapon reference", next.armor!!.campaign.notes)
+            assertEquals(original, next.copy(armor = next.armor!!.copy(campaign = next.armor!!.campaign.copy(notes = original.armor!!.campaign.notes)))))
+            compose.runOnIdle { character = next.copy(revision = 1) }
+            compose.waitForIdle()
+            compose.waitUntil(5_000) { dismissed }
+        }
+    }
 }

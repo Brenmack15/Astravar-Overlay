@@ -71,7 +71,7 @@ class GenesisArmorSyncProjectionTest {
         assertEquals("current", configuration.fields.getValue("status").jsonPrimitive.content)
         val state = BackupCodec.json.decodeFromJsonElement<Campaign>(configuration.fields.getValue("campaign"))
         assertEquals(5, state.profile.intelligence); assertEquals(4, state.profile.proficiency)
-        assertEquals(mapOf(1 to 1), state.slots); assertEquals(adopted.revision, state.revision)
+        assertEquals(mapOf(1 to 1), state.slots); assertEquals(201L, state.revision)
         assertTrue(state.pending.isEmpty())
         assertEquals(JsonArray(listOf(JsonPrimitive("COLD"))), configuration.fields.getValue("activeElements"))
         assertEquals(BackupCodec.json.encodeToJsonElement(original.pending.single()), first.single { it.kind == "roll-history" }.fields["roll"])

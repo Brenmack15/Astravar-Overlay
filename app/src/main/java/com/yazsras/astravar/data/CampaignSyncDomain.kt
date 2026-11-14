@@ -131,11 +131,9 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
                 check(character.id == scoped.single().first.profileId && saved.revision == character.revision) {
                     "Current armor identity or revision needs review; the original archive was not substituted."
                 }
-                val elapsedRevisions = Math.subtractExact(character.revision, armor.adoptedAtCharacterRevision)
-                check(elapsedRevisions >= 0) { "Current armor revision needs review; the original archive was not substituted." }
                 // The server has already seen the legacy store's revision. Carry its baseline
-                // forward while engine plans continue using the actual character revision.
-                val publicationRevision = Math.addExact(armor.originalCampaign.revision.coerceAtLeast(1), elapsedRevisions)
+                // forward, matching the engine's revision without rewriting old shot plans.
+                val publicationRevision = GenesisArmorRules.revision(character)
                 val runtime: Result<Campaign> = try {
                     check(!character.archived) { "The armor's character is archived." }
                     genesisRequireProjection(db, character.id, saved)
