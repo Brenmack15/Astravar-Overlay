@@ -78,4 +78,23 @@ class GenesisSpellReservoirUiTest {
         compose.onNodeWithText("Reservoir configuration").assertExists()
         } finally { controller.pause().stop().destroy() }
     }
+    @Test fun competingCharacterEditDoesNotDismissAnUncommittedLoad() {
+        var current by mutableStateOf(character())
+        var proposal: ReforgeCharacter? = null
+        val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            controller.get().setContent { AstravarTheme { Page { GenesisSpellReservoir(current) { next, _ -> proposal = next } } } }
+            compose.onNodeWithTag("genesis-load-reservoir").performScrollTo().performClick()
+            compose.onNodeWithTag("genesis-confirm-reservoir-load").performClick()
+            compose.runOnIdle {
+                assertNotNull(proposal)
+                current = current.copy(revision = current.revision + 1, name = "Changed elsewhere")
+            }
+            compose.waitForIdle()
+            compose.onNodeWithTag("genesis-confirm-reservoir-load").assertExists().assertIsNotEnabled()
+            assertEquals(2, current.spellSlots[1])
+            assertTrue(current.armor!!.campaign.installed!!.payloads.isEmpty())
+        } finally { controller.pause().stop().destroy() }
+    }
+
 }
