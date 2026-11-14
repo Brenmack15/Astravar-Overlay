@@ -88,6 +88,9 @@ class ReforgeConverters {
     @Query("SELECT * FROM reforge_characters ORDER BY profileId") fun observeAll(): Flow<List<ReforgeCharacterRow>>
     @Query("SELECT * FROM reforge_characters WHERE profileId=:profileId") suspend fun character(profileId: String): ReforgeCharacterRow?
     @Query("SELECT * FROM reforge_characters ORDER BY profileId") suspend fun allCharacters(): List<ReforgeCharacterRow>
+    /** Narrow candidates only; decode and validate the actual top-level armor field before use. */
+    @Query("SELECT * FROM reforge_characters WHERE instr(characterJson, '\"armor\"') > 0 ORDER BY profileId")
+    suspend fun armorCandidates(): List<ReforgeCharacterRow>
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(value: ReforgeCharacterRow)
     @Update suspend fun update(value: ReforgeCharacterRow)
     @Query("SELECT * FROM reforge_changes WHERE commandId=:id") suspend fun change(id: String): ReforgeChange?

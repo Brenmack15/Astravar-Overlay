@@ -4,6 +4,10 @@ import androidx.room.withTransaction
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
+import kotlinx.coroutines.CancellationException
+import com.yazsras.astravar.rules.BackupCodec
+import com.yazsras.astravar.rules.Campaign
+import com.yazsras.astravar.rules.reforge.GenesisArmorRules
 
 /** Versioned, typed projections of committed local records, never a database replacement. */
 @Serializable data class CampaignSyncRecord(val recordId: String, val kind: String, val revision: Long, val fields: JsonObject)
@@ -110,8 +114,53 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         if (includeReadOnly) db.ledgerDao().allEvents().filter { it.itemId in itemIds }.forEach { event ->
             output += CampaignSyncAuditProjection.records(envelope("audit", "ledger:${campaignHash(event.commandId).take(48)}", 1, event))
         }
-        // The established weapon store belongs to its primary local-player profile's selected campaign.
-        if (includeReadOnly && ("local-player" in profileIds || local && actorInScope("local-player") && allSheets.none {it.profileId=="local-player"})) weaponDb?.let {weapon ->
+        // Once adopted, the original store is an archive. Never publish it as current,
+        // even when the owning character is outside this connection's campaign scope.
+        val adoptedArmor = if (includeReadOnly) db.reforgeDao().armorCandidates().map { row ->
+            row to runCatching { row.saved() }
+        }.filter { (_, decoded) -> decoded.isFailure || decoded.getOrNull()?.character?.armor != null } else emptyList()
+        if (includeReadOnly && adoptedArmor.isNotEmpty()) {
+            val scoped = adoptedArmor.filter { (row, _) -> row.profileId in profileIds }
+            if (scoped.isNotEmpty()) {
+                check(adoptedArmor.size == 1 && scoped.single().second.isSuccess) {
+                    "Current armor ownership or saved state needs review on this device; the original archive was not substituted."
+                }
+                val saved = scoped.single().second.getOrThrow()
+                val character = saved.character
+                val armor = requireNotNull(character.armor)
+                check(character.id == scoped.single().first.profileId && saved.revision == character.revision) {
+                    "Current armor identity or revision needs review; the original archive was not substituted."
+                }
+                val elapsedRevisions = Math.subtractExact(character.revision, armor.adoptedAtCharacterRevision)
+                check(elapsedRevisions >= 0) { "Current armor revision needs review; the original archive was not substituted." }
+                // The server has already seen the legacy store's revision. Carry its baseline
+                // forward while engine plans continue using the actual character revision.
+                val publicationRevision = Math.addExact(armor.originalCampaign.revision.coerceAtLeast(1), elapsedRevisions)
+                val runtime: Result<Campaign> = try {
+                    check(!character.archived) { "The armor's character is archived." }
+                    genesisRequireProjection(db, character.id, saved)
+                    Result.success(GenesisArmorRules.runtime(character))
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { Result.failure(e) }
+                // Keep the established combat-scope contract: the same armor profile,
+                // weapon slots and core data, now derived from its scoped owner. No full
+                // character record, HP, skills or unrelated inventory is included.
+                output += CampaignSyncRecord("astravar-configuration", "configuration", publicationRevision, buildJsonObject {
+                    put("authority", "genesis-character"); put("profileId", character.id)
+                    put("characterRevision", character.revision); put("source", "Committed Android character armor")
+                    put("status", if (runtime.isSuccess) "current" else "unavailable")
+                    runtime.getOrNull()?.let { state ->
+                        put("campaign", BackupCodec.json.encodeToJsonElement(state.copy(pending = emptyList())))
+                        put("activeElements", BackupCodec.json.encodeToJsonElement(armor.elements))
+                    }
+                    if (runtime.isFailure) put("reason", "Current character statistics, armor configuration or connected records need review on this device. No archived configuration was substituted.")
+                })
+                // These are immutable actual shot snapshots, not newly computed results.
+                armor.campaign.pending.forEach { shot -> output += CampaignSyncRecord(shot.plan.id, "roll-history", publicationRevision,
+                    buildJsonObject { put("roll", BackupCodec.json.encodeToJsonElement(shot)); put("profileId", character.id)
+                        put("source", "Committed Android character armor history") }) }
+            }
+        } else if (includeReadOnly && ("local-player" in profileIds || local && actorInScope("local-player") && allSheets.none {it.profileId=="local-player"})) weaponDb?.let {weapon ->
             weapon.withTransaction {
                 val revision=weapon.dao().state()?.let {row ->
                     val state=com.yazsras.astravar.rules.BackupCodec.decodeCampaignSnapshot(row.body)
