@@ -436,6 +436,14 @@ class ReforgeRepository private constructor(private val db: RoomDatabase, privat
         return null
     }
     private suspend fun checkOwnershipChanges(before: ReforgeCharacter?, after: ReforgeCharacter) {
+        if (before?.armor == null && after.armor != null) {
+            // There is one original weapon store in an installation. Two racing
+            // reviews must not duplicate its loaded payloads or scroll inventory.
+            val owner = dao.allCharacters().firstOrNull {
+                it.profileId != after.id && it.saved().character.armor != null
+            }
+            check(owner == null) { "The saved armor systems are already connected to another character. Open that character to use them." }
+        }
         // HP, spells, rests and ordinary actions do not scan every other aggregate.
         if (before?.items.orEmpty() == after.items && before?.itemDefinitions.orEmpty() == after.itemDefinitions) return
         val others = dao.allCharacters().filter { it.profileId != after.id }.map { it.saved().character }

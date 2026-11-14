@@ -53,7 +53,7 @@ private enum class SpellbookFilter(val label: String) {
 @Composable fun ReforgeCharacterSheet(repository: CampaignLedgerRepository, localRepository: ReforgeRepository? = null,
     initialSection: String = "Sheet", sectionOnly: Boolean = false,
     companionProfileId: String? = null, onBackToCompanions: (() -> Unit)? = null,
-    navigationRequest: GenesisCharacterRoute? = null, onOpenArmor: (() -> Unit)? = null) {
+    navigationRequest: GenesisCharacterRoute? = null) {
     val context = LocalContext.current.applicationContext
     val preferences = remember(context) { Preferences(context) }
     val preferencesState by preferences.flow.collectAsState(initial = OverlayPrefs())
@@ -118,6 +118,9 @@ private enum class SpellbookFilter(val label: String) {
     }
     val saved = active.firstOrNull { it.character.id == chosenId }
     val character = saved?.character
+    val legacyArmor = LocalGenesisArmorLegacy.current.takeIf {
+        companionProfileId == null
+    }
     val projection = character?.let { remember(it) { CharacterCalculator.calculate(it) } }
     LaunchedEffect(dialog) { if (dialog != null && !busy) error = "" }
     LaunchedEffect(actorSelection) { if (actorSelection.first && selectedId == actorSelection.second) selectedId = null }
@@ -286,7 +289,6 @@ private enum class SpellbookFilter(val label: String) {
                         onHp = { dialog = "HP" }, onDefense = { dialog = "Defense" },
                         onInitiative = { projection.initiative.value?.let { requestRoll("Initiative", it, RollKind.INITIATIVE) } },
                         compact = compactChrome, onControls = { dialog = "Controls" })
-                    if (!sectionOnly && !compactChrome) GenesisQuickActions(character.id, ::quickAction)
                     GenesisCharacterPager(
                         actorId = character.id,
                         requestedSection = if (lastActor != null && lastActor != chosenId) initialSection else requestedSection,
@@ -328,19 +330,10 @@ private enum class SpellbookFilter(val label: String) {
                                         }
                                     }
                                 }
-                                RebirthSectionLabel("Skills")
-                                Column {
-                                    reforgeSkills.forEach { (name, stat) ->
-                                        val value = projection.skills[name]?.value ?: projection.abilities[stat]?.modifier
-                                        val skill = character.skills[name]
-                                        RebirthCheckRow(name, when {
-                                            skill?.expertise == true -> "${stat.name} · Expertise"
-                                            skill?.proficient == true -> "${stat.name} · Proficient"
-                                            skill?.halfProficiency == true -> "${stat.name} · Half proficiency"
-                                            else -> stat.name
-                                        }, value) { value?.let { requestRoll(name, it, RollKind.SKILL, name) } }
-                                    }
-                                }
+                                GenesisSkills(character, projection, busy,
+                                    onAdd = { dialog = "Skill" }, onEdit = { dialog = "Skill:$it" },
+                                    onPin = { id, pinned -> change(if (pinned) "Pin skill" else "Unpin skill", SkillRules.pin(character, id, pinned), false) },
+                                    onRoll = { name, value, id -> requestRoll(name, value, RollKind.SKILL, id) })
                                 PlayerDisclosure("Passive scores & movement", initiallyOpen = true) {
                                     listOf("Perception", "Investigation", "Insight").forEach { name ->
                                         val ability = reforgeSkills.getValue(name)
@@ -381,14 +374,18 @@ private enum class SpellbookFilter(val label: String) {
                                         }
                                     }
                                 }
-                                if (onOpenArmor != null && companionProfileId == null && character.id == "local-player" &&
-                                    saved!!.origin.sourceProfileId == "local-player") {
-                                    PlayerOutlinedButton(onClick = onOpenArmor, modifier = Modifier.fillMaxWidth()) {
-                                        ArcaneIcon("Weapon", Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Astravar armor attacks")
-                                    }
-                                }
+                                GenesisArmorAdoption(character, legacyArmor?.campaign, legacyArmor?.preferences?.elements.orEmpty(),
+                                    alreadyAdoptedBy = all.firstOrNull { it.character.id != character.id && it.character.armor != null }?.character?.name,
+                                    onSave = { next, label -> change(label, next, false) })
+                                GenesisArmorCombat(character,
+                                    onSave = { next, label -> change(label, next, false) },
+                                    onRoll = { next, record -> action("Armor roll saved") {
+                                        local.commitRoll(character.id, saved!!.revision, next, "Rolled Astravar attack and damage", record)
+                                        savedRoll = record
+                                    } },
+                                    onHistory = { openSection("History") }, saving = busy)
                                 RebirthSectionLabel("Attacks") { PlayerTextButton(onClick = { dialog = "Attack" }) { Text("Add attack") } }
-                                if (character.attacks.isEmpty()) PlayerEmpty("Set up your attacks", "Add an attack using your accepted damage dice and ability. Your specialized armor weapon remains in Tools → Armor weapon.", "Weapon")
+                                if (character.attacks.isEmpty()) PlayerEmpty("Set up your attacks", "Add an attack using your accepted damage dice and ability.", "Weapon")
                                 Column {
                                     character.attacks.forEach { attack -> key(attack.id) {
                                         Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -475,6 +472,9 @@ private enum class SpellbookFilter(val label: String) {
                                 }
                             }
                             "Spells" -> {
+                                GenesisArmorAdoption(character, legacyArmor?.campaign, legacyArmor?.preferences?.elements.orEmpty(),
+                                    alreadyAdoptedBy = all.firstOrNull { it.character.id != character.id && it.character.armor != null }?.character?.name,
+                                    onSave = { next, label -> change(label, next, false) })
                                 RebirthSectionLabel("Spellbook") {
                                     PlayerTextButton(onClick = { dialog = "Spell" }) { Text("Add spell") }
                                 }
@@ -543,13 +543,26 @@ private enum class SpellbookFilter(val label: String) {
                                         }
                                     }
                                 }
+                                GenesisSpellReservoir(character) { next, label -> change(label, next, false) }
+                                PlayerTextButton(onClick = { openSection("History") }) { Text("Spell and roll history") }
                             }
                             "Features" -> {
+                                GenesisArmorAdoption(character, legacyArmor?.campaign, legacyArmor?.preferences?.elements.orEmpty(),
+                                    alreadyAdoptedBy = all.firstOrNull { it.character.id != character.id && it.character.armor != null }?.character?.name,
+                                    onSave = { next, label -> change(label, next, false) })
+                                GenesisArmorFeatures(character) { next, label -> change(label, next, false) }
                                 ReforgeIdentitySection(character, onEdit = { dialog = "Identity" }, onNotes = { dialog = "Notes" }, onAdvance = { dialog = "Advance" })
                                 if (character.features.isEmpty()) PlayerEmpty("Your features & feats",
                                     "Add your accepted class features, feats and homebrew through Edit identity & features. Unreviewed source material does not become an active mechanic.")
                             }
                             "Resources" -> {
+                                Text("HP ${projection.currentHp ?: "Not set"} / ${projection.maximumHp.value ?: "Not set"} · Temporary HP ${character.temporaryHp ?: "Not set"}",
+                                    color = RebuildPalette.Ice)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    PlayerOutlinedButton(onClick = { dialog = "HP" }) { Text("Adjust hit points") }
+                                    PlayerTextButton(onClick = { dialog = "Slots" }) { Text("Spell slots") }
+                                }
+                                GenesisArmorRecovery(character) { next, label -> change(label, next, false) }
                                 RebirthSectionLabel("Limited uses") { PlayerTextButton(onClick = { dialog = "Resource" }) { Text("Add resource") } }
                                 PlayerButton(onClick = { dialog = "Rest" }) { Text("Rest & recovery") }
                                 Column {
@@ -581,8 +594,12 @@ private enum class SpellbookFilter(val label: String) {
                                 val rolls by remember(local, character.id) { local.rollHistory(character.id) }.collectAsState(initial = emptyList())
                                 val changes by remember(local, character.id) { local.historySummaries(character.id) }.collectAsState(initial = emptyList())
                                 PlayerHeading("Roll history")
-                                if (rolls.isEmpty()) Text("No rolls yet. Rolls occur only when you tap Roll or enter a manual result.", color = RebuildPalette.Muted)
-                                rolls.forEach { roll -> key(roll.id) { ReforgeSavedRollCard(roll) } }
+                                GenesisCharacterHistory(rolls,
+                                    character.armor?.campaign?.pending.orEmpty() + legacyArmor?.campaign?.pending.orEmpty().takeIf {
+                                        character.armor != null || (character.id == "local-player" && saved!!.origin.sourceProfileId == "local-player")
+                                    }.orEmpty())
+                                if (character.armor != null) Text("Earlier armor archives remain preserved in Tools → Records, backups & connection → Original armor archive.",
+                                    style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
                                 PlayerDisclosure("Changes & saved revisions") { changes.take(30).forEach { Text("${it.operation} · revision ${it.priorRevision} → ${it.resultingRevision}", color = RebuildPalette.Muted) } }
                                 PlayerDisclosure("Original sources & advanced details") {
                                     Text(saved!!.origin.label)
@@ -680,6 +697,8 @@ private enum class SpellbookFilter(val label: String) {
                 initialRole = if (companionProfileId == null) GenesisActorRole.PLAYER else GenesisActorRole.COMPANION)
                 else ReforgeCampaignConnectionsDialog(saved!!, local, repository, { dialog = null })
             "Training" -> ReforgeTrainingEditor(character, { dialog = null }) { change("Edit training", it) }
+            "Skill" -> GenesisSkillEditor(character, busy = busy, saveError = error, onDismiss = { dialog = null },
+                onSave = { label, next -> change(label, next) })
             "Item" -> if (connected != null) GenesisConnectedItemEditor(connected, saved!!, { dialog = null }, onSaved = { dialog = null })
                 else ReforgeItemEditor(character, { dialog = null }, onSave = { change("Add reviewed equipment", it) })
             "ImportItem" -> GenesisCampaignItemPicker(saved!!, local, repository) { dialog = null }
@@ -787,6 +806,9 @@ private enum class SpellbookFilter(val label: String) {
                     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
                 }
             }
+        }
+        dialog?.takeIf { it.startsWith("Skill:") }?.substringAfter(':')?.let { skillId ->
+            key(skillId) { GenesisSkillEditor(character, skillId, busy, error, { dialog = null }) { label, next -> change(label, next) } }
         }
         dialog?.takeIf { it.startsWith("Item:") }?.substringAfter(':')?.let { itemId ->
             ReforgeItemEditor(character, { dialog = null }, { change("Edit reviewed equipment", it) }, existingItemId = itemId)

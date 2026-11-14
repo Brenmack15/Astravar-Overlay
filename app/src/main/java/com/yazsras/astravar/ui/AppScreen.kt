@@ -50,6 +50,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     val localContext = LocalContext.current.applicationContext
     val playableRepository = remember(localContext) { ReforgeRepository.open(localContext) }
     val playerPreferences = remember(localContext) { com.yazsras.astravar.data.ReforgePreferences.open(localContext) }
+    val selectedPlayerId by playerPreferences.activeProfileId.collectAsState(initial = null)
     val campaignSelection by remember(playerPreferences) { playerPreferences.selectedCampaignId.map { true to it } }
         .collectAsState(initial = false to null)
     val connected = GenesisConnectedEnvironment(app.genesisStorage.authority, app.campaignLedger,
@@ -78,6 +79,12 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     var searchCampaignItemId by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     var encounterReturn by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val searchRoute = searchProfileId?.let { GenesisCharacterRoute(it, searchSection, searchDetail, searchRouteToken) }
+    LaunchedEffect(tool, selectedPlayerId) {
+        val section = genesisRetiredToolSection(tool) ?: return@LaunchedEffect
+        searchProfileId = selectedPlayerId ?: "local-player"
+        searchSection = section; searchDetail = null; searchRouteToken++
+        searchIsCompanion = false; companionPlayId = null; tool = null; tab = "Character"
+    }
     fun openSearchDestination(destination: ReforgeSearchDestination) {
         encounterReturn = false
         tool = null; campaignPage = null
@@ -174,7 +181,8 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
         returnToEncounter()
     }
     AstravarTheme {
-        CompositionLocalProvider(LocalGenesisConnectedEnvironment provides connected) {
+        CompositionLocalProvider(LocalGenesisConnectedEnvironment provides connected,
+            LocalGenesisArmorLegacy provides s?.let { GenesisArmorLegacy(it, prefs) }) {
         Scaffold(containerColor=RebuildPalette.Canvas,
             snackbarHost={SnackbarHost(snackbar)},
             topBar={RebuildAppHeader(s?.demo==true, search = { tool = "Global search" }, tools = { tool = "Tools" })},
@@ -238,8 +246,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                     when(tab) {
                         "Character" -> if (remoteTestEnabled) Page { CharacterOverviewV2(app.campaignLedger, current, RemoteStatProtocol.PROFILE_ID) }
                             else ReforgeCharacterSheet(app.campaignLedger, playableRepository,
-                                navigationRequest = searchRoute?.takeUnless { searchIsCompanion },
-                                onOpenArmor = { tool = "Armor weapon" })
+                                navigationRequest = searchRoute?.takeUnless { searchIsCompanion })
                         "Armor" -> ArmorOverviewV2(current,app.campaignLedger,
                             combat={tool="Armor weapon"},systems={tool="Spell reservoir"},
                             eek={tab="Campaign";campaignPage="Eek"},inventory={tab="Campaign";campaignPage="Inventory"},
@@ -318,21 +325,19 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                         "Character backup" -> ReforgeBackupPage(playableRepository)
                         "Campaign import" -> CampaignArchiveImportV21(app.campaignLedger)
                         "Weapon backup" -> Page {BackupPage(current,actions)}
-                        "Armor weapon" -> if(current.onboarded) Dashboard(current,actions,startOverlay,grantOverlay,stopOverlay,app.preferences,prefs)
-                            else WeaponSetupV2(current,actions,{tool="Rules & profile"},{tool="Weapon backup"})
-                        "Rules & profile" -> RulesPage(current,actions,if(prefs.mode in listOf(Ability.ARCANE,Ability.SPELL)) emptyList() else prefs.elements)
-                        "Resources & recovery" -> ResourcesPage(current,history,actions)
-                        "Spell reservoir" -> CoresPage(current,actions)
+                        "Armor systems", "Armor weapon", "Rules & profile", "Resources & recovery",
+                        "Spell reservoir", "Spell library", "Roll history" -> Text("Opening character…")
                         "ChatGPT Prompts", "ChatGPT toolkit" -> ChatGptPromptsPage(app.campaignLedger.prompts)
-                        "Spell library" -> PayloadsPage(current,actions,app.preferences,prefs.selectedPayloads)
-                        "Roll history" -> CombatHistoryPage(current)
                         "Appearance", "Overlay & appearance" -> SettingsPage(app,current,actions,startOverlay,grantOverlay,stopOverlay)
                         "Companions" -> PartyPageV2(app.campaignLedger, current, openReferences={tool=null;tab="Campaign";campaignPage="Reference Library"}) {
                             tool = null; requestedInventory = "Campaign items"; inventoryRoute++; tab = "Inventory"
                         }
-                        "Character sources" -> Page { CharacterOverviewV2(app.campaignLedger, current) }
-                        "Armor systems" -> ArmorOverviewV2(current,app.campaignLedger,combat={tool="Armor weapon"},systems={tool="Spell reservoir"},eek={tool="Companions"},inventory={tool=null;tab="Inventory"},elements=prefs.elements,selectElement={elementPicker=true},
-                            openReferences={tool=null;tab="Campaign";campaignPage="Reference Library"})
+                        "Character sources" -> Page {
+                            CharacterOverviewV2(app.campaignLedger, current)
+                            PlayerTextButton(onClick = { tool = null; tab = "Campaign"; campaignPage = "Reference Library" }) {
+                                Text("Armor source references")
+                            }
+                        }
                         else -> HelpPage()
                     }
                 }}

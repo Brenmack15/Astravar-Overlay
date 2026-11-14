@@ -140,17 +140,8 @@ val rebuildDestinations = listOf("Character", "Inventory", "Companions", "Campai
 @Composable fun RebuildConfigHub(open: (String) -> Unit) {
     Page {
         PlayerHeading("Tools & settings")
-        PlayerEntry("Armor systems", "Your accepted Astravar abilities", "Weapon", { open("Armor systems") })
         PlayerEntry("ChatGPT Prompts", "Edit campaign handoff prompts", "More", { open("ChatGPT Prompts") })
         PlayerEntry("Appearance", "Visual and feedback preferences", "Settings", { open("Appearance") })
-        PlayerDisclosure("Advanced combat & magic") {
-            PlayerEntry("Armor weapon", "Specialized attack engine", "Weapon", { open("Armor weapon") })
-            PlayerEntry("Spell reservoir", "Internal core and spell loads", "Core", { open("Spell reservoir") })
-            PlayerEntry("Spell library", "Spell templates and payloads", "Payload", { open("Spell library") })
-            PlayerEntry("Rules & profile", "Accepted upgrades and configuration", "Weapon", { open("Rules & profile") })
-            PlayerEntry("Resources & recovery", "Resources and game time", "Core", { open("Resources & recovery") })
-            PlayerEntry("Roll history", "Saved dice and rolls", "History", { open("Roll history") })
-        }
         PlayerDisclosure("Records, backups & connection") {
             PlayerEntry("Complete backup", "Keep connected campaign and playable records together", "History", { open("Complete backup") })
             PlayerEntry("Character sources", "Original campaign values and revisions", "History", { open("Character sources") })
@@ -158,7 +149,7 @@ val rebuildDestinations = listOf("Character", "Inventory", "Companions", "Campai
             PlayerEntry("Campaign backup", "Backup campaign records", "History", { open("Campaign backup") })
             PlayerEntry("Campaign import", "Review an imported archive", "History", { open("Campaign import") })
             PlayerEntry("Owner connection", "Trusted pairing and approvals", "Settings", { open("Owner connection") })
-            PlayerEntry("Weapon backup", "Backup the separate weapon system", "History", { open("Weapon backup") })
+            PlayerEntry("Original armor archive", "Preserved configuration and historical records", "History", { open("Weapon backup") })
             if (com.yazsras.astravar.BuildConfig.DEBUG) {
                 PlayerEntry("Fictional sync", "Isolated test lab", "More", { open("Fictional sync") })
                 PlayerEntry("Remote Updates", "Disposable test profile", "Settings", { open("Remote Updates") })

@@ -38,6 +38,16 @@ object CharacterCalculator {
             number(abilities.getValue(training.ability).modifier?.plus(prof), NumericTarget.SKILL,key,active,
                 "${training.ability.name} modifier${if(prof!=0) " + ${if(multiplier==2) "Expertise" else "proficiency"} $prof" else ""}")
         }
+        val customSkills = character.customSkills.associate { skill ->
+            val training = skill.training
+            val grants = active.mapNotNull { it.effect.payload as? EffectPayload.Proficiency }.filter { it.skill.equals(skill.id, true) }
+            val multiplier = when { training.expertise || grants.any { it.expertise } -> 2; training.proficient || grants.isNotEmpty() -> 1; else -> 0 }
+            val prof = if (multiplier > 0) pb * multiplier else if (training.halfProficiency) pb / 2 else 0
+            val baseline = skill.baselineOverride ?: abilities.getValue(training.ability).modifier?.let { it + prof + skill.bonus }
+            val label = if (skill.baselineOverride != null) "Explicit skill baseline override (active effects still apply)"
+                else "${training.ability.name} modifier + training $prof + bonus ${skill.bonus}"
+            skill.id to number(baseline, NumericTarget.SKILL, skill.id, active, label)
+        }
         val dex=abilities.getValue(Stat.DEX).modifier
         val acBase = character.baseAc?.let { base -> if(character.armorUsesDexterity) dex?.let { base + minOf(it,character.armorDexterityCap ?: Int.MAX_VALUE) } else base }
         val con=abilities.getValue(Stat.CON).modifier
@@ -70,7 +80,7 @@ object CharacterCalculator {
             skills.filterKeys { it in setOf("Perception","Investigation","Insight") }.mapValues { (key,value)->value.value?.let { 10+it+when(rollMode(character,RollKind.SKILL,key,context)) { DiceMode.ADVANTAGE->5;DiceMode.DISADVANTAGE->-5;else->0 } } }, effects.statuses,
             active.mapNotNull { it.effect.payload as? EffectPayload.Defense },
             active.mapNotNull { (it.effect.payload as? EffectPayload.ConditionImmunity)?.condition }.toSet(),resources,warnings,
-            (character.movement+("walk" to character.speed)).mapValues { (key,base)->number(base,NumericTarget.SPEED,key,active,"$key speed").value?.let { value->maxOf(0,if(character.rules.core==RuleFamily.LEGACY_2014 && character.exhaustionLevel>=2) value/2 else value) } },character.senses)
+            (character.movement+("walk" to character.speed)).mapValues { (key,base)->number(base,NumericTarget.SPEED,key,active,"$key speed").value?.let { value->maxOf(0,if(character.rules.core==RuleFamily.LEGACY_2014 && character.exhaustionLevel>=2) value/2 else value) } },character.senses,customSkills)
     }
 
     internal fun number(base: Int?,target: NumericTarget,key: String,active: List<ActiveEffect>,baseLabel: String): CalculatedNumber {
@@ -168,6 +178,8 @@ object CharacterCalculator {
     }
 
     fun validate(c:ReforgeCharacter) {
+        GenesisArmorRules.validate(c.armor)
+        SkillRules.validate(c)
         require(c.id.isNotBlank() && c.id.length<=200 && c.name.length in 1..200)
         require(c.level in 1..20 && c.revision>=0 && c.schemaVersion==1)
         require(c.baseAbilities.values.all { it==null || it in 0..100 })

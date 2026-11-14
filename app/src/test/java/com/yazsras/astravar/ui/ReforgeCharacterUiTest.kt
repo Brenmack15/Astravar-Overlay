@@ -383,7 +383,10 @@ class ReforgeCharacterUiTest {
     }
 
     private fun assertCharacterChromeUsesCanvas() {
-        val sampleRows = listOf("quick-health", "genesis-character-tabs", "genesis-page-indicator")
+        listOf("quick-health", "quick-attack", "quick-spells", "quick-inventory").forEach {
+            compose.onNodeWithTag(it).assertDoesNotExist()
+        }
+        val sampleRows = listOf("genesis-character-tabs", "genesis-page-indicator")
             .associateWith { compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot.center.y.toInt() }
         compose.runOnIdle { invalidateNativeCaptureWindows() }
         compose.mainClock.advanceTimeByFrame()

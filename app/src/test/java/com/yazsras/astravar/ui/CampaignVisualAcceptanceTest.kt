@@ -365,8 +365,10 @@ class CampaignVisualAcceptanceTest {
                 RebuildConfigHub { tool = it }
                 if (tool == "Fictional sync") RebuildToolSheet("Fictional sync", { tool = null }) { SandboxSyncPage(sync) }
             }
-            compose.onNodeWithText("Advanced combat & magic").performScrollTo().performClick()
-            compose.onNodeWithText("Spell reservoir").assertIsDisplayed()
+            compose.onNodeWithText("Advanced combat & magic").assertDoesNotExist()
+            compose.onNodeWithText("Spell reservoir").assertDoesNotExist()
+            compose.onNodeWithText("Armor systems").assertDoesNotExist()
+            compose.onNodeWithText("Appearance").assertIsDisplayed()
             compose.onNodeWithText("Core management").assertDoesNotExist()
             capture("rebuild-config-400", fixture.activity.get())
             if (BuildConfig.DEBUG) {

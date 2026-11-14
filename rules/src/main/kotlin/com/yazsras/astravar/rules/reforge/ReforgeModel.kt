@@ -1,6 +1,8 @@
 package com.yazsras.astravar.rules.reforge
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 
 @Serializable enum class Stat { STR, DEX, CON, INT, WIS, CHA }
 @Serializable enum class RuleFamily { REVISED_2024, LEGACY_2014 }
@@ -19,6 +21,13 @@ import kotlinx.serialization.Serializable
     val restoreUnknownOnRest: Boolean = false, val dieSides: Int? = null
 )
 @Serializable data class SkillTraining(val ability: Stat, val proficient: Boolean = false, val expertise: Boolean = false, val halfProficiency: Boolean = false)
+/** An independent identity prevents a user skill with an official name from replacing it. */
+@Serializable data class CustomSkill(
+    val id: String, val name: String, val training: SkillTraining,
+    val bonus: Int = 0, val notes: String = "",
+    /** Replaces ability + training + bonus; active effects and conditions still apply. */
+    val baselineOverride: Int? = null
+)
 @Serializable enum class NumericTarget { ABILITY, ABILITY_CAP, SAVE, SKILL, INITIATIVE, ARMOR_CLASS, MAX_HP, SPEED, SPELL_ATTACK, SPELL_DC, ATTACK, DAMAGE, RESOURCE_CAPACITY }
 @Serializable enum class NumberOperation { ADD, SET, MINIMUM, MAXIMUM }
 @Serializable enum class DamageKind { ACID, BLUDGEONING, COLD, FIRE, FORCE, LIGHTNING, NECROTIC, PIERCING, POISON, PSYCHIC, RADIANT, SLASHING, THUNDER }
@@ -91,6 +100,7 @@ import kotlinx.serialization.Serializable
     val id:String, val name:String, val source:RuleSource, val description:String = "",
     val kind:FeatureKind = FeatureKind.OTHER, val actionType:String = "", val resourceId:String? = null
 )
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class ReforgeCharacter(
     val id: String, val name: String, val revision: Long = 0, val schemaVersion: Int = 1,
     val species: String = "", val className: String = "", val subclass: String = "",
@@ -118,7 +128,12 @@ import kotlinx.serialization.Serializable
     val gameSeconds: Long = 0, val turnNumber: Long = 0,
     val usedEffectTurns: Map<String, Long> = emptyMap(), val turn: TurnEconomy = TurnEconomy(),
     /** Reversible removal from daily play; the row, source identity and complete history remain. */
-    val archived: Boolean = false
+    val archived: Boolean = false,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val customSkills: List<CustomSkill> = emptyList(),
+    /** Standard/previously stored skills use their original key; custom skills use their ID. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val pinnedSkillIds: Set<String> = emptySet(),
+    /** Connected armor state; adoption never deletes the original weapon archive. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val armor: GenesisArmorState? = null
 )
 @Serializable data class CalculationContext(
     val targetCreatureType: String? = null, val damageType: DamageKind? = null,
@@ -138,5 +153,6 @@ import kotlinx.serialization.Serializable
     val passiveScores: Map<String, Int?>, val effectStatuses: List<EffectStatus>,
     val defenses: List<EffectPayload.Defense>, val conditionImmunities: Set<String>,
     val resourceMaxima: Map<String, Int?>, val warnings: List<String> = emptyList(),
-    val movement: Map<String, Int?> = emptyMap(), val senses: Map<String, Int?> = emptyMap()
+    val movement: Map<String, Int?> = emptyMap(), val senses: Map<String, Int?> = emptyMap(),
+    val customSkills: Map<String, CalculatedNumber> = emptyMap()
 )
