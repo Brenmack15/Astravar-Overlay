@@ -97,7 +97,11 @@ class GenesisCraftingInstrumentationTest {
         find("1 × $output")
         tap("I confirm this craft is resolved and these quantities are correct")
         tap("Confirm resolved craft") // Exactly one submit; all subsequent work reads its receipt.
-        find("Craft saved")
+        assertEquals("Committed craft opens its saved receipt", "Craft saved",
+            ui.snapshot(By.text("Craft saved").pkg(product), "Saved craft receipt header", refreshCache = true) { node ->
+                node.text?.takeIf { value -> value == "Craft saved" && !node.visibleBounds.isEmpty &&
+                    !device.hasObject(By.text("Confirm resolved craft").pkg(product)) }
+            })
         captureDialog("saved", "Craft saved", "1 × $output", "Return to invention")
 
         // Leave the saved receipt unacknowledged across real Activity recreation.

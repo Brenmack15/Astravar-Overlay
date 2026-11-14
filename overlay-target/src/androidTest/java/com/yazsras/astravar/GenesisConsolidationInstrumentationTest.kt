@@ -214,6 +214,7 @@ class GenesisConsolidationInstrumentationTest {
 
         ui.selectSection(product, "Sheet")
         assertFalse("No duplicate Health shortcut row", device.hasObject(By.text("Health").pkg(product)))
+        ui.textBounds("Add skill", product, scrollAttempts = 24, firstDirection = Direction.UP)
         tap("Add skill")
         enter("Skill name", "Alchemy native")
         tap("Untrained"); tap("Proficient")
@@ -247,11 +248,14 @@ class GenesisConsolidationInstrumentationTest {
         tap("Validate entered dice")
         find("20") // INT +3 + proficiency +3 + custom bonus +1.
         tap("Save roll")
+        findPinnedHeading()
         find("Zoology native")
         ui.tap(By.desc("Unpin Zoology native custom skill").pkg(product), "Unpin custom skill")
         find("Zoology native")
         ui.tap(By.desc("Edit Zoology native custom skill").pkg(product), "Remove custom skill through its editor")
         tap("Remove skill"); tap("Remove")
+        assertTrue("The skill editor closes only after its removal is saved",
+            device.wait(Until.gone(By.text("Edit custom skill").pkg(product)), 30_000))
         restart(); ui.selectSection(product, "Sheet")
         assertFalse("Removed custom skill stays removed after restart",
             device.hasObject(By.desc("Edit Zoology native custom skill").pkg(product)))
@@ -264,6 +268,7 @@ class GenesisConsolidationInstrumentationTest {
         ui.selectSection(product, "Sheet")
         // Leave a real custom record for the later independent complete-backup
         // and same-key-update stages, after separately proving deletion works.
+        ui.textBounds("Add skill", product, scrollAttempts = 24, firstDirection = Direction.UP)
         tap("Add skill")
         enter("Skill name", "Alchemy native")
         enter("Notes (optional)", "Retained custom skill for complete backup verification")

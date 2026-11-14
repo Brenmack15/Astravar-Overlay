@@ -177,7 +177,9 @@ class GenesisJourneyInstrumentationTest {
         assertEquals("Created companion opens with its exact saved name", "Genesis Native Familiar",
             ui.snapshot(By.text("Genesis Native Familiar").pkg(product),
                 "New companion's saved name", refreshCache = true) { node ->
-                node.text?.takeIf { name -> name == "Genesis Native Familiar" && !node.visibleBounds.isEmpty }
+                node.text?.takeIf { name -> name == "Genesis Native Familiar" && !node.visibleBounds.isEmpty &&
+                    device.findObject(By.text("Companion sheet").pkg(product))?.visibleBounds?.isEmpty == false &&
+                    !device.hasObject(By.text("Create companion").pkg(product)) }
             })
         ui.ensurePrimaryTab(product, "Character")
         find("Genesis Native Hero")

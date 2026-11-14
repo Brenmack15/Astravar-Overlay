@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.UiDevice
 import org.junit.Assert.*
 import org.junit.Rule
@@ -25,6 +26,15 @@ class GenesisEncounterInstrumentationTest {
     private val encounter = "Genesis Native Manual Encounter"
     private fun tap(label: String) = ui.tapText(label, product, scrollAttempts = 18, preferLast = true)
     private fun find(label: String) = ui.textBounds(label, product, scrollAttempts = 18)
+    private fun savedPhase(label: String, completedAction: String) {
+        // Each committed transition replaces the upper status immediately.
+        // Observe it before any traversal can scroll that status out of view.
+        assertEquals("Saved encounter phase after $completedAction", label,
+            ui.snapshot(By.text(label).pkg(product), "Saved encounter phase: $label", refreshCache = true) { node ->
+                node.text?.takeIf { value -> value == label && !node.visibleBounds.isEmpty &&
+                    !device.hasObject(By.text(completedAction).pkg(product)) }
+            })
+    }
     private fun enter(label: String, value: String) {
         tap(label); ui.setFocusedField(value, product, label)
         device.pressBack(); ui.assertFocusedField(value, product, label)
@@ -42,6 +52,7 @@ class GenesisEncounterInstrumentationTest {
     private fun openEncounter() {
         ui.ensurePrimaryTab(product, "Campaign")
         if (device.hasObject(By.text("‹ Campaign").pkg(product))) tap("‹ Campaign")
+        ui.textBounds("Encounters", product, scrollAttempts = 18, firstDirection = Direction.UP)
         tap("Encounters")
         tap(encounter)
     }
@@ -65,6 +76,7 @@ class GenesisEncounterInstrumentationTest {
         tap("Create NPC")
         find("NPC saved in campaign records")
         find(npc)
+        ui.textBounds("Encounters", product, scrollAttempts = 18, firstDirection = Direction.UP)
         tap("Encounters")
         tap("Create encounter")
         enter("Encounter name", encounter)
@@ -79,13 +91,13 @@ class GenesisEncounterInstrumentationTest {
         find("1. $hero")
         find("2. $npc")
         tap("Save encounter")
-        find("Setup · confirm the order before starting")
+        savedPhase("Setup · confirm the order before starting", "Save encounter")
         tap("Review start")
         find("Initiative: 7")
         find("Initiative: 19")
         tap("I confirm this turn order")
         tap("Start encounter")
-        find("Round 1")
+        savedPhase("Round 1", "Start encounter")
         find("Current turn: $hero")
         tap("View $npc's source")
         find("This participant remains a source record. Encounter tracking does not create a playable sheet or invent statistics.")
@@ -115,7 +127,7 @@ class GenesisEncounterInstrumentationTest {
         tap("End encounter")
         find("End encounter?")
         tap("End encounter")
-        find("Ended · round 2")
+        savedPhase("Ended · round 2", "End encounter")
         tap("Close")
 
         restart()
@@ -125,7 +137,7 @@ class GenesisEncounterInstrumentationTest {
         tap("Reopen setup")
         find("Reopen setup?")
         tap("Reopen setup")
-        find("Setup · confirm the order before starting")
+        savedPhase("Setup · confirm the order before starting", "Reopen setup")
         find("1. $hero")
         find("2. $npc")
         tap("Close")
