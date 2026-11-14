@@ -16,8 +16,10 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
@@ -159,7 +161,8 @@ import com.yazsras.astravar.rules.reforge.*
 }
 
 @Composable internal fun RebirthItemRow(item: ItemInstance, definition: ItemDefinition?, busy: Boolean,
-    onInspect: () -> Unit, onEquip: () -> Unit, onManage: () -> Unit) {
+    onInspect: () -> Unit, onEquip: () -> Unit, onManage: () -> Unit,
+    onFavorite: ((Boolean) -> Unit)? = null) {
     val equipped = item.state in setOf(ItemState.WORN, ItemState.HELD)
     val stack = !equipped && item.quantity > 1
     Column {
@@ -183,6 +186,16 @@ import com.yazsras.astravar.rules.reforge.*
             PlayerTextButton(enabled = !busy && (equipped || item.quantity > 0),
                 onClick = if (stack) onManage else onEquip) {
                 Text(if (equipped) "Unequip" else if (stack) "Split stack" else "Equip")
+            }
+            if (onFavorite != null) IconToggleButton(checked = item.favorite, onCheckedChange = onFavorite,
+                enabled = !busy, modifier = Modifier.size(48.dp).testTag("favorite-item-${item.id}").semantics {
+                    contentDescription = if (item.favorite) "Remove ${definition?.name ?: "item"} from favorites"
+                        else "Add ${definition?.name ?: "item"} to favorites"
+                    stateDescription = if (item.favorite) "Favorite" else "Not favorite"
+                }) {
+                Text(if (item.favorite) "★" else "☆", modifier = Modifier.clearAndSetSemantics { },
+                    color = if (item.favorite) RebuildPalette.GoldBright else RebuildPalette.Muted,
+                    style = MaterialTheme.typography.headlineSmall)
             }
         }
         if (stack || (!equipped && item.quantity == 0)) Text(
