@@ -1,6 +1,8 @@
 package com.yazsras.astravar.rules
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 
 /** Current Force family; old shot profiles retain rules version 1 and their d10 faces. */
 object PrimaryForceRules {
@@ -58,6 +60,7 @@ object PrimaryForceRules {
 }
 @Serializable data class GauntletCharge(val profile: MeleeProfile, val turnNumber: Int)
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class Profile(
     val name: String = "Astravar · campaign profile", val version: Int = 1,
     val character: String = "Zerg Hasma", val level: Int = 5, val intelligence: Int = 4,
@@ -72,10 +75,12 @@ object PrimaryForceRules {
     val emergencySpellLevelOverride: Int? = null, // Legacy backup input only; no current damage effect.
     val fastReplacementLevel: Int = 15, val syntheticGp: Int? = null, val syntheticDays: Int? = null,
     val elementDamageProfiles: Map<DamageType, DamageFormulaProfile> = emptyMap(),
-    val melee: MeleeProfile? = null
+    val melee: MeleeProfile? = null,
+    /** Current character condition snapshot; never changes ability, damage or internal save DC. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val conditionAttackAdjustment: Int = 0
 ) {
     val bonus get() = if (!calibrationEnabled) 0 else if(proposedCalibrationProgression) { if(level >= 15) 3 else if(level >= 10) 2 else calibration } else calibration
-    val attack get() = intelligence + proficiency + bonus
+    val attack get() = intelligence + proficiency + bonus + conditionAttackAdjustment
     val primaryForceDieSides get() = elementDamageProfiles[DamageType.FORCE]?.takeIf { it.approved }?.dice?.sides ?: if(forceRulesVersion == 1) 10 else PrimaryForceRules.DIE_SIDES
     val base get() = elementDamageProfiles[DamageType.FORCE]?.takeIf { it.approved }?.dice ?: Dice(baseDamageDiceCount, primaryForceDieSides, intelligence + bonus)
     val selector get() = Dice(elementalSelectorDiceCount, 8)
@@ -100,6 +105,7 @@ object PrimaryForceRules {
         melee?.validate()
         require(name.length in 1..120 && character.length in 1..120 && version > 0)
         require(level in 5..20 && intelligence in -5..10 && proficiency in 0..10 && saveDc in 1..40 && calibration in 0..10)
+        require(conditionAttackAdjustment in -100..100)
         require(baseDamageDiceCount in 1..10) { "Base damage dice count must be between 1 and 10" }
         require(elementalSelectorDiceCount in 1..10) { "Elemental selector dice count must be between 1 and 10" }
         require(forceRulesVersion in 1..PrimaryForceRules.VERSION) { "Unsupported Force rules version" }
@@ -146,8 +152,8 @@ object PrimaryForceRules {
     val enhancedMelee get() = ability == Ability.GAUNTLET || ability == Ability.SPELL_GAUNTLET
     val melee get() = enhancedMelee || ability == Ability.GUARDIAN
     val attackBonus get() = when {
-        ability == Ability.GUARDIAN -> profile.melee?.guardianAttackBonus ?: error("Sourced Guardian attack bonus missing")
-        enhancedMelee -> profile.melee?.attackBonus ?: error("Melee profile missing")
+        ability == Ability.GUARDIAN -> (profile.melee?.guardianAttackBonus ?: error("Sourced Guardian attack bonus missing")) + profile.conditionAttackAdjustment
+        enhancedMelee -> (profile.melee?.attackBonus ?: error("Melee profile missing")) + profile.conditionAttackAdjustment
         else -> profile.attack
     }
     val blast get() = ability == Ability.DISCHARGE || ability == Ability.SHATTER

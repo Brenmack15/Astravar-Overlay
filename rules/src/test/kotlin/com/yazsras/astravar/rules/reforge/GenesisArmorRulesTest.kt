@@ -111,4 +111,27 @@ class GenesisArmorRulesTest {
         assertThrows(IllegalArgumentException::class.java) { GenesisArmorRules.plan(owner, "blocked", Ability.ARCANE) }
         assertThrows(IllegalArgumentException::class.java) { GenesisArmorRules.charge(owner) }
     }
+
+    @Test fun exhaustionChangesAccuracyOnlyAndSavedCriticalRetainsConditionSnapshot() {
+        val ordinary = adopted()
+        val exhausted = ordinary.copy(exhaustionLevel = 2)
+        val normalPlan = GenesisArmorRules.plan(ordinary, "normal", Ability.ARCANE)
+        val impaired = GenesisArmorRules.plan(exhausted, "exhausted-critical", Ability.ARCANE)
+        assertEquals(normalPlan.attackBonus - 4, impaired.attackBonus)
+        assertEquals(normalPlan.profile.base, impaired.profile.base)
+        assertEquals(normalPlan.profile.saveDc, impaired.profile.saveDc)
+        val guardian = GenesisArmorRules.plan(exhausted, "guardian", Ability.GUARDIAN, distance = 5)
+        assertEquals(3, guardian.attackBonus)
+        assertEquals(Dice(1, 8, 5), guardian.profile.melee!!.thunder)
+        val rolled = DiceRoller.roll(impaired, die = { sides -> if (sides == 20) 20 else 1 })
+        val committed = GenesisArmorRules.commitRolled(exhausted, impaired, rolled)
+        assertTrue(rolled.critical)
+        assertEquals(26, rolled.attackTotal)
+        val rested = committed.copy(exhaustionLevel = 0)
+        assertEquals(10, GenesisArmorRules.runtime(rested).profile.attack)
+        assertEquals(-4, rested.armor!!.campaign.pending.single().plan.profile.conditionAttackAdjustment)
+        val legacy = BackupCodec.json.encodeToString(Profile())
+        assertFalse(legacy.contains("conditionAttackAdjustment"))
+        assertEquals(0, BackupCodec.json.decodeFromString<Profile>(legacy).conditionAttackAdjustment)
+    }
 }

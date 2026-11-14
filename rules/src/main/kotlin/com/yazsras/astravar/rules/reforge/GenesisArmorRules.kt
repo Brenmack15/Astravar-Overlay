@@ -63,6 +63,11 @@ object GenesisArmorRules {
             ?: error("Set the character's Intelligence before using the armor.")
         require(character.level >= 5) { "The established armor profile requires level 5 or higher." }
         val profile = saved.profile
+        val builtInConditions = ConditionRules.effects(character.copy(conditions =
+            ConditionRules.activeConditions(character, projection.conditionImmunities)))
+        val conditionEffects = CharacterCalculator.evaluateEffects(character, attackContext(Ability.ARCANE)).active
+            .filter { it.effect in builtInConditions }
+        val attackAdjustment = CharacterCalculator.number(0, NumericTarget.ATTACK, "", conditionEffects, "Active conditions").value ?: 0
         val melee = profile.melee?.let {
             val accuracyDelta = if (armor.meleeUsesCharacterAccuracy)
                 intelligence - (armor.meleeAccuracyIntBaseline ?: profile.intelligence) + projection.proficiencyBonus -
@@ -77,7 +82,8 @@ object GenesisArmorRules {
         val savedTurn = if (newTurn) Turn(number = saved.turn.number + 1) else saved.turn
         return saved.copy(revision = character.revision,
             profile = profile.copy(character = character.name, level = character.level,
-                intelligence = intelligence, proficiency = projection.proficiencyBonus, melee = melee),
+                intelligence = intelligence, proficiency = projection.proficiencyBonus, melee = melee,
+                conditionAttackAdjustment = attackAdjustment),
             slots = character.spellSlots.mapNotNull { (level, count) -> count?.let { level to it } }.toMap(),
             gameSeconds = Math.addExact(character.gameSeconds, armor.gameTimeOffset),
             encounter = character.turn.tracking,
