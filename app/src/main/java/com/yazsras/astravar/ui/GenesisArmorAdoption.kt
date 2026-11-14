@@ -72,7 +72,12 @@ import java.util.UUID
 @Composable internal fun GenesisArmorRecovery(character: ReforgeCharacter,
     onSave: (ReforgeCharacter, String) -> Unit) {
     if (character.armor == null) return
-    val campaign = runCatching { GenesisArmorRules.runtime(character) }.getOrNull() ?: return
+    val available = runCatching { GenesisArmorRules.runtime(character) }
+    val campaign = available.getOrNull()
+    if (campaign == null) {
+        Text("Astravar recovery: ${available.exceptionOrNull()?.message ?: "Review character setup."}", color = RebuildPalette.Muted)
+        return
+    }
     val feedback = LocalGenesisEditorFeedback.current
     var open by rememberSaveable(character.id) { mutableStateOf(false) }
     var baseline by rememberSaveable(character.id) { mutableLongStateOf(character.revision) }

@@ -26,7 +26,8 @@ class GenesisReservoirRepositoryTest {
             gameSeconds = 100)
         val old = Campaign(onboarded = true, attuned = true, installedId = "fixture-core", gameSeconds = 600,
             cores = listOf(Core("fixture-core", "Fixture nexus")), templates = listOf(template), slots = mapOf(1 to 9, 2 to 2))
-        return GenesisArmorRules.adopt(character, old, listOf(DamageType.COLD), "Reviewed fictional armor")
+        val adopted = GenesisArmorRules.adopt(character, old, listOf(DamageType.COLD), "Reviewed fictional armor")
+        return adopted.copy(armor = adopted.armor!!.copy(templateSpellIds = mapOf(template.id to "fixture-spell")))
     }
     @Test fun reservoirLoadAndSpellbookCastShareCountAcrossRestartAndCompleteBackup() = runBlocking {
         val name = "fixture-reservoir-persistence.db"
@@ -48,6 +49,8 @@ class GenesisReservoirRepositoryTest {
             db.close(); db = open(); repository = ReforgeRepository(db)
             val reopened = requireNotNull(repository.get(created.character.id))
             assertEquals(saved, reopened)
+            assertEquals("fixture-spell", reopened.character.armor!!.templateSpellIds[template.id])
+            assertEquals(1, reopened.character.spells.size)
             val preview = GameplayRules.previewCast(reopened.character, "fixture-spell", 1)
             val cast = GameplayRules.commitCast(reopened.character, preview)
             val castSaved = repository.save(reopened.character.id, reopened.revision, cast, "Cast fixture spell", "fixture-cast")
