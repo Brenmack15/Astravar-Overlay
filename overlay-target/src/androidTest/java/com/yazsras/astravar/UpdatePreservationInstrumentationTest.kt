@@ -1,10 +1,12 @@
 package com.yazsras.astravar
 
 import android.os.Bundle
+import android.os.SystemClock
 import android.graphics.Rect
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
@@ -30,13 +32,65 @@ class UpdatePreservationInstrumentationTest {
             if (preferLast) ui.ensurePrimaryTab(product, text)
             else ui.tapText(text, product, scrollAttempts = 14)
         }
+        fun revealCaptureMarkers(markers: List<BySelector>, description: String) {
+            val deadline = SystemClock.uptimeMillis() + 30_000
+            val margin = maxOf(4, (8 * instrumentation.targetContext.resources.displayMetrics.density).toInt())
+            var gestures = 0
+            var lastObserved = "No viewport observation"
+            while (SystemClock.uptimeMillis() < deadline) {
+                val remaining = deadline - SystemClock.uptimeMillis()
+                if (remaining <= 0) break
+                val (viewport, bounds) = ui.snapshot(By.clazz("android.widget.ScrollView").pkg(product),
+                    "Capture viewport for $description", timeoutMs = remaining, refreshCache = true) {
+                    val area = device.findObjects(By.clazz("android.widget.ScrollView").pkg(product))
+                        .map { node -> Rect(node.visibleBounds) }.filter { rect -> !rect.isEmpty }
+                        .maxByOrNull { rect -> rect.width().toLong() * rect.height() } ?: return@snapshot null
+                    area to markers.map { selector -> device.findObject(selector)?.let { node -> Rect(node.visibleBounds) } }
+                }
+                val interior = Rect(viewport).apply { inset(0, margin) }
+                lastObserved = "viewport=$viewport; marker bounds=$bounds"
+                require(!interior.isEmpty) { "Capture viewport has no readable interior: $lastObserved" }
+                if (bounds.all { rect -> rect != null && !rect.isEmpty && interior.contains(rect) }) return
+                val visible = bounds.filterNotNull().filter { rect -> !rect.isEmpty }
+                val clippedAbove = visible.any { rect -> rect.top < interior.top }
+                val clippedBelow = visible.any { rect -> rect.bottom > interior.bottom }
+                check(!(clippedAbove && clippedBelow)) {
+                    "$description markers cannot fit together in the actual viewport: $lastObserved"
+                }
+                check(gestures < 8) { "Could not fully reveal $description in eight bounded scrolls: $lastObserved" }
+                val firstVisible = bounds.indexOfFirst { rect -> rect != null && !rect.isEmpty }
+                val down = when {
+                    clippedBelow -> true
+                    clippedAbove -> false
+                    firstVisible > 0 -> false
+                    else -> true
+                }
+                // A partially clipped AX node is not a fully readable marker.
+                // Small observed-viewport gestures avoid overshooting this nearby
+                // summary; no product control or saved value is touched.
+                val distance = maxOf(32, viewport.height() / 4)
+                val start = viewport.centerY() + if (down) distance / 2 else -distance / 2
+                val end = start + if (down) -distance else distance
+                assertTrue("Reveal $description with one bounded native scroll",
+                    device.swipe(viewport.centerX(), start, viewport.centerX(), end, 60))
+                gestures++
+                val idleRemaining = deadline - SystemClock.uptimeMillis()
+                if (idleRemaining > 0) device.waitForIdle(minOf(1_000L, idleRemaining))
+            }
+            error("No fully visible $description within 30 seconds: $lastObserved")
+        }
         fun captureArmor(name: String) {
             find("Active element"); find("Change element")
+            val markers = listOf(By.text("Active element").pkg(product), By.text("Change element").pkg(product))
+            revealCaptureMarkers(markers, "active element summary and action")
             ui.captureStablePage(File(files, name), product, "Character",
-                listOf(By.text("Active element").pkg(product), By.text("Change element").pkg(product)))
+                markers)
         }
-        fun captureParty(name: String) = ui.captureStablePage(File(files, name), product, "Companions",
-            listOf(By.text("CI Native Ally").pkg(product)))
+        fun captureParty(name: String) {
+            val markers = listOf(By.text("CI Native Ally").pkg(product))
+            revealCaptureMarkers(markers, "saved companion name")
+            ui.captureStablePage(File(files, name), product, "Companions", markers)
+        }
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
         ui.awaitMainAfterSavedDialogs(product)
         assertTrue("The saved labeled demo survived", device.hasObject(By.text("DEMO").pkg(product)))
