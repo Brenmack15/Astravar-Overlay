@@ -6,6 +6,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.data.*
@@ -65,15 +66,7 @@ import java.util.UUID
         PlayerTextButton(onClick = onHistory) { Text("History") }
     }
     PlayerCard {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            ApprovedAttackMedallion(ability.approvedArt(), Modifier.size(52.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Active element", style = MaterialTheme.typography.labelMedium, color = RebuildPalette.Muted)
-                Text(armor.elements.ifEmpty { listOf(DamageType.FORCE) }.joinToString(" + ") { it.name.lowercase().replaceFirstChar(Char::titlecase) },
-                    style = MaterialTheme.typography.titleMedium)
-            }
-            PlayerTextButton(onClick = { elementPicker = true }, enabled = state != null && !saving) { Text("Change element") }
-        }
+        GenesisArmorElementHeader(ability, armor.elements, state != null && !saving) { elementPicker = true }
         Choices("Armor attack", listOf(Ability.ARCANE, Ability.ELEMENTAL, Ability.GUARDIAN, Ability.GAUNTLET,
             Ability.SPELL, Ability.SPELL_GAUNTLET, Ability.DISCHARGE), ability, display = { it.title }, enabled = !saving && draft == null) {
             ability = it; error = ""
@@ -188,6 +181,30 @@ import java.util.UUID
             if (stale) Text("The character changed after this roll. These faces are retained, but this action cannot spend resources against a different revision.", color = MaterialTheme.colorScheme.error)
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
             if (feedback.error.isNotBlank()) Text(feedback.error, color = MaterialTheme.colorScheme.error)
+        }
+    }
+}
+
+/** Let the selected element keep readable width before placing the optional action beside it. */
+@Composable internal fun GenesisArmorElementHeader(ability: Ability, elements: List<DamageType>, enabled: Boolean,
+    onChange: () -> Unit) {
+    val fontScale = LocalDensity.current.fontScale
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val separateAction = fontScale > 1.3f || maxWidth < 320.dp
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ApprovedAttackMedallion(ability.approvedArt(), Modifier.size(52.dp).testTag("genesis-active-element-art"))
+                Column(Modifier.weight(1f)) {
+                    Text("Active element", style = MaterialTheme.typography.labelMedium, color = RebuildPalette.Muted)
+                    Text(elements.ifEmpty { listOf(DamageType.FORCE) }.joinToString(" + ") {
+                        it.name.lowercase().replaceFirstChar(Char::titlecase)
+                    }, style = MaterialTheme.typography.titleMedium)
+                }
+                if (!separateAction) PlayerTextButton(onClick = onChange, enabled = enabled) { Text("Change element") }
+            }
+            if (separateAction) PlayerTextButton(onClick = onChange, enabled = enabled,
+                modifier = Modifier.fillMaxWidth()) { Text("Change element") }
         }
     }
 }
