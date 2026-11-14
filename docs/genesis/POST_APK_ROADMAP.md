@@ -1,5 +1,32 @@
 # Astravar Project Genesis — Post-APK Roadmap and Deferred Intentions
 
+## Current continuation — November 14, 2026
+
+The owner installed Genesis1/code50 and supplied hands-on feedback. The
+post-APK continuation is active; the November12 release freeze below is preserved
+history, not the current task scope. Start with [section9](#9-post-install-consolidation-continuation--november-14-2026),
+the [consolidation audit](CONSOLIDATION_AUDIT_20261114.md), and the
+[current verification report](CONSOLIDATION_VERIFICATION_20261114.md).
+
+The verified release source is `65978f76f59a842657b16b5ce39ad8f9702ec5bb` on
+`feat/astravar-project-genesis-consolidation-20261114`. All 51 original/published
+checkpoint trees match; PR15 and the delivered code50 source remain intact.
+Full CI43620647220 and native CI43620647219 passed on this exact source,
+including the corrected 200-percent-font layout. The original-owner-signed code51
+APK is verified and ready for delivery. Earlier candidate passes and failures are
+recorded separately and are not reused as current acceptance.
+
+| Current milestone | Implementation and acceptance status |
+| --- | --- |
+| Recovery and preservation | Complete: 51 exact source-tree mappings; original roadmap/checkpoints and PR15 retained |
+| Character consolidation and custom/pinned skills | Complete within the stated scope: full regression and native CRUD/navigation/resource/restart/update journeys pass |
+| Existing source attacks | Supported reviewed-import slice complete: disk reopen and playable backup restore pass; unsupported mechanics remain review-required and successful native import is not claimed |
+| Deferred slice: Equipment favorites | Complete favorite/filter/restart/update slice; general containers and broader reorder remain deferred |
+| Code51 release | Complete artifact proof: original certificate, exact tested payload and checksum verified;21 native cases pass. Empirical upgrade uses a disposable signer; no owner-key or physical-device installation claim |
+| Remaining Genesis breadth | Partial/unimplemented items remain in the preserved backlog and classified audit; guided progression, general containers and broad automation are not complete |
+
+## Historical November12 handoff — preserved
+
 **Purpose:** Preserve the complete long-term Astravar 4.0 Project Genesis direction while the active development session focuses on shipping **one installable, verified APK for owner testing**. This file is a durable handoff, **not** a claim that every feature is complete and **not** an instruction to expand the current release.
 
 **Status snapshot:** November 12, 2026. This roadmap synthesizes Brendan's Project Genesis instructions, the GitHub-backed Genesis audits and checkpoints, and the verified release handoffs. The currently running Codex session must add any further internal intentions it can actually recover; those unrecorded thoughts cannot be reconstructed from GitHub alone.
@@ -174,7 +201,7 @@ For each intention, add a row here:
 
 ### Release handoff — November 12, 2026
 
-- Deliverable: Astravar-4.0.0-genesis1-code50-owner-signed.apk; package com.yazsras.astravar. [Owner download](https://chatgpt.com/library?file_id=libfile_758c61e4f78c81919956e5cbcd7e960f&account_id=personal).
+- Deliverable: Astravar-4.0.0-genesis1-code50-owner-signed.apk; package com.yazsras.astravar. The owner download was delivered privately; its private delivery URL is omitted from this publication.
 - APK SHA-256: `2c14bd7ec186122a94b5273e072ea262efeae60b00af96c65ecc21c49ce0e9b1`. Original owner certificate SHA-256: `4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847`.
 - Exact release source: `feat/astravar-project-genesis-accessible-navigation-20261112`, `a86ab0fa87ce47a4f99550dcfa8fe01ed0e22928`. Latest development source remains `d12bdfec951acb3525ecb9bd280dcf4b85cc3b3a` on the journal-readiness branch; it differs only by12 host-test readiness lines. No newer production work was dropped.
 - Reused passing runs43251800831 and43251800807: rules166, debug929 pass/3 skip, release915 pass/17 skip, Python320, bridge134, native19 pass; lint0 errors. Thirteen independent package/SQLite readbacks reproduced. Backup/restore, migration6→9 and persistence checks passed with fictional records and CI signatures. No expensive suite was rerun.
@@ -224,6 +251,12 @@ campaign/playable storage, connected creation, restricted crafting, manual
 encounters, inventory transfers, swipe/tap navigation and connected backup
 already exist and must be preserved.
 
+### Initial November14 audit snapshot
+
+The following statuses were recorded before consolidation implementation. They
+are historical evidence; use the current table at the top and the verification
+report for the latest acceptance state.
+
 | Owner priority / recovered intention | Current baseline evidence | Required next result | Status |
 | --- | --- | --- | --- |
 | Retire Armor Systems and redundant Tools routes | `PlayerShell` and `AppScreen` expose legacy screens alongside Genesis | Move useful capabilities first; retain artwork/data/configuration; remove ordinary old entries | In progress |
@@ -237,8 +270,8 @@ already exist and must be preserved.
 | Deferred Genesis breadth | Guided multiclass/progression, general containers/favorites, broad crafting/encounter automation and some historical editors remain partial or absent | Select the next small verified vertical slice after consolidation, preserving the full backlog | Deferred |
 | New owner-compatible APK | Prior owner certificate and code50 baseline are recorded | Version greater than50, exact-source tests, original certificate, checksum, in-place update/data-preservation proof and honest limitations | Pending |
 
-No new implementation is marked accepted by this documentation checkpoint.
-Append actual commit/test/artifact evidence after execution. The new directive
+At that initial checkpoint, no new implementation had yet been accepted.
+Actual commit/test/artifact evidence is appended below and in the verification report. The new directive
 authorizes development and release preparation; it does not permit invented
 physical-device testing, private signing-material publication or destructive
 data migration.
@@ -270,3 +303,113 @@ compilation passing. It found and retained a real adopted-history revision-order
 failure in canonical armor readback; fixing that defect and rerunning it is the
 next gate. These local runs used an evolving worktree, so release acceptance
 still requires an exact clean source and the native/owner-update evidence.
+
+
+The exact frozen candidate and subsequent acceptance results are tracked in
+[CONSOLIDATION_VERIFICATION_20261114.md](CONSOLIDATION_VERIFICATION_20261114.md)
+on the separate verification-documentation branch. Candidate `e00cb749` passes
+all186 rules cases and the final21 application cases covering the corrected
+armor revision defect, plus328 Python checks. Broad CI, actual native execution
+and original-owner installation are still pending at this checkpoint. Earlier
+failed evidence above remains historical and is not deleted.
+
+
+A further consolidation gap was identified during preservation review: prior
+character adoption retained existing source attack records as evidence without
+making every supported attack an ordinary Combat action. Explicit reviewed
+source-attack import is now part of the pending milestone. It must preserve
+structured formulas, identity and provenance, avoid duplicate imports, and keep
+unresolved configurations visible for review. This does not certify private or
+current-phone Zerg records; use synthetic verification and the accepted source
+mechanics, without copying stale private mirrors into code or public reports.
+
+
+### Final-source full regression checkpoint
+
+Published source `f5971e3b421629b2a51c1f052893d56fc1b64199` is tree-equivalent
+to local `9eee925dc09478efcf15a802f7925a4225baa552`; all 45 checkpoint pairs
+are preserved in the source map. Full CI43608137979 passes: 186 rules, 972
+application debug cases (3 opt-in skips), 958 release cases (17 documented
+skips), 328 Python and 134 bridge checks. Both lint variants have zero errors
+(debug81 warnings +1 hint; release83 warnings +1 hint). Raw artifact XML was
+independently counted. Native CI43608138002 and original-owner signing/update
+verification are still pending at this checkpoint; no physical-device or
+current-Zerg acceptance is implied. See
+[CONSOLIDATION_VERIFICATION_20261114.md](CONSOLIDATION_VERIFICATION_20261114.md)
+for the exact source, workflow URLs, artifact hash, skip reasons and preserved
+failed/cancelled attempts.
+
+
+The subsequent native result for f597 is **failed**, not pending: run43608138002
+exhausted downward-first discovery before returning to the upper pinned-skills
+heading and a newly created companion name. The exact companion name is visible
+in the failure screenshot and XML. Test-only correction `03ae955` uses known
+upper anchors and a fresh saved-name snapshot, retains every exact assertion and
+the same 30-second budgets, and adds positive saved-pin checks. See the fifth-run
+evidence in the verification report. No signing or final acceptance is claimed;
+corrected exact-source full/native gates are required.
+
+
+### Current48f full regression checkpoint
+
+Exact source `48f7575e58cdf14654f5083104a57b09a99a8b68` passes full
+CI43613698288. Artifact14122539554 was hash-verified and independently recounted:
+186 rules pass; debug972 pass/3 skips and release958 pass/17 skips (975 total
+each), with zero failures/errors. Python328 and bridge134 pass. Lint has zero
+errors (debug81 warnings +1 hint; release83 warnings +1 hint). Native
+CI43613698316 is still running, and owner-artifact proof remains pending.
+The actual upgrade test uses a disposable signer; owner certificate/package/
+payload verification and empirical test-signed migration are separate evidence.
+No owner-key code51 installation or physical-device test is claimed.
+
+
+The48f native gate subsequently passed 16 cases, including the complete new
+consolidation journey, Genesis navigation/backup, crafting and encounters, but
+failed the late200-percent-font update capture. The screenshot exposed both a
+cramped element-summary layout and a seven-pixel clipped Change element marker.
+Responsive product correction `7dcb955` and bounded native reveal `2fef3cc`
+preserve the strict screenshot gate. Imports did not run; new exact-source
+release gates remain required. See the seventh-run evidence in the verification
+report; no owner signing or complete native acceptance is claimed.
+
+
+### Intermediate eighth-candidate full regression checkpoint
+
+Source `65978f76f59a842657b16b5ce39ad8f9702ec5bb` passes full CI43620647220,
+with 51 preserved checkpoint pairs. Verified artifact14125885867 and independent
+raw-XML recount establish186 rules passes,975 debug passes/3 skips and961
+release passes/17 skips (978 application cases each), zero failures/errors.
+Python328 and bridge134 pass. Lint has zero errors (debug81 warnings +1 hint;
+release83 warnings +1 hint). The new precise responsive layout tests pass.
+At this intermediate checkpoint, native CI43620647219 and owner-artifact
+verification were pending. Both subsequently passed as recorded below; earlier
+native successes remain source-specific evidence.
+
+
+### Final consolidation milestone acceptance
+
+Release source `65978f76f59a842657b16b5ce39ad8f9702ec5bb` passes full
+CI43620647220 and native CI43620647219. Final measured results are186 rules,
+975 debug passes/3 skips,961 release passes/17 skips (978 application cases per
+variant),328 Python,134 bridge and21 native cases across 18 successful
+invocations. Both lint variants have zero errors; existing warnings and explicit
+skip reasons remain documented. Independent native receipts verify retained
+stores/source/history, later canonical writes, connected backup, crafting,
+encounters and all four import/recovery cases.
+
+The completed slice consolidates ordinary armor/element Combat, reservoir and
+payload Spells, contextual rules/resources/history, custom/pinned skills and
+Equipment favorites. Source-attack import is complete for supported reviewed
+records, with focused disk reopen/playable backup coverage; unsupported
+mechanics remain explicit. The complete guided progression/container/automation
+backlog remains partial or unimplemented as classified above. Current Zerg phone
+data is not certified by fictional fixtures.
+
+`Astravar-4.0.0-genesis2-code51-owner-signed.apk` is 13,184,678 bytes, SHA-256
+`81c4ab63e4aba980bc7881919d6e90333e2f72f3031d43db2fbbe1fa17d5e644`.
+Its production package and original certificate match the original owner code50
+APK; all 210 tested CI payload entries are unchanged, with no rebuild.
+Signature/package/payload proof and disposable-signer49→50→51 migration evidence
+are distinct. No owner-key code51 or Galaxy S26 installation was performed by
+this verification work. See the current verification report for exact hashes,
+source mapping, receipts, limitations and the retained failed/cancelled attempts.

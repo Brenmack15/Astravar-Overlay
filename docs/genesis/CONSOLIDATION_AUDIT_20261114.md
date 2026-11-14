@@ -230,7 +230,20 @@ open blocker at this documentation checkpoint.
 The executed Gradle tasks/filters (runtime paths abbreviated) were:
 
 ```sh
-gradle --continue :rules:test :app:testDebugUnitTest   --tests 'com.yazsras.astravar.data.GenesisArmor*Test'   --tests 'com.yazsras.astravar.data.GenesisSkillsPersistenceTest'   --tests 'com.yazsras.astravar.data.GenesisReservoirRepositoryTest'   --tests 'com.yazsras.astravar.ui.GenesisArmor*Test'   --tests 'com.yazsras.astravar.ui.GenesisSkillsUiTest'   --tests 'com.yazsras.astravar.ui.GenesisSpellReservoirUiTest'   --tests 'com.yazsras.astravar.ui.GenesisConsolidationNavigationTest'   --tests 'com.yazsras.astravar.ui.GenesisEquipmentFavoritesUiTest'   --tests 'com.yazsras.astravar.ui.ReforgeCharacterUiTest'   --tests 'com.yazsras.astravar.ui.NavigationV2Test'   --tests 'com.yazsras.astravar.ui.CampaignVisualAcceptanceTest'   :overlay-target:compileDebugAndroidTestKotlin   -PastravarScreenshots=<runtime>/screenshots
+gradle --continue :rules:test :app:testDebugUnitTest \
+  --tests 'com.yazsras.astravar.data.GenesisArmor*Test' \
+  --tests 'com.yazsras.astravar.data.GenesisSkillsPersistenceTest' \
+  --tests 'com.yazsras.astravar.data.GenesisReservoirRepositoryTest' \
+  --tests 'com.yazsras.astravar.ui.GenesisArmor*Test' \
+  --tests 'com.yazsras.astravar.ui.GenesisSkillsUiTest' \
+  --tests 'com.yazsras.astravar.ui.GenesisSpellReservoirUiTest' \
+  --tests 'com.yazsras.astravar.ui.GenesisConsolidationNavigationTest' \
+  --tests 'com.yazsras.astravar.ui.GenesisEquipmentFavoritesUiTest' \
+  --tests 'com.yazsras.astravar.ui.ReforgeCharacterUiTest' \
+  --tests 'com.yazsras.astravar.ui.NavigationV2Test' \
+  --tests 'com.yazsras.astravar.ui.CampaignVisualAcceptanceTest' \
+  :overlay-target:compileDebugAndroidTestKotlin \
+  -PastravarScreenshots=<runtime>/screenshots
 ```
 
 Additional recoverable checkpoints: `a6d7109` scopes canonical armor configuration
@@ -239,3 +252,103 @@ and recent-shot readback to the reviewed owner in the selected campaign;
 same-key-update readback. Both original store and out-of-scope campaign data
 remain protected. Exact-source broad regression, emulator execution, signing
 and owner-compatible installation remain pending.
+
+
+The exact frozen candidate and subsequent acceptance results are tracked in
+[CONSOLIDATION_VERIFICATION_20261114.md](CONSOLIDATION_VERIFICATION_20261114.md)
+on the separate verification-documentation branch. Candidate `e00cb749` passes
+all186 rules cases and the final21 application cases covering the corrected
+armor revision defect, plus328 Python checks. Broad CI, actual native execution
+and original-owner installation are still pending at this checkpoint. Earlier
+failed evidence above remains historical and is not deleted.
+
+
+### Final-source full regression checkpoint
+
+Published source `f5971e3b421629b2a51c1f052893d56fc1b64199` is tree-equivalent
+to local `9eee925dc09478efcf15a802f7925a4225baa552`; all 45 checkpoint pairs
+are preserved in the source map. Full CI43608137979 passes: 186 rules, 972
+application debug cases (3 opt-in skips), 958 release cases (17 documented
+skips), 328 Python and 134 bridge checks. Both lint variants have zero errors
+(debug81 warnings +1 hint; release83 warnings +1 hint). Raw artifact XML was
+independently counted. Native CI43608138002 and original-owner signing/update
+verification are still pending at this checkpoint; no physical-device or
+current-Zerg acceptance is implied. See
+[CONSOLIDATION_VERIFICATION_20261114.md](CONSOLIDATION_VERIFICATION_20261114.md)
+for the exact source, workflow URLs, artifact hash, skip reasons and preserved
+failed/cancelled attempts.
+
+
+The subsequent native result for f597 is **failed**, not pending: run43608138002
+exhausted downward-first discovery before returning to the upper pinned-skills
+heading and a newly created companion name. The exact companion name is visible
+in the failure screenshot and XML. Test-only correction `03ae955` uses known
+upper anchors and a fresh saved-name snapshot, retains every exact assertion and
+the same 30-second budgets, and adds positive saved-pin checks. See the fifth-run
+evidence in the verification report. No signing or final acceptance is claimed;
+corrected exact-source full/native gates are required.
+
+
+### Current48f full regression checkpoint
+
+Exact source `48f7575e58cdf14654f5083104a57b09a99a8b68` passes full
+CI43613698288. Artifact14122539554 was hash-verified and independently recounted:
+186 rules pass; debug972 pass/3 skips and release958 pass/17 skips (975 total
+each), with zero failures/errors. Python328 and bridge134 pass. Lint has zero
+errors (debug81 warnings +1 hint; release83 warnings +1 hint). Native
+CI43613698316 is still running, and owner-artifact proof remains pending.
+The actual upgrade test uses a disposable signer; owner certificate/package/
+payload verification and empirical test-signed migration are separate evidence.
+No owner-key code51 installation or physical-device test is claimed.
+
+
+The48f native gate subsequently passed 16 cases, including the complete new
+consolidation journey, Genesis navigation/backup, crafting and encounters, but
+failed the late200-percent-font update capture. The screenshot exposed both a
+cramped element-summary layout and a seven-pixel clipped Change element marker.
+Responsive product correction `7dcb955` and bounded native reveal `2fef3cc`
+preserve the strict screenshot gate. Imports did not run; new exact-source
+release gates remain required. See the seventh-run evidence in the verification
+report; no owner signing or complete native acceptance is claimed.
+
+
+### Intermediate eighth-candidate full regression checkpoint
+
+Source `65978f76f59a842657b16b5ce39ad8f9702ec5bb` passes full CI43620647220,
+with 51 preserved checkpoint pairs. Verified artifact14125885867 and independent
+raw-XML recount establish186 rules passes,975 debug passes/3 skips and961
+release passes/17 skips (978 application cases each), zero failures/errors.
+Python328 and bridge134 pass. Lint has zero errors (debug81 warnings +1 hint;
+release83 warnings +1 hint). The new precise responsive layout tests pass.
+At this intermediate checkpoint, native CI43620647219 and owner-artifact
+verification were pending. Both subsequently passed as recorded below; earlier
+native successes remain source-specific evidence.
+
+
+### Final consolidation milestone acceptance
+
+Release source `65978f76f59a842657b16b5ce39ad8f9702ec5bb` passes full
+CI43620647220 and native CI43620647219. Final measured results are186 rules,
+975 debug passes/3 skips,961 release passes/17 skips (978 application cases per
+variant),328 Python,134 bridge and21 native cases across 18 successful
+invocations. Both lint variants have zero errors; existing warnings and explicit
+skip reasons remain documented. Independent native receipts verify retained
+stores/source/history, later canonical writes, connected backup, crafting,
+encounters and all four import/recovery cases.
+
+The completed slice consolidates ordinary armor/element Combat, reservoir and
+payload Spells, contextual rules/resources/history, custom/pinned skills and
+Equipment favorites. Source-attack import is complete for supported reviewed
+records, with focused disk reopen/playable backup coverage; unsupported
+mechanics remain explicit. The complete guided progression/container/automation
+backlog remains partial or unimplemented as classified above. Current Zerg phone
+data is not certified by fictional fixtures.
+
+`Astravar-4.0.0-genesis2-code51-owner-signed.apk` is 13,184,678 bytes, SHA-256
+`81c4ab63e4aba980bc7881919d6e90333e2f72f3031d43db2fbbe1fa17d5e644`.
+Its production package and original certificate match the original owner code50
+APK; all 210 tested CI payload entries are unchanged, with no rebuild.
+Signature/package/payload proof and disposable-signer49→50→51 migration evidence
+are distinct. No owner-key code51 or Galaxy S26 installation was performed by
+this verification work. See the current verification report for exact hashes,
+source mapping, receipts, limitations and the retained failed/cancelled attempts.
