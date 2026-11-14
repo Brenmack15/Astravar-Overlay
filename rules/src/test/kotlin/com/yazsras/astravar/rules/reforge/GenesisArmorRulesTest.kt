@@ -66,13 +66,14 @@ class GenesisArmorRulesTest {
 
     @Test fun spellImbuingAndNormalSpellcastingShareSlotAndTurnBudgets() {
         val spell = Template("template", "Fictional bolt", 1, 1, listOf(TypedDice(Dice(2, 6), DamageType.FIRE)), DamageType.FIRE, approved = true)
-        val owner = adopted().copy(spells = listOf(SpellDefinition("spell", "Fictional bolt", 1, preparation = SpellPreparation.PREPARED)))
+        val owner = adopted().copy(spells = listOf(SpellDefinition("spell", "Fictional bolt", 1, preparation = SpellPreparation.PREPARED, castingTime = "Bonus Action")))
         val plan = GenesisArmorRules.plan(owner, "imbue", Ability.SPELL, immediate = spell)
         val next = GenesisArmorRules.commitRolled(owner, plan, DiceRoller.roll(plan, die = { 1 }))
         assertEquals(1, next.spellSlots[1]) // cost applies even on natural 1
         assertTrue(next.turn.spellSlotSpent)
         assertThrows(IllegalArgumentException::class.java) { GenesisArmorRules.plan(next, "twice", Ability.SPELL, immediate = spell) }
-        assertThrows(IllegalArgumentException::class.java) { GameplayRules.previewCast(next, "spell", 1) }
+        val blocked = assertThrows(IllegalArgumentException::class.java) { GameplayRules.previewCast(next, "spell", 1) }
+        assertTrue(blocked.message.orEmpty().contains("spell slot has already been spent"))
         val later = GameplayRules.nextTurn(next)
         assertEquals(0, GenesisArmorRules.runtime(later).turn.spellShots)
         assertEquals(1, later.spellSlots[1])
