@@ -114,6 +114,9 @@ if [ -n "${ASTRAVAR_BASELINE_APK:-}" ]; then
   # disposable CI key. This is a real older-version update; it is distinct from
   # the later same-version reinstall and from private owner-signing acceptance.
   sha256sum "$ASTRAVAR_BASELINE_APK" >validation/upgrade-baseline-apk.sha256
+  # Exercise retired presentation only on its frozen historical package. The
+  # candidate journey below proves the replacement and retained real rolls.
+  run_stage OverlayInstrumentationTest 3 420 native-baseline-overlay.txt 49
   run_stage GenesisUpgradeInstrumentationTest#seedCode49 1 720 native-genesis-upgrade-seed.txt
   stop_product
   timeout 15s adb -s "$astravar_serial" root
@@ -170,7 +173,6 @@ fi
 # Collect independent roll, SQLite and player journeys once before dependent
 # update/import stages. Every failure remains release-blocking.
 astravar_prerequisites_ok=1
-run_stage OverlayInstrumentationTest 3 420 native-overlay.txt || astravar_prerequisites_ok=0
 # Run the >32m SQLite regression inside the separate disposable QA application.
 # The optimized release journeys above and this fixture exercise distinct packages.
 timeout -k 5s 45s adb -s "$astravar_serial" install app/build/outputs/apk/debug/app-debug.apk
@@ -184,6 +186,7 @@ else
   astravar_prerequisites_ok=0
 fi
 run_stage PlayerFirstJourneyInstrumentationTest 1 1050 native-player-first.txt || astravar_prerequisites_ok=0
+run_stage GenesisConsolidationInstrumentationTest 1 900 native-genesis-consolidation.txt || astravar_prerequisites_ok=0
 run_stage VisualRebirthJourneyInstrumentationTest 1 900 native-visual-rebirth.txt || astravar_prerequisites_ok=0
 run_stage GenesisJourneyInstrumentationTest 1 1500 native-genesis.txt || astravar_prerequisites_ok=0
 test "$astravar_prerequisites_ok" = 1
@@ -251,4 +254,4 @@ run_stage CampaignImportInstrumentationTest#dMappedCampaignRecordsRollbackAfterR
 stop_product
 copy_campaign_database validation/campaign-mapped-rolled-back
 verify_mapped validation/campaign-mapped-rolled-back/astravar-campaign-ledger.db validation/campaign-mapped-before.json validation/native-mapped-fixture.json rollback validation/native-mapped-rollback-readback.json
-printf '%s\n' 'PASS: every ordered stage recorded in native-stages.tsv. Genesis exercised guided creation, horizontal page flicks, per-page reading positions, Back, quick-action drag and tap rearrangement, restart persistence, contextual inventory creation and cross-view edits, single-row item identity and Activity rotation. Visual Rebirth captured the primary destinations and forms, checked resource persistence, companion equipment, journal edits and 400dp layouts at three font scales. Standalone weapon rolls, retired overlay contract, character advancement, reviewed gear, generic companion relationships and direct companion combat passed. Companion-only healing survived restart, with source HP and the default character preserved. Same-version reinstall preserved persisted bytes. Native readback retained rolls and inventory. Large and typed imports and separately consented rollback passed independent host SQLite verification. Native QA SQLite fixtures verified scoped selection above the complete-export ceiling, duplicate and stale rejection, interrupted-write rollback, same-command recovery and backup restore after reopen. When a baseline APK is provided, separate genesis-upgrade evidence records code49 to code50 and code50 to candidate package preservation, unchanged original files, additive schema6 to schema9 cutover with raw row and receipt verification, and a later canonical UI heal that survives restart without changing the retained source. Disposable CI signer and emulator only. Physical owner phone acceptance remains pending.' >validation/RELEASE-UI-RESULT.txt
+printf '%s\n' 'PASS: every ordered stage recorded in native-stages.tsv. Genesis exercised guided creation, horizontal page flicks, per-page reading positions, Back, quick-action drag and tap rearrangement, restart persistence, contextual inventory creation and cross-view edits, single-row item identity and Activity rotation. Visual Rebirth captured the primary destinations and forms, checked resource persistence, companion equipment, journal edits and 400dp layouts at three font scales. Frozen-baseline weapon rolls, candidate consolidated armor rolls and skills, retired overlay contract, character advancement, reviewed gear, generic companion relationships and direct companion combat passed. Companion-only healing survived restart, with source HP and the default character preserved. Same-version reinstall preserved persisted bytes. Native readback retained rolls and inventory. Large and typed imports and separately consented rollback passed independent host SQLite verification. Native QA SQLite fixtures verified scoped selection above the complete-export ceiling, duplicate and stale rejection, interrupted-write rollback, same-command recovery and backup restore after reopen. When a baseline APK is provided, separate genesis-upgrade evidence records code49 to code50 and code50 to candidate package preservation, unchanged original files, additive schema6 to schema9 cutover with raw row and receipt verification, and a later canonical UI heal that survives restart without changing the retained source. Disposable CI signer and emulator only. Physical owner phone acceptance remains pending.' >validation/RELEASE-UI-RESULT.txt
