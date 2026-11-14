@@ -21,6 +21,16 @@ import kotlinx.serialization.Serializable
 )
 
 object GenesisArmorRules {
+    fun attackContext(ability: Ability): CalculationContext = CalculationContext(attackId = "armor:${ability.name}",
+        tags = if (ability in listOf(Ability.GAUNTLET, Ability.SPELL_GAUNTLET, Ability.GUARDIAN)) setOf("melee", "weapon") else setOf("ranged", "weapon"))
+
+    private fun requireAction(character: ReforgeCharacter) {
+        val projection = CharacterCalculator.calculate(character)
+        require(ConditionRules.activeConditions(character, projection.conditionImmunities).none {
+            it in setOf("incapacitated", "unconscious", "stunned", "paralyzed", "petrified")
+        }) { "The current condition prevents armor actions." }
+    }
+
     fun validate(armor: GenesisArmorState?) {
         if (armor == null) return
         require(armor.source.isNotBlank() && armor.source.length <= 2000 && armor.adoptedAtCharacterRevision >= 0 && armor.lastCharacterTurnNumber >= 0)
@@ -110,7 +120,8 @@ object GenesisArmorRules {
     fun plan(character: ReforgeCharacter, id: String, ability: Ability, payloadIds: List<String> = emptyList(),
         immediate: Template? = null, distance: Int = 30, point: String = "", direct: Boolean = false,
         manualSlotConfirmed: Boolean = false): ShotPlan {
-        ConditionRules.rollRestriction(character, RollKind.ATTACK, "armor:${ability.name}")?.let { error(it) }
+        requireAction(character)
+        ConditionRules.rollRestriction(character, RollKind.ATTACK, "armor:${ability.name}", attackContext(ability))?.let { error(it) }
         if (character.turn.tracking) {
             if (ability == Ability.DISCHARGE) require(character.turn.actionAvailable && character.turn.attacksUsed == 0) { "Action already spent this turn." }
             else require(character.turn.actionAvailable && character.turn.attacksUsed < character.turn.attacksPerAction) { "No attacks remain in this Action." }
@@ -128,6 +139,7 @@ object GenesisArmorRules {
     }
 
     fun charge(character: ReforgeCharacter): ReforgeCharacter {
+        requireAction(character)
         val scores = CharacterCalculator.calculate(character).abilities
         require(listOf(Stat.STR, Stat.DEX, Stat.INT).all { scores.getValue(it).modifier != null }) {
             "Set current Strength, Dexterity and Intelligence before preparing Charged Gauntlet."

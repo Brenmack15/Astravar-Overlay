@@ -105,4 +105,10 @@ class GenesisArmorRulesTest {
         assertTrue(GenesisArmorRules.runtime(elapsed).installed!!.usable(GenesisArmorRules.runtime(elapsed).gameSeconds))
         assertEquals(source(), elapsed.armor!!.originalCampaign)
     }
+
+    @Test fun incapacitatingConditionsBlockArmorAndChargedActions() {
+        val owner = adopted().copy(conditions = setOf("unconscious"))
+        assertThrows(IllegalArgumentException::class.java) { GenesisArmorRules.plan(owner, "blocked", Ability.ARCANE) }
+        assertThrows(IllegalArgumentException::class.java) { GenesisArmorRules.charge(owner) }
+    }
 }

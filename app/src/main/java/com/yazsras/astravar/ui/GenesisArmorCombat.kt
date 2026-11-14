@@ -135,7 +135,7 @@ import java.util.UUID
         PlayerButton(onClick = {
             try {
                 val checked = makePlan(UUID.randomUUID().toString())
-                val activeMode = CharacterCalculator.rollMode(character, RollKind.ATTACK, "armor:${ability.name}",
+                val activeMode = CharacterCalculator.rollMode(character, RollKind.ATTACK, "armor:${ability.name}", GenesisArmorRules.attackContext(ability),
                     advantage = advantage, disadvantage = disadvantage || checked.disadvantage)
                 val options = RollOptions(activeMode == DiceMode.ADVANTAGE, activeMode == DiceMode.DISADVANTAGE)
                 // Distance is already included in the effective mode; a cancelled edge must remain cancelled.
@@ -192,10 +192,11 @@ import java.util.UUID
 
 /** Surface only active effects whose application is currently unsupported by the specialized engine. */
 internal fun genesisArmorUnmappedEffects(character: ReforgeCharacter, ability: Ability): List<String> {
-    val active = CharacterCalculator.calculate(character).effectStatuses.filter { it.active }.map { it.effectId }.toSet()
+    val context = GenesisArmorRules.attackContext(ability)
+    val active = CharacterCalculator.calculate(character, context.copy(successfulHit = true)).effectStatuses.filter { it.active }.map { it.effectId }.toSet()
     val effects = character.effects + character.itemDefinitions.flatMap { it.effects }
     val key = "armor:${ability.name}"
-    val tags = if (ability in listOf(Ability.GAUNTLET, Ability.SPELL_GAUNTLET, Ability.GUARDIAN)) setOf("melee", "weapon") else setOf("ranged", "weapon")
+    val tags = context.tags
     return effects.filter { it.id in active }.filter { effect ->
         when (val payload = effect.payload) {
             is EffectPayload.Number -> payload.target in setOf(NumericTarget.ATTACK, NumericTarget.DAMAGE) && (payload.key.isBlank() || payload.key == key)
