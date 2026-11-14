@@ -41,6 +41,9 @@ internal fun validateReforgeBackup(value: ReforgeBackup) {
         validateCharacter(saved.character)
         require(row.originJson.length <= 2_000_000 && row.characterJson.length <= 1_000_000)
     }
+    require(value.characters.count { it.saved().character.armor != null } <= 1) {
+        "Original armor systems are connected to more than one character. Review ownership before restoring; no records were replaced."
+    }
     value.changes.forEach { event ->
         checkId(event.commandId)
         require(event.fingerprint.matches(Regex("[0-9a-f]{64}"))) { "Invalid immutable receipt fingerprint." }

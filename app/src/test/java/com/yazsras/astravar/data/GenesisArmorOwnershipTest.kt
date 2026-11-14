@@ -14,6 +14,30 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class) @Config(sdk = [35])
 class GenesisArmorOwnershipTest {
+    @Test fun separateValidBackupsCannotMergeTwoOwnersOfTheOriginalArmor() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        fun database() = Room.inMemoryDatabaseBuilder(context, ReforgeDb::class.java).build()
+        val first = database(); val second = database(); val empty = database()
+        try {
+            val old = Campaign(onboarded = true, cores = listOf(Core("source-core", "Source core")), installedId = "source-core")
+            fun actor(id: String) = GenesisArmorRules.adopt(ReforgeCharacter(id, "Fixture $id", level = 5,
+                baseAbilities = mapOf(Stat.INT to 16)), old, emptyList(), "Fictional reviewed source")
+            val a = ReforgeRepository(first); val b = ReforgeRepository(second)
+            a.create(actor("backup-a"), "create-backup-a")
+            b.create(actor("backup-b"), "create-backup-b")
+            val backupA = decodeReforgeBackup(a.export()); val backupB = decodeReforgeBackup(b.export())
+            val preview = a.previewRestore(b.export())
+            assertFalse(preview.valid)
+            assertTrue(preview.conflicts.toString().contains("more than one character"))
+            assertNull(a.get("backup-b"))
+            val both = backupA.copy(characters = backupA.characters + backupB.characters,
+                changes = backupA.changes + backupB.changes)
+            val forged = ReforgeRepository(empty).previewRestore(reforgeJson.encodeToString(ReforgeBackup.serializer(), both))
+            assertFalse(forged.valid)
+            assertTrue(forged.conflicts.toString().contains("more than one character"))
+        } finally { first.close(); second.close(); empty.close() }
+    }
+
     @Test fun simultaneousReviewsCannotDuplicateOriginalReservoirAcrossCharacters() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val db = Room.inMemoryDatabaseBuilder(context, ReforgeDb::class.java).build()
@@ -21,7 +45,7 @@ class GenesisArmorOwnershipTest {
             val repo = ReforgeRepository(db)
             val template = Template("fixture-template", "Fixture spell", 1, 1,
                 listOf(TypedDice(Dice(1, 6), DamageType.FIRE)), DamageType.FIRE, true)
-            val original = Campaign(onboarded = true, attuned = true, installedId = "fixture-nexus",
+            val original = Campaign(onboarded = true, attuned = true, installedId = "fixture-nexus", gameSeconds = 10,
                 cores = listOf(Core("fixture-nexus", "Fixture nexus", payloads = listOf(
                     Payload("original-payload", template, SourceKind.SLOT, "fixture-nexus", 10)))),
                 templates = listOf(template), scrolls = listOf(Scroll("original-scroll", template.id, 2)))
