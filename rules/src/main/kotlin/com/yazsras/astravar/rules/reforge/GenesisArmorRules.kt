@@ -26,6 +26,7 @@ object GenesisArmorRules {
 
     private fun requireAction(character: ReforgeCharacter) {
         val projection = CharacterCalculator.calculate(character)
+        require(character.exhaustionLevel < 6) { "Exhaustion has reached the fatal level; resolve the character's state with the DM." }
         require(ConditionRules.activeConditions(character, projection.conditionImmunities).none {
             it in setOf("incapacitated", "unconscious", "stunned", "paralyzed", "petrified")
         }) { "The current condition prevents armor actions." }

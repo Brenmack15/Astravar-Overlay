@@ -111,6 +111,7 @@ class GenesisArmorRulesTest {
         val owner = adopted().copy(conditions = setOf("unconscious"))
         assertThrows(IllegalArgumentException::class.java) { GenesisArmorRules.plan(owner, "blocked", Ability.ARCANE) }
         assertThrows(IllegalArgumentException::class.java) { GenesisArmorRules.charge(owner) }
+        assertThrows(IllegalArgumentException::class.java) { GenesisArmorRules.charge(adopted().copy(exhaustionLevel = 6)) }
     }
 
     @Test fun exhaustionChangesAccuracyOnlyAndSavedCriticalRetainsConditionSnapshot() {
