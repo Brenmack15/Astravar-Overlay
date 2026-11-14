@@ -192,7 +192,7 @@ import java.util.UUID
 
 /** Surface only active effects whose application is currently unsupported by the specialized engine. */
 internal fun genesisArmorUnmappedEffects(character: ReforgeCharacter, ability: Ability): List<String> {
-    val active = CharacterCalculator.calculate(character).effects.filter { it.active }.map { it.effectId }.toSet()
+    val active = CharacterCalculator.calculate(character).effectStatuses.filter { it.active }.map { it.effectId }.toSet()
     val effects = character.effects + character.itemDefinitions.flatMap { it.effects }
     val key = "armor:${ability.name}"
     val tags = if (ability in listOf(Ability.GAUNTLET, Ability.SPELL_GAUNTLET, Ability.GUARDIAN)) setOf("melee", "weapon") else setOf("ranged", "weapon")
