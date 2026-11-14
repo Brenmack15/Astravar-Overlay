@@ -207,3 +207,35 @@ used by old Android2.1 workflows; the active Genesis workflow uses
   external portrait files and some drafts) still need separate coverage.
 - Owner-key artifact, in-place install, broad tests and emulator acceptance are
   pending; Galaxy S26/Android17 physical testing has not been performed here.
+
+
+### Second focused verification pass
+
+The second local pass ran against the evolving shared worktree; it does **not**
+establish one exact clean source SHA. `focused-consolidation-second.log` records
+**184/184 rules passing**, **64/65 focused application cases passing**, and
+successful `:overlay-target:compileDebugAndroidTestKotlin`. The earlier three
+failures no longer appear. Skills account for nine rules cases, three
+repository/restart/backup cases and one complete Sheet interaction case, all
+passing. `current-python.log` independently records **328 Python tests passing**.
+
+The remaining application failure is substantive:
+`GenesisArmorSyncProjectionTest.canonicalStateAndRollsUseCurrentCharacterAndMonotonicPublicationRevisions`
+finds an original saved shot at revision200 inside a newly adopted runtime whose
+revision restarted at2. `BackupCodec` correctly rejects that invalid ordering.
+Correct the adapter's revision mapping while preserving historical plans and
+source bytes, then rerun; do not relax the backup invariant. This remains an
+open blocker at this documentation checkpoint.
+
+The executed Gradle tasks/filters (runtime paths abbreviated) were:
+
+```sh
+gradle --continue :rules:test :app:testDebugUnitTest   --tests 'com.yazsras.astravar.data.GenesisArmor*Test'   --tests 'com.yazsras.astravar.data.GenesisSkillsPersistenceTest'   --tests 'com.yazsras.astravar.data.GenesisReservoirRepositoryTest'   --tests 'com.yazsras.astravar.ui.GenesisArmor*Test'   --tests 'com.yazsras.astravar.ui.GenesisSkillsUiTest'   --tests 'com.yazsras.astravar.ui.GenesisSpellReservoirUiTest'   --tests 'com.yazsras.astravar.ui.GenesisConsolidationNavigationTest'   --tests 'com.yazsras.astravar.ui.GenesisEquipmentFavoritesUiTest'   --tests 'com.yazsras.astravar.ui.ReforgeCharacterUiTest'   --tests 'com.yazsras.astravar.ui.NavigationV2Test'   --tests 'com.yazsras.astravar.ui.CampaignVisualAcceptanceTest'   :overlay-target:compileDebugAndroidTestKotlin   -PastravarScreenshots=<runtime>/screenshots
+```
+
+Additional recoverable checkpoints: `a6d7109` scopes canonical armor configuration
+and recent-shot readback to the reviewed owner in the selected campaign;
+`68995d0` extends real native Equipment favorite/filter/unfavorite/restart and
+same-key-update readback. Both original store and out-of-scope campaign data
+remain protected. Exact-source broad regression, emulator execution, signing
+and owner-compatible installation remain pending.

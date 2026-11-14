@@ -262,3 +262,11 @@ and **55/57 application tests passed**, followed by fixes and additional coverag
 awaiting rerun. Native compilation was corrected after observer API errors;
 compilation and emulator acceptance are distinct gates. None of these partial
 results is a completed owner-compatible release or physical-device claim.
+
+
+The second local focused pass advances evidence to **184/184 rules** and
+**64/65 application cases**, plus **328 Python tests**, with native test Kotlin
+compilation passing. It found and retained a real adopted-history revision-order
+failure in canonical armor readback; fixing that defect and rerunning it is the
+next gate. These local runs used an evolving worktree, so release acceptance
+still requires an exact clean source and the native/owner-update evidence.
