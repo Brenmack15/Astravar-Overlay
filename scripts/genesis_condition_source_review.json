@@ -1,0 +1,33 @@
+{
+  "verified_source_baseline": "a86ab0fa87ce47a4f99550dcfa8fe01ed0e22928",
+  "source_path": "rules/src/main/kotlin/com/yazsras/astravar/rules/Model.kt",
+  "authorization": "Owner Genesis continuation 2026-11-14; reviewed additive current-character condition accuracy snapshot only. Historical defaults, damage, saves, resources and raw records remain unchanged.",
+  "previous_pinned_sha256": "0c17dde66699844d0a87c32506e9a61eb48f1f4de98b10e3f3355e06c990618d",
+  "reviewed_sha256": "bd0bdb1e52bb9dbbab4c29719f7fca6057612714e03a87553ed17fc6c6b245e9",
+  "exact_replacements": [
+    {
+      "before": "import kotlinx.serialization.Serializable\n",
+      "after": "import kotlinx.serialization.Serializable\nimport kotlinx.serialization.EncodeDefault\nimport kotlinx.serialization.ExperimentalSerializationApi\n"
+    },
+    {
+      "before": "@Serializable data class Profile(",
+      "after": "@OptIn(ExperimentalSerializationApi::class)\n@Serializable data class Profile("
+    },
+    {
+      "before": "    val melee: MeleeProfile? = null\n",
+      "after": "    val melee: MeleeProfile? = null,\n    /** Current character condition snapshot; never changes ability, damage or internal save DC. */\n    @EncodeDefault(EncodeDefault.Mode.NEVER) val conditionAttackAdjustment: Int = 0\n"
+    },
+    {
+      "before": "    val attack get() = intelligence + proficiency + bonus\n",
+      "after": "    val attack get() = intelligence + proficiency + bonus + conditionAttackAdjustment\n"
+    },
+    {
+      "before": "        require(level in 5..20 && intelligence in -5..10 && proficiency in 0..10 && saveDc in 1..40 && calibration in 0..10)\n",
+      "after": "        require(level in 5..20 && intelligence in -5..10 && proficiency in 0..10 && saveDc in 1..40 && calibration in 0..10)\n        require(conditionAttackAdjustment in -100..100)\n"
+    },
+    {
+      "before": "        ability == Ability.GUARDIAN -> profile.melee?.guardianAttackBonus ?: error(\"Sourced Guardian attack bonus missing\")\n        enhancedMelee -> profile.melee?.attackBonus ?: error(\"Melee profile missing\")\n",
+      "after": "        ability == Ability.GUARDIAN -> (profile.melee?.guardianAttackBonus ?: error(\"Sourced Guardian attack bonus missing\")) + profile.conditionAttackAdjustment\n        enhancedMelee -> (profile.melee?.attackBonus ?: error(\"Melee profile missing\")) + profile.conditionAttackAdjustment\n"
+    }
+  ]
+}
