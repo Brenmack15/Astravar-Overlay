@@ -742,9 +742,25 @@ internal class ObservedUi(private val device: UiDevice) {
 
     fun assertFocusedField(value: String, packageName: String, description: String) {
         val selector = By.clazz("android.widget.EditText").focused(true).pkg(packageName)
+        var settled: Rect? = null
+        var settledSince = 0L
         assertEquals("Committed editor text must remain exact after keyboard dismissal: $description", value,
-            snapshot(selector, description, timeoutMs = 10_000, refreshCache = true) {
-                it.text.orEmpty().takeIf { current -> current == value }
+            snapshot(selector, description, timeoutMs = 10_000, refreshCache = true) { node ->
+                val keyboardShown = InstrumentationRegistry.getInstrumentation().uiAutomation.windows.any { window ->
+                    window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD &&
+                        !Rect().also { window.getBoundsInScreen(it) }.isEmpty
+                }
+                val bounds = Rect(node.visibleBounds)
+                val current = node.text.orEmpty()
+                if (keyboardShown || !node.isFocused || !node.isEnabled || current != value || bounds.isEmpty) {
+                    settled = null
+                    null
+                } else {
+                    // Callers invoke this after one native Back. A matching
+                    // value alone is not proof that footer coordinates settled.
+                    if (settled != bounds) { settled = bounds; settledSince = SystemClock.uptimeMillis() }
+                    current.takeIf { SystemClock.uptimeMillis() - settledSince >= 120 }
+                }
             })
     }
 
