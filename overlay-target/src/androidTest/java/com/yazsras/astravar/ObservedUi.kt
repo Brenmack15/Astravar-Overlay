@@ -761,7 +761,10 @@ internal class ObservedUi(private val device: UiDevice) {
         snapshot(selector, "visible native keyboard before fixture edit: $description", timeoutMs = 10_000, refreshCache = true) { node ->
             true.takeIf { node.isFocused && node.isEnabled && !node.visibleBounds.isEmpty && keyboardShown() }
         }
-        assertTrue("Dismiss the observed native keyboard once: $description", device.pressBack())
+        // UiDevice can report false after the native IME already handled Back.
+        // Dispatch once; the following strict window/focus observation is the
+        // acceptance criterion, never a second key or an assumed success.
+        device.pressBack()
         var stable: Pair<Rect, String>? = null
         var stableSince = 0L
         val settled = snapshot(selector, "stable focused field after keyboard dismissal: $description", timeoutMs = 10_000, refreshCache = true) {
