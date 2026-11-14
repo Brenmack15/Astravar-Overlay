@@ -114,7 +114,7 @@ class GenesisArmorFeaturesUiTest {
             assertFalse(dismissed)
             val next = requireNotNull(pending)
             assertEquals("Updated weapon reference", next.armor!!.campaign.notes)
-            assertEquals(original, next.copy(armor = next.armor!!.copy(campaign = next.armor!!.campaign.copy(notes = original.armor!!.campaign.notes)))))
+            assertEquals(original, next.copy(armor = next.armor!!.copy(campaign = next.armor!!.campaign.copy(notes = original.armor!!.campaign.notes))))
             compose.runOnIdle { character = next.copy(revision = 1) }
             compose.waitForIdle()
             compose.waitUntil(5_000) { dismissed }
