@@ -758,8 +758,8 @@ internal class ObservedUi(private val device: UiDevice) {
         }
         // Observe the real IME before Back so a late keyboard cannot turn this
         // into navigation. This does not change any Gboard settings or app data.
-        snapshot(selector, "visible native keyboard before fixture edit: $description", timeoutMs = 10_000, refreshCache = true) {
-            true.takeIf { it.isFocused && it.isEnabled && !it.visibleBounds.isEmpty && keyboardShown() }
+        snapshot(selector, "visible native keyboard before fixture edit: $description", timeoutMs = 10_000, refreshCache = true) { node ->
+            true.takeIf { node.isFocused && node.isEnabled && !node.visibleBounds.isEmpty && keyboardShown() }
         }
         assertTrue("Dismiss the observed native keyboard once: $description", device.pressBack())
         var stable: Pair<Rect, String>? = null
@@ -783,8 +783,8 @@ internal class ObservedUi(private val device: UiDevice) {
             "Focused fixture field changed after the stable observation: $description"
         }
         field.text = value
-        snapshot(selector, "exact fixture text with keyboard dismissed: $description", timeoutMs = 10_000, refreshCache = true) {
-            true.takeIf { !keyboardShown() && it.isFocused && it.text.orEmpty() == value }
+        snapshot(selector, "exact fixture text with keyboard dismissed: $description", timeoutMs = 10_000, refreshCache = true) { node ->
+            true.takeIf { !keyboardShown() && node.isFocused && node.text.orEmpty() == value }
         }
         // Keep the caller's existing native Back/geometry contract. Reopening
         // the IME after ACTION_SET_TEXT creates no partial composing word.
@@ -792,8 +792,8 @@ internal class ObservedUi(private val device: UiDevice) {
             Rect(it.visibleBounds).takeIf { bounds -> it.text.orEmpty() == value && !bounds.isEmpty }
         }
         touch(reopen, "Reopen the native keyboard after exact fixture edit: $description", idleTimeoutMs = 1_000)
-        snapshot(selector, "exact fixture text after native keyboard returns: $description", timeoutMs = 10_000, refreshCache = true) {
-            true.takeIf { keyboardShown() && it.isFocused && it.text.orEmpty() == value }
+        snapshot(selector, "exact fixture text after native keyboard returns: $description", timeoutMs = 10_000, refreshCache = true) { node ->
+            true.takeIf { keyboardShown() && node.isFocused && node.text.orEmpty() == value }
         }
         // enterFocusedField is deliberately unchanged: dedicated distance/IME
         // geometry tests still dispatch real keys and check exact text afterward.
