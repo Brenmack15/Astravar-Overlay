@@ -39,8 +39,7 @@ class GenesisReservoirRepositoryTest {
             val created = repository.create(fixture(), "fixture-create")
             val runtime = GenesisArmorRules.runtime(created.character)
             assertEquals(3, runtime.slots[1]); assertFalse(runtime.slots.containsKey(2))
-            val loaded = GenesisArmorRules.apply(created.character,
-                Engine.charge(runtime, "fixture-core", template, "fixture-load", SourceKind.SLOT, true))
+            val loaded = GenesisArmorRules.load(created.character, template.id, "fixture-load", SourceKind.SLOT)
             val saved = repository.save(created.character.id, created.revision, loaded, "Load fixture", "fixture-load-command")
             assertEquals(2, saved.character.spellSlots[1])
             assertEquals(9, saved.character.armor!!.originalCampaign.slots[1])
@@ -73,8 +72,7 @@ class GenesisReservoirRepositoryTest {
         try {
             val repository = ReforgeRepository(db)
             val created = repository.create(fixture())
-            val campaign = GenesisArmorRules.runtime(created.character)
-            val loaded = GenesisArmorRules.apply(created.character, Engine.charge(campaign, "fixture-core", template, "snapshot-payload", SourceKind.SLOT, true))
+            val loaded = GenesisArmorRules.load(created.character, template.id, "snapshot-payload", SourceKind.SLOT)
             val saved = repository.save(created.character.id, created.revision, loaded, "Load")
             try { repository.save(created.character.id, created.revision, loaded, "Stale load"); fail("Stale action must reject") }
             catch (_: IllegalStateException) { }

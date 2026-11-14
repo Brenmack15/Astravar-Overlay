@@ -86,7 +86,7 @@ import java.util.UUID
             if (payload != null) PlayerSheet("Purge ${payload.template.name}?", { dialog = null }, actions = {
                 PlayerButton(enabled = !feedback.busy, onClick = {
                     try {
-                        save(GenesisArmorRules.apply(character, Engine.purge(campaign, payload.coreId, payload.id)), "Purged stored spell · Bonus Action")
+                        save(GenesisArmorRules.purge(character, payload.id), "Purged stored spell · Bonus Action")
                     } catch (failure: Exception) { actionError = failure.message ?: "Unable to purge this spell." }
                 }) { Text("Purge · no refund") }
             }) {
@@ -116,9 +116,9 @@ import java.util.UUID
             modifier = Modifier.testTag("genesis-confirm-reservoir-load"), onClick = {
                 try {
                     val selected = template ?: error("Choose an approved template.")
-                    val after = Engine.charge(campaign, campaign.installedId ?: error("The internal nexus is unavailable."),
-                        selected, payloadId, source, true, false, scrollId.takeIf { source == SourceKind.SCROLL }, overwrite)
-                    onSave(GenesisArmorRules.apply(character, after), "Loaded ${selected.name.take(90)} · Bonus Action")
+                    val after = GenesisArmorRules.load(character, selected.id, payloadId, source,
+                        scrollId = scrollId.takeIf { source == SourceKind.SCROLL }, overwriteId = overwrite)
+                    onSave(after, "Loaded ${selected.name.take(90)} · Bonus Action")
                 } catch (failure: Exception) { error = failure.message ?: "Unable to load this spell." }
             }) { Text(if (overwrite == null) "Load · spend source" else "Overwrite · spend source") }
     }) {

@@ -9,7 +9,19 @@ import androidx.compose.ui.platform.testTag
 import com.yazsras.astravar.rules.*
 import com.yazsras.astravar.rules.reforge.GenesisArmorRules
 import com.yazsras.astravar.rules.reforge.ReforgeCharacter
+import com.yazsras.astravar.rules.reforge.TurnEconomy
 import java.util.UUID
+
+/** Default reconciliation cannot restore a spent action or bonus; the owner may explicitly choose the current sheet. */
+internal fun genesisReviewedArmorTurn(character: ReforgeCharacter, legacy: Campaign, sheetOnly: Boolean): TurnEconomy {
+    val current = character.turn
+    if (sheetOnly) return current
+    val attacks = maxOf(current.attacksUsed, if (legacy.encounter) legacy.turn.attacks else 0)
+    return current.copy(tracking = current.tracking || legacy.encounter,
+        attacksUsed = attacks,
+        actionAvailable = current.actionAvailable && (!legacy.encounter || !legacy.turn.fullAction) && attacks < current.attacksPerAction,
+        bonusActionAvailable = current.bonusActionAvailable && !legacy.turn.bonus)
+}
 
 /** A one-time identity review, never a rest or an overwrite of current character resources. */
 @Composable internal fun GenesisArmorAdoption(character: ReforgeCharacter, legacyCampaign: Campaign?,
@@ -20,6 +32,7 @@ import java.util.UUID
     var open by rememberSaveable(character.id) { mutableStateOf(false) }
     var confirmed by rememberSaveable(character.id) { mutableStateOf(false) }
     var importUnknown by rememberSaveable(character.id) { mutableStateOf(false) }
+    var useSheetTurn by rememberSaveable(character.id) { mutableStateOf(false) }
     var source by rememberSaveable(character.id) { mutableStateOf("") }
     var baseline by rememberSaveable(character.id) { mutableLongStateOf(character.revision) }
     var legacyRevision by rememberSaveable(character.id) { mutableStateOf<Long?>(null) }
@@ -31,7 +44,7 @@ import java.util.UUID
     }
     if (recorded == null) return
     PlayerEntry("Connect saved Astravar systems", "Review the armor attacks, active element and reservoir for ${character.name}.", "Core", {
-        baseline = character.revision; legacyRevision = recorded.revision; confirmed = false; importUnknown = false; error = ""; open = true
+        baseline = character.revision; legacyRevision = recorded.revision; confirmed = false; importUnknown = false; useSheetTurn = false; error = ""; open = true
     })
     if (!open) return
     PlayerSheet("Connect Astravar to ${character.name}", { open = false }, dirty = confirmed || source.isNotBlank(), showCancel = true, actions = {
@@ -40,7 +53,8 @@ import java.util.UUID
                 try {
                     val slots = if (importUnknown) character.spellSlots + recorded.slots.filterKeys { character.spellSlots[it] == null }
                         else character.spellSlots
-                    val next = GenesisArmorRules.adopt(character.copy(spellSlots = slots), recorded, legacyElements, source.trim())
+                    val reviewed = character.copy(spellSlots = slots, turn = genesisReviewedArmorTurn(character, recorded, useSheetTurn))
+                    val next = GenesisArmorRules.adopt(reviewed, recorded, legacyElements, source.trim())
                     onSave(next, "Connected reviewed Astravar systems to character")
                 } catch (failure: Exception) { error = failure.message ?: "Unable to connect these records." }
             }) { Text("Connect reviewed systems") }
@@ -58,6 +72,13 @@ import java.util.UUID
             if (recorded.slots.keys.any { character.spellSlots[it] == null }) {
                 Toggle("Use recorded armor slots for unknown levels", importUnknown, !feedback.busy) { importUnknown = it }
             }
+        }
+        val reconciledTurn = genesisReviewedArmorTurn(character, recorded, false)
+        if (reconciledTurn != character.turn) PlayerDisclosure("Review current actions", initiallyOpen = true) {
+            Text("Sheet · ${if (character.turn.tracking) "tracking on" else "tracking off"} · ${character.turn.attacksUsed} attacks used · Action ${if (character.turn.actionAvailable) "available" else "spent"} · Bonus Action ${if (character.turn.bonusActionAvailable) "available" else "spent"}")
+            Text("Armor · ${if (recorded.encounter) "tracking on" else "tracking off"} · ${recorded.turn.attacks} attacks used · Action ${if (recorded.turn.fullAction) "spent" else "not spent"} · Bonus Action ${if (recorded.turn.bonus) "spent" else "available"}")
+            Text("By default, spent actions from either record remain spent. The sheet's attack allowance, reaction and spell-slot-spent flag remain unchanged. Saved spell-firing counts and Charged Gauntlet are preserved.", color = RebuildPalette.Muted)
+            Toggle("Use the current sheet's action budget instead", useSheetTurn, !feedback.busy) { useSheetTurn = it }
         }
         Text("This connection preserves an original armor snapshot for recovery. Future combat, spell loading and spellbook casting share this character's resources. No rest, healing or game time is added.", color = RebuildPalette.Muted)
         Field("Source or confirmation note", source, { source = it }, single = false, enabled = !feedback.busy)

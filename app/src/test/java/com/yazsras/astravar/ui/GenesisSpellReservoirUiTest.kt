@@ -100,7 +100,8 @@ class GenesisSpellReservoirUiTest {
     @Test fun adoptionExplicitlyReconcilesOnlyUnknownCountsAndPreservesSource() {
         val actor = character().copy(armor = null, spellSlots = mapOf(1 to 1, 2 to null))
         val legacy = Campaign(onboarded = true, attuned = true, installedId = "source-core", gameSeconds = 600,
-            cores = listOf(Core("source-core", "Existing nexus", exhaustedUntil = 1000)), slots = mapOf(1 to 4, 2 to 3))
+            cores = listOf(Core("source-core", "Existing nexus", exhaustedUntil = 1000)), slots = mapOf(1 to 4, 2 to 3),
+            encounter = true, turn = Turn(attacks = 1, bonus = true, spellShots = 1))
         var adopted: ReforgeCharacter? = null
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
@@ -117,12 +118,32 @@ class GenesisSpellReservoirUiTest {
                 val result = requireNotNull(adopted)
                 assertEquals(1, result.spellSlots[1])
                 assertEquals(3, result.spellSlots[2])
+                assertTrue(result.turn.tracking)
+                assertEquals(1, result.turn.attacksUsed)
+                assertFalse(result.turn.actionAvailable)
+                assertFalse(result.turn.bonusActionAvailable)
+                assertEquals(1, result.armor!!.campaign.turn.spellShots)
                 assertEquals(legacy, result.armor!!.originalCampaign)
                 assertEquals(listOf(DamageType.COLD), result.armor!!.elements)
                 assertEquals(600L, GenesisArmorRules.runtime(result).gameSeconds)
                 assertEquals(1000L, GenesisArmorRules.runtime(result).installed!!.exhaustedUntil)
             }
         } finally { controller.pause().stop().destroy() }
+    }
+
+    @Test fun actionBudgetReconciliationNeverRefillsUnlessCurrentSheetExplicitlyChosen() {
+        val actor = character().copy(turn = TurnEconomy(tracking = true, reactionAvailable = false,
+            attacksPerAction = 2, attacksUsed = 1, spellSlotSpent = true))
+        val old = Campaign(encounter = true, turn = Turn(attacks = 2, fullAction = true, bonus = true, spellShots = 1))
+        val reconciled = genesisReviewedArmorTurn(actor, old, false)
+        assertEquals(2, reconciled.attacksUsed)
+        assertEquals(2, reconciled.attacksPerAction)
+        assertFalse(reconciled.actionAvailable)
+        assertFalse(reconciled.bonusActionAvailable)
+        assertFalse(reconciled.reactionAvailable)
+        assertTrue(reconciled.spellSlotSpent)
+        assertEquals(actor.turn, genesisReviewedArmorTurn(actor, old, true))
+        assertFalse(genesisReviewedArmorTurn(actor, old.copy(encounter = false), false).bonusActionAvailable)
     }
 
 }
