@@ -97,4 +97,32 @@ class GenesisSpellReservoirUiTest {
         } finally { controller.pause().stop().destroy() }
     }
 
+    @Test fun adoptionExplicitlyReconcilesOnlyUnknownCountsAndPreservesSource() {
+        val actor = character().copy(armor = null, spellSlots = mapOf(1 to 1, 2 to null))
+        val legacy = Campaign(onboarded = true, attuned = true, installedId = "source-core", gameSeconds = 600,
+            cores = listOf(Core("source-core", "Existing nexus", exhaustedUntil = 1000)), slots = mapOf(1 to 4, 2 to 3))
+        var adopted: ReforgeCharacter? = null
+        val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            controller.get().setContent { AstravarTheme { Page {
+                GenesisArmorAdoption(actor, legacy, listOf(DamageType.COLD)) { next, _ -> adopted = next }
+            } } }
+            compose.onNodeWithText("Connect saved Astravar systems").performScrollTo().performClick()
+            compose.onNodeWithTag("genesis-adopt-armor").assertIsNotEnabled()
+            compose.onNodeWithText("Use recorded armor slots for unknown levels").performScrollTo().performClick()
+            compose.onNodeWithText("Source or confirmation note").performScrollTo().performTextInput("Reviewed fixture source")
+            compose.onNodeWithText("These saved Astravar systems belong to Fictional artificer").performScrollTo().performClick()
+            compose.onNodeWithTag("genesis-adopt-armor").performClick()
+            compose.runOnIdle {
+                val result = requireNotNull(adopted)
+                assertEquals(1, result.spellSlots[1])
+                assertEquals(3, result.spellSlots[2])
+                assertEquals(legacy, result.armor!!.originalCampaign)
+                assertEquals(listOf(DamageType.COLD), result.armor!!.elements)
+                assertEquals(600L, GenesisArmorRules.runtime(result).gameSeconds)
+                assertEquals(1000L, GenesisArmorRules.runtime(result).installed!!.exhaustedUntil)
+            }
+        } finally { controller.pause().stop().destroy() }
+    }
+
 }
