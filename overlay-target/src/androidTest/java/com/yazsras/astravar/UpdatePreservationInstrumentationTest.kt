@@ -152,6 +152,7 @@ class UpdatePreservationInstrumentationTest {
         assertNotNull(query)
         ui.setFocusedField("Resume", product, "ChatGPT prompt search")
         device.pressBack()
+        ui.assertFocusedField("Resume", product, "ChatGPT prompt search after keyboard dismissal")
         tap("Copy handoff prompt")
         find("Copied — paste in ChatGPT")
         assertTrue(device.takeScreenshot(File(files, "native-chatgpt-prompt-copy.png")))

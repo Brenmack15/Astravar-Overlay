@@ -811,8 +811,19 @@ internal class ObservedUi(private val device: UiDevice) {
             Rect(it.visibleBounds).takeIf { bounds -> it.text.orEmpty() == value && !bounds.isEmpty }
         }
         touch(reopen, "Reopen the native keyboard after exact fixture edit: $description", idleTimeoutMs = 1_000)
+        var reopenedBounds: Rect? = null
+        var reopenedSince = 0L
         snapshot(selector, "exact fixture text after native keyboard returns: $description", timeoutMs = 10_000, refreshCache = true) { node ->
-            true.takeIf { keyboardShown() && node.isFocused && node.text.orEmpty() == value }
+            val bounds = Rect(node.visibleBounds)
+            if (!keyboardShown() || !node.isFocused || node.text.orEmpty() != value || bounds.isEmpty) {
+                reopenedBounds = null
+                null
+            } else {
+                // SAF intentionally saves with the keyboard open. Its next
+                // control lookup needs settled geometry as well as exact text.
+                if (reopenedBounds != bounds) { reopenedBounds = bounds; reopenedSince = SystemClock.uptimeMillis() }
+                true.takeIf { SystemClock.uptimeMillis() - reopenedSince >= 120 }
+            }
         }
         // enterFocusedField is deliberately unchanged: dedicated distance/IME
         // geometry tests still dispatch real keys and check exact text afterward.
