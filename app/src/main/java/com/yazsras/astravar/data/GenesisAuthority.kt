@@ -51,6 +51,28 @@ class GenesisAuthorityRepository(private val db: CampaignLedgerDb, private val r
         val value = GenesisCampaignRecord("genesis-campaign-${campaignHash(commandId).take(48)}", clean, notes, createdAt = now, updatedAt = now, commandId = commandId)
         dao.insert(value); record(commandId, "create-campaign", request, campaignJson.encodeToString(value)); value
     }
+    /**
+     * Opt-in bridge for existing owner grants bound to the historical `local-campaign` identity.
+     * Creating the campaign NEVER assigns a character or approves shared gameplay values.
+     * Both steps still require the owner's separate membership and authority review.
+     */
+    suspend fun prepareOwnerLocalCampaign(commandId: String = UUID.randomUUID().toString()): GenesisCampaignRecord = transaction {
+        dao.campaign("local-campaign")?.let {
+            require(!it.archived) { "The connected local campaign is archived. Restore it before linking characters." }
+            return@transaction it
+        }
+        val request = campaignJson.encodeToString(listOf("local-campaign", "Local campaign"))
+        retry(commandId, "prepare-owner-local-campaign", request)?.let {
+            return@transaction campaignJson.decodeFromString<GenesisCampaignRecord>(it.outcomeJson)
+        }
+        val now = System.currentTimeMillis()
+        val value = GenesisCampaignRecord("local-campaign", "Local campaign",
+            "Prepared by the owner for a previously authorized private campaign connection. Membership is separately reviewed.",
+            createdAt = now, updatedAt = now, commandId = commandId)
+        dao.insert(value)
+        record(commandId, "prepare-owner-local-campaign", request, campaignJson.encodeToString(value))
+        value
+    }
     suspend fun createActor(name: String, role: GenesisActorRole, campaignId: String? = null, ownerActorId: String? = null,
         playable: ReforgeCharacter? = null, commandId: String = UUID.randomUUID().toString()): GenesisActorCreationOutcome = transaction {
         val clean = name.trim(); require(clean.isNotBlank() && clean.length <= 120) { "Enter an actor name of at most 120 characters." }

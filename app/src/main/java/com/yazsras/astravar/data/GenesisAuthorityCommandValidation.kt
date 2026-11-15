@@ -21,6 +21,17 @@ internal suspend fun genesisRequireAuthorityCommand(db: CampaignLedgerDb, receip
             require(outcome.commandId == receipt.commandId && outcome.name == input[0] && outcome.notes == input[1] && outcome.revision == 1L)
             require(db.genesisAuthorityDao().campaign(outcome.id) == outcome) { "Campaign creation failed current-record readback." }
         }
+        "prepare-owner-local-campaign" -> {
+            val input = genesisAuthorityRequest(receipt, 2)
+            val outcome = campaignJson.decodeFromString<GenesisCampaignRecord>(receipt.outcomeJson)
+            require(input == listOf("local-campaign", "Local campaign") &&
+                outcome.id == "local-campaign" && outcome.name == "Local campaign" &&
+                outcome.notes == "Prepared by the owner for a previously authorized private campaign connection. Membership is separately reviewed." &&
+                outcome.commandId == receipt.commandId && outcome.revision == 1L && !outcome.archived) {
+                "Prepared owner campaign differs from its explicit request."
+            }
+            require(db.genesisAuthorityDao().campaign(outcome.id) == outcome) { "Prepared owner campaign failed current-record readback." }
+        }
         "create-actor", "register-actor", "accept-actor" -> {
             val outcome = genesisRequireActorDecision(db, receipt)
             require(db.genesisAuthorityDao().actor(outcome.actor.actorId) == outcome.actor &&

@@ -60,6 +60,33 @@ class CampaignConnectionTest {
             requestedReadJson=scopes,requestedWriteJson=scopes,grantJson=remote.grant.toString()))
         return client(remote).also { it.sync() }
     }
+    @Test fun connectedHeartbeatWithoutExplicitMembershipPublishesNoCharacterUntilReviewedEnrollment() = runBlocking {
+        val authority = GenesisAuthorityRepository(campaign)
+        authority.registerActorAssociation(profileId, current().revision, GenesisActorRole.PLAYER,
+            null, null, "fixture-register-unassigned")
+        val remote = Remote()
+        val c = paired(remote)
+        assertTrue(remote.records.isEmpty())
+        val empty = c.snapshot()
+        assertEquals(0, empty.getValue("localRecordCount").jsonPrimitive.int)
+        assertEquals(JsonNull, empty.getValue("sourceActorCampaignId"))
+        assertFalse(empty.getValue("sourceCampaignPrepared").jsonPrimitive.boolean)
+        assertTrue(empty.getValue("lastDeviceSyncAt").jsonPrimitive.long > 0)
+
+        val saved = authority.prepareOwnerLocalCampaign("fixture-opt-in-local-campaign")
+        // Preparing the identity is not permission to publish this unassigned actor.
+        c.sync()
+        assertTrue(remote.records.isEmpty())
+        assertNull(authority.actor(profileId)?.campaignId)
+
+        authority.updateActorAssociation(profileId, 1, GenesisActorRole.PLAYER, saved.id, null,
+            "fixture-explicit-membership")
+        c.sync()
+        assertTrue(remote.records.containsKey("character-profile" to profileId))
+        val connected = c.snapshot()
+        assertTrue(connected.getValue("localRecordCount").jsonPrimitive.int > 0)
+        assertEquals("local-campaign", connected.getValue("sourceActorCampaignId").jsonPrimitive.content)
+    }
     @Test fun injectedTransportFixturesNeverEnrollProductionPushy() = runBlocking {
         val remote = Remote()
         val c = paired(remote)

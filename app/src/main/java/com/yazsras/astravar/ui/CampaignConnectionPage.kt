@@ -35,6 +35,7 @@ import java.io.IOException
 /** Player-facing manager. No UI state is accepted as evidence of a successful device commit. */
 @Composable fun CampaignConnectionPage() {
     val context = LocalContext.current.applicationContext
+    val connectedEnvironment = LocalGenesisConnectedEnvironment.current
     val client = remember(context) { CampaignConnectionClient(context) }
     val syncPreferences = remember(context) { CampaignSyncPreferences(context) }
     var syncPaused by remember { mutableStateOf(syncPreferences.paused) }
@@ -58,6 +59,7 @@ import java.io.IOException
     var error by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     var diagnostics by rememberSaveable { mutableStateOf(false) }
+    var membershipOpen by rememberSaveable { mutableStateOf(false) }
 
     fun operate(action: suspend () -> JsonObject) {
         if (busy) return
@@ -167,6 +169,21 @@ import java.io.IOException
             onRenew = { origin, profile -> operate { val url = client.startServiceAuthorization(origin, profile); openOwner(url, origin); client.snapshot() } },
             onImportAuthorization = { importAuthorization.launch(arrayOf("application/json", "application/octet-stream")) },
             onDiagnostics = { diagnostics = true },
+            onPrepareCampaign = {
+                val environment = connectedEnvironment
+                if (environment == null || view.campaignId != "local-campaign") {
+                    error = true; message = "The connected local campaign could not be prepared from this screen. No records changed."
+                } else operate {
+                    environment.authority.prepareOwnerLocalCampaign()
+                    environment.preferences.selectCampaign("local-campaign")
+                    client.snapshot()
+                }
+            },
+            onReviewMembership = {
+                if (connectedEnvironment == null || view.selectedProfileId.isBlank()) {
+                    error = true; message = "Open the character's campaign membership before sharing any values."
+                } else membershipOpen = true
+            },
             onRestrictPermissions = { readScopes, writeScopes -> operate { client.restrictPermissions(readScopes, writeScopes) } },
             onPauseSync = { paused ->
                 try {
@@ -217,5 +234,12 @@ import java.io.IOException
                 }
             }
         )
+        if (membershipOpen && connectedEnvironment != null && view.selectedProfileId.isNotBlank()) {
+            GenesisActorMembershipEditor(
+                connectedEnvironment.copy(selectedCampaignId = view.campaignId, selectionLoaded = true),
+                view.selectedProfileId,
+                { membershipOpen = false }
+            )
+        }
     }
 }

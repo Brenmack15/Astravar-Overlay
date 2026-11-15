@@ -21,12 +21,35 @@ import org.robolectric.annotation.LooperMode
 class CampaignConnectionUiTest {
     @get:Rule val compose = createAstravarComposeRule()
     private fun show(view: CampaignConnectionView, auto: (Set<String>) -> Unit = {}, decision: (String, Boolean) -> Unit = { _, _ -> },
-        restrict: (Set<String>,Set<String>) -> Unit = { _, _ -> }, pause: (Boolean) -> Unit = {}, sync: () -> Unit = {}): AutoCloseable {
+        restrict: (Set<String>,Set<String>) -> Unit = { _, _ -> }, pause: (Boolean) -> Unit = {}, sync: () -> Unit = {},
+        prepare: () -> Unit = {}, review: () -> Unit = {}): AutoCloseable {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         activity.get().setContent { AstravarTheme {
-            CampaignConnectionContent(view, { _, _, _, _, _ -> }, {}, sync, {}, auto, decision, {}, { _, _ -> }, {}, {}, restrict, pause)
+            CampaignConnectionContent(view, { _, _, _, _, _ -> }, {}, sync, {}, auto, decision, {}, { _, _ -> }, {}, {}, restrict, pause,
+                onPrepareCampaign = prepare, onReviewMembership = review)
         } }
         return AutoCloseable { activity.pause().stop().destroy() }
+    }
+
+    @Test fun emptyButSuccessfulHeartbeatOffersExplicitEnrollmentInsteadOfClaimingPublishedCharacterData() {
+        var prepares = 0
+        show(CampaignConnectionView(connected = true, status = "Connected", campaignId = "local-campaign",
+            selectedProfileId = "fictional-player", localRecordCount = 0, sourceCampaignPrepared = false),
+            prepare = { prepares++ }).use {
+            compose.onNodeWithText("Local campaign records eligible for sync: 0").performScrollTo().assertExists()
+            compose.onNodeWithText("Prepare connected local campaign").performScrollTo().performClick()
+            assertEquals(1, prepares)
+        }
+    }
+
+    @Test fun preparedCampaignShowsReviewedMembershipActionBeforeGameplaySharing() {
+        var reviews = 0
+        show(CampaignConnectionView(connected = true, status = "Connected", campaignId = "local-campaign",
+            selectedProfileId = "fictional-player", localRecordCount = 0, sourceCampaignPrepared = true),
+            review = { reviews++ }).use {
+            compose.onNodeWithText("Review character membership and shared values").performScrollTo().performClick()
+            assertEquals(1, reviews)
+        }
     }
 
     @Test fun pausing_delivery_does_not_revoke_standing_permissions_and_manual_sync_stays_available() {
@@ -106,6 +129,19 @@ class CampaignConnectionUiTest {
         assertEquals("Unknown", view.pending.single().operations.single().current.single().second)
         assertFalse(view.receipts.single().independentlyVerified)
         assertFalse(view.toString().contains("secret"))
+    }
+
+    @Test fun connectionSnapshotExposesLocalSharingReadinessWithoutInventingMembership() {
+        val view = campaignConnectionView(buildJsonObject {
+            put("connected", true); put("campaignId", "local-campaign")
+            put("selectedProfileId", "fictional-player"); put("localRecordCount", 0)
+            put("sourceActorCampaignId", JsonNull)
+            put("sourceActorPlayable", false); put("sourceCampaignPrepared", false)
+        })
+        assertEquals(0, view.localRecordCount)
+        assertNull(view.sourceActorCampaignId)
+        assertFalse(view.sourceActorPlayable)
+        assertFalse(view.sourceCampaignPrepared)
     }
 
     @Test fun exact_pending_approval_snapshot_displays_prepared_values_and_allows_one_reviewed_action() {
