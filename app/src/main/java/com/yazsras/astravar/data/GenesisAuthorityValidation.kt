@@ -46,6 +46,18 @@ internal fun genesisAuthorityBackupErrors(
                 require(outcome.id in campaigns) { "Created campaign identity is missing from portable authority." }
                 campaignProofs[receipt.commandId] = outcome
             }
+            "prepare-owner-local-campaign" -> {
+                val input = request(2)
+                val outcome = campaignJson.decodeFromString<GenesisCampaignRecord>(receipt.outcomeJson)
+                require(input == listOf("local-campaign", "Local campaign") &&
+                    outcome.id == "local-campaign" && outcome.name == "Local campaign" &&
+                    outcome.notes == "Prepared by the owner for a previously authorized private campaign connection. Membership is separately reviewed." &&
+                    outcome.commandId == receipt.commandId && outcome.revision == 1L && !outcome.archived) {
+                    "Prepared owner campaign differs from its explicitly authorized source."
+                }
+                require(outcome.id in campaigns) { "Prepared owner campaign identity is missing from portable authority." }
+                campaignProofs[receipt.commandId] = outcome
+            }
             "create-actor", "register-actor", "accept-actor" -> {
                 val outcome = campaignJson.decodeFromString<GenesisActorCreationOutcome>(receipt.outcomeJson)
                 val actor = outcome.actor
