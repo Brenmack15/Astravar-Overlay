@@ -61,9 +61,9 @@ class CampaignConnectionTest {
         return client(remote).also { it.sync() }
     }
     @Test fun connectedHeartbeatWithoutExplicitMembershipPublishesNoCharacterUntilReviewedEnrollment() = runBlocking {
-        campaign.genesisAuthorityDao().insert(GenesisActorAuthority(profileId, GenesisActorRole.PLAYER,
-            campaignId = null, playable = false, activationCommandId = "fixture-unassigned-authority",
-            lastCommandId = "fixture-unassigned-authority", createdAt = time, updatedAt = time))
+        val authority = GenesisAuthorityRepository(campaign)
+        authority.registerActorAssociation(profileId, current().revision, GenesisActorRole.PLAYER,
+            null, null, "fixture-register-unassigned")
         val remote = Remote()
         val c = paired(remote)
         assertTrue(remote.records.isEmpty())
@@ -73,7 +73,6 @@ class CampaignConnectionTest {
         assertFalse(empty.getValue("sourceCampaignPrepared").jsonPrimitive.boolean)
         assertTrue(empty.getValue("lastDeviceSyncAt").jsonPrimitive.long > 0)
 
-        val authority = GenesisAuthorityRepository(campaign)
         val saved = authority.prepareOwnerLocalCampaign("fixture-opt-in-local-campaign")
         // Preparing the identity is not permission to publish this unassigned actor.
         c.sync()
