@@ -120,6 +120,12 @@ class CampaignConnectionClient internal constructor(private val context: Context
     private suspend fun campaignFor(profileId: String): String {
         OwnerSyncProtocol.id(profileId); require(profileId != OwnerConnectionProtocol.PROFILE)
         requireNotNull(campaignDb.recordsDao().characterProfile(profileId)) { "Choose an existing saved character." }
+        // Genesis membership, when explicitly reviewed, owns the campaign identity.
+        // A historical party-sheet label must not pair the owner with a different campaign.
+        campaignDb.genesisAuthorityDao().actor(profileId)?.campaignId?.let { linked ->
+            OwnerSyncProtocol.id(linked)
+            return linked
+        }
         val campaigns = campaignDb.partyDao().allSheets().filter { it.profileId == profileId }.map { it.campaignId }.distinct()
         require(campaigns.size <= 1) { "Character belongs to multiple campaigns. Resolve campaign identity before pairing." }
         return campaigns.singleOrNull()?.also { OwnerSyncProtocol.id(it); require(it != OwnerConnectionProtocol.CAMPAIGN) }
@@ -299,12 +305,18 @@ class CampaignConnectionClient internal constructor(private val context: Context
         val value = setting()
         val commands = dao.commands().filter { belongs(it, value) }
         val current = if (value.campaignId.isBlank()) emptyList() else domain.snapshot(value.campaignId, includeReadOnly = false)
+        val actor = value.profileId.takeIf { it.isNotBlank() }?.let { campaignDb.genesisAuthorityDao().actor(it) }
+        val selectedCampaign = value.campaignId.takeIf { it.isNotBlank() }?.let { campaignDb.genesisAuthorityDao().campaign(it) }
         val localById = current.associateBy { it.kind to it.recordId }
         val secret = if (value.origin.isBlank() || value.campaignId.isBlank()) null else vault.credential(value.origin, value.campaignId)
         val g = grant(value)
         return buildJsonObject {
             put("connected", secret?.credentialId == value.deviceId && value.deviceId.isNotBlank() && secret.expiresAt > now() && !value.revokePending && runCatching { checkedGrant(value, g) }.isSuccess); put("origin", value.origin)
             put("campaignId", value.campaignId); put("selectedProfileId", value.profileId); put("deviceId", value.deviceId)
+            put("localRecordCount", current.size)
+            put("sourceActorCampaignId", actor?.campaignId?.let(::JsonPrimitive) ?: JsonNull)
+            put("sourceActorPlayable", actor?.playable == true)
+            put("sourceCampaignPrepared", selectedCampaign != null && !selectedCampaign.archived)
             put("deviceName", value.deviceName); put("accountLabel", value.accountLabel)
             put("status", if (value.deviceId.isNotBlank() && !value.revokePending && (secret == null || secret.expiresAt <= now() || runCatching { checkedGrant(value, g) }.isFailure)) "Authentication expired" else value.status)
             put("lastError", value.lastError); put("lastSyncAt", value.lastSyncAt); put("lastDeviceSyncAt", value.lastDeviceSyncAt)

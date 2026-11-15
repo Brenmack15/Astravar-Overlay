@@ -51,6 +51,31 @@ class GenesisAuthorityRepositoryTest {
     }
     private suspend fun profile(id: String) = requireNotNull(db.recordsDao().characterProfile(id))
 
+    @Test fun ownerLocalCampaignRequiresSeparateExplicitMembershipBeforeAnyCharacterPublication() = runBlocking {
+        val actor = authority.createActor("Fictional unassigned scout", GenesisActorRole.PLAYER,
+            playable = configured("fictional-local-owner", "Fictional unassigned scout"), commandId = "fictional-unassigned-create")
+        val domain = CampaignSyncDomain(db)
+        assertNull(actor.actor.campaignId)
+        assertFalse(domain.snapshot("local-campaign").any { it.kind == "character-profile" && it.recordId == actor.actor.actorId })
+
+        val prepared = authority.prepareOwnerLocalCampaign("fictional-prepare-local")
+        assertEquals("local-campaign", prepared.id)
+        assertEquals(prepared, authority.prepareOwnerLocalCampaign("fictional-prepare-retry"))
+        assertNull(authority.actor(actor.actor.actorId)?.campaignId)
+        assertFalse(domain.snapshot("local-campaign").any { it.kind == "character-profile" && it.recordId == actor.actor.actorId })
+
+        val linked = authority.updateActorAssociation(actor.actor.actorId, actor.actor.revision,
+            GenesisActorRole.PLAYER, prepared.id, null, "fictional-explicit-owner-membership")
+        assertEquals(prepared.id, linked.campaignId)
+        val published = domain.snapshot("local-campaign")
+        assertTrue(published.any { it.kind == "character-profile" && it.recordId == actor.actor.actorId })
+        assertTrue(published.any { it.kind == "party-sheet" && it.recordId == actor.actor.actorId })
+
+        reopen()
+        assertEquals(prepared, authority.prepareOwnerLocalCampaign("fictional-prepare-after-reopen"))
+        assertEquals(prepared.id, authority.actor(actor.actor.actorId)?.campaignId)
+    }
+
     @Test fun campaignActorEquipmentQuantityAndTransferRemainConnectedAfterReopen() = runBlocking {
         val world = authority.createCampaign("Fictional Lantern Coast", "Synthetic campaign", "lifecycle-campaign")
         val first = authority.createActor("Fictional scout", GenesisActorRole.PLAYER, world.id,

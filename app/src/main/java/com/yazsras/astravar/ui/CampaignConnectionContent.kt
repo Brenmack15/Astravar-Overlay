@@ -49,7 +49,9 @@ data class CampaignConnectionView(
     val busy: Boolean = false, val message: String = "", val error: Boolean = false,
     val automaticSyncPaused: Boolean = false, val syncNotificationEnabled: Boolean = false,
     val syncNotificationAvailable: Boolean = false, val pushConfigured: Boolean = false, val pushRegistered: Boolean = false,
-    val pushEnabled: Boolean = false
+    val pushEnabled: Boolean = false, val localRecordCount: Int = 0,
+    val sourceActorCampaignId: String? = null, val sourceActorPlayable: Boolean = false,
+    val sourceCampaignPrepared: Boolean = false
 )
 
 @Composable fun CampaignConnectionContent(view: CampaignConnectionView,
@@ -60,7 +62,8 @@ data class CampaignConnectionView(
     onImportAuthorization: () -> Unit, onDiagnostics: () -> Unit,
     onRestrictPermissions: (Set<String>, Set<String>) -> Unit = { _, _ -> },
     onPauseSync: (Boolean) -> Unit = {}, onSyncNotification: (Boolean) -> Unit = {},
-    onPushy: (Boolean) -> Unit = {}
+    onPushy: (Boolean) -> Unit = {}, onPrepareCampaign: () -> Unit = {},
+    onReviewMembership: () -> Unit = {}
 ) {
     var origin by rememberSaveable(view.origin) { mutableStateOf(view.origin) }
     var deviceName by rememberSaveable(view.deviceName) { mutableStateOf(view.deviceName) }
@@ -93,10 +96,33 @@ data class CampaignConnectionView(
             Text("Account: ${view.account.ifBlank { "Not authenticated" }}")
             Text("Device: ${view.deviceName}", color = RebuildPalette.Muted)
             Text("Campaign: ${view.campaignId.ifBlank { "Not selected" }}", color = RebuildPalette.Muted)
-            Text("Latest verified device sync: ${view.lastSyncAt?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM).format(Date(it)) } ?: "Not yet verified"}", color = RebuildPalette.Muted)
+            Text("${if (view.connected && view.localRecordCount == 0) "Last verified service contact" else "Latest verified device sync"}: ${view.lastSyncAt?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM).format(Date(it)) } ?: "Not yet verified"}", color = RebuildPalette.Muted)
+            if (view.connected) Text("Local campaign records eligible for sync: ${view.localRecordCount}", color = RebuildPalette.Muted)
             if (view.revokePending) Text("Server revocation pending. Local access is disabled; retry to confirm server revocation.", color = RebuildPalette.GoldBright)
             if (view.connected || view.revokePending) PlayerButton(onClick = onSync, enabled = !view.busy,
                 modifier = Modifier.fillMaxWidth()) { Text("Sync now") }
+        }
+        if (view.connected && view.selectedProfileId.isNotBlank() &&
+            (view.sourceActorCampaignId != view.campaignId || !view.sourceActorPlayable || view.localRecordCount == 0)) PlayerCard {
+            Text("Complete campaign sharing", style = MaterialTheme.typography.titleMedium)
+            when {
+                view.sourceActorCampaignId != null && view.sourceActorCampaignId != view.campaignId ->
+                    Text("This character belongs to a different saved campaign than the owner connection. Its records were not reassigned or shared. Review the correct campaign and start a separately authorized pairing.", color = RebuildPalette.GoldBright)
+                view.campaignId == "local-campaign" && !view.sourceCampaignPrepared -> {
+                    Text("The private service is connected, but this local campaign has not been prepared in Genesis. Preparing it creates a campaign identity only; it does not share a character or change any gameplay value.", color = RebuildPalette.GoldBright)
+                    PlayerButton(onClick = onPrepareCampaign, enabled = !view.busy, modifier = Modifier.fillMaxWidth().testTag("prepare-local-campaign")) {
+                        Text("Prepare connected local campaign")
+                    }
+                }
+                !view.sourceCampaignPrepared -> Text("The owner connection references a campaign not available in the current Genesis records. Restore or select the correct campaign before sharing.", color = RebuildPalette.GoldBright)
+                view.sourceActorCampaignId != view.campaignId || !view.sourceActorPlayable -> {
+                    Text("The selected character's gameplay values have not been explicitly linked to this campaign. Review membership and reconcile saved values before publishing; the source sheet is preserved.", color = RebuildPalette.GoldBright)
+                    PlayerButton(onClick = onReviewMembership, enabled = !view.busy, modifier = Modifier.fillMaxWidth().testTag("review-campaign-membership")) {
+                        Text("Review character membership and shared values")
+                    }
+                }
+                else -> Text("Membership is connected, but there are no typed records in this campaign yet. Review the character's saved values before expecting remote data.", color = RebuildPalette.GoldBright)
+            }
         }
         PlayerCard {
             Text("Background sync", style = MaterialTheme.typography.titleMedium)
@@ -327,6 +353,10 @@ internal fun campaignConnectionView(snapshot: JsonObject, now: Long = System.cur
         campaignId = snapshot.connectionText("campaignId"), selectedProfileId = snapshot.connectionText("selectedProfileId"),
         deviceId = snapshot.connectionText("deviceId"), deviceName = snapshot.connectionText("deviceName").ifBlank { "Android device" },
         account = snapshot.connectionText("accountLabel"), lastSyncAt = snapshot.connectionLong("lastSyncAt")?.takeIf { it > 0 },
+        localRecordCount = snapshot.connectionLong("localRecordCount")?.coerceIn(0, Int.MAX_VALUE.toLong())?.toInt() ?: 0,
+        sourceActorCampaignId = snapshot.connectionText("sourceActorCampaignId").ifBlank { null },
+        sourceActorPlayable = (snapshot["sourceActorPlayable"] as? JsonPrimitive)?.booleanOrNull == true,
+        sourceCampaignPrepared = (snapshot["sourceCampaignPrepared"] as? JsonPrimitive)?.booleanOrNull == true,
         revokePending = revoking,
         profiles = snapshot.connectionRows("profiles").map { CampaignConnectionProfileView(it.connectionText("id"), it.connectionText("name"), it.connectionText("campaignId")) },
         pairingCode = if (activePairing) pairing?.connectionText("userCode")?.ifBlank { null } else null, pairingUrl = if (activePairing) pairing?.connectionText("verificationUri")?.ifBlank { null } else null,
