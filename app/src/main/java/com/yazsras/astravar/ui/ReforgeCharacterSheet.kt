@@ -473,6 +473,10 @@ private enum class SpellbookFilter(val label: String) {
                                 PlayerOutlinedButton(onClick = { dialog = "ImportItem" }) {
                                     Text("Add from campaign inventory")
                                 }
+                                PlayerOutlinedButton(onClick = { dialog = "NotionImport" },
+                                    modifier = Modifier.fillMaxWidth().testTag("character-notion-transfer")) {
+                                    Text("Import character & inventory from Notion file")
+                                }
                                 PlayerDisclosure("About campaign inventory") {
                                     Text("Equipped items affect this character's calculations. Campaign items keep the original records. Adding one here creates an explicitly reviewed copy, with no automatic magical effects.",
                                         color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
@@ -709,6 +713,7 @@ private enum class SpellbookFilter(val label: String) {
             "Item" -> if (connected != null) GenesisConnectedItemEditor(connected, saved!!, { dialog = null }, onSaved = { dialog = null })
                 else ReforgeItemEditor(character, { dialog = null }, onSave = { change("Add reviewed equipment", it) })
             "ImportItem" -> GenesisCampaignItemPicker(saved!!, local, repository) { dialog = null }
+            "NotionImport" -> GenesisNotionTransferDialog(saved!!) { dialog = null }
             "Attack" -> ReforgeAttackEditor(character, { dialog = null }, onSave = { change("Add attack", it) })
             "Spell" -> ReforgeSpellEditor(character, { dialog = null }, onSave = { change("Add spell", it) })
             "Resource" -> ReforgeResourceEditor(character, { dialog = null }, onSave = { change("Add resource", it) })
