@@ -48,7 +48,7 @@ class NotionTransferTest {
 
     @Test fun donorComponentsConsumedItemsOtherOwnersAndUnknownMasksStayDeferred() {
         val input = transfer(listOf(item(), item("component-2", "Prototype", "Consumed"),
-            item("other-3", "Companion Harness", "Equipped", "Companion"),
+            item("other-333", "Companion Harness", "Equipped", "Companion"),
             item("unknown-4", "Unlocated Mask", "Unknown")))
         val result = planNotionCharacterTransfer(character(), input, NotionTransferChoices(replaceConflictingStats = true))
         assertEquals(1, result.added.size)
