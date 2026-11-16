@@ -84,7 +84,7 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
         with:
-          cache-read-only: ${{ github.event_name == 'pull_request' || (github.ref_name != github.event.repository.default_branch && github.event_name != 'workflow_dispatch') }}
+          cache-read-only: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) && github.ref_name != github.event.repository.default_branch && github.event_name != 'workflow_dispatch' }}
       - name: Use installed Android packages
         timeout-minutes: 9
         run: bash scripts/ci-android-sdk.sh
