@@ -57,8 +57,8 @@ class GenesisNotionTransferInstrumentationTest {
         val rootsList = By.res(picker, "roots_list")
         ui.tapWithin(rootsList, By.text("Downloads").pkg(picker), "Downloads document root", timeoutMs = 10_000)
         ui.snapshot(By.res(picker, "breadcrumb_text").text("Downloads"), "Notion fixture Downloads directory",
-            timeoutMs = 10_000, refreshCache = true) {
-            true.takeIf { !it.visibleBounds.isEmpty && !device.hasObject(rootsList) }
+            timeoutMs = 10_000, refreshCache = true) { node ->
+            true.takeIf { !node.visibleBounds.isEmpty && !device.hasObject(rootsList) }
         }
         ui.tap(By.text("astravar-native-notion-preview.json").pkg(picker), "Select prepared fictional Notion transfer",
             timeoutMs = 10_000, refreshCache = true)
