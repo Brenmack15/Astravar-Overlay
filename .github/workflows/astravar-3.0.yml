@@ -1,8 +1,6 @@
 name: Astravar Reforge verification
 on:
-  push:
-    branches: ['feat/astravar-3.0-reforge', 'fix/astravar-3.0-*', 'feat/astravar-3.1-*', 'feat/astravar-project-genesis*']
-  pull_request:
+  workflow_call:
   workflow_dispatch:
 permissions:
   contents: read
@@ -11,13 +9,12 @@ concurrency:
   cancel-in-progress: true
 jobs:
   verify:
-    if: github.head_ref == 'feat/astravar-3.0-reforge' || github.ref_name == 'feat/astravar-3.0-reforge' || startsWith(github.head_ref, 'fix/astravar-3.0-') || startsWith(github.ref_name, 'fix/astravar-3.0-') || startsWith(github.head_ref, 'feat/astravar-3.1-') || startsWith(github.ref_name, 'feat/astravar-3.1-') || startsWith(github.head_ref, 'feat/astravar-project-genesis') || startsWith(github.ref_name, 'feat/astravar-project-genesis')
     runs-on: ubuntu-latest
     timeout-minutes: 100
     env:
       GENESIS_GATE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') }}
-      EXPECTED_VERSION_NAME: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '4.0.0-genesis2' || '3.2.0-rc1' }}
-      EXPECTED_VERSION_CODE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '51' || '49' }}
+      EXPECTED_VERSION_NAME: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '4.0.0-unification1' || '3.2.0-rc1' }}
+      EXPECTED_VERSION_CODE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '52' || '49' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -31,21 +28,12 @@ jobs:
           node-version: '24'
       - name: Authenticated bridge protocol regression
         run: node --test backend/owner-bridge/*.test.mjs
-      - name: Install pinned Android build tools
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' || (github.ref_name != github.event.repository.default_branch && github.event_name != 'workflow_dispatch') }}
+      - name: Use installed Android packages
         timeout-minutes: 9
-        run: |
-          export ANDROID_HOME="$RUNNER_TEMP/astravar-30-sdk"
-          mkdir -p "$ANDROID_HOME/cmdline-tools"
-          curl --connect-timeout 15 --max-time 150 -fsSL https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip -o "$RUNNER_TEMP/astravar-30-sdk.zip"
-          echo '7ec965280a073311c339e571cd5de778b9975026cfcbe79f2b1cdcb1e15317ee  '"$RUNNER_TEMP/astravar-30-sdk.zip" | sha256sum -c -
-          unzip -q "$RUNNER_TEMP/astravar-30-sdk.zip" -d "$ANDROID_HOME/cmdline-tools"
-          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/19.0"
-          export PATH="$ANDROID_HOME/cmdline-tools/19.0/bin:$ANDROID_HOME/platform-tools:$PATH"
-          printf 'y\n%.0s' {1..100} | timeout -k 5s 120s sdkmanager --licenses >/dev/null
-          timeout -k 10s 300s sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
-          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
-          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+        run: bash scripts/ci-android-sdk.sh
       - name: Verify migration boundaries and retained provenance
         run: |
           python3 -m unittest discover -s scripts/tests -v
@@ -59,7 +47,7 @@ jobs:
         if: env.GENESIS_GATE != 'true'
         timeout-minutes: 20
         run: |
-          bash gradlew --no-daemon --console=plain :app:testDebugUnitTest \
+          bash gradlew --console=plain --build-cache :app:testDebugUnitTest \
             --tests 'com.yazsras.astravar.ui.NavigationV2Test' \
             --tests 'com.yazsras.astravar.ui.PrimaryNavigationLayoutTest' \
             --tests 'com.yazsras.astravar.ui.CampaignVisualAcceptanceTest' \
@@ -79,14 +67,14 @@ jobs:
       - name: Rules and debug Room/Compose regressions
         timeout-minutes: 45
         run: |
-          bash gradlew --no-daemon --console=plain --continue :rules:test :app:testDebugUnitTest -PastravarScreenshots="$GITHUB_WORKSPACE/validation/reforge-screenshots"
+          bash gradlew --console=plain --build-cache --continue :rules:test :app:testDebugUnitTest -PastravarScreenshots="$GITHUB_WORKSPACE/validation/reforge-screenshots"
       - name: Release regressions, lint and debug APK
         # Do not spend the release/lint budget after a known debug regression.
         # Every task remains required before this workflow can pass.
         if: success()
         timeout-minutes: 45
         run: |
-          bash gradlew --no-daemon --console=plain --continue :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug -PastravarScreenshots="$GITHUB_WORKSPACE/validation/reforge-screenshots"
+          bash gradlew --console=plain --build-cache --continue :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug -PastravarScreenshots="$GITHUB_WORKSPACE/validation/reforge-screenshots"
       - name: Inspect actual QA package
         run: |
           mkdir -p validation
@@ -96,6 +84,7 @@ jobs:
         if: always()
         run: |
           mkdir -p validation
+          python3 scripts/ci-test-summary.py
           python3 scripts/reforge_evidence.py --output validation/reforge-evidence.json
           git rev-parse HEAD > validation/SOURCE_COMMIT.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

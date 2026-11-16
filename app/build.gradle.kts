@@ -13,8 +13,8 @@ android {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(51)
-        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("4.0.0-genesis2")
+        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(52)
+        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("4.0.0-unification1")
     }
     signingConfigs {
         create("owner") {
@@ -56,8 +56,15 @@ ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 // the complete UI suite remains bounded locally and on the standard Actions runner.
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     maxHeapSize = "1536m"
-    maxParallelForks = 1
-    forkEvery = 1
+    // Defaults retain proven per-class Robolectric isolation. Explicit benchmark
+    // properties let CI compare reuse/parallelism without changing release gates.
+    val testForks = providers.gradleProperty("astravarTestForks").map(String::toInt).getOrElse(1)
+    val testForkEvery = providers.gradleProperty("astravarTestForkEvery").map(String::toLong).getOrElse(1L)
+    require(testForks in 1..2 && testForkEvery in 1L..8L) { "Test benchmark settings exceed bounded runner limits" }
+    maxParallelForks = testForks
+    forkEvery = testForkEvery
+    inputs.property("astravarTestForks", testForks)
+    inputs.property("astravarTestForkEvery", testForkEvery)
     providers.gradleProperty("astravarScreenshots").orNull?.let {
         systemProperty("astravar.screenshots", it)
     }
