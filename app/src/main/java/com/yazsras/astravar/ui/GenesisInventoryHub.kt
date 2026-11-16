@@ -89,6 +89,11 @@ internal fun genesisInventoryOwnerRoute(owner: GenesisInventoryOwner, companionI
             Text(active?.let { "${it.name}'s equipment and campaign records" }
                 ?: "Create or review a character before adding playable equipment.",
                 color = RebuildPalette.Muted, style = MaterialTheme.typography.bodyMedium)
+            PlayerOutlinedButton(enabled = active != null, onClick = {
+                active?.let { open(ReforgeSearchDestination.Character(it.id, "Equipment", "NotionImport", it.id in companionIds)) }
+            }, modifier = Modifier.fillMaxWidth().testTag("inventory-notion-transfer")) {
+                Text("Import character & inventory from Notion file")
+            }
             PlayerSearch(query, { query = it }, "Find an item or owner")
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) { PlayerTabs(if (active == null) listOf("All items") else listOf("My items", "All items"), filter, { filter = it }) }

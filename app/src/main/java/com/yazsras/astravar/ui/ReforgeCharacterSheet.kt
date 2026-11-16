@@ -203,7 +203,7 @@ private enum class SpellbookFilter(val label: String) {
             dialog = route.detailDialog?.takeIf { detail ->
                 val id = detail.substringAfter(':', "")
                 when (detail.substringBefore(':')) {
-                    "Item" -> detail == "Item"
+                    "Item", "NotionImport" -> detail == detail.substringBefore(':')
                     "InspectItem" -> target.items.any { it.id == id }
                     "InspectSpell" -> target.spells.any { it.id == id }
                     "Attack" -> target.attacks.any { it.id == id }

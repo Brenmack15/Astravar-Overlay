@@ -116,11 +116,8 @@ import java.util.Locale
                     busy = true; error = ""; consent = false
                     scope.launch {
                         try {
-                            val currentProof = storage.backup.exportWithProof().currentFingerprint
-                            check(currentProof == verifiedBackup) {
-                                "Saved backup no longer matches the current records. Make a new verified backup."
-                            }
-                            outcome = transferRepository.commit(saved, data, choices, includeWallet)
+                            outcome = transferRepository.commit(saved, data, choices, includeWallet,
+                                requireNotNull(verifiedBackup))
                             verifiedBackup = null
                         } catch (e: CancellationException) { throw e }
                         catch (e: Exception) { verifiedBackup = null; error = e.message ?: "Nothing was imported. Existing data is unchanged." }
@@ -142,6 +139,8 @@ import java.util.Locale
             Text("Transferred ${done.itemsAdded} items; ${done.itemsPreviouslyPresent} previously recorded. " +
                 "${if (done.walletAdded) "Provisional wallet added." else if (done.walletPreviouslyPresent) "Provisional wallet already present." else "Wallet unchanged."}",
                 color = RebuildPalette.Ice)
+            Text("Saved locally. Campaign sharing still requires reviewed membership, authorized scopes and verified synchronization.",
+                color = RebuildPalette.Muted)
             done.warnings.take(12).forEach { Text(it, color = RebuildPalette.Muted) }
         }
         val transfer = selected
@@ -161,7 +160,7 @@ import java.util.Locale
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Checkbox(includeItems, { includeItems = it; consent = false })
-                Text("Add confirmed Zerg-owned carried, equipped and stored items. Skip duplicate names and IDs.", Modifier.weight(1f))
+                Text("Add confirmed ${transfer.character.name}-owned carried, equipped and stored items. Skip duplicate names and IDs.", Modifier.weight(1f))
             }
             val plan = proposed?.getOrNull()
             if (plan != null) {
