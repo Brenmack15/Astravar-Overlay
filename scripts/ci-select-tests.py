@@ -13,6 +13,8 @@ CRITICAL = {
     'com.yazsras.astravar.data.GenesisAuthorityBackupTest',
     'com.yazsras.astravar.data.ReforgeLargeCampaignSelectionTest',
     'com.yazsras.astravar.ui.GenesisConsolidationNavigationTest',
+    'com.yazsras.astravar.ui.PartyPlayerFirstTest',
+    'com.yazsras.astravar.ui.GenesisSpellReservoirUiTest',
 }
 GROUPS = {
     'CampaignConnection': ['data.CampaignConnectionTest', 'data.CampaignConnectionProjectionTest', 'ui.CampaignConnectionUiTest'],

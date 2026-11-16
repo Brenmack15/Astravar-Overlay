@@ -18,6 +18,14 @@ class CiSelectionTest(unittest.TestCase):
         self.assertFalse(result['full_required'])
         self.assertIn('com.yazsras.astravar.ui.GenesisPagerTest', result['tests'])
 
+    def test_atomic_purchase_and_spell_resource_journeys_always_run(self):
+        root = Path(__file__).resolve().parents[2]
+        files = [p.relative_to(root) for p in (root / 'app/src/test').rglob('*.kt')]
+        result = m.plan(['docs/guide.md'], files)
+        self.assertIn('com.yazsras.astravar.ui.PartyPlayerFirstTest', result['tests'])
+        self.assertIn('com.yazsras.astravar.ui.GenesisSpellReservoirUiTest', result['tests'])
+        self.assertNotIn('com.yazsras.astravar.ui.ChatGptPromptManagementTest', result['tests'])
+
     def test_sensitive_and_unknown_inputs_require_full(self):
         for path in ['app/src/main/java/com/yazsras/astravar/data/CampaignConnection.kt', 'app/schemas/8.json', 'rules/src/main/Foo.kt', 'build.gradle.kts', '.github/workflows/android.yml', 'app/src/main/AndroidManifest.xml', 'backend/owner-bridge/index.mjs', 'app/src/main/java/com/yazsras/astravar/ui/NewFlow.kt']:
             with self.subTest(path=path):
