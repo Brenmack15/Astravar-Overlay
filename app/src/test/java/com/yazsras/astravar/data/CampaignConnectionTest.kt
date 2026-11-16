@@ -72,6 +72,9 @@ class CampaignConnectionTest {
         assertEquals(JsonNull, empty.getValue("sourceActorCampaignId"))
         assertFalse(empty.getValue("sourceCampaignPrepared").jsonPrimitive.boolean)
         assertTrue(empty.getValue("lastDeviceSyncAt").jsonPrimitive.long > 0)
+        assertEquals("CAMPAIGN_NOT_PREPARED", empty.getValue("readiness").jsonPrimitive.content)
+        assertFalse(empty.getValue("gameplayVerified").jsonPrimitive.boolean)
+        assertEquals(JsonNull, empty.getValue("gameplayVerifiedAt"))
 
         val saved = authority.prepareOwnerLocalCampaign("fixture-opt-in-local-campaign")
         // Preparing the identity is not permission to publish this unassigned actor.
@@ -86,6 +89,47 @@ class CampaignConnectionTest {
         val connected = c.snapshot()
         assertTrue(connected.getValue("localRecordCount").jsonPrimitive.int > 0)
         assertEquals("local-campaign", connected.getValue("sourceActorCampaignId").jsonPrimitive.content)
+    }
+    @Test fun eligibilityUsesCurrentReadGrantAndNeverClaimsAServiceHeartbeatIsGameplay() = runBlocking {
+        val remote = Remote(); val c = paired(remote)
+        val full = c.snapshot()
+        assertTrue(full.getValue("gameplayVerified").jsonPrimitive.boolean)
+        assertEquals(full.getValue("localRecordCount"), full.getValue("verifiedRecordCount"))
+        c.restrictPermissions(emptySet(), emptySet())
+        val revoked = c.snapshot()
+        assertTrue(revoked.getValue("sourceRecordCount").jsonPrimitive.int > 0)
+        assertEquals(0, revoked.getValue("localRecordCount").jsonPrimitive.int)
+        assertEquals("PERMISSION_DENIED", revoked.getValue("readiness").jsonPrimitive.content)
+        assertFalse(revoked.getValue("gameplayVerified").jsonPrimitive.boolean)
+        assertEquals(JsonNull, revoked.getValue("gameplayVerifiedAt"))
+    }
+    @Test fun localRevisionChangeInvalidatesCompleteVerificationUntilIndependentReadback() = runBlocking {
+        val remote = Remote(); val c = paired(remote)
+        CampaignRecordsRepository(campaign).saveProfile(current().copy(level = 10), 1, "Fixture reviewed level")
+        val changed = c.snapshot()
+        assertFalse(changed.getValue("gameplayVerified").jsonPrimitive.boolean)
+        assertEquals("PUBLICATION_PENDING", changed.getValue("readiness").jsonPrimitive.content)
+        assertEquals(JsonNull, changed.getValue("gameplayVerifiedAt"))
+        c.sync()
+        assertTrue(c.snapshot().getValue("gameplayVerified").jsonPrimitive.boolean)
+        time += 300_001
+        assertEquals("STALE", c.snapshot().getValue("readiness").jsonPrimitive.content)
+    }
+    @Test fun acceptedUploadWithFailedReadbackRemainsDurableAndUnverifiedAcrossClientRecreation() = runBlocking {
+        val remote = Remote(); val c = paired(remote)
+        CampaignRecordsRepository(campaign).saveProfile(current().copy(level = 10), 1, "Fixture reviewed level")
+        remote.failPublicationReadback = true
+        assertTrue(runCatching { c.sync() }.isFailure)
+        val frozen = journal.connection().publications().single { it.state == "PENDING" }
+        assertTrue(remote.records.values.any { it["revision"]?.jsonPrimitive?.long == 2L })
+        val pending = c.snapshot()
+        assertEquals(1, pending.getValue("pendingPublicationCount").jsonPrimitive.int)
+        assertFalse(pending.getValue("gameplayVerified").jsonPrimitive.boolean)
+        remote.failPublicationReadback = false
+        client(remote).sync()
+        assertEquals("VERIFIED", journal.connection().publications().single { it.commandId == frozen.commandId }.state)
+        assertEquals(frozen.body, journal.connection().publications().single { it.commandId == frozen.commandId }.body)
+        assertTrue(c.snapshot().getValue("gameplayVerified").jsonPrimitive.boolean)
     }
     @Test fun injectedTransportFixturesNeverEnrollProductionPushy() = runBlocking {
         val remote = Remote()
@@ -365,6 +409,7 @@ class CampaignConnectionTest {
         val publications=linkedMapOf<String,List<JsonObject>>()
         val commands=linkedMapOf<String,JsonObject>(); val decisions=linkedMapOf<String,JsonObject>()
         val grantCommands=mutableMapOf<String,String>();val grantRequests=mutableListOf<String>()
+        var failPublicationReadback = false
         var loseDecision=false;var loseGrant=false;var offline=false;var lastDecision:String?=null;var receiptReads=0;var recordReads=0
         var blockPending: Pair<CompletableDeferred<Unit>,CompletableDeferred<Unit>>? = null
         var pendingLimit = Int.MAX_VALUE
@@ -407,7 +452,7 @@ class CampaignConnectionTest {
                     publications[b.getValue("commandId").jsonPrimitive.content]=rows
                     answer("published" to b.getValue("records"),"publishedAt" to JsonPrimitive(time))
                 }
-                path.contains("/publications/") -> {val rows=publications.getValue(path.substringAfterLast('/')).map { row -> records.getValue(row.getValue("kind").jsonPrimitive.content to row.getValue("recordId").jsonPrimitive.content) }; answer("records" to JsonArray(rows))}
+                path.contains("/publications/") -> {if (failPublicationReadback) throw IOException("Fixture lost independent publication readback");val rows=publications.getValue(path.substringAfterLast('/')).map { row -> records.getValue(row.getValue("kind").jsonPrimitive.content to row.getValue("recordId").jsonPrimitive.content) }; answer("records" to JsonArray(rows))}
                 path.contains("/records/") -> {recordReads++;val kind=path.substringAfter("/records/").substringBefore('/');val id=java.net.URLDecoder.decode(path.substringAfterLast('/'),"UTF-8");(records[kind to id]?.let { answer("records" to JsonArray(listOf(it))) } ?: OwnerSyncResponse(404,buildJsonObject {put("mode",CampaignConnectionProtocol.MODE);put("error",buildJsonObject{put("code","RECORD_NOT_PUBLISHED")})})).also { afterRecordRead?.invoke() }}
                 path.endsWith("/decisions") -> {
                     lastDecision=body;val id=b!!.getValue("commandId").jsonPrimitive.content

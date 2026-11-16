@@ -42,6 +42,24 @@ class CampaignConnectionUiTest {
         }
     }
 
+    @Test fun serviceContactCannotSupplyTheGameplayVerificationTimestamp() {
+        val view = campaignConnectionView(buildJsonObject {
+            put("connected", true); put("status", "Connected"); put("lastSyncAt", 10_000)
+            put("lastDeviceSyncAt", 10_000); put("localRecordCount", 0)
+            put("readiness", "NO_ELIGIBLE_RECORDS"); put("readinessTitle", "Connected · no eligible records")
+            put("readinessDetail", "No saved records are publishable within this campaign and its current read permissions.")
+            put("gameplayVerified", false); put("gameplayVerifiedAt", JsonNull)
+        })
+        assertNotNull(view.lastSyncAt)
+        assertNull(view.gameplayVerifiedAt)
+        show(view).use {
+            compose.onNodeWithTag("campaign-connection-status").assertTextEquals("Connected · no eligible records")
+            compose.onNodeWithTag("campaign-gameplay-verification-time").performScrollTo()
+                .assertTextEquals("Last complete gameplay verification: Not yet verified")
+            compose.onNodeWithText("Current records independently verified: 0 of 0").performScrollTo().assertExists()
+        }
+    }
+
     @Test fun preparedCampaignShowsReviewedMembershipActionBeforeGameplaySharing() {
         var reviews = 0
         show(CampaignConnectionView(connected = true, status = "Connected", campaignId = "local-campaign",

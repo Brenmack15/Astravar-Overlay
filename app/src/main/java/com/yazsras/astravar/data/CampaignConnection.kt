@@ -304,16 +304,43 @@ class CampaignConnectionClient internal constructor(private val context: Context
     private suspend fun snapshotUnlocked(): JsonObject {
         val value = setting()
         val commands = dao.commands().filter { belongs(it, value) }
-        val current = if (value.campaignId.isBlank()) emptyList() else domain.snapshot(value.campaignId, includeReadOnly = false)
+        val current = if (value.campaignId.isBlank()) emptyList() else domain.snapshot(value.campaignId)
         val actor = value.profileId.takeIf { it.isNotBlank() }?.let { campaignDb.genesisAuthorityDao().actor(it) }
         val selectedCampaign = value.campaignId.takeIf { it.isNotBlank() }?.let { campaignDb.genesisAuthorityDao().campaign(it) }
         val localById = current.associateBy { it.kind to it.recordId }
         val secret = if (value.origin.isBlank() || value.campaignId.isBlank()) null else vault.credential(value.origin, value.campaignId)
         val g = grant(value)
+        val connected = secret?.credentialId == value.deviceId && value.deviceId.isNotBlank() && secret.expiresAt > now() &&
+            !value.revokePending && runCatching { checkedGrant(value, g) }.isSuccess
+        // Match the actual outbound projection, including read-only categories. Counts must
+        // never advertise records outside the owner's current read grant as publishable.
+        val eligible = if (connected) visible(value, current) else emptyList()
+        val mirrors = dao.mirrors(value.origin, value.campaignId, value.deviceId).associateBy { it.kind to it.recordId }
+        val verified = eligible.count { record -> mirrors[record.kind to record.recordId]?.let {
+            it.revision == record.revision && it.fingerprint == OwnerSyncProtocol.hash(OwnerSyncProtocol.canonical(campaignJson.encodeToJsonElement(record)))
+        } == true }
+        val pendingPublications = dao.publications().count { it.origin == value.origin && it.campaignId == value.campaignId && it.deviceId == value.deviceId && it.state == "PENDING" }
+        val pendingDevice = commands.count { it.state in setOf("PENDING_APPROVAL", "PENDING_DELIVERY", "APPLYING") }
+        val pendingReceipts = commands.count { it.state in setOf("APPLIED_PENDING", "REJECTED_PENDING", "CONFLICT_PENDING") }
+        val moreServerPending = syncContinuationRequired || value.status in setOf("Pending delivery · more queued transactions", "Pending approval · additional queued transactions")
+        val readiness = campaignSyncReadiness(CampaignSyncReadinessInput(
+            connected, value.deviceId.isNotBlank(), value.campaignId.isNotBlank(), value.revokePending,
+            selectedCampaign != null && !selectedCampaign.archived, actor != null, actor?.campaignId == value.campaignId,
+            actor?.campaignId != null && actor.campaignId != value.campaignId, actor?.playable == true,
+            activeRead(value).isNotEmpty(), value.grantBody != null, eligible.size, verified, pendingPublications,
+            pendingDevice + if (moreServerPending) 1 else 0, pendingReceipts, commands.any { it.state in setOf("CONFLICT", "DECISION_CONFLICT") },
+            value.lastError, value.lastDeviceSyncAt, now()))
         return buildJsonObject {
-            put("connected", secret?.credentialId == value.deviceId && value.deviceId.isNotBlank() && secret.expiresAt > now() && !value.revokePending && runCatching { checkedGrant(value, g) }.isSuccess); put("origin", value.origin)
+            put("connected", connected); put("origin", value.origin)
+            put("readiness", readiness.name); put("readinessTitle", readiness.title); put("readinessDetail", readiness.detail)
+            put("verifiedRecordCount", verified); put("pendingPublicationCount", pendingPublications)
+            put("pendingDeviceCommandCount", pendingDevice); put("pendingReceiptCount", pendingReceipts)
+            put("gameplayVerified", readiness == CampaignSyncReadiness.VERIFIED)
+            put("gameplayVerifiedAt", if (eligible.isNotEmpty() && verified == eligible.size && value.lastDeviceSyncAt > 0) JsonPrimitive(value.lastDeviceSyncAt) else JsonNull)
             put("campaignId", value.campaignId); put("selectedProfileId", value.profileId); put("deviceId", value.deviceId)
-            put("localRecordCount", current.size)
+            put("localRecordCount", eligible.size)
+            put("sourceRecordCount", current.size)
+            put("sourceActorExists", actor != null)
             put("sourceActorCampaignId", actor?.campaignId?.let(::JsonPrimitive) ?: JsonNull)
             put("sourceActorPlayable", actor?.playable == true)
             put("sourceCampaignPrepared", selectedCampaign != null && !selectedCampaign.archived)
@@ -334,7 +361,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
                 add(buildJsonObject { put("id", it.id); put("name", it.name); put("campaignId", campaignFor(it.id)) })
             } })
             put("pairing", buildJsonObject { put("userCode", if (value.pairingExpiresAt > now()) value.userCode else ""); put("verificationUri", value.verificationUri); put("expiresAt", value.pairingExpiresAt) })
-            put("pending", buildJsonArray { commands.filter { it.state in setOf("PENDING_APPROVAL", "PENDING_DELIVERY", "APPLYING", "APPLIED_PENDING", "REJECTED_PENDING", "CONFLICT", "DECISION_CONFLICT") }.forEach { command ->
+            put("pending", buildJsonArray { commands.filter { it.state in setOf("PENDING_APPROVAL", "PENDING_DELIVERY", "APPLYING", "APPLIED_PENDING", "REJECTED_PENDING", "CONFLICT_PENDING", "CONFLICT", "DECISION_CONFLICT") }.forEach { command ->
                 val data = Json.parseToJsonElement(command.body).jsonObject
                 add(buildJsonObject {
                     put("commandId", command.commandId); put("state", command.state); put("source", data.getValue("source")); put("message", command.message)
@@ -451,7 +478,8 @@ class CampaignConnectionClient internal constructor(private val context: Context
             CampaignSyncPreferences(context).paused -> "Paused"
             value.revokePending -> "Server revocation pending"
             code.contains("EXPIRED") || code in setOf("AUTHENTICATION_REQUIRED", "CREDENTIAL_REVOKED_OR_EXPIRED") -> "Authentication expired"
-            code.contains("CONFLICT") -> "Conflict requires review"
+            code.contains("CONFLICT") || code == "GRANT_CHANGED" -> "Conflict requires review"
+            code in setOf("ACCESS_DENIED", "READ_SCOPE_DENIED", "WRITE_SCOPE_DENIED", "CAMPAIGN_NOT_AUTHORIZED", "PRIVATE_GATEWAY_AUTH_REQUIRED") -> "Permission denied · pending delivery retained"
             else -> "Offline · pending delivery retained"
         }
         dao.settings(value.copy(status = status, lastError = code))
