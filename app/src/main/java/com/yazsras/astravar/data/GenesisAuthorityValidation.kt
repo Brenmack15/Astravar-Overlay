@@ -130,6 +130,7 @@ internal fun genesisAuthorityBackupErrors(
                 }
                 itemProofs[receipt.commandId] = outcome
             }
+            "notion-transfer" -> genesisValidateNotionTransfer(receipt, playableHistory, receipts, campaign.records.receipts.associateBy { it.commandId })
             "craft-items" -> {
                 val outcome = genesisValidateCraftReceipt(receipt, GenesisCraftingEvidence(campaign.events, campaign.records.audit,
                     campaign.records.receipts, campaign.records.crafts, campaign.records.consumptions, playable.changes, campaign.records.links))
