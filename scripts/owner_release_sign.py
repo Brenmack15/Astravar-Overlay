@@ -100,7 +100,7 @@ def clean_head(repo, expected):
     return repo
 
 
-def check_ci_evidence(document, commit, artifact_sha):
+def check_legacy_ci_evidence(document, commit, artifact_sha):
     require(isinstance(document, dict) and document.get("schema_version") == 1, "ci_evidence_schema")
     require(set(document) == {"schema_version", "source_commit", "artifact_sha256", "runs", "artifact"}, "ci_unexpected_fields")
     require(document.get("source_commit") == commit, "ci_evidence_source_mismatch")
@@ -126,6 +126,65 @@ def check_ci_evidence(document, commit, artifact_sha):
     require(artifact.get("sha256") == artifact_sha, "ci_artifact_receipt_digest_mismatch")
     # This is a pinned operator-supplied receipt, not an independent GitHub query.
     return {"receipt_source": "operator-verified GitHub run and artifact metadata", "runs": runs, "artifact": artifact}
+
+
+# GitHub reports reusable workflow job names with their caller name prefix.
+TIER_B_JOBS = {
+    "full": "Full regression gate / verify",
+    "native": "Historical upgrade and native acceptance / verify",
+}
+
+
+def check_ci_evidence(document, commit, artifact_sha):
+    """Accept legacy separate runs or independent jobs in a successful Tier B run."""
+    require(isinstance(document, dict), "ci_evidence_schema")
+    if document.get("schema_version") == 1:
+        return check_legacy_ci_evidence(document, commit, artifact_sha)
+    require(document.get("schema_version") == 2, "ci_evidence_schema")
+    require(set(document) == {"schema_version", "source_commit", "artifact_sha256", "run", "jobs", "artifact"},
+            "ci_unexpected_fields")
+    require(document["source_commit"] == commit, "ci_evidence_source_mismatch")
+    require(document["artifact_sha256"] == artifact_sha, "ci_evidence_artifact_mismatch")
+    run = document["run"]
+    require(isinstance(run, dict) and set(run) == {
+        "run_id", "run_attempt", "head_sha", "status", "conclusion", "html_url"
+    }, "ci_run_unexpected_fields")
+    require(type(run["run_id"]) is int and run["run_id"] > 0 and
+            type(run["run_attempt"]) is int and run["run_attempt"] > 0, "ci_run_id")
+    require(run["head_sha"] == commit, "ci_run_source_mismatch")
+    require(run["status"] == "completed" and run["conclusion"] == "success", "ci_gate_not_successful")
+    run_url = f"https://github.com/{REPOSITORY}/actions/runs/{run['run_id']}"
+    require(run["html_url"] == run_url, "ci_run_url")
+    jobs = document["jobs"]
+    require(isinstance(jobs, list) and len(jobs) == 2, "ci_two_gates_required")
+    require(all(isinstance(job, dict) for job in jobs) and
+            {job.get("kind") for job in jobs} == set(TIER_B_JOBS), "ci_gate_kinds")
+    seen = set()
+    for job in jobs:
+        require(set(job) == {"kind", "job_id", "run_id", "run_attempt", "head_sha", "name",
+                             "status", "conclusion", "html_url"}, "ci_job_unexpected_fields")
+        require(type(job["job_id"]) is int and job["job_id"] > 0, "ci_job_id")
+        require(job["job_id"] not in seen, "ci_distinct_jobs_required")
+        seen.add(job["job_id"])
+        require(type(job["run_id"]) is int and job["run_id"] == run["run_id"] and
+                type(job["run_attempt"]) is int and job["run_attempt"] == run["run_attempt"],
+                "ci_job_run_mismatch")
+        require(job["head_sha"] == commit, "ci_job_source_mismatch")
+        require(job["name"] == TIER_B_JOBS[job["kind"]], "ci_job_role_mismatch")
+        require(job["status"] == "completed" and job["conclusion"] == "success", "ci_job_not_successful")
+        require(job["html_url"] == f"{run_url}/job/{job['job_id']}", "ci_job_url")
+    artifact = document["artifact"]
+    require(isinstance(artifact, dict) and set(artifact) == {
+        "run_id", "artifact_id", "name", "sha256"
+    }, "ci_artifact_unexpected_fields")
+    require(type(artifact["run_id"]) is int and artifact["run_id"] == run["run_id"],
+            "artifact_must_come_from_successful_native_run")
+    require(type(artifact["artifact_id"]) is int and artifact["artifact_id"] > 0, "ci_artifact_id")
+    # This name is produced only by the native workflow in the pinned source.
+    require(artifact["name"] == "android-verification", "ci_native_artifact_name")
+    require(artifact["sha256"] == artifact_sha, "ci_artifact_receipt_digest_mismatch")
+    return {"receipt_source": "operator-verified GitHub run, job and artifact metadata",
+            "run": run, "jobs": jobs, "artifact": artifact}
 
 
 def zip_index(archive):

@@ -63,6 +63,21 @@ def evidence(artifact_sha="c" * 64):
                      for kind, run_id in (("full", 100), ("native", 101))]}
 
 
+def tiered_evidence(artifact_sha="c" * 64):
+    run_id = 200
+    url = f"https://github.com/{sign.REPOSITORY}/actions/runs/{run_id}"
+    return {
+        "schema_version": 2, "source_commit": COMMIT, "artifact_sha256": artifact_sha,
+        "run": {"run_id": run_id, "run_attempt": 1, "head_sha": COMMIT, "status": "completed",
+                "conclusion": "success", "html_url": url},
+        "jobs": [{"kind": kind, "job_id": job_id, "run_id": run_id, "run_attempt": 1,
+                  "head_sha": COMMIT, "name": name, "status": "completed", "conclusion": "success",
+                  "html_url": f"{url}/job/{job_id}"}
+                 for kind, job_id, name in (("full", 201, "Full regression gate / verify"),
+                                           ("native", 202, "Historical upgrade and native acceptance / verify"))],
+        "artifact": {"run_id": run_id, "artifact_id": 203, "name": "android-verification", "sha256": artifact_sha}}
+
+
 class PayloadTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -185,6 +200,47 @@ class GateTests(unittest.TestCase):
             with self.subTest(target=target), self.assertRaises(sign.GateError) as caught:
                 sign.check_ci_evidence(changed, COMMIT, "c" * 64)
             self.assertNotIn("sentinel-secret", str(caught.exception))
+
+    def test_tiered_run_requires_distinct_successful_full_native_jobs(self):
+        good = tiered_evidence()
+        result = sign.check_ci_evidence(good, COMMIT, "c" * 64)
+        self.assertEqual(200, result["run"]["run_id"])
+        self.assertEqual({201, 202}, {job["job_id"] for job in result["jobs"]})
+        for field, value in (("job_id", 201), ("job_id", True), ("run_id", 199), ("run_attempt", 2),
+                             ("head_sha", "f" * 40), ("status", "in_progress"), ("conclusion", "skipped"),
+                             ("name", "Fast development gate"), ("name", "Full regression gate / verify"),
+                             ("kind", "full"), ("html_url", "https://example.com/job")):
+            with self.subTest(field=field, value=value):
+                changed = copy.deepcopy(good); changed["jobs"][1][field] = value
+                with self.assertRaises(sign.GateError):
+                    sign.check_ci_evidence(changed, COMMIT, "c" * 64)
+        for field, value in (("status", "in_progress"), ("conclusion", "failure"),
+                             ("run_attempt", 2), ("head_sha", "f" * 40)):
+            with self.subTest(run_field=field):
+                changed = copy.deepcopy(good); changed["run"][field] = value
+                with self.assertRaises(sign.GateError):
+                    sign.check_ci_evidence(changed, COMMIT, "c" * 64)
+
+    def test_tiered_native_artifact_cannot_be_substituted_with_fast_artifact(self):
+        for field, value in (("run_id", 100), ("name", "Astravar-development-verification"),
+                             ("artifact_id", 0), ("sha256", "f" * 64)):
+            with self.subTest(field=field):
+                changed = tiered_evidence(); changed["artifact"][field] = value
+                with self.assertRaises(sign.GateError):
+                    sign.check_ci_evidence(changed, COMMIT, "c" * 64)
+
+    def test_tiered_evidence_rejects_unknown_fields_and_missing_gates(self):
+        for target in ("top", "run", "job", "artifact"):
+            changed = tiered_evidence()
+            row = changed if target == "top" else changed["jobs"][0] if target == "job" else changed[target]
+            row["secret"] = "sentinel-secret"
+            with self.subTest(target=target), self.assertRaises(sign.GateError) as caught:
+                sign.check_ci_evidence(changed, COMMIT, "c" * 64)
+            self.assertNotIn("sentinel-secret", str(caught.exception))
+        for jobs in ([], tiered_evidence()["jobs"][:1]):
+            changed = tiered_evidence(); changed["jobs"] = jobs
+            with self.assertRaises(sign.GateError):
+                sign.check_ci_evidence(changed, COMMIT, "c" * 64)
 
     def test_sdk_min_and_target_are_exact_and_unambiguous(self):
         good = "sdkVersion:'26'\ntargetSdkVersion:'36'\n"
@@ -325,6 +381,14 @@ class SyntheticPipelineTests(unittest.TestCase):
                 self.ci.write_text(json.dumps({"changed": True}))
             return ""
         raise AssertionError("Unexpected synthetic external call")
+
+    def test_tiered_evidence_completes_mocked_pipeline_with_native_product_proof(self):
+        self.ci.write_text(json.dumps(tiered_evidence(sign.digest(self.artifact))))
+        result = sign.sign_release(self.args)
+        self.assertTrue(Path(result["apk"]).is_file())
+        report = json.loads(Path(result["report"]).read_text())
+        self.assertEqual({201, 202}, {job["job_id"] for job in report["ci"]["jobs"]})
+        self.assertEqual(sign.digest(self.artifact), report["source_artifact_sha256"])
 
     def test_same_or_older_version_cannot_be_signed(self):
         for code in (0, 49, 50, 51):

@@ -25,7 +25,9 @@ the actual previous owner APK. Never lower the minimum to bypass an update failu
 1. Finish Tier A and both comprehensive release gates on the exact clean source
    commit. Retain raw results, known skips, native upgrade evidence and failure
    logs. A successful fast PR gate alone does not authorize a stable release.
-2. Retrieve completed successful **full** and **native** run metadata from GitHub.
+2. Retrieve the successful Tier B orchestrator run and its completed successful
+   **full** and **native** job metadata from GitHub. Both jobs must belong to the
+   same source commit and successful run attempt, with distinct job IDs.
    Download the original native artifact archive and verify its checksum against
    GitHub artifact metadata. Record the artifact ID and the run that owns it.
 3. Identify the native artifact's exact release APK entry and source marker.
@@ -42,20 +44,28 @@ the actual previous owner APK. Never lower the minimum to bypass an update failu
 
 Create a small operator-verified JSON receipt from the retrieved metadata. This
 receipt is evidence supplied to the helper, **not an independent GitHub query**;
-never populate it from assumed statuses. Its exact schema is:
+never populate it from assumed statuses. Use schema2 for reusable Tier B jobs:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "source_commit": "FULL_40_CHARACTER_COMMIT",
   "artifact_sha256": "VERIFIED_64_CHARACTER_ARCHIVE_DIGEST",
-  "artifact": {"run_id": 123, "artifact_id": 456, "sha256": "SAME_ARCHIVE_DIGEST"},
-  "runs": [
-    {"kind": "full", "run_id": 122, "head_sha": "SAME_FULL_COMMIT", "status": "completed", "conclusion": "success", "html_url": "https://github.com/Brenmack15/Astravar-Overlay/actions/runs/122"},
-    {"kind": "native", "run_id": 123, "head_sha": "SAME_FULL_COMMIT", "status": "completed", "conclusion": "success", "html_url": "https://github.com/Brenmack15/Astravar-Overlay/actions/runs/123"}
+  "artifact": {"run_id": 123, "artifact_id": 456, "name": "android-verification", "sha256": "SAME_ARCHIVE_DIGEST"},
+  "run": {"run_id": 123, "run_attempt": 1, "head_sha": "SAME_FULL_COMMIT", "status": "completed", "conclusion": "success", "html_url": "https://github.com/Brenmack15/Astravar-Overlay/actions/runs/123"},
+  "jobs": [
+    {"kind": "full", "job_id": 501, "run_id": 123, "run_attempt": 1, "head_sha": "SAME_FULL_COMMIT", "name": "Full regression gate / verify", "status": "completed", "conclusion": "success", "html_url": "https://github.com/Brenmack15/Astravar-Overlay/actions/runs/123/job/501"},
+    {"kind": "native", "job_id": 502, "run_id": 123, "run_attempt": 1, "head_sha": "SAME_FULL_COMMIT", "name": "Historical upgrade and native acceptance / verify", "status": "completed", "conclusion": "success", "html_url": "https://github.com/Brenmack15/Astravar-Overlay/actions/runs/123/job/502"}
   ]
 }
 ```
+
+Schema1 remains supported for the two independently dispatched legacy full and
+native workflows: it uses a `runs` array with distinct run IDs, and each row has
+`kind`, `run_id`, `head_sha`, `status`, `conclusion`, and `html_url`; its artifact
+has `run_id`, `artifact_id`, and `sha256`. Schema1 cannot treat the same run as two
+gates. Schema2 requires the exact named full/native jobs and the native artifact,
+so a successful fast-only orchestrator run does not qualify.
 
 These placeholders deliberately cannot pass. Run
 `python3 scripts/owner_release_sign.py --help` for the required paths. First use
