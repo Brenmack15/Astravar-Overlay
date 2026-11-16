@@ -29,7 +29,7 @@ internal data class CampaignSyncReadinessInput(
     val readAccess: Boolean, val grantPending: Boolean, val eligible: Int, val verified: Int,
     val pendingPublications: Int, val pendingDevice: Int, val pendingReceipts: Int,
     val conflict: Boolean, val error: String, val verifiedAt: Long, val now: Long,
-    val pendingRemovals: Int = 0
+    val pendingRemovals: Int = 0, val canonicalValuesRequireReview: Boolean = false
 )
 
 internal fun campaignSyncReadiness(input: CampaignSyncReadinessInput): CampaignSyncReadiness = with(input) {
@@ -41,6 +41,7 @@ internal fun campaignSyncReadiness(input: CampaignSyncReadinessInput): CampaignS
         error in setOf("ACCESS_DENIED", "READ_SCOPE_DENIED", "WRITE_SCOPE_DENIED", "CAMPAIGN_NOT_AUTHORIZED", "PRIVATE_GATEWAY_AUTH_REQUIRED") || !readAccess -> CampaignSyncReadiness.PERMISSION_DENIED
         conflict || error.contains("CONFLICT") || error == "GRANT_CHANGED" -> CampaignSyncReadiness.CONFLICT
         grantPending -> CampaignSyncReadiness.AUTHORIZATION_PENDING
+        canonicalValuesRequireReview -> CampaignSyncReadiness.VALUES_REVIEW_REQUIRED
         // Removing a previously published identity is still necessary when the
         // last local actor was removed or unassigned. Never ask for enrollment
         // before completing that scoped removal from the remote mirror.

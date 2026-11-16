@@ -57,4 +57,12 @@ class CampaignSyncReadinessTest {
         // Historical grants may have published records without a Genesis actor association.
         check(CampaignSyncReadiness.VERIFIED, ready.copy(campaignPrepared = false, hasActor = false))
     }
+
+    @Test fun blockedCanonicalProjectionRequiresReviewInsteadOfEmptyOrRemovedRecords() {
+        val blocked = ready.copy(canonicalValuesRequireReview = true, eligible = 0, verified = 0,
+            hasActor = false, pendingPublications = 1, error = "CONNECTION_UNVERIFIED")
+        check(CampaignSyncReadiness.VALUES_REVIEW_REQUIRED, blocked)
+        check(CampaignSyncReadiness.PERMISSION_DENIED, blocked.copy(readAccess = false))
+        check(CampaignSyncReadiness.AUTHORIZATION_REQUIRED, blocked.copy(connected = false))
+    }
 }

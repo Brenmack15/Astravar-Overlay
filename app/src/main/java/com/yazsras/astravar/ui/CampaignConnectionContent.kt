@@ -55,7 +55,8 @@ data class CampaignConnectionView(
     val readiness: String = "", val readinessTitle: String = "", val readinessDetail: String = "",
     val verifiedRecordCount: Int = 0, val pendingPublicationCount: Int = 0, val pendingRemovalCount: Int = 0,
     val pendingDeviceCommandCount: Int = 0, val pendingReceiptCount: Int = 0,
-    val gameplayVerified: Boolean = false, val gameplayVerifiedAt: Long? = null
+    val gameplayVerified: Boolean = false, val gameplayVerifiedAt: Long? = null,
+    val canonicalReviewProfileId: String = ""
 )
 
 @Composable fun CampaignConnectionContent(view: CampaignConnectionView,
@@ -106,8 +107,13 @@ data class CampaignConnectionView(
             Text("Last complete gameplay verification: ${view.gameplayVerifiedAt?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM).format(Date(it)) } ?: "Not yet verified"}", color = RebuildPalette.Muted,
                 modifier = Modifier.testTag("campaign-gameplay-verification-time"))
             if (view.connected) {
-                Text("Local campaign records eligible for sync: ${view.localRecordCount}", color = RebuildPalette.Muted)
-                Text("Current records independently verified: ${view.verifiedRecordCount} of ${view.localRecordCount}", color = RebuildPalette.Muted)
+                if (view.canonicalReviewProfileId.isNotBlank()) {
+                    Text("Record eligibility and verification are blocked until shared values are reconciled.", color = RebuildPalette.GoldBright,
+                        modifier = Modifier.testTag("campaign-record-verification-blocked"))
+                } else {
+                    Text("Local campaign records eligible for sync: ${view.localRecordCount}", color = RebuildPalette.Muted)
+                    Text("Current records independently verified: ${view.verifiedRecordCount} of ${view.localRecordCount}", color = RebuildPalette.Muted)
+                }
                 if (view.pendingPublicationCount > 0) Text("Uploads awaiting verification: ${view.pendingPublicationCount}", color = RebuildPalette.GoldBright)
                 if (view.pendingRemovalCount > 0) Text("Previously shared records awaiting removal: ${view.pendingRemovalCount}", color = RebuildPalette.GoldBright)
                 if (view.pendingDeviceCommandCount > 0) Text("Updates awaiting device approval or commitment: ${view.pendingDeviceCommandCount}", color = RebuildPalette.GoldBright)
@@ -122,6 +128,14 @@ data class CampaignConnectionView(
                 (view.readiness.isBlank() && (view.sourceActorCampaignId != view.campaignId || !view.sourceActorPlayable || view.localRecordCount == 0)))) PlayerCard {
             Text("Complete campaign sharing", style = MaterialTheme.typography.titleMedium)
             when {
+                view.canonicalReviewProfileId.isNotBlank() -> {
+                    val actorName = view.profiles.firstOrNull { it.id == view.canonicalReviewProfileId }?.name
+                        ?: view.canonicalReviewProfileId
+                    Text("Shared records for $actorName differ from the saved playable values. Review and reconcile them before publishing. Existing records and queued work are retained.", color = RebuildPalette.GoldBright)
+                    PlayerButton(onClick = onReviewMembership, enabled = !view.busy, modifier = Modifier.fillMaxWidth().testTag("review-campaign-membership")) {
+                        Text("Review character membership and shared values")
+                    }
+                }
                 view.sourceActorCampaignId != null && view.sourceActorCampaignId != view.campaignId ->
                     Text("This character belongs to a different saved campaign than the owner connection. Its records were not reassigned or shared. Review the correct campaign and start a separately authorized pairing.", color = RebuildPalette.GoldBright)
                 view.campaignId == "local-campaign" && !view.sourceCampaignPrepared -> {
@@ -372,6 +386,7 @@ internal fun campaignConnectionView(snapshot: JsonObject, now: Long = System.cur
         localRecordCount = snapshot.connectionLong("localRecordCount")?.coerceIn(0, Int.MAX_VALUE.toLong())?.toInt() ?: 0,
         readiness = snapshot.connectionText("readiness"), readinessTitle = snapshot.connectionText("readinessTitle"),
         readinessDetail = snapshot.connectionText("readinessDetail"),
+        canonicalReviewProfileId = snapshot.connectionText("canonicalReviewProfileId"),
         verifiedRecordCount = snapshot.connectionLong("verifiedRecordCount")?.coerceIn(0, Int.MAX_VALUE.toLong())?.toInt() ?: 0,
         pendingPublicationCount = snapshot.connectionLong("pendingPublicationCount")?.coerceIn(0, Int.MAX_VALUE.toLong())?.toInt() ?: 0,
         pendingRemovalCount = snapshot.connectionLong("pendingRemovalCount")?.coerceIn(0, Int.MAX_VALUE.toLong())?.toInt() ?: 0,

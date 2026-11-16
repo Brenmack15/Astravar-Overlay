@@ -304,7 +304,15 @@ class CampaignConnectionClient internal constructor(private val context: Context
     private suspend fun snapshotUnlocked(): JsonObject {
         val value = setting()
         val commands = dao.commands().filter { belongs(it, value) }
-        val current = if (value.campaignId.isBlank()) emptyList() else domain.snapshot(value.campaignId)
+        var canonicalReviewProfileId: String? = null
+        val current = try {
+            if (value.campaignId.isBlank()) emptyList() else domain.snapshot(value.campaignId)
+        } catch (review: CampaignCanonicalReviewRequired) {
+            // Display the explicit repair action without treating blocked projections
+            // as deleted records. Publication still calls the strict domain snapshot.
+            canonicalReviewProfileId = review.actorId
+            emptyList()
+        }
         val actor = value.profileId.takeIf { it.isNotBlank() }?.let { campaignDb.genesisAuthorityDao().actor(it) }
         val selectedCampaign = value.campaignId.takeIf { it.isNotBlank() }?.let { campaignDb.genesisAuthorityDao().campaign(it) }
         val localById = current.associateBy { it.kind to it.recordId }
@@ -320,7 +328,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
             it.revision == record.revision && it.fingerprint == OwnerSyncProtocol.hash(OwnerSyncProtocol.canonical(campaignJson.encodeToJsonElement(record)))
         } == true }
         val eligibleIds = eligible.map { it.kind to it.recordId }.toSet()
-        val pendingRemovals = if (connected) mirrors.values.count {
+        val pendingRemovals = if (connected && canonicalReviewProfileId == null) mirrors.values.count {
             (it.kind to it.recordId) !in eligibleIds && canReadKind(it.kind, it.recordId, activeRead(value))
         } else 0
         val pendingPublications = dao.publications().count { it.origin == value.origin && it.campaignId == value.campaignId && it.deviceId == value.deviceId && it.state == "PENDING" }
@@ -333,10 +341,12 @@ class CampaignConnectionClient internal constructor(private val context: Context
             actor?.campaignId != null && actor.campaignId != value.campaignId, actor?.playable == true,
             activeRead(value).isNotEmpty(), value.grantBody != null, eligible.size, verified, pendingPublications,
             pendingDevice + if (moreServerPending) 1 else 0, pendingReceipts, commands.any { it.state in setOf("CONFLICT", "DECISION_CONFLICT") },
-            value.lastError, value.lastDeviceSyncAt, now(), pendingRemovals = pendingRemovals))
+            value.lastError, value.lastDeviceSyncAt, now(), pendingRemovals = pendingRemovals,
+            canonicalValuesRequireReview = canonicalReviewProfileId != null))
         return buildJsonObject {
             put("connected", connected); put("origin", value.origin)
             put("readiness", readiness.name); put("readinessTitle", readiness.title); put("readinessDetail", readiness.detail)
+            put("canonicalReviewProfileId", canonicalReviewProfileId?.let(::JsonPrimitive) ?: JsonNull)
             put("verifiedRecordCount", verified); put("pendingPublicationCount", pendingPublications)
             put("pendingRemovalCount", pendingRemovals)
             put("pendingDeviceCommandCount", pendingDevice); put("pendingReceiptCount", pendingReceipts)

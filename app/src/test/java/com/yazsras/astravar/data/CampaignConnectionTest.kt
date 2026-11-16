@@ -3,6 +3,8 @@ package com.yazsras.astravar.data
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.yazsras.astravar.rules.reforge.ReforgeCharacter
+import com.yazsras.astravar.rules.reforge.Stat
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -102,6 +104,52 @@ class CampaignConnectionTest {
         assertEquals("PERMISSION_DENIED", revoked.getValue("readiness").jsonPrimitive.content)
         assertFalse(revoked.getValue("gameplayVerified").jsonPrimitive.boolean)
         assertEquals(JsonNull, revoked.getValue("gameplayVerifiedAt"))
+    }
+
+    @Test fun canonicalProjectionDriftRemainsReviewableWithoutPublishingOrInferringRemoval() = runBlocking {
+        val authority = GenesisAuthorityRepository(campaign)
+        authority.prepareOwnerLocalCampaign("fixture-canonical-review-campaign")
+        val otherId = "fixture-canonical-companion"
+        val created = authority.createActor("Fictional canonical companion", GenesisActorRole.PLAYER, campaignId,
+            playable = ReforgeCharacter(otherId, "Fictional canonical companion", level = 3,
+                baseAbilities = Stat.entries.associateWith { 10 }, baseMaxHp = 20,
+                baselineConstitutionModifier = 0, currentHp = 12, temporaryHp = 0, baseAc = 12),
+            commandId = "fixture-canonical-review-create")
+        val remote = Remote(); val c = paired(remote)
+        remote.propose()
+        c.sync()
+        val pending = journal.connection().commands()
+        assertTrue(pending.any { it.state == "PENDING_APPROVAL" })
+        val mirrors = journal.connection().mirrors(origin, campaignId, deviceId)
+        val publications = journal.connection().publications()
+        assertTrue(mirrors.isNotEmpty())
+        val published = remote.records.toMap()
+        val remotePublications = remote.publications.toMap()
+        // Deliberate source divergence is isolated to this synthetic in-memory fixture.
+        val drifted = requireNotNull(campaign.recordsDao().characterProfile(otherId)).copy(currentHp = 19)
+        campaign.recordsDao().put(drifted)
+
+        fun assertReview(snapshot: JsonObject) {
+            assertTrue(snapshot.getValue("connected").jsonPrimitive.boolean)
+            assertEquals("VALUES_REVIEW_REQUIRED", snapshot.getValue("readiness").jsonPrimitive.content)
+            assertEquals(otherId, snapshot.getValue("canonicalReviewProfileId").jsonPrimitive.content)
+            assertEquals(profileId, snapshot.getValue("selectedProfileId").jsonPrimitive.content)
+            assertEquals(0, snapshot.getValue("localRecordCount").jsonPrimitive.int)
+            assertEquals(0, snapshot.getValue("verifiedRecordCount").jsonPrimitive.int)
+            assertEquals(0, snapshot.getValue("pendingRemovalCount").jsonPrimitive.int)
+            assertFalse(snapshot.getValue("gameplayVerified").jsonPrimitive.boolean)
+            assertEquals(JsonNull, snapshot.getValue("gameplayVerifiedAt"))
+        }
+        assertReview(c.snapshot())
+        assertTrue(runCatching { c.sync() }.exceptionOrNull() is CampaignCanonicalReviewRequired)
+        assertReview(c.snapshot())
+        assertEquals(published, remote.records)
+        assertEquals(remotePublications, remote.publications)
+        assertEquals(pending, journal.connection().commands())
+        assertEquals(mirrors, journal.connection().mirrors(origin, campaignId, deviceId))
+        assertEquals(publications, journal.connection().publications())
+        assertEquals(drifted, campaign.recordsDao().characterProfile(otherId))
+        assertEquals(created.playable, ReforgeRepository(campaign).get(otherId))
     }
     @Test fun localRevisionChangeInvalidatesCompleteVerificationUntilIndependentReadback() = runBlocking {
         val remote = Remote(); val c = paired(remote)
