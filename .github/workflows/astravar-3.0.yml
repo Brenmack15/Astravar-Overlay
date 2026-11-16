@@ -47,7 +47,7 @@ jobs:
         if: env.GENESIS_GATE != 'true'
         timeout-minutes: 20
         run: |
-          bash gradlew --console=plain --build-cache :app:testDebugUnitTest \
+          bash gradlew --console=plain --build-cache --profile :app:testDebugUnitTest \
             --tests 'com.yazsras.astravar.ui.NavigationV2Test' \
             --tests 'com.yazsras.astravar.ui.PrimaryNavigationLayoutTest' \
             --tests 'com.yazsras.astravar.ui.CampaignVisualAcceptanceTest' \
@@ -67,14 +67,14 @@ jobs:
       - name: Rules and debug Room/Compose regressions
         timeout-minutes: 45
         run: |
-          bash gradlew --console=plain --build-cache --continue :rules:test :app:testDebugUnitTest -PastravarScreenshots="$GITHUB_WORKSPACE/validation/reforge-screenshots"
+          bash gradlew --console=plain --build-cache --profile --continue :rules:test :app:testDebugUnitTest -PastravarScreenshots="$GITHUB_WORKSPACE/validation/reforge-screenshots"
       - name: Release regressions, lint and debug APK
         # Do not spend the release/lint budget after a known debug regression.
         # Every task remains required before this workflow can pass.
         if: success()
         timeout-minutes: 45
         run: |
-          bash gradlew --console=plain --build-cache --continue :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug -PastravarScreenshots="$GITHUB_WORKSPACE/validation/reforge-screenshots"
+          bash gradlew --console=plain --build-cache --profile --continue :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug -PastravarScreenshots="$GITHUB_WORKSPACE/validation/reforge-screenshots"
       - name: Inspect actual QA package
         run: |
           mkdir -p validation
@@ -93,6 +93,7 @@ jobs:
           name: Astravar-3.0-verification
           path: |
             app/build/outputs/apk/debug/*.apk
+            build/reports/profile/
             app/build/reports/
             rules/build/reports/
             app/build/test-results/

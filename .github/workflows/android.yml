@@ -104,7 +104,7 @@ jobs:
               export ASTRAVAR_VERSION_CODE=23
               stat_args+=('-PastravarRemoteStatTest=true')
             fi
-            timeout -k 10s 1140s ./gradlew --console=plain --build-cache :rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug "${stat_args[@]}" -PastravarScreenshots="$GITHUB_WORKSPACE/validation/screenshots"
+            timeout -k 10s 1140s ./gradlew --console=plain --build-cache --profile :rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug "${stat_args[@]}" -PastravarScreenshots="$GITHUB_WORKSPACE/validation/screenshots"
             exit 0
           fi
           # This one-run key is ONLY for exercising the optimized release on CI.
@@ -120,7 +120,7 @@ jobs:
             regression_tasks=()
             printf '%s\n' 'Full rules, debug/release unit tests and both lint variants remain required in Astravar Reforge verification for this exact source commit.'
           fi
-          timeout -k 10s 2640s ./gradlew --console=plain --build-cache "${regression_tasks[@]}" :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
+          timeout -k 10s 2640s ./gradlew --console=plain --build-cache --profile "${regression_tasks[@]}" :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
           mkdir -p validation
           python3 scripts/inspect_release_apk.py app/build/outputs/apk/release/app-release.apk --sdk "$ANDROID_HOME" --package com.yazsras.astravar --version-name "$EXPECTED_VERSION_NAME" --version-code "$EXPECTED_VERSION_CODE" --output validation/ci-release-package.json
           printf '%s\n' 'Optimized release variant, disposable CI signer only. Not compatible with the original owner installation.' > validation/CI-RELEASE-ONLY.txt
@@ -170,7 +170,7 @@ jobs:
           printf 'Product APK reused without modification from run %s\n' "$REUSE_RUN_ID" > validation/product-provenance.txt
           sha256sum app/build/outputs/apk/release/app-release.apk >> validation/product-provenance.txt
           chmod +x gradlew
-          timeout -k 10s 210s ./gradlew --console=plain --build-cache :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
+          timeout -k 10s 210s ./gradlew --console=plain --build-cache --profile :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
       - name: Ordered release UI, import, recovery and in-place update on Android 16
         if: env.INVENTORY_BETA != 'true'
         timeout-minutes: 90
@@ -196,6 +196,7 @@ jobs:
             app/build/outputs/apk/androidTest/debug/*.apk
             app/build/outputs/apk/release/*.apk
             overlay-target/build/outputs/apk/**/*.apk
+            build/reports/profile/
             app/build/reports/
             rules/build/reports/
             app/build/test-results/

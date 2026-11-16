@@ -51,6 +51,8 @@ Android test XML reports about1116s debug and1127s release; task log spans were 
 
 Recent unsuccessful full runs still consumed 22–24minutes while independent native runs continued for61–76minutes. Duplicate push/PR runs were often canceled after4–50seconds; these count as wasted setup/queue work, not useful verification.
 
+Current fast/full/native Gradle invocations emit timestamped local `--profile` HTML reports under `build/reports/profile/`, retained in workflow artifacts. They separate configuration, dependency resolution and task costs (including Kotlin compilation, tests, lint and packaging) without publishing a Build Scan or sending build data to another service. See the [Gradle profile documentation](https://docs.gradle.org/8.13/userguide/inspect.html#sec:profiling_build). Historical baseline helper provenance separately records cold-build or warm re-sign durations.
+
 The 5–15minute Tier A objective is a target for warm caches, not a measured guarantee. Cold Kotlin compilation can dominate. Compare completed new runs against these recorded baselines before claiming a speedup; include cache hit/miss state, runner image, selected test count, commit and failed/canceled attempts. Full release tests and native journeys remain intentionally comprehensive. This document does not claim a new run passed merely because the workflow was added.
 
 ## Owner-compatible release boundary

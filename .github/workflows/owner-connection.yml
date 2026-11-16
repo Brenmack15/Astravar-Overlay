@@ -67,7 +67,7 @@ jobs:
           export ASTRAVAR_KEY_ALIAS=astravar-ci
           keytool -genkeypair -noprompt -keystore "$ASTRAVAR_KEYSTORE" -storetype PKCS12 -storepass "$ASTRAVAR_STORE_PASSWORD" -keypass "$ASTRAVAR_KEY_PASSWORD" -alias "$ASTRAVAR_KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 2 -dname 'CN=Astravar owner connection CI test only'
           trap 'rm -f "$ASTRAVAR_KEYSTORE"' EXIT
-          bash ./gradlew --console=plain --build-cache :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease
+          bash ./gradlew --console=plain --build-cache --profile :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease
           mkdir -p validation/owner-connection
           cp app/build/outputs/apk/release/app-release.apk validation/owner-connection/Astravar-2.3-CI-ONLY-code39.apk
           python3 scripts/inspect_release_apk.py validation/owner-connection/Astravar-2.3-CI-ONLY-code39.apk --package com.yazsras.astravar --version-name 2.3.2 --version-code 39 --output validation/owner-connection/ci-apk-metadata.json
@@ -79,6 +79,7 @@ jobs:
         with:
           name: Astravar-owner-connection-verification
           path: |
+            build/reports/profile/
             app/build/reports/
             app/build/test-results/
             rules/build/reports/

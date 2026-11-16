@@ -9,8 +9,8 @@ tests = plan['tests']
 if not tests:
     raise SystemExit('No critical Android tests selected; fail closed.')
 # Separate rules task: --tests belongs only to app:testDebugUnitTest.
-subprocess.run(['bash', 'gradlew', '--console=plain', '--build-cache', ':rules:test'], check=True)
-args = ['bash', 'gradlew', '--console=plain', '--build-cache', ':app:testDebugUnitTest']
+subprocess.run(['bash', 'gradlew', '--console=plain', '--build-cache', '--profile', ':rules:test'], check=True)
+args = ['bash', 'gradlew', '--console=plain', '--build-cache', '--profile', ':app:testDebugUnitTest']
 for name in tests:
     args += ['--tests', name]
 subprocess.run(args, check=True)

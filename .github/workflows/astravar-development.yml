@@ -93,7 +93,7 @@ jobs:
         run: python3 scripts/ci-fast-tests.py
       - name: Debug lint and development APK
         timeout-minutes: 10
-        run: bash gradlew --console=plain --build-cache :app:lintDebug :app:assembleDebug
+        run: bash gradlew --console=plain --build-cache --profile :app:lintDebug :app:assembleDebug
       - name: Record source and failures
         if: always()
         run: |
@@ -110,6 +110,7 @@ jobs:
             validation/
             app/build/outputs/apk/debug/*.apk
             app/build/test-results/
+            build/reports/profile/
             app/build/reports/
             rules/build/test-results/
           retention-days: 14
