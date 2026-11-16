@@ -74,6 +74,16 @@ class ChatGptPromptManagementTest {
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Name").fetchSemanticsNodes().isEmpty() }
     }
 
+    private fun openSavedEditor(id: String) {
+        compose.onNodeWithTag("prompt-edit-$id").performScrollTo().performClick()
+        // Editing loads the latest row on real Room/IO executors. Compose idle
+        // alone does not prove that lookup has returned and opened the editor.
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Edit prompt").fetchSemanticsNodes().size == 1 &&
+                compose.onAllNodesWithText("Identifier").fetchSemanticsNodes().size == 1
+        }
+    }
+
     @Test fun createReadEditCancelAndConfirmedDeleteUseTheStoredRecord() {
         openPage()
         compose.onNodeWithText("Add Prompt").performScrollTo().performClick()
@@ -95,7 +105,7 @@ class ChatGptPromptManagementTest {
         compose.onNodeWithText("Find a prompt").performScrollTo().performTextInput("Fictional custom")
         compose.onNodeWithText("Read prompt").performScrollTo().performClick()
         compose.onNodeWithText(created.content).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("prompt-edit-fictional-custom").performScrollTo().performClick()
+        openSavedEditor("fictional-custom")
         compose.onNodeWithText("Identifier").assertIsNotEnabled()
         compose.onNodeWithText("Name").performScrollTo().performTextReplacement("Fictional custom prompt edited")
         compose.onNodeWithText("Prompt content").performScrollTo().performTextReplacement("Confirmed fictional wording")
@@ -107,7 +117,7 @@ class ChatGptPromptManagementTest {
         assertEquals(created.createdAt, edited.createdAt)
         assertTrue(edited.updatedAt >= created.updatedAt)
 
-        compose.onNodeWithTag("prompt-edit-fictional-custom").performScrollTo().performClick()
+        openSavedEditor("fictional-custom")
         compose.onNodeWithText("Prompt content").performScrollTo().performTextReplacement("Discard this fictional draft")
         compose.onNodeWithText("Cancel").performClick()
         compose.onNodeWithText("Discard").performClick()
@@ -155,7 +165,7 @@ class ChatGptPromptManagementTest {
 
     @Test fun editorValidationAndStaleRevisionNeverOverwriteANewerSavedPrompt() {
         openPage()
-        compose.onNodeWithTag("prompt-edit-fixture-stored").performScrollTo().performClick()
+        openSavedEditor("fixture-stored")
         compose.onNodeWithText("Name").performScrollTo().performTextReplacement("")
         compose.onNodeWithText("Save").assertIsNotEnabled()
         compose.onNodeWithText("Name").performScrollTo().performTextReplacement("Fictional stored prompt")
