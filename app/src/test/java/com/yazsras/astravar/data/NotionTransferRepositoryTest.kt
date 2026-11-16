@@ -118,6 +118,35 @@ class NotionTransferRepositoryTest {
         assertTrue(backup.previewRestore(backup.exportWithProof().text).valid)
     }
 
+    @Test fun repeatedWalletImportProofSurvivesLaterBalanceEdit() = runBlocking {
+        val campaign = authority.createCampaign("Fictional expedition", commandId = "fictional-campaign-create")
+        val original = actor(campaign.id)
+        val first = importer.commit(original, transfer(), choices, true, proof(), "fictional-wallet-import")
+        val frozenProof = proof()
+        val repeated = importer.commit(first.profile, transfer(), choices, true, frozenProof, "fictional-wallet-repeat")
+        val wallet = db.partyDao().allWallets().single()
+        PartyRecordsRepository(db).saveWallet(wallet.copy(gold = 12), wallet.revision, "Later legitimate currency review", "fictional-wallet-later")
+        assertEquals(repeated, importer.commit(first.profile, transfer(), choices, true, frozenProof, "fictional-wallet-repeat"))
+        assertEquals(12L, db.partyDao().allWallets().single().gold)
+        assertTrue(backup.previewRestore(backup.exportWithProof().text).valid)
+    }
+
+    @Test fun noOpRestoreRejectsClaimOfPreviouslyImportedWalletWithoutHistory() = runBlocking {
+        val original = actor()
+        val before = backup.snapshot()
+        val template = noOpReceipt(original, "fictional-phantom-wallet-import")
+        val request = campaignJson.decodeFromString<NotionTransferRequest>(template.requestJson).copy(recordProvisionalWallet = true)
+        val outcome = campaignJson.decodeFromString<NotionTransferOutcome>(template.outcomeJson).copy(walletPreviouslyPresent = true)
+        val requestJson = campaignJson.encodeToString(request)
+        val forged = template.copy(requestJson = requestJson, fingerprint = genesisAuthorityFingerprint(template.kind, requestJson),
+            outcomeJson = campaignJson.encodeToString(outcome))
+        val tampered = before.copy(authority = before.authority.copy(receipts = before.authority.receipts + forged))
+        val preview = backup.previewRestore(genesisAuthorityBackupJson(tampered))
+        assertFalse(preview.valid)
+        assertTrue(preview.conflicts.any { it.contains("wallet has no matching immutable history") })
+        assertEquals(before, backup.snapshot())
+    }
+
     @Test fun unassignedWalletFailureRollsBackTheEntireImport() = runBlocking {
         val original = actor()
         val before = backup.snapshot()

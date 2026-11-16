@@ -82,7 +82,25 @@ internal fun genesisValidateNotionTransfer(
             wallet.source == "UNRECONCILED GP-EQUIVALENT ESTIMATE, not verified coin denominations. Notion private transfer ${request.transfer.transferId} · ${request.transfer.character.sourceUrl}") {
             "Imported wallet differs from the reviewed provisional estimate."
         }
-    } else require(walletChild == null) { "Import unexpectedly wrote a wallet." }
+    } else {
+        require(walletChild == null) { "Import unexpectedly wrote a wallet." }
+        if (outcome.walletPreviouslyPresent) {
+            require(!request.transfer.walletVerified)
+            val walletId = "notion-wallet-${campaignHash(request.transfer.transferId).take(56)}"
+            val gp = requireNotNull(request.transfer.provisionalGpEquivalent)
+            // Repeated imports write no wallet child. Their claim still needs an
+            // immutable matching wallet, even after a later balance edit.
+            // Android wall-clock timestamps do not establish causal ordering.
+            require(recordReceipts.values.any { prior ->
+                prior.kind == "wallet" && prior.recordId == walletId &&
+                    campaignJson.decodeFromString<PartyWallet>(prior.outcomeJson).let { wallet ->
+                        wallet.id == walletId && wallet.revision == prior.resultingRevision &&
+                            wallet.holderProfileId == selected.character.id && wallet.campaignId.isNotBlank() &&
+                            wallet.gold == gp && wallet.name.contains("provisional", ignoreCase = true)
+                    }
+            }) { "Previously imported wallet has no matching immutable history." }
+        }
+    }
     val newIds = plan.character.items.map { it.id }.toSet() - selected.character.items.map { it.id }.toSet()
     request.transfer.inventory.filter { "notion-instance-${it.sourceId}" in newIds }.forEach { source ->
         recordReceipts[genesisChild(receipt.commandId, "notion-reference:${source.sourceId}")]?.let { child ->
@@ -114,6 +132,13 @@ internal suspend fun genesisRequireNotionTransfer(db: CampaignLedgerDb, receipt:
     selectedHistoryIds.forEach { id -> genesisNotionChange(db, id)?.let { changes[it.commandId] = it } }
     genesisNotionChange(db, genesisChild(receipt.commandId, "notion-playable"))?.let { changes[it.commandId] = it }
     db.recordsDao().receipt(genesisChild(receipt.commandId, "notion-wallet"))?.let { records[it.commandId] = it }
+    if (request.recordProvisionalWallet) {
+        val walletId = "notion-wallet-${campaignHash(request.transfer.transferId).take(56)}"
+        val walletHistoryIds = db.openHelper.writableDatabase.query(
+            "SELECT commandId FROM command_receipts WHERE kind='wallet' AND recordId=?", arrayOf(walletId)
+        ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getString(0)) } }
+        walletHistoryIds.forEach { id -> db.recordsDao().receipt(id)?.let { records[it.commandId] = it } }
+    }
     plan.character.itemDefinitions.filter { candidate -> request.selected.character.itemDefinitions.none { it.id == candidate.id } }.forEach { definition ->
         readGenesisAuthorityReceipt(db, genesisChild(receipt.commandId, "notion-item:${definition.id}"))?.let { child ->
             authority[child.commandId] = child
