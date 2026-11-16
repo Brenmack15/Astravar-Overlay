@@ -410,6 +410,9 @@ class PartyPlayerFirstTest {
             compose.onNodeWithText("Review exchange").performClick()
             compose.onNodeWithText("Commit confirmed exchange").performClick()
             compose.waitUntil(10_000) { runBlocking { db.partyDao().wallet("synthetic-purse")?.gold == 0L } }
+            // The atomic DB commit can finish before its receipt reaches Compose.
+            // Observe completion without repeating the financial action.
+            waitForText("Exchange saved")
             compose.onNodeWithText("Exchange saved").performScrollTo().assertIsDisplayed()
             capture("party-exchange-receipt-400", activity.get(), modal = true)
             runBlocking {
@@ -533,6 +536,7 @@ class PartyPlayerFirstTest {
             val decoded = requireNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
             assertTrue(decoded.width <= 448 && decoded.height <= 448)
             decoded.recycle()
+            compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("Portrait for Korr").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithContentDescription("Portrait for Korr").performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("Edit Identity & progression").performScrollTo().performClick()
             compose.onNodeWithText("Remove custom portrait").performScrollTo().performClick()
@@ -566,6 +570,9 @@ class PartyPlayerFirstTest {
             compose.onNodeWithText("Change source / resolved event (required)").performScrollTo().performTextInput("Fictional form fixture")
             compose.onNodeWithText("Save sheet").performClick()
             compose.waitUntil(10_000) { runBlocking { db.partyDao().sheet(companion)?.revision == 1L } }
+            // Wait for the saved sheet, not the same text still inside its draft.
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Save sheet").fetchSemanticsNodes().isEmpty() }
+            waitForText("Synthetic alternate shell")
             compose.onNodeWithText("Synthetic alternate shell").performScrollTo().assertExists()
             runBlocking {
                 val form = db.partyDao().sheet(companion)!!.sheet.forms.single()
