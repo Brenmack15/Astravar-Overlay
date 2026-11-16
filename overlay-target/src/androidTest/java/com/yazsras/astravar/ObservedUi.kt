@@ -69,12 +69,16 @@ internal class ObservedUi(private val device: UiDevice) {
     fun controlBounds(selector: BySelector, description: String, timeoutMs: Long = 30_000, refreshCache: Boolean = false): Rect =
         snapshot(selector, description, timeoutMs, refreshCache = refreshCache) { interactiveBounds(it) }
 
-    fun touch(bounds: Rect, description: String, idleTimeoutMs: Long? = null) {
+    fun touch(bounds: Rect, description: String, idleTimeoutMs: Long = 1_000) {
         assertTrue("Observed control must have visible on-screen bounds: $description", !bounds.isEmpty &&
             bounds.left >= 0 && bounds.top >= 0 && bounds.right <= device.displayWidth && bounds.bottom <= device.displayHeight)
         assertTrue("Touch must be dispatched once to the observed control: $description",
             device.click(bounds.centerX(), bounds.centerY()))
-        if (idleTimeoutMs == null) device.waitForIdle() else device.waitForIdle(idleTimeoutMs)
+        // Global accessibility idle is only a short settling opportunity, never
+        // proof of completion. Subsequent state observations retain their own
+        // deadlines and assertions; do not spend the API's default 10 seconds
+        // on unrelated accessibility events after every ordinary tap.
+        device.waitForIdle(idleTimeoutMs)
     }
 
     fun tap(selector: BySelector, description: String, timeoutMs: Long = 30_000, refreshCache: Boolean = false) =
