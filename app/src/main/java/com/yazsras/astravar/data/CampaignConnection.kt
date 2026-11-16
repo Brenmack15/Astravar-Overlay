@@ -319,6 +319,10 @@ class CampaignConnectionClient internal constructor(private val context: Context
         val verified = eligible.count { record -> mirrors[record.kind to record.recordId]?.let {
             it.revision == record.revision && it.fingerprint == OwnerSyncProtocol.hash(OwnerSyncProtocol.canonical(campaignJson.encodeToJsonElement(record)))
         } == true }
+        val eligibleIds = eligible.map { it.kind to it.recordId }.toSet()
+        val pendingRemovals = if (connected) mirrors.values.count {
+            (it.kind to it.recordId) !in eligibleIds && canReadKind(it.kind, it.recordId, activeRead(value))
+        } else 0
         val pendingPublications = dao.publications().count { it.origin == value.origin && it.campaignId == value.campaignId && it.deviceId == value.deviceId && it.state == "PENDING" }
         val pendingDevice = commands.count { it.state in setOf("PENDING_APPROVAL", "PENDING_DELIVERY", "APPLYING") }
         val pendingReceipts = commands.count { it.state in setOf("APPLIED_PENDING", "REJECTED_PENDING", "CONFLICT_PENDING") }
@@ -327,16 +331,17 @@ class CampaignConnectionClient internal constructor(private val context: Context
             connected, value.deviceId.isNotBlank(), value.campaignId.isNotBlank(), value.revokePending,
             selectedCampaign != null && !selectedCampaign.archived, actor != null, actor?.campaignId == value.campaignId,
             actor?.campaignId != null && actor.campaignId != value.campaignId, actor?.playable == true,
-            activeRead(value).isNotEmpty(), value.grantBody != null, eligible.size, verified, pendingPublications,
+            activeRead(value).isNotEmpty(), value.grantBody != null, eligible.size, verified, pendingPublications + pendingRemovals,
             pendingDevice + if (moreServerPending) 1 else 0, pendingReceipts, commands.any { it.state in setOf("CONFLICT", "DECISION_CONFLICT") },
             value.lastError, value.lastDeviceSyncAt, now()))
         return buildJsonObject {
             put("connected", connected); put("origin", value.origin)
             put("readiness", readiness.name); put("readinessTitle", readiness.title); put("readinessDetail", readiness.detail)
             put("verifiedRecordCount", verified); put("pendingPublicationCount", pendingPublications)
+            put("pendingRemovalCount", pendingRemovals)
             put("pendingDeviceCommandCount", pendingDevice); put("pendingReceiptCount", pendingReceipts)
             put("gameplayVerified", readiness == CampaignSyncReadiness.VERIFIED)
-            put("gameplayVerifiedAt", if (eligible.isNotEmpty() && verified == eligible.size && value.lastDeviceSyncAt > 0) JsonPrimitive(value.lastDeviceSyncAt) else JsonNull)
+            put("gameplayVerifiedAt", if (eligible.isNotEmpty() && verified == eligible.size && pendingRemovals == 0 && value.lastDeviceSyncAt > 0) JsonPrimitive(value.lastDeviceSyncAt) else JsonNull)
             put("campaignId", value.campaignId); put("selectedProfileId", value.profileId); put("deviceId", value.deviceId)
             put("localRecordCount", eligible.size)
             put("sourceRecordCount", current.size)

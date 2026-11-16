@@ -263,6 +263,10 @@ class CampaignConnectionTest {
     @Test fun missing_local_identity_is_removed_only_from_mirror_and_confirmed_absent() = runBlocking {
         val remote=Remote();val c=paired(remote)
         campaign.openHelper.writableDatabase.execSQL("DELETE FROM character_profiles WHERE id=?",arrayOf(profileId))
+        val pending = c.snapshot()
+        assertTrue(pending.getValue("pendingRemovalCount").jsonPrimitive.int > 0)
+        assertFalse(pending.getValue("gameplayVerified").jsonPrimitive.boolean)
+        assertEquals("PUBLICATION_PENDING", pending.getValue("readiness").jsonPrimitive.content)
         c.sync();assertFalse(remote.records.containsKey("character-profile" to profileId))
         assertTrue(journal.connection().mirrors(origin,campaignId,deviceId).none {it.kind=="character-profile"&&it.recordId==profileId})
         assertTrue(campaign.recordsDao().allAudit().isNotEmpty())

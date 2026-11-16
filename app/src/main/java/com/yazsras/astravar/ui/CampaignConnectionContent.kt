@@ -53,7 +53,7 @@ data class CampaignConnectionView(
     val sourceActorCampaignId: String? = null, val sourceActorPlayable: Boolean = false,
     val sourceCampaignPrepared: Boolean = false,
     val readiness: String = "", val readinessTitle: String = "", val readinessDetail: String = "",
-    val verifiedRecordCount: Int = 0, val pendingPublicationCount: Int = 0,
+    val verifiedRecordCount: Int = 0, val pendingPublicationCount: Int = 0, val pendingRemovalCount: Int = 0,
     val pendingDeviceCommandCount: Int = 0, val pendingReceiptCount: Int = 0,
     val gameplayVerified: Boolean = false, val gameplayVerifiedAt: Long? = null
 )
@@ -109,6 +109,7 @@ data class CampaignConnectionView(
                 Text("Local campaign records eligible for sync: ${view.localRecordCount}", color = RebuildPalette.Muted)
                 Text("Current records independently verified: ${view.verifiedRecordCount} of ${view.localRecordCount}", color = RebuildPalette.Muted)
                 if (view.pendingPublicationCount > 0) Text("Uploads awaiting verification: ${view.pendingPublicationCount}", color = RebuildPalette.GoldBright)
+                if (view.pendingRemovalCount > 0) Text("Previously shared records awaiting removal: ${view.pendingRemovalCount}", color = RebuildPalette.GoldBright)
                 if (view.pendingDeviceCommandCount > 0) Text("Updates awaiting device approval or commitment: ${view.pendingDeviceCommandCount}", color = RebuildPalette.GoldBright)
                 if (view.pendingReceiptCount > 0) Text("Device decisions awaiting verified receipts: ${view.pendingReceiptCount}", color = RebuildPalette.GoldBright)
             }
@@ -373,6 +374,7 @@ internal fun campaignConnectionView(snapshot: JsonObject, now: Long = System.cur
         readinessDetail = snapshot.connectionText("readinessDetail"),
         verifiedRecordCount = snapshot.connectionLong("verifiedRecordCount")?.coerceIn(0, Int.MAX_VALUE.toLong())?.toInt() ?: 0,
         pendingPublicationCount = snapshot.connectionLong("pendingPublicationCount")?.coerceIn(0, Int.MAX_VALUE.toLong())?.toInt() ?: 0,
+        pendingRemovalCount = snapshot.connectionLong("pendingRemovalCount")?.coerceIn(0, Int.MAX_VALUE.toLong())?.toInt() ?: 0,
         pendingDeviceCommandCount = snapshot.connectionLong("pendingDeviceCommandCount")?.coerceIn(0, Int.MAX_VALUE.toLong())?.toInt() ?: 0,
         pendingReceiptCount = snapshot.connectionLong("pendingReceiptCount")?.coerceIn(0, Int.MAX_VALUE.toLong())?.toInt() ?: 0,
         gameplayVerified = (snapshot["gameplayVerified"] as? JsonPrimitive)?.booleanOrNull == true,

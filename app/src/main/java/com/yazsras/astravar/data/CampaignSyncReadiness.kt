@@ -47,8 +47,9 @@ internal fun campaignSyncReadiness(input: CampaignSyncReadinessInput): CampaignS
         pendingDevice > 0 -> CampaignSyncReadiness.DEVICE_COMMIT_PENDING
         pendingReceipts > 0 -> CampaignSyncReadiness.RECEIPT_PENDING
         error.isNotBlank() -> CampaignSyncReadiness.RETRY_REQUIRED
+        pendingPublications > 0 -> CampaignSyncReadiness.PUBLICATION_PENDING
         eligible == 0 -> CampaignSyncReadiness.NO_ELIGIBLE_RECORDS
-        pendingPublications > 0 || verified < eligible || verifiedAt <= 0 -> CampaignSyncReadiness.PUBLICATION_PENDING
+        verified < eligible || verifiedAt <= 0 -> CampaignSyncReadiness.PUBLICATION_PENDING
         verifiedAt > now + 60_000 || now - verifiedAt > 5 * 60_000 -> CampaignSyncReadiness.STALE
         else -> CampaignSyncReadiness.VERIFIED
     }
