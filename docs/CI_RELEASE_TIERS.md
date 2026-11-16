@@ -28,6 +28,19 @@ Cache-scope and cross-job matching behavior follows the [GitHub cache reference]
 
 `maxParallelForks=1` and `forkEvery=1` remain the proven defaults because Robolectric retains framework/font state per classloader. Bounded opt-in properties `astravarTestForks` (1–2) and `astravarTestForkEvery` (1–8) support measurement. Run **Astravar test worker benchmark** to compare (1,1), (1,4), (2,1), (2,4), twice each, on identical mixed data/Compose cases. Logs, wall time, JUnit time, process resource reports and source SHA are uploaded. Any failed or missing/different test set aborts. A sample benchmark does not justify promoting defaults: require repeated complete debug/release suites and review peak memory/flake evidence first.
 
+## Measured worker alternatives (16 November 2026)
+
+Source `a5b14ce220f1859db65ce20a1778508d4bda08d0` ran the same110 data/Compose cases twice per configuration, with warm compilation outside the timer and the test task forced to execute (`--rerun`). All880 case executions passed with no skips. App/rules/build inputs were checked unchanged throughout; concurrent documentation and independent native-harness edits were outside these inputs.
+
+| Parallel test JVMs | Classes per JVM | Actual run seconds | Mean | Faster than1/1 | Maximum sampled aggregate Java RSS |
+|---|---:|---:|---:|---:|---:|
+| 1 | 1 | 85.746 / 85.317 | 85.532s | baseline | 2.203GiB |
+| 1 | 4 | 36.612 / 37.100 | 36.856s | 56.91% | 2.390GiB |
+| 2 | 1 | 54.324 / 54.365 | 54.345s | 36.46% | 2.495GiB |
+| 2 | 4 | 30.104 / 31.097 | 30.601s | 64.22% | 3.104GiB |
+
+The measured host had9 CPUs and about9.7GiB RAM. Memory was sampled from `/proc` every0.5seconds, including the Gradle daemon and test workers; this is not an exact kernel peak. The fastest candidate is2forks/every4, but the subset does not establish full-suite reliability or hosted wall-clock savings. Defaults remain1/1 pending complete debug/release validation;2/1 preserves per-class isolation if reuse exposes a failure. The [machine-readable record](verification/test-worker-benchmark-20261116.json) binds environment, method, cases and results to source. Raw XML and execution logs remain outside the public source tree.
+
 ## Measured baseline and acceptance of improvements
 
 Baseline source `099c960dbbd76e0e4537efaaee28c3987e99c2a0`:
