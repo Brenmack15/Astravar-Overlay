@@ -14,6 +14,11 @@ import com.yazsras.astravar.rules.reforge.GenesisArmorRules
 @Serializable data class CampaignSyncOperation(val type: String, val recordId: String, val kind: String,
     val expectedRevision: Long, val fields: JsonObject)
 
+/** Reviewable canonical divergence only; storage and decoding failures remain distinct. */
+internal class CampaignCanonicalReviewRequired(val actorId: String) : IllegalArgumentException(
+    "Connected gameplay values need explicit review before synchronizing."
+)
+
 /** All record changes and the parent receipt share the existing campaign Room transaction. */
 class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb: AstravarDb? = null) {
     private val records = CampaignRecordsRepository(db)
@@ -60,6 +65,17 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         fun effectiveCampaign(actorId: String?, storedCampaign: String): String? =
             if (actorId != null && actorId in associations) associations.getValue(actorId).campaignId else storedCampaign
         val explicitProfiles = associations.values.filter { it.campaignId == campaignId }.map { it.actorId }
+        // A reviewed playable actor owns its current mechanics. Do not publish
+        // stale source projections merely because campaign membership is valid.
+        // This reads only each scoped character, never a complete database export.
+        associations.values.filter { it.campaignId == campaignId && it.playable }.forEach { actor ->
+            val saved = db.reforgeDao().character(actor.actorId)?.saved()
+                ?: throw CampaignCanonicalReviewRequired(actor.actorId)
+            if (saved.character.id != actor.actorId || saved.revision != saved.character.revision ||
+                db.recordsDao().characterProfile(actor.actorId) == null) throw CampaignCanonicalReviewRequired(actor.actorId)
+            if (genesisReadbackProjectionErrors(db, actor.actorId, saved).isNotEmpty())
+                throw CampaignCanonicalReviewRequired(actor.actorId)
+        }
         val sheets = allSheets.filter { effectiveCampaign(it.profileId, it.campaignId) == campaignId && it.profileId !in diagnostics }
             .map { it.copy(campaignId = campaignId) }
         val scopedReferences = db.partyDao().allReferences().filter { it.campaignId == campaignId }

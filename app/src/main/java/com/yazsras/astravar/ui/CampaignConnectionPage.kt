@@ -59,7 +59,7 @@ import java.io.IOException
     var error by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     var diagnostics by rememberSaveable { mutableStateOf(false) }
-    var membershipOpen by rememberSaveable { mutableStateOf(false) }
+    var membershipReviewProfileId by rememberSaveable { mutableStateOf<String?>(null) }
 
     fun operate(action: suspend () -> JsonObject) {
         if (busy) return
@@ -180,9 +180,9 @@ import java.io.IOException
                 }
             },
             onReviewMembership = {
-                if (connectedEnvironment == null || view.selectedProfileId.isBlank()) {
+                if (connectedEnvironment == null || (view.canonicalReviewProfileId.ifBlank { view.selectedProfileId }).isBlank()) {
                     error = true; message = "Open the character's campaign membership before sharing any values."
-                } else membershipOpen = true
+                } else membershipReviewProfileId = view.canonicalReviewProfileId.ifBlank { view.selectedProfileId }
             },
             onRestrictPermissions = { readScopes, writeScopes -> operate { client.restrictPermissions(readScopes, writeScopes) } },
             onPauseSync = { paused ->
@@ -234,11 +234,12 @@ import java.io.IOException
                 }
             }
         )
-        if (membershipOpen && connectedEnvironment != null && view.selectedProfileId.isNotBlank()) {
+        val reviewProfileId = membershipReviewProfileId
+        if (reviewProfileId != null && connectedEnvironment != null) {
             GenesisActorMembershipEditor(
                 connectedEnvironment.copy(selectedCampaignId = view.campaignId, selectionLoaded = true),
-                view.selectedProfileId,
-                { membershipOpen = false }
+                reviewProfileId,
+                { membershipReviewProfileId = null }
             )
         }
     }

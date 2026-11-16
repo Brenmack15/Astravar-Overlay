@@ -52,7 +52,11 @@ class GenesisSpellReservoirUiTest {
             compose.onNodeWithText("Level 1 slots: 2").assertExists()
             compose.onNodeWithTag("genesis-confirm-reservoir-load").performClick()
             compose.waitUntil(10_000) { runBlocking { repository.get(saved.character.id)?.character?.spellSlots?.get(1) == 1 } }
-            compose.waitForIdle()
+            // A committed row can precede its asynchronous Room Flow emission.
+            // Wait for the rendered result as well as the independent DB proof.
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithText("1 / 1 stored spells").fetchSemanticsNodes().size == 1
+            }
             compose.onNodeWithText("1 / 1 stored spells").assertExists()
             val state = runBlocking { requireNotNull(repository.get(saved.character.id)).character }
             assertEquals(1, state.spellSlots[1])

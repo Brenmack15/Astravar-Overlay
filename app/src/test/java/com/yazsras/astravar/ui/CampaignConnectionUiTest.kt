@@ -42,11 +42,49 @@ class CampaignConnectionUiTest {
         }
     }
 
+    @Test fun serviceContactCannotSupplyTheGameplayVerificationTimestamp() {
+        val view = campaignConnectionView(buildJsonObject {
+            put("connected", true); put("status", "Connected"); put("lastSyncAt", 10_000)
+            put("lastDeviceSyncAt", 10_000); put("localRecordCount", 0)
+            put("readiness", "NO_ELIGIBLE_RECORDS"); put("readinessTitle", "Connected · no eligible records")
+            put("readinessDetail", "No saved records are publishable within this campaign and its current read permissions.")
+            put("gameplayVerified", false); put("gameplayVerifiedAt", JsonNull)
+        })
+        assertNotNull(view.lastSyncAt)
+        assertNull(view.gameplayVerifiedAt)
+        show(view).use {
+            compose.onNodeWithTag("campaign-connection-status").assertTextEquals("Connected · no eligible records")
+            compose.onNodeWithTag("campaign-gameplay-verification-time").performScrollTo()
+                .assertTextEquals("Last complete gameplay verification: Not yet verified")
+            compose.onNodeWithText("Current records independently verified: 0 of 0").performScrollTo().assertExists()
+        }
+    }
+
     @Test fun preparedCampaignShowsReviewedMembershipActionBeforeGameplaySharing() {
         var reviews = 0
         show(CampaignConnectionView(connected = true, status = "Connected", campaignId = "local-campaign",
             selectedProfileId = "fictional-player", localRecordCount = 0, sourceCampaignPrepared = true),
             review = { reviews++ }).use {
+            compose.onNodeWithText("Review character membership and shared values").performScrollTo().performClick()
+            assertEquals(1, reviews)
+        }
+    }
+
+    @Test fun playableProjectionDriftNamesTheAffectedActorAndOffersExplicitReview() {
+        var reviews = 0
+        val view = campaignConnectionView(buildJsonObject {
+            put("connected", true); put("campaignId", "local-campaign"); put("selectedProfileId", "selected-player")
+            put("sourceCampaignPrepared", true); put("sourceActorPlayable", true)
+            put("sourceActorCampaignId", "local-campaign"); put("readiness", "VALUES_REVIEW_REQUIRED")
+            put("canonicalReviewProfileId", "other-player")
+            put("profiles", buildJsonArray { add(buildJsonObject { put("id", "other-player"); put("name", "Fictional other actor"); put("campaignId", "local-campaign") }) })
+        })
+        assertEquals("other-player", view.canonicalReviewProfileId)
+        assertEquals("selected-player", view.selectedProfileId)
+        show(view, review = { reviews++ }).use {
+            compose.onNodeWithTag("campaign-record-verification-blocked").performScrollTo().assertExists()
+            compose.onAllNodesWithText("Local campaign records eligible for sync: 0").assertCountEquals(0)
+            compose.onNodeWithText("Shared records for Fictional other actor differ from the saved playable values. Review and reconcile them before publishing. Existing records and queued work are retained.").performScrollTo().assertExists()
             compose.onNodeWithText("Review character membership and shared values").performScrollTo().performClick()
             assertEquals(1, reviews)
         }

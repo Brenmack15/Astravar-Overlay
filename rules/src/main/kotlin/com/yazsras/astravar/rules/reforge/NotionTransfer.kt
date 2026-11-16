@@ -12,7 +12,9 @@ const val NOTION_CHARACTER_TRANSFER_FORMAT = "astravar-notion-character-transfer
     /** Permanent totals, not the temporary values of worn magic equipment. */
     val permanentAbilities: Map<Stat, Int>,
     val baseMaxHp: Int? = null, val baselineConstitutionModifier: Int? = null,
-    val armoredAc: Int? = null
+    val armoredAc: Int? = null,
+    /** Optional explicit destination binding. Older prepared files still require a selected sheet. */
+    val targetProfileId: String? = null
 )
 
 @Serializable data class NotionInventoryFact(
@@ -38,7 +40,7 @@ const val NOTION_CHARACTER_TRANSFER_FORMAT = "astravar-notion-character-transfer
     val provisionalGpEquivalent: Long?, val walletVerified: Boolean = false
 )
 
-data class NotionTransferChoices(
+@Serializable data class NotionTransferChoices(
     val stats: Boolean = true, val items: Boolean = true,
     val replaceConflictingStats: Boolean = false
 )
@@ -51,7 +53,7 @@ data class NotionTransferPlan(
     val changed: Boolean get() = statsChanged || added.isNotEmpty()
 }
 
-private fun notionName(value: String): String = value.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+private fun notionName(value: String): String = value.lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
 
 private fun notionSameItem(existing: String, incoming: String): Boolean {
     val a = notionName(existing)
@@ -73,6 +75,7 @@ fun validateNotionCharacterTransfer(value: NotionCharacterTransfer) {
     }
     val c = value.character
     require(c.name.isNotBlank() && c.name.length <= 200 && c.ownerLabel.isNotBlank() && c.ownerLabel.length <= 100)
+    require(c.targetProfileId == null || c.targetProfileId.matches(Regex("[a-zA-Z0-9:_-]{1,120}")))
     require(c.level in 1..20 && c.permanentAbilities.keys.containsAll(Stat.entries))
     require(c.permanentAbilities.values.all { it in 0..100 })
     require(c.baseMaxHp == null || c.baseMaxHp in 0..1_000_000)
@@ -115,6 +118,9 @@ fun planNotionCharacterTransfer(
     choices: NotionTransferChoices = NotionTransferChoices()
 ): NotionTransferPlan {
     validateNotionCharacterTransfer(transfer)
+    require(transfer.character.targetProfileId == null || transfer.character.targetProfileId == current.id) {
+        "The file is bound to another saved character identity. Choose its exact sheet; no records changed."
+    }
     require(notionName(current.name) == notionName(transfer.character.name)) {
         "The selected character does not match the Notion subject. Choose the correct saved character."
     }

@@ -3,6 +3,8 @@ package com.yazsras.astravar.data
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.yazsras.astravar.rules.reforge.ReforgeCharacter
+import com.yazsras.astravar.rules.reforge.Stat
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -72,6 +74,9 @@ class CampaignConnectionTest {
         assertEquals(JsonNull, empty.getValue("sourceActorCampaignId"))
         assertFalse(empty.getValue("sourceCampaignPrepared").jsonPrimitive.boolean)
         assertTrue(empty.getValue("lastDeviceSyncAt").jsonPrimitive.long > 0)
+        assertEquals("CAMPAIGN_NOT_PREPARED", empty.getValue("readiness").jsonPrimitive.content)
+        assertFalse(empty.getValue("gameplayVerified").jsonPrimitive.boolean)
+        assertEquals(JsonNull, empty.getValue("gameplayVerifiedAt"))
 
         val saved = authority.prepareOwnerLocalCampaign("fixture-opt-in-local-campaign")
         // Preparing the identity is not permission to publish this unassigned actor.
@@ -86,6 +91,93 @@ class CampaignConnectionTest {
         val connected = c.snapshot()
         assertTrue(connected.getValue("localRecordCount").jsonPrimitive.int > 0)
         assertEquals("local-campaign", connected.getValue("sourceActorCampaignId").jsonPrimitive.content)
+    }
+    @Test fun eligibilityUsesCurrentReadGrantAndNeverClaimsAServiceHeartbeatIsGameplay() = runBlocking {
+        val remote = Remote(); val c = paired(remote)
+        val full = c.snapshot()
+        assertTrue(full.getValue("gameplayVerified").jsonPrimitive.boolean)
+        assertEquals(full.getValue("localRecordCount"), full.getValue("verifiedRecordCount"))
+        c.restrictPermissions(emptySet(), emptySet())
+        val revoked = c.snapshot()
+        assertTrue(revoked.getValue("sourceRecordCount").jsonPrimitive.int > 0)
+        assertEquals(0, revoked.getValue("localRecordCount").jsonPrimitive.int)
+        assertEquals("PERMISSION_DENIED", revoked.getValue("readiness").jsonPrimitive.content)
+        assertFalse(revoked.getValue("gameplayVerified").jsonPrimitive.boolean)
+        assertEquals(JsonNull, revoked.getValue("gameplayVerifiedAt"))
+    }
+
+    @Test fun canonicalProjectionDriftRemainsReviewableWithoutPublishingOrInferringRemoval() = runBlocking {
+        val authority = GenesisAuthorityRepository(campaign)
+        authority.prepareOwnerLocalCampaign("fixture-canonical-review-campaign")
+        val otherId = "fixture-canonical-companion"
+        val created = authority.createActor("Fictional canonical companion", GenesisActorRole.PLAYER, campaignId,
+            playable = ReforgeCharacter(otherId, "Fictional canonical companion", level = 3,
+                baseAbilities = Stat.entries.associateWith { 10 }, baseMaxHp = 20,
+                baselineConstitutionModifier = 0, currentHp = 12, temporaryHp = 0, baseAc = 12),
+            commandId = "fixture-canonical-review-create")
+        val remote = Remote(); val c = paired(remote)
+        remote.propose()
+        c.sync()
+        val pending = journal.connection().commands()
+        assertTrue(pending.any { it.state == "PENDING_APPROVAL" })
+        val mirrors = journal.connection().mirrors(origin, campaignId, deviceId)
+        val publications = journal.connection().publications()
+        assertTrue(mirrors.isNotEmpty())
+        val published = remote.records.toMap()
+        val remotePublications = remote.publications.toMap()
+        // Deliberate source divergence is isolated to this synthetic in-memory fixture.
+        val drifted = requireNotNull(campaign.recordsDao().characterProfile(otherId)).copy(currentHp = 19)
+        campaign.recordsDao().put(drifted)
+
+        fun assertReview(snapshot: JsonObject) {
+            assertTrue(snapshot.getValue("connected").jsonPrimitive.boolean)
+            assertEquals("VALUES_REVIEW_REQUIRED", snapshot.getValue("readiness").jsonPrimitive.content)
+            assertEquals(otherId, snapshot.getValue("canonicalReviewProfileId").jsonPrimitive.content)
+            assertEquals(profileId, snapshot.getValue("selectedProfileId").jsonPrimitive.content)
+            assertEquals(0, snapshot.getValue("localRecordCount").jsonPrimitive.int)
+            assertEquals(0, snapshot.getValue("verifiedRecordCount").jsonPrimitive.int)
+            assertEquals(0, snapshot.getValue("pendingRemovalCount").jsonPrimitive.int)
+            assertFalse(snapshot.getValue("gameplayVerified").jsonPrimitive.boolean)
+            assertEquals(JsonNull, snapshot.getValue("gameplayVerifiedAt"))
+        }
+        assertReview(c.snapshot())
+        assertTrue(runCatching { c.sync() }.exceptionOrNull() is CampaignCanonicalReviewRequired)
+        assertReview(c.snapshot())
+        assertEquals(published, remote.records)
+        assertEquals(remotePublications, remote.publications)
+        assertEquals(pending, journal.connection().commands())
+        assertEquals(mirrors, journal.connection().mirrors(origin, campaignId, deviceId))
+        assertEquals(publications, journal.connection().publications())
+        assertEquals(drifted, campaign.recordsDao().characterProfile(otherId))
+        assertEquals(created.playable, ReforgeRepository(campaign).get(otherId))
+    }
+    @Test fun localRevisionChangeInvalidatesCompleteVerificationUntilIndependentReadback() = runBlocking {
+        val remote = Remote(); val c = paired(remote)
+        CampaignRecordsRepository(campaign).saveProfile(current().copy(level = 10), 1, "Fixture reviewed level")
+        val changed = c.snapshot()
+        assertFalse(changed.getValue("gameplayVerified").jsonPrimitive.boolean)
+        assertEquals("PUBLICATION_PENDING", changed.getValue("readiness").jsonPrimitive.content)
+        assertEquals(JsonNull, changed.getValue("gameplayVerifiedAt"))
+        c.sync()
+        assertTrue(c.snapshot().getValue("gameplayVerified").jsonPrimitive.boolean)
+        time += 300_001
+        assertEquals("STALE", c.snapshot().getValue("readiness").jsonPrimitive.content)
+    }
+    @Test fun acceptedUploadWithFailedReadbackRemainsDurableAndUnverifiedAcrossClientRecreation() = runBlocking {
+        val remote = Remote(); val c = paired(remote)
+        CampaignRecordsRepository(campaign).saveProfile(current().copy(level = 10), 1, "Fixture reviewed level")
+        remote.failPublicationReadback = true
+        assertTrue(runCatching { c.sync() }.isFailure)
+        val frozen = journal.connection().publications().single { it.state == "PENDING" }
+        assertTrue(remote.records.values.any { it["revision"]?.jsonPrimitive?.long == 2L })
+        val pending = c.snapshot()
+        assertEquals(1, pending.getValue("pendingPublicationCount").jsonPrimitive.int)
+        assertFalse(pending.getValue("gameplayVerified").jsonPrimitive.boolean)
+        remote.failPublicationReadback = false
+        client(remote).sync()
+        assertEquals("VERIFIED", journal.connection().publications().single { it.commandId == frozen.commandId }.state)
+        assertEquals(frozen.body, journal.connection().publications().single { it.commandId == frozen.commandId }.body)
+        assertTrue(c.snapshot().getValue("gameplayVerified").jsonPrimitive.boolean)
     }
     @Test fun injectedTransportFixturesNeverEnrollProductionPushy() = runBlocking {
         val remote = Remote()
@@ -219,6 +311,10 @@ class CampaignConnectionTest {
     @Test fun missing_local_identity_is_removed_only_from_mirror_and_confirmed_absent() = runBlocking {
         val remote=Remote();val c=paired(remote)
         campaign.openHelper.writableDatabase.execSQL("DELETE FROM character_profiles WHERE id=?",arrayOf(profileId))
+        val pending = c.snapshot()
+        assertTrue(pending.getValue("pendingRemovalCount").jsonPrimitive.int > 0)
+        assertFalse(pending.getValue("gameplayVerified").jsonPrimitive.boolean)
+        assertEquals("PUBLICATION_PENDING", pending.getValue("readiness").jsonPrimitive.content)
         c.sync();assertFalse(remote.records.containsKey("character-profile" to profileId))
         assertTrue(journal.connection().mirrors(origin,campaignId,deviceId).none {it.kind=="character-profile"&&it.recordId==profileId})
         assertTrue(campaign.recordsDao().allAudit().isNotEmpty())
@@ -365,6 +461,7 @@ class CampaignConnectionTest {
         val publications=linkedMapOf<String,List<JsonObject>>()
         val commands=linkedMapOf<String,JsonObject>(); val decisions=linkedMapOf<String,JsonObject>()
         val grantCommands=mutableMapOf<String,String>();val grantRequests=mutableListOf<String>()
+        var failPublicationReadback = false
         var loseDecision=false;var loseGrant=false;var offline=false;var lastDecision:String?=null;var receiptReads=0;var recordReads=0
         var blockPending: Pair<CompletableDeferred<Unit>,CompletableDeferred<Unit>>? = null
         var pendingLimit = Int.MAX_VALUE
@@ -407,7 +504,7 @@ class CampaignConnectionTest {
                     publications[b.getValue("commandId").jsonPrimitive.content]=rows
                     answer("published" to b.getValue("records"),"publishedAt" to JsonPrimitive(time))
                 }
-                path.contains("/publications/") -> {val rows=publications.getValue(path.substringAfterLast('/')).map { row -> records.getValue(row.getValue("kind").jsonPrimitive.content to row.getValue("recordId").jsonPrimitive.content) }; answer("records" to JsonArray(rows))}
+                path.contains("/publications/") -> {if (failPublicationReadback) throw IOException("Fixture lost independent publication readback");val rows=publications.getValue(path.substringAfterLast('/')).map { row -> records.getValue(row.getValue("kind").jsonPrimitive.content to row.getValue("recordId").jsonPrimitive.content) }; answer("records" to JsonArray(rows))}
                 path.contains("/records/") -> {recordReads++;val kind=path.substringAfter("/records/").substringBefore('/');val id=java.net.URLDecoder.decode(path.substringAfterLast('/'),"UTF-8");(records[kind to id]?.let { answer("records" to JsonArray(listOf(it))) } ?: OwnerSyncResponse(404,buildJsonObject {put("mode",CampaignConnectionProtocol.MODE);put("error",buildJsonObject{put("code","RECORD_NOT_PUBLISHED")})})).also { afterRecordRead?.invoke() }}
                 path.endsWith("/decisions") -> {
                     lastDecision=body;val id=b!!.getValue("commandId").jsonPrimitive.content

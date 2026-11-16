@@ -40,21 +40,14 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Install checksum-verified Android SDK
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          cache-read-only: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) && github.ref_name != github.event.repository.default_branch && github.event_name != 'workflow_dispatch' }}
+      - name: Use installed Android packages
         timeout-minutes: 9
         run: |
-          export ANDROID_HOME="$RUNNER_TEMP/android-sdk"
-          mkdir -p "$ANDROID_HOME/cmdline-tools"
-          curl --connect-timeout 15 --max-time 150 -fsSL https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip -o "$RUNNER_TEMP/android-cli.zip"
-          echo '7ec965280a073311c339e571cd5de778b9975026cfcbe79f2b1cdcb1e15317ee  '"$RUNNER_TEMP/android-cli.zip" | sha256sum -c -
-          unzip -q "$RUNNER_TEMP/android-cli.zip" -d "$ANDROID_HOME/cmdline-tools"
-          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/19.0"
-          export PATH="$ANDROID_HOME/cmdline-tools/19.0/bin:$ANDROID_HOME/platform-tools:$PATH"
-          printf 'y\n%.0s' {1..100} | timeout -k 5s 60s sdkmanager --licenses >/dev/null
-          timeout -k 10s 360s sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
+          bash scripts/ci-android-sdk.sh
           python3 scripts/normalize-android-platform.py
-          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
       - name: Preserve source, artwork and historical schema invariants
         run: |
           python3 -m unittest discover -s scripts/tests -v
@@ -74,7 +67,7 @@ jobs:
           export ASTRAVAR_KEY_ALIAS=astravar-ci
           keytool -genkeypair -noprompt -keystore "$ASTRAVAR_KEYSTORE" -storetype PKCS12 -storepass "$ASTRAVAR_STORE_PASSWORD" -keypass "$ASTRAVAR_KEY_PASSWORD" -alias "$ASTRAVAR_KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 2 -dname 'CN=Astravar owner connection CI test only'
           trap 'rm -f "$ASTRAVAR_KEYSTORE"' EXIT
-          bash ./gradlew --no-daemon --console=plain :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease
+          bash ./gradlew --console=plain --build-cache --profile :rules:test :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease
           mkdir -p validation/owner-connection
           cp app/build/outputs/apk/release/app-release.apk validation/owner-connection/Astravar-2.3-CI-ONLY-code39.apk
           python3 scripts/inspect_release_apk.py validation/owner-connection/Astravar-2.3-CI-ONLY-code39.apk --package com.yazsras.astravar --version-name 2.3.2 --version-code 39 --output validation/owner-connection/ci-apk-metadata.json
@@ -86,6 +79,7 @@ jobs:
         with:
           name: Astravar-owner-connection-verification
           path: |
+            build/reports/profile/
             app/build/reports/
             app/build/test-results/
             rules/build/reports/

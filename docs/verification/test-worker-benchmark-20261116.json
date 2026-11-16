@@ -1,0 +1,131 @@
+{
+  "schema": "astravar-test-worker-benchmark-v1",
+  "source_commit": "a5b14ce220f1859db65ce20a1778508d4bda08d0",
+  "execution": "local JDK17/Gradle8.13; fixed API35 Robolectric data/Compose suites",
+  "environment": {
+    "cpu_count": 9,
+    "memory_total_kib": 10206468,
+    "memory_measurement": "Sum of Gradle daemon/client and test-worker Java RSS sampled every 0.5 seconds; sampled maximum, not kernel exact peak."
+  },
+  "method": {
+    "precompile_outside_measurement": true,
+    "test_task_forced_rerun": true,
+    "identical_cases_per_run": 110,
+    "repetitions_per_configuration": 2,
+    "failures": 0,
+    "skips": 0,
+    "source_inputs_rechecked_unchanged": true,
+    "source_scope": [
+      "app/src/main",
+      "app/src/test",
+      "app/build.gradle.kts",
+      "rules",
+      "root Gradle build inputs"
+    ]
+  },
+  "classes": [
+    "CampaignConnectionTest",
+    "GenesisAuthorityBackupTest",
+    "CampaignSyncDomainTest",
+    "ReforgeLargeCampaignSelectionTest",
+    "GenesisPagerTest",
+    "GenesisCompactChromeTest",
+    "CampaignConnectionUiTest",
+    "GenesisCampaignUiTest"
+  ],
+  "results": [
+    {
+      "forks": 1,
+      "every": 1,
+      "seconds": [
+        85.746,
+        85.317
+      ],
+      "mean_seconds": 85.5315,
+      "max_java_rss_gib": 2.2028656005859375,
+      "tests_per_run": 110,
+      "percent_faster": 0.0
+    },
+    {
+      "forks": 1,
+      "every": 4,
+      "seconds": [
+        36.612,
+        37.1
+      ],
+      "mean_seconds": 36.856,
+      "max_java_rss_gib": 2.3904953002929688,
+      "tests_per_run": 110,
+      "percent_faster": 56.91
+    },
+    {
+      "forks": 2,
+      "every": 1,
+      "seconds": [
+        54.324,
+        54.365
+      ],
+      "mean_seconds": 54.3445,
+      "max_java_rss_gib": 2.4951019287109375,
+      "tests_per_run": 110,
+      "percent_faster": 36.46
+    },
+    {
+      "forks": 2,
+      "every": 4,
+      "seconds": [
+        30.104,
+        31.097
+      ],
+      "mean_seconds": 30.6005,
+      "max_java_rss_gib": 3.1036834716796875,
+      "tests_per_run": 110,
+      "percent_faster": 64.22
+    }
+  ],
+  "limits": [
+    "Subset benchmark only; not full Android suite or hosted workflow timing.",
+    "GNU time unavailable locally; elapsed time uses monotonic clock and memory uses /proc sampling.",
+    "Raw logs and XML are retained as execution evidence outside the public source tree.",
+    "Local complete suite validation supports defaults; it does not establish hosted runtime, physical-device or release approval."
+  ],
+  "source_tree": "9c998ea34ce7d47f03d1ae7529884d55de369a1c",
+  "full_validation": [
+    {
+      "source": "468030c334f9abd5e1f2bbf485974a2e3e844720",
+      "variant": "Debug",
+      "forks": 2,
+      "fork_every": 4,
+      "exit_code": 0,
+      "elapsed_seconds": 498.729,
+      "suites": 151,
+      "cases": 1014,
+      "failed": 0,
+      "skipped": 3,
+      "max_java_rss_kib": 4673476,
+      "max_worker_rss_kib": 2067044,
+      "max_worker_count": 2
+    },
+    {
+      "source": "52ed850393d1cb420af17fde9170fd1f14308601",
+      "variant": "Release",
+      "forks": 2,
+      "fork_every": 4,
+      "exit_code": 0,
+      "elapsed_seconds": 344.2,
+      "suites": 151,
+      "cases": 1014,
+      "failed": 0,
+      "skipped": 17,
+      "max_java_rss_kib": 2711572,
+      "max_worker_rss_kib": 2016532,
+      "max_worker_count": 2
+    }
+  ],
+  "adoption": {
+    "max_parallel_forks": 2,
+    "fork_every": 4,
+    "basis": "Both complete local variants passed with screenshots; targeted async UI wait fixes retained original assertions; hosted full/native remain required.",
+    "runtime_unchanged_between_full_variants": true
+  }
+}

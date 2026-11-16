@@ -106,6 +106,10 @@ import java.util.Locale
     val proposed = remember(selected, saved, choices) {
         selected?.let { runCatching { planNotionCharacterTransfer(saved.character, it, choices) } }
     }
+    val replacementPreview = remember(selected, saved, includeItems) {
+        selected?.let { runCatching { planNotionCharacterTransfer(saved.character, it,
+            NotionTransferChoices(stats = true, items = includeItems, replaceConflictingStats = true)) } }
+    }
     PlayerSheet("Import Notion character records", onDismiss, dismissEnabled = !busy && pendingBackup == null, actions = {
         if (selected != null && outcome == null) {
             PlayerButton(
@@ -116,11 +120,8 @@ import java.util.Locale
                     busy = true; error = ""; consent = false
                     scope.launch {
                         try {
-                            val currentProof = storage.backup.exportWithProof().currentFingerprint
-                            check(currentProof == verifiedBackup) {
-                                "Saved backup no longer matches the current records. Make a new verified backup."
-                            }
-                            outcome = transferRepository.commit(saved, data, choices, includeWallet)
+                            outcome = transferRepository.commit(saved, data, choices, includeWallet,
+                                requireNotNull(verifiedBackup))
                             verifiedBackup = null
                         } catch (e: CancellationException) { throw e }
                         catch (e: Exception) { verifiedBackup = null; error = e.message ?: "Nothing was imported. Existing data is unchanged." }
@@ -142,6 +143,8 @@ import java.util.Locale
             Text("Transferred ${done.itemsAdded} items; ${done.itemsPreviouslyPresent} previously recorded. " +
                 "${if (done.walletAdded) "Provisional wallet added." else if (done.walletPreviouslyPresent) "Provisional wallet already present." else "Wallet unchanged."}",
                 color = RebuildPalette.Ice)
+            Text("Saved locally. Campaign sharing still requires reviewed membership, authorized scopes and verified synchronization.",
+                color = RebuildPalette.Muted)
             done.warnings.take(12).forEach { Text(it, color = RebuildPalette.Muted) }
         }
         val transfer = selected
@@ -155,13 +158,21 @@ import java.util.Locale
                 Checkbox(includeStats, { includeStats = it; consent = false })
                 Text("Import confirmed level, permanent abilities, HP baseline and armor class where safe.", Modifier.weight(1f))
             }
+            if (includeStats) {
+                replacementPreview?.getOrNull()?.let { replacement ->
+                    GenesisNotionStatsReview(saved.character, replacement.character, replaceStats)
+                }
+                replacementPreview?.exceptionOrNull()?.let { failure ->
+                    Text("Stat replacement cannot be previewed: ${failure.message}", color = MaterialTheme.colorScheme.error)
+                }
+            }
             if (includeStats) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Checkbox(replaceStats, { replaceStats = it; consent = false })
                 Text("Explicitly replace conflicting stored stats. Existing resources, HP lost, spell slots and turn state stay unchanged.", Modifier.weight(1f))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Checkbox(includeItems, { includeItems = it; consent = false })
-                Text("Add confirmed Zerg-owned carried, equipped and stored items. Skip duplicate names and IDs.", Modifier.weight(1f))
+                Text("Add confirmed ${transfer.character.name}-owned carried, equipped and stored items. Skip duplicate names and IDs.", Modifier.weight(1f))
             }
             val plan = proposed?.getOrNull()
             if (plan != null) {
@@ -169,7 +180,7 @@ import java.util.Locale
                     "${plan.deferred.size} intentionally deferred.", color = RebuildPalette.Ice)
                 val projection = CharacterCalculator.calculate(plan.character)
                 Text("Proposed level ${plan.character.level} · AC ${projection.armorClass.value ?: "unknown"} · " +
-                    "max HP ${projection.maximumHp.value ?: "unknown"}. Current HP is preserved.", color = RebuildPalette.Ice)
+                    "max HP ${projection.maximumHp.value ?: "unknown"} · current HP ${projection.currentHp ?: "unknown"}. Stored HP and recorded damage are retained.", color = RebuildPalette.Ice)
                 PlayerDisclosure("Items to add (${plan.added.size})") { plan.added.forEach { Text(it) } }
                 if (plan.alreadyPresent.isNotEmpty()) PlayerDisclosure("Existing items (${plan.alreadyPresent.size})") {
                     plan.alreadyPresent.forEach { Text(it) }
@@ -203,4 +214,57 @@ import java.util.Locale
             }
         }
     }
+}
+
+internal data class NotionStatReviewRow(val key: String, val label: String, val current: String, val proposed: String)
+
+/** Shows the exact planner result; source text never invents effective or permanent scores. */
+internal fun notionStatReviewRows(current: ReforgeCharacter, proposed: ReforgeCharacter): List<NotionStatReviewRow> = buildList {
+    fun display(value: Any?): String = value?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown"
+    fun changed(key: String, label: String, before: Any?, after: Any?) {
+        if (before != after) add(NotionStatReviewRow(key, label, display(before), display(after)))
+    }
+    changed("level", "Level", current.level, proposed.level)
+    changed("species", "Species", current.species, proposed.species)
+    changed("class", "Class", current.className, proposed.className)
+    changed("subclass", "Subclass", current.subclass, proposed.subclass)
+    val before = CharacterCalculator.calculate(current)
+    val after = CharacterCalculator.calculate(proposed)
+    Stat.entries.forEach { stat ->
+        add(NotionStatReviewRow("${stat.name}-permanent", "${stat.name} permanent score",
+            display(before.abilities.getValue(stat).permanent), display(after.abilities.getValue(stat).permanent)))
+        changed("${stat.name}-effective", "${stat.name} with selected equipment",
+            before.abilities.getValue(stat).effective.value, after.abilities.getValue(stat).effective.value)
+    }
+    changed("hp-base", "Base maximum HP", current.baseMaxHp, proposed.baseMaxHp)
+    changed("hp-baseline-con", "HP baseline Constitution modifier", current.baselineConstitutionModifier, proposed.baselineConstitutionModifier)
+    changed("hp-maximum", "Calculated maximum HP", before.maximumHp.value, after.maximumHp.value)
+    changed("hp-current", "Calculated current HP", before.currentHp, after.currentHp)
+    changed("ac", "Armor class with selected equipment", before.armorClass.value, after.armorClass.value)
+    changed("casting-level", "Spellcasting class level", current.spellcastingClassLevel, proposed.spellcastingClassLevel)
+    fun core(value: RuleFamily) = if (value == RuleFamily.LEGACY_2014) "2014 core rules" else "2024 core rules"
+    changed("core-rules", "Core rules", core(current.rules.core), core(proposed.rules.core))
+    fun classRules(value: String) = when (value) {
+        "unconfigured" -> "Not configured"
+        "legacy-artificer-infusions-2020" -> "Legacy Artificer (2020)"
+        else -> value
+    }
+    changed("class-rules", "Class rules", classRules(current.rules.classVersion), classRules(proposed.rules.classVersion))
+}
+
+@Composable internal fun GenesisNotionStatsReview(current: ReforgeCharacter, proposed: ReforgeCharacter, replacing: Boolean) {
+    Text(if (replacing) "Reviewed stat replacements" else "Review possible stat replacements", style = MaterialTheme.typography.titleMedium)
+    Text(if (replacing) "These are the selected source statistics. Existing equipment and recorded resources remain protected."
+        else "These are the values the source would use if you allow conflicting stats to be replaced. Leave that option off to retain existing conflicting values.",
+        color = RebuildPalette.Muted)
+    notionStatReviewRows(current, proposed).forEach { row ->
+        Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("notion-review-${row.key}")) {
+            Text(row.label, style = MaterialTheme.typography.titleSmall)
+            Text("Current: ${row.current}", color = RebuildPalette.Muted, modifier = Modifier.testTag("notion-review-${row.key}-current"))
+            Text("Proposed: ${row.proposed}", color = if (row.current == row.proposed) RebuildPalette.Muted else RebuildPalette.Ice,
+                modifier = Modifier.testTag("notion-review-${row.key}-proposed"))
+        }
+    }
+    Text("Stored HP, recorded damage, temporary HP and spent resources are retained. Calculated HP can reflect reviewed capacity changes; this is not a rest.",
+        color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
 }

@@ -58,7 +58,7 @@ timeout -k 5s 35s adb -s "$astravar_serial" install overlay-target/build/outputs
 : >validation/native-stages.tsv
 run_stage() {
   local astravar_class=$1 astravar_count=$2 astravar_budget=$3 astravar_log=$4
-  local astravar_expected_version=${5:-${EXPECTED_VERSION_CODE:-51}}
+  local astravar_expected_version=${5:-${EXPECTED_VERSION_CODE:-52}}
   # Each named stage runs exactly once. A failed prerequisite stops its dependents;
   # no JUnit hash order, automatic retry, assertion suppression or data reset.
   if timeout -k 5s "${astravar_budget}s" adb -s "$astravar_serial" shell am instrument -w -r -e astravarPackage "$astravar_product" -e astravarExpectedVersion "$astravar_expected_version" -e class "com.yazsras.astravar.$astravar_class" com.yazsras.astravar.target.test/androidx.test.runner.AndroidJUnitRunner | tee "validation/$astravar_log"; then
@@ -152,7 +152,7 @@ if [ -n "${ASTRAVAR_BASELINE_APK:-}" ]; then
   python3 scripts/genesis-package-readback.py \
     --before validation/genesis-code50-package.txt \
     --after validation/genesis-upgrade-package-after.txt --package "$astravar_product" \
-    --old-version 50 --new-version "${EXPECTED_VERSION_CODE:-51}" --output validation/genesis-upgrade-package-result.json
+    --old-version 50 --new-version "${EXPECTED_VERSION_CODE:-52}" --output validation/genesis-upgrade-package-result.json
   run_stage GenesisUpgradeInstrumentationTest#verifyAfterUpgrade 1 360 native-genesis-upgrade-readback.txt
   stop_product
   copy_upgrade_stores validation/genesis-upgrade-after
@@ -201,6 +201,16 @@ python3 scripts/genesis-connected-readback.py \
   --database validation/genesis-connected/astravar-campaign-ledger.db \
   --backup-document validation/genesis-connected-backup.json --synthetic-emulator --expected-room-schema 9 \
   --output validation/genesis-connected-readback.json
+# Open an actual prepared Notion document against the existing fictional hero.
+# Preview requires backup/consent before commit and must leave every table intact.
+timeout 15s adb -s "$astravar_serial" push scripts/fixtures/native-notion-preview.json /sdcard/Download/astravar-native-notion-preview.json >/dev/null
+run_stage GenesisNotionTransferInstrumentationTest 1 480 native-genesis-notion-preview.txt
+stop_product
+copy_campaign_database validation/genesis-notion-preview
+python3 scripts/genesis-notion-preview-readback.py \
+  --before-database validation/genesis-connected/astravar-campaign-ledger.db \
+  --database validation/genesis-notion-preview/astravar-campaign-ledger.db --synthetic-emulator \
+  --output validation/genesis-notion-preview-readback.json
 # Craft only after the complete-backup proof has compared its unchanged snapshot.
 # This stage uses the same fictional hero and adds its own material and invention.
 run_stage GenesisCraftingInstrumentationTest 1 900 native-genesis-crafting.txt

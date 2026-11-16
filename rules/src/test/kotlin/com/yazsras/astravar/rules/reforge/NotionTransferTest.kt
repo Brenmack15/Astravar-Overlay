@@ -90,4 +90,19 @@ class NotionTransferTest {
         val original = transfer(listOf(item().copy(knownProperties = "Confirmed but not automated", rulesLimits = "No invented charges")))
         assertEquals(original, Json.decodeFromString<NotionCharacterTransfer>(Json.encodeToString(original)))
     }
+
+    @Test fun optionalDestinationBindingDistinguishesSameNameCharacters() {
+        val bound = transfer().let { it.copy(character = it.character.copy(targetProfileId = "different-saved-identity")) }
+        assertFailsWith<IllegalArgumentException> { planNotionCharacterTransfer(character(), bound) }
+        val correct = bound.copy(character = bound.character.copy(targetProfileId = character().id))
+        assertEquals(character().id, planNotionCharacterTransfer(character(), correct).character.id)
+    }
+
+    @Test fun nonLatinNamesDoNotCollapseToTheSameEmptyIdentity() {
+        val original = character().copy(name = "雪")
+        val different = transfer().let { it.copy(character = it.character.copy(name = "火")) }
+        assertFailsWith<IllegalArgumentException> { planNotionCharacterTransfer(original, different) }
+        val matching = different.copy(character = different.character.copy(name = "雪"))
+        assertEquals("雪", planNotionCharacterTransfer(original, matching).character.name)
+    }
 }

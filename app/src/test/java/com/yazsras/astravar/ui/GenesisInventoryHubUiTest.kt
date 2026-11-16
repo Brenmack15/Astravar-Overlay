@@ -83,6 +83,8 @@ class GenesisInventoryHubUiTest {
             compose.onNodeWithTag("genesis-inventory-item-shared:blade").assertDoesNotExist()
             compose.onNodeWithText("Add item").performClick()
             compose.runOnIdle { assertEquals(ReforgeSearchDestination.Character("actor-b", "Equipment", "Item"), opened) }
+            compose.onNodeWithTag("inventory-notion-transfer").performClick()
+            compose.runOnIdle { assertEquals(ReforgeSearchDestination.Character("actor-b", "Equipment", "NotionImport"), opened) }
             compose.onNodeWithText("Campaign items").performClick()
             compose.runOnIdle { assertTrue(sourcesOpened) }
             compose.onNodeWithText("All items").performClick()
@@ -102,6 +104,7 @@ class GenesisInventoryHubUiTest {
                 GenesisInventoryContent(entries, listOf(actor), "archived", emptyMap(), emptySet(), { error("No gameplay route expected") }, {})
             } }
             compose.onNodeWithText("Add item").assertIsNotEnabled()
+            compose.onNodeWithTag("inventory-notion-transfer").assertIsNotEnabled()
             compose.onNodeWithText("Create or review a character before adding playable equipment.").assertExists()
             compose.onNodeWithTag("genesis-inventory-item-shared:blade").performClick()
             compose.onNodeWithText("This owner is archived. Restore the saved sheet before changing this item.").assertExists()

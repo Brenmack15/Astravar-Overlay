@@ -67,3 +67,37 @@ Pending delivery returns an ordered prefix whose full serialized UTF-8 envelope 
 ### Compact 2.3 read views
 
 Existing unfiltered get_inventory/get_equipment calls remain valid. Optional holderProfileId selects the explicit committed placement relation and returns INVENTORY_BY_HOLDER_V1; it never infers a holder from display text. Results retain each item's original record identity, provenance, revision and device freshness. get_character_resources emits RESOURCE_COUNTERS_V1 containing saved resource counters only, including explicit null values, scoped to the requested profile/companion identity. Resource and inventory pages are bounded and preserve composite kind/record identity cursors. These server mirror views never establish a newer offline Android commit.
+
+
+## Project Unification diagnostics
+
+`get_owner_connection.campaignSync.connections` now includes `publishedRecordCount`
+and `synchronizationState`: `NO_READ_SCOPES`, `NO_DEVICE_RECORDS`,
+`STALE_DEVICE_MIRROR`, or `DEVICE_MIRROR_AVAILABLE`. Counts and timestamps include
+only records visible under the **current** grant; revoked categories and archive
+bodies requiring broader scopes do not contribute. `lastDeviceSyncAt` is the
+oldest visible record's device timestamp, so a fresh unrelated publication cannot
+hide stale records. `latestDevicePublicationAt` separately reports the newest.
+An authenticated empty heartbeat never changes an empty mirror into published
+gameplay.
+
+Scoped record/session responses add `synchronization` with the returned record
+count, oldest device timestamp, explicit empty/stale state and a next action.
+Paginated end-of-view reads are distinguished from an empty first view. This is
+information about that bounded authorized view, not proof that the whole phone
+is empty, online, or ready. `deviceReadiness` remains
+`UNKNOWN_UNTIL_DEVICE_REPORTS`; only the app can diagnose its local campaign,
+membership and canonical-value review. `verifiedAt` remains the server read time,
+not a substitute for device publication or a committed transaction receipt.
+
+Published records with an explicit `fields.campaignId` different from their
+authorized route are rejected before atomic publication. The same check applies
+to prepared operations and applied device receipt records. This does not infer
+membership from a name, create campaigns or broaden grants.
+
+Before publishing a reviewed Genesis playable actor, Android validates the
+selected character's source projections against its authoritative saved revision
+and fingerprint using the existing scoped reader. Divergent HP, abilities,
+resources or equipment stop publication for reconciliation; synchronization does
+not rewrite either store to hide the conflict. An unrelated campaign is not
+scanned or exported for this check.

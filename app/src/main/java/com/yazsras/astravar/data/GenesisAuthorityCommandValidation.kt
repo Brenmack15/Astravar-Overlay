@@ -66,6 +66,7 @@ internal suspend fun genesisRequireAuthorityCommand(db: CampaignLedgerDb, receip
             require(instances.all { readGenesisAuthorityItem(db, it.id)?.activationCommandId == receipt.commandId }) { "Created item lost its original activation decision." }
             genesisRequireAffectedActor(db, requireNotNull(db.genesisAuthorityDao().actor(outcome.character.id)))
         }
+        "notion-transfer" -> genesisRequireNotionTransfer(db, receipt)
         "craft-items" -> genesisRequireCraftCommand(db, receipt)
         GENESIS_ENCOUNTER_COMMAND -> genesisRequireEncounterCommand(db, receipt)
         else -> error("Unsupported connected command kind.")

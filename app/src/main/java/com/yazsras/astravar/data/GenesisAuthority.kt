@@ -57,13 +57,15 @@ class GenesisAuthorityRepository(private val db: CampaignLedgerDb, private val r
      * Both steps still require the owner's separate membership and authority review.
      */
     suspend fun prepareOwnerLocalCampaign(commandId: String = UUID.randomUUID().toString()): GenesisCampaignRecord = transaction {
+        val request = campaignJson.encodeToString(listOf("local-campaign", "Local campaign"))
+        // Validate replay identity even when preparation is already complete. An
+        // existing campaign must not make another operation's command ID valid.
+        retry(commandId, "prepare-owner-local-campaign", request)?.let {
+            return@transaction campaignJson.decodeFromString<GenesisCampaignRecord>(it.outcomeJson)
+        }
         dao.campaign("local-campaign")?.let {
             require(!it.archived) { "The connected local campaign is archived. Restore it before linking characters." }
             return@transaction it
-        }
-        val request = campaignJson.encodeToString(listOf("local-campaign", "Local campaign"))
-        retry(commandId, "prepare-owner-local-campaign", request)?.let {
-            return@transaction campaignJson.decodeFromString<GenesisCampaignRecord>(it.outcomeJson)
         }
         val now = System.currentTimeMillis()
         val value = GenesisCampaignRecord("local-campaign", "Local campaign",

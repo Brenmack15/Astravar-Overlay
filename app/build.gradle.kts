@@ -13,8 +13,8 @@ android {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(51)
-        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("4.0.0-genesis2")
+        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(52)
+        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("4.0.0-unification1")
     }
     signingConfigs {
         create("owner") {
@@ -52,12 +52,19 @@ android {
     lint { abortOnError = true; checkReleaseBuilds = true }
 }
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
-// Robolectric retains framework/font caches per test classloader. Isolate classes so
-// the complete UI suite remains bounded locally and on the standard Actions runner.
+// Robolectric retains framework/font caches per test classloader. Measured two-worker,
+// four-class batches bound reuse; full debug/release validation includes screenshots.
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     maxHeapSize = "1536m"
-    maxParallelForks = 1
-    forkEvery = 1
+    // Adopt the fastest repeatedly measured setting after complete debug/release
+    // validation. Use 1/1 for per-class isolation diagnostics; never unbounded reuse.
+    val testForks = providers.gradleProperty("astravarTestForks").map(String::toInt).getOrElse(2)
+    val testForkEvery = providers.gradleProperty("astravarTestForkEvery").map(String::toLong).getOrElse(4L)
+    require(testForks in 1..2 && testForkEvery in 1L..8L) { "Test benchmark settings exceed bounded runner limits" }
+    maxParallelForks = testForks
+    forkEvery = testForkEvery
+    inputs.property("astravarTestForks", testForks)
+    inputs.property("astravarTestForkEvery", testForkEvery)
     providers.gradleProperty("astravarScreenshots").orNull?.let {
         systemProperty("astravar.screenshots", it)
     }
