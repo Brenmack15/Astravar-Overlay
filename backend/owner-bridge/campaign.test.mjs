@@ -234,3 +234,61 @@ test('V2 compact resource view preserves unknowns and sources while omitting unr
  await f.publish(Array.from({length:4},(_,n)=>envelope('companion-resource','eek-extra-'+n,{id:'eek-extra-'+n,companionId:'fixture-eek',name:'Counter '+n,current:null,maximum:null})));let after='',all=[];do{const page=await f.sync.resourceCounters(connector,campaign,{profileId:'fixture-eek',limit:2,after});all.push(...page.records);after=page.nextCursor;}while(after);assert.equal(all.length,5,'bounded resource branches must apply cursor before their LIMIT');assert.equal(new Set(all.map(r=>r.recordId)).size,5);
  const characterOnly=await setup(t,{readScopes:['character'],writeScopes:['character']});await fails(characterOnly.sync.resourceCounters(connector,campaign,{profileId:profile}),'READ_SCOPE_DENIED');
 });
+
+test('V2 empty authenticated heartbeat never reports published gameplay, while scoped MCP reads explain next action',async t=>{
+ const f=await setup(t);
+ const grant=await f.sync.authorize(f.principal,campaign);
+ await f.sync.publish(f.principal,campaign,{commandId:uuid(),records:[],snapshotFingerprint:(await f.sync.mirrorSnapshot(grant)).fingerprint});
+ const connection=(await f.sync.getConnection(connector)).connections[0];
+ assert.equal(connection.synchronizationState,'NO_DEVICE_RECORDS');
+ assert.equal(connection.publishedRecordCount,0);assert.equal(connection.lastDeviceSyncAt,null);assert.equal(connection.stale,true);
+ for(const name of ['get_party','get_campaign_state']){
+  const request=new Request('https://fixture-owner.example/mcp',{method:'POST',headers:{'Content-Type':'application/json','oai-authenticated-user-id':ownerId},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:{campaignId:campaign}}})});
+  const response=await (await handleWorker(request,{DB:f.db,OWNER_SITE_USER_ID:ownerId})).json();
+  assert.equal(response.result.isError,false);
+  const result=response.result.structuredContent??JSON.parse(response.result.content[0].text);
+  assert.deepEqual(result.records,[]);assert.equal(result.synchronization.state,'EMPTY_SCOPED_VIEW');
+  assert.equal(result.synchronization.oldestDeviceSyncAt,null);
+  assert.match(result.synchronization.nextAction,/membership/);
+  assert.equal(result.synchronization.deviceReadiness,'UNKNOWN_UNTIL_DEVICE_REPORTS');
+ }
+});
+
+test('V2 connection diagnostics count only currently authorized rows and use the oldest visible freshness',async t=>{
+ const f=await setup(t);await f.publish([profileRecord()]);
+ const profileTime=f.now();f.setTime(profileTime+300001);await f.publish([itemRecord()]);
+ let connection=(await f.sync.getConnection(connector)).connections[0];
+ assert.equal(connection.publishedRecordCount,2);assert.equal(connection.synchronizationState,'STALE_DEVICE_MIRROR');
+ assert.equal(connection.lastDeviceSyncAt,profileTime);assert.equal(connection.latestDevicePublicationAt,f.now());
+ await f.sync.configureGrant(f.principal,campaign,{commandId:uuid(),expectedRevision:1,autoSyncScopes:[],readScopes:['inventory'],writeScopes:[]});
+ connection=(await f.sync.getConnection(connector)).connections[0];
+ assert.equal(connection.publishedRecordCount,1);assert.equal(connection.synchronizationState,'DEVICE_MIRROR_AVAILABLE');
+ assert.equal(connection.lastDeviceSyncAt,f.now());
+ await f.sync.configureGrant(f.principal,campaign,{commandId:uuid(),expectedRevision:2,autoSyncScopes:[],readScopes:['inventory'],writeScopes:[]});
+ const after='item|zzzz';
+ assert.equal((await f.sync.read(connector,campaign,{kinds:['item'],after})).synchronization.state,'END_OF_SCOPED_VIEW');
+ await f.sync.configureGrant(f.principal,campaign,{commandId:uuid(),expectedRevision:3,autoSyncScopes:[],readScopes:[],writeScopes:[]});
+ connection=(await f.sync.getConnection(connector)).connections[0];
+ assert.equal(connection.publishedRecordCount,0);assert.equal(connection.synchronizationState,'NO_READ_SCOPES');
+ assert.equal(connection.lastDeviceSyncAt,null);
+ assert.equal((await f.sync.session(connector,campaign)).synchronization.state,'NO_READ_SCOPES');
+});
+
+test('V2 publication and proposed records cannot contradict the authorized campaign identity',async t=>{
+ const f=await setup(t);
+ const wrong={...walletRecord(),fields:{...walletRecord().fields,campaignId:'foreign-private-campaign'}};
+ await fails(f.publish([profileRecord(),wrong]),'CAMPAIGN_IDENTITY_MISMATCH');
+ assert.deepEqual((await f.sync.read(connector,campaign)).records,[],'mixed publication must be atomic');
+ await fails(f.submit([op('set_record','wallet','foreign-wallet',{name:'Foreign wallet',campaignId:'foreign-private-campaign',gold:1},0)]),'CAMPAIGN_IDENTITY_MISMATCH');
+ assert.equal((await f.sync.pending(f.principal,campaign)).commands.length,0);
+});
+
+test('V2 narrowed continuity diagnostic never counts retained private archive bodies',async t=>{
+ const f=await setup(t);await f.publish([envelope('reference','archive:fixture-private',{referenceId:'fixture-private',body:'Fictional cross-category history',campaignId:campaign})]);
+ assert.equal((await f.sync.getConnection(connector)).connections[0].publishedRecordCount,1);
+ await f.sync.configureGrant(f.principal,campaign,{commandId:uuid(),expectedRevision:1,autoSyncScopes:[],readScopes:['continuity'],writeScopes:[]});
+ const connection=(await f.sync.getConnection(connector)).connections[0];
+ assert.equal(connection.publishedRecordCount,0);assert.equal(connection.lastDeviceSyncAt,null);
+ assert.equal(connection.synchronizationState,'NO_DEVICE_RECORDS');
+ assert.equal((await f.sync.read(connector,campaign)).records.length,0);
+});

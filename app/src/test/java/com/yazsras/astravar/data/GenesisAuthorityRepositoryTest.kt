@@ -76,6 +76,34 @@ class GenesisAuthorityRepositoryTest {
         assertEquals(prepared.id, authority.actor(actor.actor.actorId)?.campaignId)
     }
 
+    @Test fun campaignPublicationRejectsDivergentCanonicalValuesWithoutRewritingEitherStore() = runBlocking {
+        val world = authority.prepareOwnerLocalCampaign("fixture-publication-prepare")
+        val actor = authority.createActor("Fictional verified scout", GenesisActorRole.PLAYER, world.id,
+            playable = configured("fixture-publication-scout", "Fictional verified scout"), commandId = "fixture-publication-create")
+        val domain = CampaignSyncDomain(db)
+        assertTrue(domain.snapshot(world.id).any { it.recordId == actor.actor.actorId && it.kind == "character-profile" })
+        val saved = requireNotNull(playable.get(actor.actor.actorId))
+        // Isolated fixture corruption simulates an interrupted older writer. The
+        // publication path must not silently repair or export these stale values.
+        db.openHelper.writableDatabase.execSQL("UPDATE character_profiles SET currentHp = 1 WHERE id = ?", arrayOf(actor.actor.actorId))
+        val before = profile(actor.actor.actorId)
+        rejected { domain.snapshot(world.id) }
+        assertEquals(before, profile(actor.actor.actorId))
+        assertEquals(saved, playable.get(actor.actor.actorId))
+        assertTrue(domain.snapshot("fictional-unrelated-campaign").isEmpty())
+    }
+
+    @Test fun preparedOwnerCampaignStillRejectsAnotherOperationsCommandIdentity() = runBlocking {
+        val prepared = authority.prepareOwnerLocalCampaign("fixture-owner-preparation")
+        authority.createCampaign("Unrelated fictional campaign", commandId = "fixture-other-campaign")
+        val before = snapshot()
+        rejected { authority.prepareOwnerLocalCampaign("fixture-other-campaign") }
+        rejected { authority.prepareOwnerLocalCampaign("") }
+        assertEquals(before, snapshot())
+        assertEquals(prepared, authority.prepareOwnerLocalCampaign("fixture-owner-preparation"))
+        assertEquals(prepared, authority.prepareOwnerLocalCampaign("fixture-another-preparation"))
+    }
+
     @Test fun campaignActorEquipmentQuantityAndTransferRemainConnectedAfterReopen() = runBlocking {
         val world = authority.createCampaign("Fictional Lantern Coast", "Synthetic campaign", "lifecycle-campaign")
         val first = authority.createActor("Fictional scout", GenesisActorRole.PLAYER, world.id,

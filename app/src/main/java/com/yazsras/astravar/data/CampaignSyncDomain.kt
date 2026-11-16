@@ -60,6 +60,18 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         fun effectiveCampaign(actorId: String?, storedCampaign: String): String? =
             if (actorId != null && actorId in associations) associations.getValue(actorId).campaignId else storedCampaign
         val explicitProfiles = associations.values.filter { it.campaignId == campaignId }.map { it.actorId }
+        // A reviewed playable actor owns its current mechanics. Do not publish
+        // stale source projections merely because campaign membership is valid.
+        // This reads only each scoped character, never a complete database export.
+        associations.values.filter { it.campaignId == campaignId && it.playable }.forEach { actor ->
+            val saved = requireNotNull(db.reforgeDao().character(actor.actorId)?.saved()) {
+                "The connected playable character is missing. Review its shared values before synchronizing."
+            }
+            require(saved.character.id == actor.actorId && saved.revision == saved.character.revision) {
+                "Connected character identity or revision needs review before synchronizing."
+            }
+            genesisRequireProjection(db, actor.actorId, saved)
+        }
         val sheets = allSheets.filter { effectiveCampaign(it.profileId, it.campaignId) == campaignId && it.profileId !in diagnostics }
             .map { it.copy(campaignId = campaignId) }
         val scopedReferences = db.partyDao().allReferences().filter { it.campaignId == campaignId }
