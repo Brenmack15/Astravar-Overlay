@@ -331,9 +331,9 @@ class CampaignConnectionClient internal constructor(private val context: Context
             connected, value.deviceId.isNotBlank(), value.campaignId.isNotBlank(), value.revokePending,
             selectedCampaign != null && !selectedCampaign.archived, actor != null, actor?.campaignId == value.campaignId,
             actor?.campaignId != null && actor.campaignId != value.campaignId, actor?.playable == true,
-            activeRead(value).isNotEmpty(), value.grantBody != null, eligible.size, verified, pendingPublications + pendingRemovals,
+            activeRead(value).isNotEmpty(), value.grantBody != null, eligible.size, verified, pendingPublications,
             pendingDevice + if (moreServerPending) 1 else 0, pendingReceipts, commands.any { it.state in setOf("CONFLICT", "DECISION_CONFLICT") },
-            value.lastError, value.lastDeviceSyncAt, now()))
+            value.lastError, value.lastDeviceSyncAt, now(), pendingRemovals = pendingRemovals))
         return buildJsonObject {
             put("connected", connected); put("origin", value.origin)
             put("readiness", readiness.name); put("readinessTitle", readiness.title); put("readinessDetail", readiness.detail)

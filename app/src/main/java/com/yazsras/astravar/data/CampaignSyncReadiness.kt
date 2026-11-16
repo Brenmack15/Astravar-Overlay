@@ -15,7 +15,7 @@ internal enum class CampaignSyncReadiness(val title: String, val detail: String)
     NO_ELIGIBLE_RECORDS("Connected · no eligible records", "No saved records are publishable within this campaign and its current read permissions."),
     DEVICE_COMMIT_PENDING("Gameplay update pending on device", "A server-delivered update still needs device approval or commitment. It is not a completed save."),
     RECEIPT_PENDING("Saved locally · receipt verification pending", "The local transaction is saved, but its server receipt and independent readback still need verification."),
-    PUBLICATION_PENDING("Records awaiting verified delivery", "Eligible records have not all passed independent server readback. Sync now or allow background recovery."),
+    PUBLICATION_PENDING("Records awaiting verified delivery", "New or changed records and removals have not all passed independent server readback. Sync now or allow background recovery."),
     CONFLICT("Synchronization conflict", "Review changed revisions or permissions. Existing records and immutable receipts are retained."),
     RETRY_REQUIRED("Synchronization retry required", "The last attempt did not verify completion. Queued work is retained for the next connected attempt."),
     STALE("Records verified earlier · refresh required", "The last complete record verification is older than 5 minutes. Sync now to check current server state."),
@@ -28,7 +28,8 @@ internal data class CampaignSyncReadinessInput(
     val actorCampaignMatches: Boolean, val actorHasOtherCampaign: Boolean, val actorPlayable: Boolean,
     val readAccess: Boolean, val grantPending: Boolean, val eligible: Int, val verified: Int,
     val pendingPublications: Int, val pendingDevice: Int, val pendingReceipts: Int,
-    val conflict: Boolean, val error: String, val verifiedAt: Long, val now: Long
+    val conflict: Boolean, val error: String, val verifiedAt: Long, val now: Long,
+    val pendingRemovals: Int = 0
 )
 
 internal fun campaignSyncReadiness(input: CampaignSyncReadinessInput): CampaignSyncReadiness = with(input) {
@@ -40,6 +41,10 @@ internal fun campaignSyncReadiness(input: CampaignSyncReadinessInput): CampaignS
         error in setOf("ACCESS_DENIED", "READ_SCOPE_DENIED", "WRITE_SCOPE_DENIED", "CAMPAIGN_NOT_AUTHORIZED", "PRIVATE_GATEWAY_AUTH_REQUIRED") || !readAccess -> CampaignSyncReadiness.PERMISSION_DENIED
         conflict || error.contains("CONFLICT") || error == "GRANT_CHANGED" -> CampaignSyncReadiness.CONFLICT
         grantPending -> CampaignSyncReadiness.AUTHORIZATION_PENDING
+        // Removing a previously published identity is still necessary when the
+        // last local actor was removed or unassigned. Never ask for enrollment
+        // before completing that scoped removal from the remote mirror.
+        pendingRemovals > 0 -> if (error.isNotBlank()) CampaignSyncReadiness.RETRY_REQUIRED else CampaignSyncReadiness.PUBLICATION_PENDING
         hasActor && actorHasOtherCampaign -> CampaignSyncReadiness.CAMPAIGN_MISMATCH
         !campaignPrepared && (hasActor || eligible == 0) -> CampaignSyncReadiness.CAMPAIGN_NOT_PREPARED
         hasActor && !actorCampaignMatches -> CampaignSyncReadiness.MEMBERSHIP_REQUIRED

@@ -39,6 +39,17 @@ class CampaignSyncReadinessTest {
         check(CampaignSyncReadiness.CONFLICT, ready.copy(error = "REVISION_CONFLICT"))
         check(CampaignSyncReadiness.RETRY_REQUIRED, ready.copy(error = "REMOTE_UNAVAILABLE"))
     }
+    @Test fun pendingRemovalIsVisibleWithoutRequiringNewCampaignEnrollment() {
+        val removedLegacyActor = ready.copy(hasActor = false, campaignPrepared = false,
+            eligible = 0, verified = 0, pendingRemovals = 1)
+        check(CampaignSyncReadiness.PUBLICATION_PENDING, removedLegacyActor)
+        check(CampaignSyncReadiness.PUBLICATION_PENDING,
+            removedLegacyActor.copy(hasActor = true, actorCampaignMatches = false))
+        check(CampaignSyncReadiness.RETRY_REQUIRED, removedLegacyActor.copy(error = "REMOTE_UNAVAILABLE"))
+        check(CampaignSyncReadiness.PERMISSION_DENIED, removedLegacyActor.copy(readAccess = false))
+        check(CampaignSyncReadiness.AUTHORIZATION_REQUIRED, removedLegacyActor.copy(connected = false))
+    }
+
     @Test fun onlyFreshCompleteReadbackIsVerified() {
         check(CampaignSyncReadiness.VERIFIED, ready)
         check(CampaignSyncReadiness.STALE, ready.copy(now = 902_000))
