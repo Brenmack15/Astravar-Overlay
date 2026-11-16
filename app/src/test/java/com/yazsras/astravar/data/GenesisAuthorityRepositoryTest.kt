@@ -87,7 +87,9 @@ class GenesisAuthorityRepositoryTest {
         // publication path must not silently repair or export these stale values.
         db.openHelper.writableDatabase.execSQL("UPDATE character_profiles SET currentHp = 1 WHERE id = ?", arrayOf(actor.actor.actorId))
         val before = profile(actor.actor.actorId)
-        rejected { domain.snapshot(world.id) }
+        val failure = runCatching { domain.snapshot(world.id) }.exceptionOrNull()
+        assertTrue(failure is CampaignCanonicalReviewRequired)
+        assertEquals(actor.actor.actorId, (failure as CampaignCanonicalReviewRequired).actorId)
         assertEquals(before, profile(actor.actor.actorId))
         assertEquals(saved, playable.get(actor.actor.actorId))
         assertTrue(domain.snapshot("fictional-unrelated-campaign").isEmpty())

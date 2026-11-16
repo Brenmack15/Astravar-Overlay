@@ -76,14 +76,19 @@ internal fun genesisProjectionErrors(actor: GenesisActorAuthority, saved: Reforg
     }
 }
 internal suspend fun genesisRequireProjection(db: CampaignLedgerDb, actorId: String, saved: ReforgeSavedCharacter, ignored: Set<String> = emptySet()) {
-    val actor = db.genesisAuthorityDao().actor(actorId)?.takeIf { it.playable } ?: return
+    val errors = genesisReadbackProjectionErrors(db, actorId, saved, ignored)
+    require(errors.isEmpty()) { "Connected records need explicit reconciliation before this change: ${errors.joinToString(" ")}" }
+}
+
+/** Shared scoped readback; callers may distinguish reviewable divergence from a storage failure. */
+internal suspend fun genesisReadbackProjectionErrors(db: CampaignLedgerDb, actorId: String, saved: ReforgeSavedCharacter, ignored: Set<String> = emptySet()): List<String> {
+    val actor = db.genesisAuthorityDao().actor(actorId)?.takeIf { it.playable } ?: return emptyList()
     val source = CampaignLedgerRepository(db).readCharacterSnapshot(actorId)
     val records = CampaignRecordsExport(characterProfiles = listOf(source.profile), characterAbilities = source.abilities,
         partySheets = listOfNotNull(source.sheet), placements = source.placements,
         companionStates = listOfNotNull(db.recordsDao().companion(actorId)), entities = listOfNotNull(db.recordsDao().entity(actorId)),
         companionResources = db.recordsDao().allCompanionResources().filter { it.companionId == actorId })
-    val errors = genesisProjectionErrors(actor, saved, LedgerExport(exportedAt = 0, items = source.items, events = emptyList(), records = records), ignored + genesisProjectionIgnored(db))
-    require(errors.isEmpty()) { "Connected records need explicit reconciliation before this change: ${errors.joinToString(" ")}" }
+    return genesisProjectionErrors(actor, saved, LedgerExport(exportedAt = 0, items = source.items, events = emptyList(), records = records), ignored + genesisProjectionIgnored(db))
 }
 
 /** Runs inside the caller's Room transaction after canonical history insertion. No second database or async dual write. */
