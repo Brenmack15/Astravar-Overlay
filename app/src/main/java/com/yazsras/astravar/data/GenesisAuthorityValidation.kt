@@ -130,7 +130,11 @@ internal fun genesisAuthorityBackupErrors(
                 }
                 itemProofs[receipt.commandId] = outcome
             }
-            "notion-transfer" -> genesisValidateNotionTransfer(receipt, playableHistory, receipts, campaign.records.receipts.associateBy { it.commandId })
+            "notion-transfer" -> {
+                val selected = campaignJson.decodeFromString<NotionTransferRequest>(receipt.requestJson).selected
+                require(selected.character.id in saved) { "Imported character identity is missing from portable playable records." }
+                genesisValidateNotionTransfer(receipt, playableHistory, receipts, campaign.records.receipts.associateBy { it.commandId })
+            }
             "craft-items" -> {
                 val outcome = genesisValidateCraftReceipt(receipt, GenesisCraftingEvidence(campaign.events, campaign.records.audit,
                     campaign.records.receipts, campaign.records.crafts, campaign.records.consumptions, playable.changes, campaign.records.links))

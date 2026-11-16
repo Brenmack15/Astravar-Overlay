@@ -17,6 +17,13 @@ internal fun genesisValidateNotionTransfer(
     val selected = request.selected
     require(selected.revision == selected.character.revision && !selected.character.archived)
     validateCharacter(selected.character)
+    // A no-op import has no new playable child. Its frozen starting state must
+    // still be anchored to the one actual immutable mechanical revision.
+    val selectedHistory = changes.values.filter { it.profileId == selected.character.id &&
+        it.resultingRevision == selected.revision && it.outcomeType in setOf("CHARACTER", "ACTION", "INVENTORY") }
+    require(selectedHistory.size == 1 && reforgeChangeCharacter(selectedHistory.single()) == selected) {
+        "Import selected revision has no matching immutable playable history."
+    }
     val plan = planNotionCharacterTransfer(selected.character, request.transfer, request.choices)
     require(outcome.itemsAdded == plan.added.size && outcome.itemsPreviouslyPresent == plan.alreadyPresent.size &&
         outcome.warnings == plan.warnings) { "Import summary differs from its reviewed source." }
@@ -98,6 +105,13 @@ internal suspend fun genesisRequireNotionTransfer(db: CampaignLedgerDb, receipt:
     val authority = mutableMapOf<String, GenesisAuthorityReceipt>()
     val changes = mutableMapOf<String, ReforgeChange>()
     val records = mutableMapOf<String, CommandReceipt>()
+    // Read only IDs for this selected revision, then use the existing chunked
+    // reader for its snapshots. Never load another character or complete backup.
+    val selectedHistoryIds = db.openHelper.writableDatabase.query(
+        "SELECT commandId FROM reforge_changes WHERE profileId=? AND resultingRevision=? AND outcomeType IN ('CHARACTER','ACTION','INVENTORY')",
+        arrayOf<Any>(request.selected.character.id, request.selected.revision)
+    ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getString(0)) } }
+    selectedHistoryIds.forEach { id -> genesisNotionChange(db, id)?.let { changes[it.commandId] = it } }
     genesisNotionChange(db, genesisChild(receipt.commandId, "notion-playable"))?.let { changes[it.commandId] = it }
     db.recordsDao().receipt(genesisChild(receipt.commandId, "notion-wallet"))?.let { records[it.commandId] = it }
     plan.character.itemDefinitions.filter { candidate -> request.selected.character.itemDefinitions.none { it.id == candidate.id } }.forEach { definition ->

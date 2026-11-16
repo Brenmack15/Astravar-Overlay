@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.rules.reforge.*
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.encodeToString
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -172,6 +173,57 @@ class NotionTransferRepositoryTest {
         assertEquals(7, db.recordsDao().characterProfile(original.character.id)?.currentHp)
         assertEquals(3, result.profile.character.temporaryHp)
         assertEquals(original.character.spellSlots, result.profile.character.spellSlots)
+        assertTrue(backup.previewRestore(backup.exportWithProof().text).valid)
+    }
+
+    private fun noOpReceipt(selected: ReforgeSavedCharacter, id: String): GenesisAuthorityReceipt {
+        val request = NotionTransferRequest(selected, transfer(), NotionTransferChoices(stats = false, items = false),
+            false, "a".repeat(64))
+        val plan = planNotionCharacterTransfer(selected.character, request.transfer, request.choices)
+        val requestJson = campaignJson.encodeToString(request)
+        val outcome = NotionTransferOutcome(selected, 0, 0, false, false, plan.warnings)
+        return GenesisAuthorityReceipt(id, "notion-transfer", genesisAuthorityFingerprint("notion-transfer", requestJson),
+            requestJson, campaignJson.encodeToString(outcome), 100)
+    }
+
+    @Test fun noOpRestoreRejectsPhantomActorEvenWhenParentFingerprintIsValid() = runBlocking {
+        val empty = backup.snapshot()
+        val phantom = ReforgeSavedCharacter(ReforgeCharacter("fictional-phantom", "Fictional maker", revision = 1),
+            1, ReforgeOrigin(), 1, 1)
+        val receipt = noOpReceipt(phantom, "fictional-phantom-import")
+        val tampered = empty.copy(authority = empty.authority.copy(receipts = listOf(receipt)))
+        val preview = backup.previewRestore(genesisAuthorityBackupJson(tampered))
+        assertFalse(preview.valid)
+        assertTrue(preview.conflicts.any { it.contains("character identity is missing") })
+        assertEquals(empty, backup.snapshot())
+    }
+
+    @Test fun noOpRestoreRejectsFabricatedStateOrRevisionForAnExistingIdentity() = runBlocking {
+        val original = actor()
+        val before = backup.snapshot()
+        val forged = listOf(original.copy(character = original.character.copy(notes = "Invented prior state")),
+            original.copy(revision = 999, character = original.character.copy(revision = 999)))
+        forged.forEachIndexed { index, selected ->
+            val receipt = noOpReceipt(selected, "fictional-fabricated-import-$index")
+            val tampered = before.copy(authority = before.authority.copy(receipts = before.authority.receipts + receipt))
+            val preview = backup.previewRestore(genesisAuthorityBackupJson(tampered))
+            assertFalse(preview.valid)
+            assertTrue(preview.conflicts.any { it.contains("matching immutable playable history") })
+        }
+        assertEquals(before, backup.snapshot())
+    }
+
+    @Test fun genuineNoOpAndRepeatedImportProofSurviveLaterCharacterEdits() = runBlocking {
+        val original = actor()
+        val noOpChoices = NotionTransferChoices(stats = false, items = false)
+        val frozenProof = proof()
+        val first = importer.commit(original, transfer(), noOpChoices, false, frozenProof, "fictional-noop-import")
+        assertEquals(original, first.profile)
+        val repeated = importer.commit(original, transfer(), noOpChoices, false, proof(), "fictional-noop-repeat")
+        assertEquals(first.profile, repeated.profile)
+        playable.save(original.character.id, original.revision, original.character.copy(notes = "Later independent note"),
+            "Later note", "fictional-note-after-noop")
+        assertEquals(first, importer.commit(original, transfer(), noOpChoices, false, frozenProof, "fictional-noop-import"))
         assertTrue(backup.previewRestore(backup.exportWithProof().text).valid)
     }
 
