@@ -1,0 +1,40 @@
+{
+  "format": "astravar-notion-character-transfer-v1",
+  "transferId": "native-notion-preview-only",
+  "capturedDate": "2026-11-16",
+  "character": {
+    "name": "Genesis Native Hero",
+    "ownerLabel": "Genesis Native Hero",
+    "sourceUrl": "https://app.notion.com/p/11111111111111111111111111111111",
+    "level": 1,
+    "species": "Fictional",
+    "className": "Fighter",
+    "subclass": "Unconfigured",
+    "permanentAbilities": {"STR": 10, "DEX": 10, "CON": 10, "INT": 10, "WIS": 10, "CHA": 10}
+  },
+  "inventory": [
+    {
+      "sourceId": "native-preview-lantern",
+      "sourceUrl": "https://app.notion.com/p/22222222222222222222222222222222",
+      "name": "Native Notion Preview Lantern",
+      "category": "Equipment",
+      "holder": "Genesis Native Hero",
+      "state": "Carried",
+      "evidence": "Confirmed",
+      "quantity": 1,
+      "knownProperties": "Fictional preview fixture with no mechanical effects."
+    },
+    {
+      "sourceId": "native-preview-consumed-chalk",
+      "sourceUrl": "https://app.notion.com/p/33333333333333333333333333333333",
+      "name": "Native Notion Consumed Chalk",
+      "category": "Equipment",
+      "holder": "Genesis Native Hero",
+      "state": "Consumed",
+      "evidence": "Confirmed",
+      "quantity": 1
+    }
+  ],
+  "currency": [],
+  "provisionalGpEquivalent": null
+}

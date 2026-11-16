@@ -201,6 +201,16 @@ python3 scripts/genesis-connected-readback.py \
   --database validation/genesis-connected/astravar-campaign-ledger.db \
   --backup-document validation/genesis-connected-backup.json --synthetic-emulator --expected-room-schema 9 \
   --output validation/genesis-connected-readback.json
+# Open an actual prepared Notion document against the existing fictional hero.
+# Preview requires backup/consent before commit and must leave every table intact.
+timeout 15s adb -s "$astravar_serial" push scripts/fixtures/native-notion-preview.json /sdcard/Download/astravar-native-notion-preview.json >/dev/null
+run_stage GenesisNotionTransferInstrumentationTest 1 480 native-genesis-notion-preview.txt
+stop_product
+copy_campaign_database validation/genesis-notion-preview
+python3 scripts/genesis-notion-preview-readback.py \
+  --before-database validation/genesis-connected/astravar-campaign-ledger.db \
+  --database validation/genesis-notion-preview/astravar-campaign-ledger.db --synthetic-emulator \
+  --output validation/genesis-notion-preview-readback.json
 # Craft only after the complete-backup proof has compared its unchanged snapshot.
 # This stage uses the same fictional hero and adds its own material and invention.
 run_stage GenesisCraftingInstrumentationTest 1 900 native-genesis-crafting.txt
