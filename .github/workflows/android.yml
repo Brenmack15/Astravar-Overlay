@@ -1,7 +1,5 @@
 name: Bounded Android verification
 on:
-  push:
-    branches: ['feat/astravar-android', 'feat/astravar-android/**', 'feat/astravar-inventory-mvp-v170', 'feat/astravar-2.0-integrated', 'feat/astravar-2.0-ui-rebuild']
   workflow_call:
   workflow_dispatch:
     inputs:
@@ -23,22 +21,20 @@ concurrency:
   cancel-in-progress: true
 jobs:
   verify:
-    # The 2.1 branch has a complete native/update verification workflow. Keep
-    # historical branch checks available without running the legacy test path twice.
-    if: github.head_ref != 'feat/astravar-2.1-player-first' && github.ref_name != 'feat/astravar-2.1-player-first' && github.head_ref != 'feat/astravar-3.0-reforge' && github.ref_name != 'feat/astravar-3.0-reforge'
+    # This checked-out source is Genesis regardless of the caller's branch name.
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && 180 || 150 }}
+    timeout-minutes: 180
     env:
       REUSE_RUN_ID: ${{ inputs.reuse_run_id || '0' }}
       ASTRAVAR_SOURCE_BRANCH: ${{ github.head_ref || github.ref_name }}
       # The Reforge workflow is the exact-head full rules/debug/release/lint gate.
       # Run native acceptance concurrently instead of duplicating that 30-minute
       # regression batch before the first touch on every 3.1 candidate.
-      REFORGE_FULL_GATE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-3.1-') || startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') }}
-      GENESIS_GATE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') }}
-      EXPECTED_VERSION_NAME: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '4.0.0-unification1' || '3.2.0-rc1' }}
-      EXPECTED_VERSION_CODE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '52' || '49' }}
-      INVENTORY_BETA: ${{ github.head_ref == 'feat/astravar-inventory-mvp-v170' || github.ref_name == 'feat/astravar-inventory-mvp-v170' || github.head_ref == 'feat/astravar-2.0-integrated' || github.ref_name == 'feat/astravar-2.0-integrated' || github.head_ref == 'feat/astravar-2.0-ui-rebuild' || github.ref_name == 'feat/astravar-2.0-ui-rebuild' }}
+      REFORGE_FULL_GATE: 'true'
+      GENESIS_GATE: 'true'
+      EXPECTED_VERSION_NAME: '4.0.0-unification1'
+      EXPECTED_VERSION_CODE: '52'
+      INVENTORY_BETA: 'false'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

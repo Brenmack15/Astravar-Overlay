@@ -58,7 +58,7 @@ timeout -k 5s 35s adb -s "$astravar_serial" install overlay-target/build/outputs
 : >validation/native-stages.tsv
 run_stage() {
   local astravar_class=$1 astravar_count=$2 astravar_budget=$3 astravar_log=$4
-  local astravar_expected_version=${5:-${EXPECTED_VERSION_CODE:-51}}
+  local astravar_expected_version=${5:-${EXPECTED_VERSION_CODE:-52}}
   # Each named stage runs exactly once. A failed prerequisite stops its dependents;
   # no JUnit hash order, automatic retry, assertion suppression or data reset.
   if timeout -k 5s "${astravar_budget}s" adb -s "$astravar_serial" shell am instrument -w -r -e astravarPackage "$astravar_product" -e astravarExpectedVersion "$astravar_expected_version" -e class "com.yazsras.astravar.$astravar_class" com.yazsras.astravar.target.test/androidx.test.runner.AndroidJUnitRunner | tee "validation/$astravar_log"; then
@@ -152,7 +152,7 @@ if [ -n "${ASTRAVAR_BASELINE_APK:-}" ]; then
   python3 scripts/genesis-package-readback.py \
     --before validation/genesis-code50-package.txt \
     --after validation/genesis-upgrade-package-after.txt --package "$astravar_product" \
-    --old-version 50 --new-version "${EXPECTED_VERSION_CODE:-51}" --output validation/genesis-upgrade-package-result.json
+    --old-version 50 --new-version "${EXPECTED_VERSION_CODE:-52}" --output validation/genesis-upgrade-package-result.json
   run_stage GenesisUpgradeInstrumentationTest#verifyAfterUpgrade 1 360 native-genesis-upgrade-readback.txt
   stop_product
   copy_upgrade_stores validation/genesis-upgrade-after

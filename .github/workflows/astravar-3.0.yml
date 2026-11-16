@@ -12,9 +12,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 100
     env:
-      GENESIS_GATE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') }}
-      EXPECTED_VERSION_NAME: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '4.0.0-unification1' || '3.2.0-rc1' }}
-      EXPECTED_VERSION_CODE: ${{ startsWith(github.head_ref || github.ref_name, 'feat/astravar-project-genesis') && '52' || '49' }}
+      GENESIS_GATE: 'true'
+      EXPECTED_VERSION_NAME: '4.0.0-unification1'
+      EXPECTED_VERSION_CODE: '52'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
