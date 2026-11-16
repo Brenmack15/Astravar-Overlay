@@ -29,3 +29,15 @@ class CiSelectionTest(unittest.TestCase):
 
     def test_shared_test_fixture_requires_full(self):
         self.assertTrue(m.plan(['app/src/test/java/com/yazsras/astravar/ui/AstravarComposeTestRule.kt'], TESTS)['full_required'])
+
+    def test_ui_suffix_matches_covered_production_screen(self):
+        files = TESTS + ['app/src/test/java/com/yazsras/astravar/ui/GenesisSpellReservoirUiTest.kt']
+        result = m.plan(['app/src/main/java/com/yazsras/astravar/ui/GenesisSpellReservoir.kt'], files)
+        self.assertFalse(result['full_required'])
+        self.assertIn('com.yazsras.astravar.ui.GenesisSpellReservoirUiTest', result['tests'])
+        self.assertTrue(m.CRITICAL.issubset(result['tests']))
+
+    def test_ui_suffix_does_not_exempt_canonical_data_from_full_gate(self):
+        files = TESTS + ['app/src/test/java/com/yazsras/astravar/ui/GenesisSpellReservoirUiTest.kt']
+        result = m.plan(['app/src/main/java/com/yazsras/astravar/data/GenesisSpellReservoir.kt'], files)
+        self.assertTrue(result['full_required'])

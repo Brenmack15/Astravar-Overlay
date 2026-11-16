@@ -86,7 +86,46 @@
   "limits": [
     "Subset benchmark only; not full Android suite or hosted workflow timing.",
     "GNU time unavailable locally; elapsed time uses monotonic clock and memory uses /proc sampling.",
-    "Configuration2/4 is the fastest candidate, not an accepted default until complete debug/release suites pass.",
-    "Raw logs and XML are retained as execution evidence outside the public source tree."
-  ]
+    "Raw logs and XML are retained as execution evidence outside the public source tree.",
+    "Local complete suite validation supports defaults; it does not establish hosted runtime, physical-device or release approval."
+  ],
+  "source_tree": "9c998ea34ce7d47f03d1ae7529884d55de369a1c",
+  "full_validation": [
+    {
+      "source": "468030c334f9abd5e1f2bbf485974a2e3e844720",
+      "variant": "Debug",
+      "forks": 2,
+      "fork_every": 4,
+      "exit_code": 0,
+      "elapsed_seconds": 498.729,
+      "suites": 151,
+      "cases": 1014,
+      "failed": 0,
+      "skipped": 3,
+      "max_java_rss_kib": 4673476,
+      "max_worker_rss_kib": 2067044,
+      "max_worker_count": 2
+    },
+    {
+      "source": "52ed850393d1cb420af17fde9170fd1f14308601",
+      "variant": "Release",
+      "forks": 2,
+      "fork_every": 4,
+      "exit_code": 0,
+      "elapsed_seconds": 344.2,
+      "suites": 151,
+      "cases": 1014,
+      "failed": 0,
+      "skipped": 17,
+      "max_java_rss_kib": 2711572,
+      "max_worker_rss_kib": 2016532,
+      "max_worker_count": 2
+    }
+  ],
+  "adoption": {
+    "max_parallel_forks": 2,
+    "fork_every": 4,
+    "basis": "Both complete local variants passed with screenshots; targeted async UI wait fixes retained original assertions; hosted full/native remain required.",
+    "runtime_unchanged_between_full_variants": true
+  }
 }

@@ -10,9 +10,11 @@ The development gate produces a QA APK and early regression feedback. A stable o
 | B: comprehensive | Automatically when canonical stores, schemas, rules, permissions, backend, build/CI configuration, instrumentation or unmapped production files change; PR label `full-verification`; or `Astravar tiered verification` → `full` | Existing complete debug/release unit suites, both lint variants, retained provenance checks, optimized native journeys and frozen historical upgrades |
 | C: owner release | Private release procedure after successful Tier B | Permanent package, increasing version, original certificate, signature/alignment, source/checksum/payload identity and preserved-data upgrade proof |
 
+Automatic PR tiers are active on this feature branch. GitHub's **Run workflow** UI normally requires the workflow definition on the default branch; these new manual dispatch controls are not yet exposed there. They become available after a separately authorized adoption of the workflow definitions on the default branch. No main merge or administration change was performed for this work. The `full-verification` label offers an explicit current-PR full run and may need one-time label creation.
+
 Configure branch protection to require **Astravar required verification**. This check always runs and fails if the plan, fast gate or an applicable full/native gate is missing, canceled or unsuccessful. Path selection happens inside the workflow; it does not leave a filtered required workflow permanently pending. Changes to shared test fixtures or removed tests require full verification.
 
-The orchestrator executes the fast gate first. Only after it passes do full regression and native acceptance run concurrently. This stops cheap source/rules/targeted failures before expensive emulator work while preserving parallel release feedback. Standalone full/native workflows remain manually runnable. Current-source verification always uses the Genesis historical lane and code52 expectations, regardless of branch name; retained historical branches keep their own workflow files. Current Genesis development no longer starts these twice on push and PR. Explicit native runs use a separate concurrency group and are not canceled by routine PR updates.
+The orchestrator executes the fast gate first. Only after it passes do full regression and native acceptance run concurrently. This stops cheap source/rules/targeted failures before expensive emulator work while preserving parallel release feedback. Standalone full/native dispatch definitions are retained, subject to the default-branch UI availability above. Current-source verification always uses the Genesis historical lane and code52 expectations, regardless of branch name; retained historical branches keep their own workflow files. Current Genesis development no longer starts these twice on push and PR. Explicit native runs use a separate concurrency group and are not canceled by routine PR updates.
 
 PR checkout is the exact head SHA, not an undocumented merge artifact. Retain `SOURCE_COMMIT.txt`, checksums, plans and logs with the corresponding run. Full/native approval must refer to that same source; changing packaged code invalidates an earlier candidate's release evidence.
 
@@ -26,9 +28,9 @@ Historical versions49 and50 have fixed source SHAs. A trusted exact-key cache re
 
 Cache-scope and cross-job matching behavior follows the [GitHub cache reference](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache) and [pinned setup-gradle implementation documentation](https://github.com/gradle/actions/blob/0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d/docs/setup-gradle.md#finding-a-matching-cache-entry). The latter saves at job completion and can restore the most recent same-OS cache from a different job, so the existing fast-before-full/native dependency supplies an actual warmup opportunity.
 
-`maxParallelForks=1` and `forkEvery=1` remain the proven defaults because Robolectric retains framework/font state per classloader. Bounded opt-in properties `astravarTestForks` (1–2) and `astravarTestForkEvery` (1–8) support measurement. Run **Astravar test worker benchmark** to compare (1,1), (1,4), (2,1), (2,4), twice each, on identical mixed data/Compose cases. Logs, wall time, JUnit time, process resource reports and source SHA are uploaded. Any failed or missing/different test set aborts. A sample benchmark does not justify promoting defaults: require repeated complete debug/release suites and review peak memory/flake evidence first.
+`maxParallelForks=2` and `forkEvery=4` are now the defaults after repeated mixed-suite measurements and complete debug/release validation with screenshots. Batching remains bounded because Robolectric retains framework/font state per classloader; unlimited JVM reuse is not enabled. Override both properties to1 for isolation diagnostics. Bounded opt-in properties `astravarTestForks` (1–2) and `astravarTestForkEvery` (1–8) support measurement. Run **Astravar test worker benchmark** to compare (1,1), (1,4), (2,1), (2,4), twice each, on identical mixed data/Compose cases. Logs, wall time, JUnit time, process resource reports and source SHA are uploaded. Any failed or missing/different test set aborts. Future tuning must retain complete debug/release gates and review peak memory and any timing-sensitive failures; a sample benchmark alone does not justify another promotion.
 
-## Measured worker alternatives (16 November 2026)
+## Measured worker alternatives
 
 Source `a5b14ce220f1859db65ce20a1778508d4bda08d0` ran the same110 data/Compose cases twice per configuration, with warm compilation outside the timer and the test task forced to execute (`--rerun`). All880 case executions passed with no skips. App/rules/build inputs were checked unchanged throughout; concurrent documentation and independent native-harness edits were outside these inputs.
 
@@ -39,7 +41,16 @@ Source `a5b14ce220f1859db65ce20a1778508d4bda08d0` ran the same110 data/Compose c
 | 2 | 1 | 54.324 / 54.365 | 54.345s | 36.46% | 2.495GiB |
 | 2 | 4 | 30.104 / 31.097 | 30.601s | 64.22% | 3.104GiB |
 
-The measured host had9 CPUs and about9.7GiB RAM. Memory was sampled from `/proc` every0.5seconds, including the Gradle daemon and test workers; this is not an exact kernel peak. The fastest candidate is2forks/every4, but the subset does not establish full-suite reliability or hosted wall-clock savings. Defaults remain1/1 pending complete debug/release validation;2/1 preserves per-class isolation if reuse exposes a failure. The [machine-readable record](verification/test-worker-benchmark-20261116.json) binds environment, method, cases and results to source. Raw XML and execution logs remain outside the public source tree.
+The measured host had9 CPUs and about9.7GiB RAM. Memory was sampled from `/proc` every0.5seconds, including the Gradle daemon and test workers; this is not an exact kernel peak. The fastest candidate was2forks/every4. Subsequent full-suite evidence below supports its adoption; the subset alone does not establish hosted wall-clock savings. The2/1 override retains per-class isolation if later evidence exposes cross-class state. The [machine-readable record](verification/test-worker-benchmark-20261116.json) binds environment, method, cases and results to source. Raw XML and execution logs remain outside the public source tree.
+
+Complete local calibration used the same2/4 settings and enabled screenshot capture:
+
+| Variant/source | Cases / suites | Failures / skips | Wall time | Maximum sampled aggregate Java RSS |
+|---|---:|---:|---:|---:|
+| Debug / `468030c334f9abd5e1f2bbf485974a2e3e844720` | 1014 / 151 | 0 / 3 | 498.729s (includes compilation) | 4.457GiB |
+| Release / `52ed850393d1cb420af17fde9170fd1f14308601` | 1014 / 151 | 0 / 17 | 344.200s (warm retry) | 2.586GiB |
+
+The first release run exposed two UI tests reading before Room-backed editor/reservoir rendering completed. Bounded waits for the actual expected UI state were added; all original value/disabled-state assertions remain. The two affected classes passed with2/4, then the entire release suite passed. Product app/rules code did not change between these full debug/release validations. The initial failed run and raw evidence are retained; its peak sampled Java RSS was5.383GiB. No test was excluded to obtain these results. The native instrumentation APK also compiled after a fixture-only name-shadowing correction. Native runtime acceptance and final hosted repetition remain separate required evidence.
 
 ## Measured baseline and acceptance of improvements
 
@@ -63,6 +74,8 @@ Baseline source `099c960dbbd76e0e4537efaaee28c3987e99c2a0`:
 Android test XML reports about1116s debug and1127s release; task log spans were about21m21s and21m16s respectively. These are different measurements: XML test time excludes some process/setup overhead. SDK installation is not the dominant cost on this observed run.
 
 Recent unsuccessful full runs still consumed 22–24minutes while independent native runs continued for61–76minutes. Duplicate push/PR runs were often canceled after4–50seconds; these count as wasted setup/queue work, not useful verification.
+
+The first new cold PR gate on source `3ef625d125d6f519045fdb2a90ba978eca506db0` reported the now-corrected readiness regression in445seconds (7m25s), run43786417767. Rules/selected Android work took403seconds, source/protocol checks26seconds, and installed SDK reuse0seconds. Both expensive full/native jobs were correctly skipped. This measures **failure feedback**, not a successful gate: debug lint/APK were not executed on that failed run.
 
 Current fast/full/native Gradle invocations emit timestamped local `--profile` HTML reports under `build/reports/profile/`, retained in workflow artifacts. They separate configuration, dependency resolution and task costs (including Kotlin compilation, tests, lint and packaging) without publishing a Build Scan or sending build data to another service. See the [Gradle profile documentation](https://docs.gradle.org/8.13/userguide/inspect.html#sec:profiling_build). Historical baseline helper provenance separately records cold-build or warm re-sign durations.
 

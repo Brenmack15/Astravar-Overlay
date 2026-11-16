@@ -52,14 +52,14 @@ android {
     lint { abortOnError = true; checkReleaseBuilds = true }
 }
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
-// Robolectric retains framework/font caches per test classloader. Isolate classes so
-// the complete UI suite remains bounded locally and on the standard Actions runner.
+// Robolectric retains framework/font caches per test classloader. Measured two-worker,
+// four-class batches bound reuse; full debug/release validation includes screenshots.
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     maxHeapSize = "1536m"
-    // Defaults retain proven per-class Robolectric isolation. Explicit benchmark
-    // properties let CI compare reuse/parallelism without changing release gates.
-    val testForks = providers.gradleProperty("astravarTestForks").map(String::toInt).getOrElse(1)
-    val testForkEvery = providers.gradleProperty("astravarTestForkEvery").map(String::toLong).getOrElse(1L)
+    // Adopt the fastest repeatedly measured setting after complete debug/release
+    // validation. Use 1/1 for per-class isolation diagnostics; never unbounded reuse.
+    val testForks = providers.gradleProperty("astravarTestForks").map(String::toInt).getOrElse(2)
+    val testForkEvery = providers.gradleProperty("astravarTestForkEvery").map(String::toLong).getOrElse(4L)
     require(testForks in 1..2 && testForkEvery in 1L..8L) { "Test benchmark settings exceed bounded runner limits" }
     maxParallelForks = testForks
     forkEvery = testForkEvery

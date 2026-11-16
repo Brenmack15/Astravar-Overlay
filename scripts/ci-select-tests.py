@@ -40,7 +40,7 @@ def plan(paths, test_files):
             else:
                 reasons.append(path)  # Removed/renamed tests require the full gate.
         elif path.startswith('app/src/main/java/'):
-            related = {x for x in available if x.rsplit('.', 1)[-1] == name + 'Test'}
+            related = {x for x in available if x.rsplit('.', 1)[-1] in {name + 'Test', name + 'UiTest'}}
             for prefix, classes in GROUPS.items():
                 if name.startswith(prefix):
                     related.update('com.yazsras.astravar.' + c for c in classes)
