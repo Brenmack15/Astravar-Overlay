@@ -22,11 +22,13 @@ def evaluate(expression, values):
     return eval(compile(tree, '<validated-cache-policy>', 'eval'), {'__builtins__': {}}, {})
 
 
-def context(event='pull_request', head='Brenmack15/Astravar-Overlay', ref='18/merge', successful=True):
+def context(event='pull_request', head='Brenmack15/Astravar-Overlay', ref='18/merge', successful=True,
+            build_outcome='success'):
     return {'github.event_name': event, 'github.event.pull_request.head.repo.full_name': head,
             'github.repository': 'Brenmack15/Astravar-Overlay',
             'github.event.repository.default_branch': 'main', 'github.ref_name': ref,
-            'success()': successful, 'env.GENESIS_GATE': 'true'}
+            'success()': successful, 'env.GENESIS_GATE': 'true',
+            'steps.native_build.outcome': build_outcome}
 
 
 class CiCachePolicyTests(unittest.TestCase):
@@ -55,12 +57,28 @@ class CiCachePolicyTests(unittest.TestCase):
 
     def test_historical_artifacts_require_success_and_allowed_scope(self):
         text = (ROOT / '.github/workflows/android.yml').read_text()
-        expression = re.search(r'name: Save validated historical cache.*\n\s+if: (.*)', text).group(1)
+        expression = re.search(r'name: Save validated historical cache.*\n(?:\s+#.*\n)*\s+if: (.*)', text).group(1)
         self.assertTrue(evaluate(expression, context()))
         self.assertFalse(evaluate(expression, context(successful=False)))
+        self.assertFalse(evaluate(expression, context(build_outcome='failure')))
+        self.assertFalse(evaluate(expression, context(build_outcome='skipped')))
         self.assertFalse(evaluate(expression, context(head='fork/Astravar-Overlay')))
         self.assertFalse(evaluate(expression, context(event='push', ref='feature')))
         self.assertTrue(evaluate(expression, context(event='workflow_dispatch', ref='feature')))
+
+    def test_historical_cache_saves_after_validation_before_native_acceptance(self):
+        text = (ROOT / '.github/workflows/android.yml').read_text()
+        build = text.index('      - name: Build native APKs;')
+        cache = text.index('      - name: Save validated historical cache')
+        native = text.index('      - name: Ordered release UI, import, recovery and in-place update')
+        self.assertLess(build, cache)
+        self.assertLess(cache, native)
+        build_step = text[build:cache]
+        self.assertIn('id: native_build', build_step)
+        self.assertIn('scripts/inspect_release_apk.py', build_step)
+        self.assertIn('scripts/ci-baseline.py --version-code 49', build_step)
+        self.assertIn('scripts/ci-baseline.py --version-code 50', build_step)
+        self.assertIn('run: timeout -k 10s 5100s bash scripts/ci-emulator.sh', text[native:])
 
     def test_no_privileged_pull_request_target_trigger_or_signing_cache(self):
         for name in WORKFLOWS:

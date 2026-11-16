@@ -78,6 +78,7 @@ jobs:
           path: ${{ runner.temp }}/astravar-baseline-cache
           key: astravar-historical-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ci-baseline.py', 'scripts/inspect_release_apk.py') }}
       - name: Build native APKs; full regressions stay in the exact-head Reforge gate
+        id: native_build
         if: env.REUSE_RUN_ID == '0'
         timeout-minutes: 60
         env:
@@ -132,6 +133,14 @@ jobs:
             echo 'ASTRAVAR_BASELINE_APK=validation/upgrade-baseline/code49-ci.apk' >> "$GITHUB_ENV"
             echo 'ASTRAVAR_GENESIS_BASELINE_APK=validation/upgrade-baseline/code50-ci.apk' >> "$GITHUB_ENV"
           fi
+      - name: Save validated historical cache in its trusted branch or PR scope
+        # Cache validated immutable build inputs before unrelated native journeys.
+        # This is never evidence that an upgrade or release gate passed.
+        if: success() && steps.native_build.outcome == 'success' && env.GENESIS_GATE == 'true' && (github.event_name == 'workflow_dispatch' || github.ref_name == github.event.repository.default_branch || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/astravar-baseline-cache
+          key: astravar-historical-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ci-baseline.py', 'scripts/inspect_release_apk.py') }}
       - name: Reuse verified product and build current overlay tests
         if: env.REUSE_RUN_ID != '0'
         timeout-minutes: 9
@@ -178,12 +187,6 @@ jobs:
           ASTRAVAR_TEST_APK: app/build/outputs/apk/release/app-release.apk
           ASTRAVAR_TEST_PACKAGE: com.yazsras.astravar
         run: timeout -k 10s 5100s bash scripts/ci-emulator.sh
-      - name: Save validated historical cache in its trusted branch or PR scope
-        if: success() && env.GENESIS_GATE == 'true' && (github.event_name == 'workflow_dispatch' || github.ref_name == github.event.repository.default_branch || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: ${{ runner.temp }}/astravar-baseline-cache
-          key: astravar-historical-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ci-baseline.py', 'scripts/inspect_release_apk.py') }}
       - name: Summarize executed tests
         if: always()
         run: python3 scripts/ci-test-summary.py
