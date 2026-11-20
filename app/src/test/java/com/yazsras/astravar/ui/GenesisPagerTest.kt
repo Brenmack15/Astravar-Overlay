@@ -151,10 +151,10 @@ class GenesisPagerTest {
             compose.onNodeWithTag("section-Equipment").assertIsSelected()
             compose.onNodeWithTag("genesis-character-pager").performTouchInput { swipeLeft() }
             compose.waitForIdle()
-            compose.onNodeWithTag("section-Spells").assertIsSelected()
+            compose.onNodeWithTag("section-Currency").assertIsSelected()
             compose.runOnIdle { route.value = "Sheet" }
             compose.waitForIdle()
-            compose.onNodeWithTag("section-Spells").assertIsSelected()
+            compose.onNodeWithTag("section-Currency").assertIsSelected()
             compose.runOnIdle { actor.value = "fictional-second" }
             compose.waitForIdle()
             compose.onNodeWithTag("section-Sheet").assertIsSelected()
