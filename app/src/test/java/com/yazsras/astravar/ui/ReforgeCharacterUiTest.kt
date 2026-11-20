@@ -100,6 +100,8 @@ class ReforgeCharacterUiTest {
                     name = "Field purse", gold = 25, platinum = 9), source = "Fictional known balance")
             }
         }) { _ ->
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("section-Currency").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("section-Currency").performClick()
             compose.onNodeWithTag("section-Currency").assertIsSelected()
             compose.onNodeWithText("Field purse").assertIsDisplayed()
             compose.onNodeWithText("25 gp", substring = true).assertExists()
@@ -462,7 +464,7 @@ class ReforgeCharacterUiTest {
             // String Text's semantics paragraph retains the Row's maximum
             // width even when its measured text fits. Check actual line ink and
             // every character, rather than that paragraph's blank allocation.
-            assertEquals("1 / 7", indicator.layoutInput.text.text)
+            assertEquals("1 / ${genesisCharacterSections.size}", indicator.layoutInput.text.text)
             assertEquals("The complete page count must remain visible", indicator.layoutInput.text.length,
                 indicator.getLineEnd(0, visibleEnd = true))
             assertFalse("Page count must not be ellipsized", indicator.isLineEllipsized(0))
