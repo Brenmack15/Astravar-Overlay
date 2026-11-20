@@ -89,6 +89,26 @@ class ReforgeCharacterUiTest {
 
     private fun actorPreferences() = ReforgePreferences.open(ApplicationProvider.getApplicationContext())
 
+    @Test fun characterCurrencyUsesPlayerWalletWithoutCreatingCompanion() {
+        lateinit var campaign: CampaignLedgerRepository
+        withSheet(initialSection = "Currency", campaignSetup = { ledger ->
+            campaign = ledger
+            runBlocking {
+                ledger.records.saveProfile(CharacterProfile(id = "synthetic-player", name = "Synthetic artificer"),
+                    source = "Fictional player identity")
+                ledger.party.saveWallet(PartyWallet(id = "synthetic-player-purse", holderProfileId = "synthetic-player",
+                    name = "Field purse", gold = 25, platinum = 9), source = "Fictional known balance")
+            }
+        }) { _ ->
+            compose.onNodeWithTag("section-Currency").assertIsSelected()
+            compose.onNodeWithText("Field purse").assertIsDisplayed()
+            compose.onNodeWithText("25 gp", substring = true).assertExists()
+            compose.onNodeWithText("9 pp", substring = true).assertExists()
+            compose.onNodeWithText("Add wallet").assertIsEnabled()
+            assertTrue(runBlocking { campaign.records.companionStates.first().isEmpty() })
+        }
+    }
+
     @Test fun pinnedCompanionOpensCombatWithoutSwitchingTheMainActor() {
         val main = fixture()
         val companion = ReforgeCharacter("fictional-winged-ally", "Fictional winged ally", currentHp = 9,
