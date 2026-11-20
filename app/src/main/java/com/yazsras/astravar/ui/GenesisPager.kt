@@ -36,7 +36,7 @@ import com.yazsras.astravar.rules.reforge.CharacterProjection
 import com.yazsras.astravar.rules.reforge.ReforgeCharacter
 import kotlinx.coroutines.launch
 
-internal val genesisCharacterSections = listOf("Sheet", "Combat", "Equipment", "Spells", "Features", "Resources", "History")
+internal val genesisCharacterSections = listOf("Sheet", "Combat", "Equipment", "Currency", "Spells", "Features", "Resources", "History")
 
 /** Navigation only; never a second copy of the character or its editable state. */
 data class GenesisCharacterRoute(val profileId: String, val section: String = "Sheet",
