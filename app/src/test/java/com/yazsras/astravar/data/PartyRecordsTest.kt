@@ -436,4 +436,35 @@ class PartyRecordsTest {
             assertEquals(1, target.party.sheets.first().size)
         } finally { targetDb.close() }
     }
+    @Test fun standalonePlayableWalletKeepsPlayerIdentityAndAtomicRollback() = runBlocking {
+        val playable = ReforgeRepository(db)
+        val playerId = "synthetic-standalone-player"
+        val player = com.yazsras.astravar.rules.reforge.ReforgeCharacter(playerId, "Synthetic standalone artificer")
+        playable.create(player)
+        assertNull(db.recordsDao().characterProfile(playerId))
+        val wallet = PartyWallet("synthetic-standalone-wallet", holderProfileId = playerId,
+            name = "Player treasury", gold = 25L, platinum = 11L)
+        val first = party.savePlayableWallet(wallet, 1L, source = "Fictional counted coins",
+            commandId = "synthetic-playable-wallet-first")
+        assertEquals(first, party.savePlayableWallet(wallet, 1L, source = "Fictional counted coins",
+            commandId = "synthetic-playable-wallet-first"))
+        assertEquals("Synthetic standalone artificer", db.recordsDao().characterProfile(playerId)?.name)
+        assertEquals(playerId, db.partyDao().wallet(wallet.id)?.holderProfileId)
+        assertEquals(11L, db.partyDao().wallet(wallet.id)?.platinum)
+        assertTrue(ledger.records.companionStates.first().isEmpty())
+
+        val secondId = "synthetic-invalid-player"
+        playable.create(com.yazsras.astravar.rules.reforge.ReforgeCharacter(secondId, "Synthetic invalid wallet owner"))
+        rejects {
+            party.savePlayableWallet(PartyWallet("synthetic-invalid-wallet", holderProfileId = secondId,
+                name = "Invalid purse", gold = -1), 1L, source = "Rejected negative coin test",
+                commandId = "synthetic-invalid-wallet-command")
+        }
+        assertNull(db.recordsDao().characterProfile(secondId))
+        assertNull(db.partyDao().wallet("synthetic-invalid-wallet"))
+        assertNull(db.recordsDao().receipt("synthetic-invalid-wallet-command"))
+        assertTrue(ledger.records.companionStates.first().isEmpty())
+    }
+
+
 }
