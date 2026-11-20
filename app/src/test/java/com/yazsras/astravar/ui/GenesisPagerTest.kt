@@ -61,6 +61,24 @@ class GenesisPagerTest {
         } finally { activity.pause().stop().destroy() }
     }
 
+    @Test fun playerCurrencyIsAFirstClassSectionNextToEquipment() {
+        assertEquals("Currency", genesisCharacterSections[genesisCharacterSections.indexOf("Equipment") + 1])
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent { AstravarTheme {
+                GenesisCharacterPager("synthetic-player", requestedSection = "Currency") { page ->
+                    Text("Content for $page")
+                }
+            } }
+            compose.onNodeWithTag("section-Currency").assertIsSelected()
+            compose.onNodeWithText("Content for Currency").assertIsDisplayed()
+            compose.onNodeWithTag("section-Equipment").performClick()
+            compose.onNodeWithTag("section-Equipment").assertIsSelected()
+            compose.onNodeWithTag("section-Currency").performClick()
+            compose.onNodeWithTag("section-Currency").assertIsSelected()
+        } finally { activity.pause().stop().destroy() }
+    }
+
     @Test fun verticalReadingPositionsAndCurrentPageSurviveCompositionRestoration() {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         var registry = SaveableStateRegistry(null) { true }
@@ -133,10 +151,10 @@ class GenesisPagerTest {
             compose.onNodeWithTag("section-Equipment").assertIsSelected()
             compose.onNodeWithTag("genesis-character-pager").performTouchInput { swipeLeft() }
             compose.waitForIdle()
-            compose.onNodeWithTag("section-Spells").assertIsSelected()
+            compose.onNodeWithTag("section-Currency").assertIsSelected()
             compose.runOnIdle { route.value = "Sheet" }
             compose.waitForIdle()
-            compose.onNodeWithTag("section-Spells").assertIsSelected()
+            compose.onNodeWithTag("section-Currency").assertIsSelected()
             compose.runOnIdle { actor.value = "fictional-second" }
             compose.waitForIdle()
             compose.onNodeWithTag("section-Sheet").assertIsSelected()
@@ -260,7 +278,7 @@ class GenesisPagerTest {
                         info.isVisibleToUser && bounds.height() >= chrome.boundsInRoot.height.roundToInt() &&
                             bounds.width() >= chrome.boundsInRoot.width.roundToInt())
                 }
-                assertEquals("Spells, page 4 of 7", provider.createAccessibilityNodeInfo(indicator.id)?.stateDescription)
+                assertEquals("Spells, page 5 of 8", provider.createAccessibilityNodeInfo(indicator.id)?.stateDescription)
             }
             compose.onNodeWithTag("section-Equipment").performTouchInput {
                 click(Offset(centerX, height - 1f))

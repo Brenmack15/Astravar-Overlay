@@ -436,4 +436,48 @@ class PartyRecordsTest {
             assertEquals(1, target.party.sheets.first().size)
         } finally { targetDb.close() }
     }
+    @Test fun standalonePlayableWalletKeepsPlayerIdentityAndAtomicRollback() = runBlocking {
+        val playable = ReforgeRepository(db)
+        val playerId = "synthetic-standalone-player"
+        val player = com.yazsras.astravar.rules.reforge.ReforgeCharacter(playerId, "Synthetic standalone artificer")
+        playable.create(player)
+        assertNull(db.recordsDao().characterProfile(playerId))
+        val wallet = PartyWallet("synthetic-standalone-wallet", holderProfileId = playerId,
+            name = "Player treasury", gold = 25L, platinum = 11L)
+        val first = party.savePlayableWallet(wallet, 1L, source = "Fictional counted coins",
+            commandId = "synthetic-playable-wallet-first")
+        assertEquals(first, party.savePlayableWallet(wallet, 1L, source = "Fictional counted coins",
+            commandId = "synthetic-playable-wallet-first"))
+        assertEquals("Synthetic standalone artificer", db.recordsDao().characterProfile(playerId)?.name)
+        assertEquals(playerId, db.partyDao().wallet(wallet.id)?.holderProfileId)
+        assertEquals(11L, db.partyDao().wallet(wallet.id)?.platinum)
+        assertTrue(ledger.records.companionStates.first().isEmpty())
+
+        val secondId = "synthetic-invalid-player"
+        playable.create(com.yazsras.astravar.rules.reforge.ReforgeCharacter(secondId, "Synthetic invalid wallet owner"))
+        val pending = PartyWallet("synthetic-invalid-wallet", holderProfileId = secondId,
+            name = "Fictional guarded purse", gold = 100L)
+        db.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER synthetic_wallet_insert_fail BEFORE INSERT ON party_wallets " +
+                "BEGIN SELECT RAISE(ABORT, 'Fictional write failure'); END")
+        try {
+            rejects {
+                party.savePlayableWallet(pending, 1L, source = "Fictional rollback check",
+                    commandId = "synthetic-invalid-wallet-command")
+            }
+        } finally {
+            db.openHelper.writableDatabase.execSQL("DROP TRIGGER synthetic_wallet_insert_fail")
+        }
+        assertNull(db.recordsDao().characterProfile(secondId))
+        assertNull(db.partyDao().wallet(pending.id))
+        assertNull(db.recordsDao().receipt("synthetic-invalid-wallet-command"))
+        // A failed attempt did not consume the command ID, holder, or source state.
+        party.savePlayableWallet(pending, 1L, source = "Fictional rollback check",
+            commandId = "synthetic-invalid-wallet-command")
+        assertEquals(100L, db.partyDao().wallet(pending.id)?.gold)
+        assertEquals(secondId, db.recordsDao().characterProfile(secondId)?.id)
+        assertTrue(ledger.records.companionStates.first().isEmpty())
+    }
+
+
 }

@@ -482,6 +482,12 @@ private enum class SpellbookFilter(val label: String) {
                                         color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
                                 }
                             }
+                            "Currency" -> {
+                                // The player owns the same audited wallet as campaign records;
+                                // viewing or editing currency never creates a companion.
+                                PartyWalletV2(repository, character.id,
+                                    playable = character.takeIf { companionProfileId == null })
+                            }
                             "Spells" -> {
                                 GenesisArmorAdoption(character, legacyArmor?.campaign, legacyArmor?.preferences?.elements.orEmpty(),
                                     alreadyAdoptedBy = all.firstOrNull { it.character.id != character.id && it.character.armor != null }?.character?.name,
