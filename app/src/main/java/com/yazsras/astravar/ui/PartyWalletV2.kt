@@ -22,7 +22,7 @@ import java.util.UUID
     val json = remember { Json { encodeDefaults = true } }
     fun edit(wallet: PartyWallet?, mode: String) { snapshotJson = wallet?.let { json.encodeToString(it) }; editing = mode }
     val hasHolder = profiles.any { it.id == memberId }
-    val isPlayer = playable?.id == memberId && playable.archived.not()
+    val isPlayer = playable?.let { it.id == memberId && !it.archived } == true
     PlayerHeading("Currency")
     Text("Sourced local balances and transactional income / expenses. Unknown balances stay unknown. No coins are automatically converted.",
         color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
