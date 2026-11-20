@@ -455,14 +455,27 @@ class PartyRecordsTest {
 
         val secondId = "synthetic-invalid-player"
         playable.create(com.yazsras.astravar.rules.reforge.ReforgeCharacter(secondId, "Synthetic invalid wallet owner"))
-        rejects {
-            party.savePlayableWallet(PartyWallet("synthetic-invalid-wallet", holderProfileId = secondId,
-                name = "Invalid purse", gold = -1), 1L, source = "Rejected negative coin test",
-                commandId = "synthetic-invalid-wallet-command")
+        val pending = PartyWallet("synthetic-invalid-wallet", holderProfileId = secondId,
+            name = "Fictional guarded purse", gold = 100L)
+        db.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER synthetic_wallet_insert_fail BEFORE INSERT ON party_wallets " +
+                "BEGIN SELECT RAISE(ABORT, 'Fictional write failure'); END")
+        try {
+            rejects {
+                party.savePlayableWallet(pending, 1L, source = "Fictional rollback check",
+                    commandId = "synthetic-invalid-wallet-command")
+            }
+        } finally {
+            db.openHelper.writableDatabase.execSQL("DROP TRIGGER synthetic_wallet_insert_fail")
         }
         assertNull(db.recordsDao().characterProfile(secondId))
-        assertNull(db.partyDao().wallet("synthetic-invalid-wallet"))
+        assertNull(db.partyDao().wallet(pending.id))
         assertNull(db.recordsDao().receipt("synthetic-invalid-wallet-command"))
+        // A failed attempt did not consume the command ID, holder, or source state.
+        party.savePlayableWallet(pending, 1L, source = "Fictional rollback check",
+            commandId = "synthetic-invalid-wallet-command")
+        assertEquals(100L, db.partyDao().wallet(pending.id)?.gold)
+        assertEquals(secondId, db.recordsDao().characterProfile(secondId)?.id)
         assertTrue(ledger.records.companionStates.first().isEmpty())
     }
 
