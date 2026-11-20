@@ -7,12 +7,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.data.*
+import com.yazsras.astravar.rules.reforge.ReforgeCharacter
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
 
 /** Local recorded denominations are independent. No automatic conversion or inferred opening balance. */
-@Composable internal fun PartyWalletV2(repository: CampaignLedgerRepository, memberId: String) {
+@Composable internal fun PartyWalletV2(repository: CampaignLedgerRepository, memberId: String, playable: ReforgeCharacter? = null) {
     val wallets by repository.party.wallets.collectAsState(initial = emptyList())
     val profiles by repository.records.characterProfiles.collectAsState(initial = emptyList())
     var exchangeOpen by rememberSaveable(memberId) { mutableStateOf(false) }
@@ -20,13 +21,18 @@ import java.util.UUID
     var snapshotJson by rememberSaveable(memberId) { mutableStateOf<String?>(null) }
     val json = remember { Json { encodeDefaults = true } }
     fun edit(wallet: PartyWallet?, mode: String) { snapshotJson = wallet?.let { json.encodeToString(it) }; editing = mode }
+    val hasHolder = profiles.any { it.id == memberId }
+    val isPlayer = playable?.id == memberId && playable.archived.not()
     PlayerHeading("Currency")
     Text("Sourced local balances and transactional income / expenses. Unknown balances stay unknown. No coins are automatically converted.",
         color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
-    PlayerButton(onClick = { edit(null, "balance") }, enabled = profiles.any { it.id == memberId }) { Text("Add wallet") }
-    PlayerOutlinedButton(onClick = { exchangeOpen = true }, enabled = profiles.any { it.id == memberId }) { Text("Item & currency exchange") }
-    if (exchangeOpen) PartyExchangeV21(repository, memberId, onDismiss = { exchangeOpen = false })
-    if (profiles.none { it.id == memberId }) Text("Save a sourced character status before adding a wallet.", color = RebuildPalette.Ice)
+    PlayerButton(onClick = { edit(null, "balance") }, enabled = hasHolder || isPlayer) { Text("Add wallet") }
+    PlayerOutlinedButton(onClick = { exchangeOpen = true }, enabled = hasHolder) { Text("Item & currency exchange") }
+    if (exchangeOpen && hasHolder) PartyExchangeV21(repository, memberId, onDismiss = { exchangeOpen = false })
+    if (!hasHolder) Text(
+        if (isPlayer) "The first saved wallet will link to this existing player identity; no companion is created."
+        else "Save a sourced character status before adding a wallet.",
+        color = RebuildPalette.Ice)
     val held = wallets.filter { it.holderProfileId == memberId }
     if (held.isEmpty()) PlayerEmpty("No wallet recorded", "Opening Party never assumes a zero balance or imports currency from old conversations.")
     held.forEach { wallet -> PlayerCard {
@@ -39,12 +45,14 @@ import java.util.UUID
     editing?.let { mode ->
         val snapshot = snapshotJson?.let { json.decodeFromString<PartyWallet>(it) }
         PartyWalletEditorV2(repository, memberId, mode, snapshot,
-            wallets.firstOrNull { it.id == snapshot?.id }?.revision, onDismiss = { editing = null })
+            wallets.firstOrNull { it.id == snapshot?.id }?.revision, onDismiss = { editing = null },
+            playable = playable.takeIf { isPlayer })
     }
 }
 
 @Composable private fun PartyWalletEditorV2(repository: CampaignLedgerRepository, memberId: String, mode: String,
-    snapshot: PartyWallet?, latestRevision: Long?, onDismiss: () -> Unit) {
+    snapshot: PartyWallet?, latestRevision: Long?, onDismiss: () -> Unit,
+    playable: ReforgeCharacter? = null) {
     var name by rememberSaveable { mutableStateOf(snapshot?.name.orEmpty()) }
     var copper by rememberSaveable { mutableStateOf(if (mode == "balance") snapshot?.copper?.toString().orEmpty() else "") }
     var silver by rememberSaveable { mutableStateOf(if (mode == "balance") snapshot?.silver?.toString().orEmpty() else "") }
@@ -68,11 +76,14 @@ import java.util.UUID
         platinum != (if (mode == "balance") snapshot?.platinum?.toString().orEmpty() else "")
     PlayerSheet(if (mode == "balance") "Record wallet balances" else "Record currency change", onDismiss, dirty = dirty, actions = {
         PlayerButton(onClick = { actions.run {
-            val receipt = if (mode == "balance") repository.party.saveWallet(
-                (snapshot ?: PartyWallet(id = walletId, holderProfileId = memberId, name = name.trim())).copy(
-                    name = name.trim(), copper = amount(copper), silver = amount(silver), gold = amount(gold), electrum = amount(electrum), platinum = amount(platinum)),
-                snapshot?.revision, source.trim(), commandId)
-            else repository.party.adjustCurrency(CurrencyCommand(walletId, snapshot?.revision ?: error("Wallet unavailable."),
+            val receipt = if (mode == "balance") {
+                val wallet = (snapshot ?: PartyWallet(id = walletId, holderProfileId = memberId, name = name.trim())).copy(
+                    name = name.trim(), copper = amount(copper), silver = amount(silver), gold = amount(gold),
+                    electrum = amount(electrum), platinum = amount(platinum))
+                if (playable != null) repository.party.savePlayableWallet(
+                    wallet, playable.revision, snapshot?.revision, source.trim(), commandId)
+                else repository.party.saveWallet(wallet, snapshot?.revision, source.trim(), commandId)
+            } else repository.party.adjustCurrency(CurrencyCommand(walletId, snapshot?.revision ?: error("Wallet unavailable."),
                 amount(copper) ?: 0, amount(silver) ?: 0, amount(gold) ?: 0, source.trim(), commandId, amount(electrum) ?: 0, amount(platinum) ?: 0))
             onDismiss(); "Currency saved; receipt ${receipt.commandId}."
         } }, enabled = !actions.busy && !stale && !invalid && source.isNotBlank() && (mode != "balance" || name.isNotBlank())) { Text("Save currency record") }
