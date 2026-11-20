@@ -94,7 +94,7 @@ class GenesisCharacterRoutingTest {
         compose.onNodeWithTag("section-Equipment").assertIsSelected()
         compose.onNodeWithTag("genesis-character-pager").performTouchInput { swipeLeft() }
         compose.waitForIdle()
-        compose.onNodeWithTag("section-Spells").assertIsSelected()
+        compose.onNodeWithTag("section-Currency").assertIsSelected()
     }
 
     @Test fun absentProfileNeverFallsThroughToAnUnrelatedSavedCharacter() = withRecords { ledger, playable, prefs, activity ->
