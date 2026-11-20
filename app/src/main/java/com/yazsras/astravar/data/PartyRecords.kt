@@ -366,6 +366,43 @@ class PartyRecordsRepository(private val db: CampaignLedgerDb) {
             campaignJson.encodeToString(outcome), kind = "ATOMIC_EXCHANGE").also { records.insert(it) }
     }
 
+    /**
+     * A standalone playable character may exist before its legacy campaign profile does.
+     * Bind its first wallet to the SAME player ID, never create a companion or a second
+     * playable sheet. The identity, wallet and immutable receipts commit atomically.
+     * Connected actors already have a canonical character profile and reuse it unchanged.
+     */
+    suspend fun savePlayableWallet(wallet: PartyWallet, playableRevision: Long,
+        expectedRevision: Long? = null, source: String,
+        commandId: String = UUID.randomUUID().toString()): CommandReceipt = db.withTransaction {
+        val holderId = requireNotNull(wallet.holderProfileId) { "Choose the player receiving this wallet." }
+        checkId(holderId); checkSource(source); validateWallet(wallet)
+        val association = db.genesisAuthorityDao().actor(holderId)
+        require(association == null || association.role == GenesisActorRole.PLAYER) {
+            "This identity is assigned to a different actor role. Review campaign membership."
+        }
+        if (records.characterProfile(holderId) == null) {
+            require(association == null) {
+                "A connected player's campaign identity is unavailable. Review campaign recovery."
+            }
+            require(records.companion(holderId) == null) {
+                "A companion identity cannot be converted into a player by adding a wallet."
+            }
+            val saved = requireNotNull(db.reforgeDao().character(holderId)) {
+                "Save this playable character before creating a wallet."
+            }.saved()
+            check(!saved.character.archived && saved.revision == playableRevision) {
+                "This character changed or was archived. Reopen its current sheet."
+            }
+            CampaignRecordsRepository(db).saveProfile(
+                CharacterProfile(id = holderId, name = saved.character.name, level = saved.character.level),
+                source = "Wallet identity linked to existing playable player",
+                commandId = "player-wallet-holder-${campaignHash(commandId).take(48)}"
+            )
+        }
+        saveWallet(wallet, expectedRevision, source, commandId)
+    }
+
     suspend fun saveWallet(wallet: PartyWallet, expectedRevision: Long? = null, source: String,
         commandId: String = UUID.randomUUID().toString()): CommandReceipt = db.withTransaction {
         checkId(wallet.id); checkSource(source); validateWallet(wallet)
