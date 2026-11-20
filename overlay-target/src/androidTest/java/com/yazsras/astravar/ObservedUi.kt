@@ -334,7 +334,7 @@ internal class ObservedUi(private val device: UiDevice) {
         // horizontal strip. A body heading or unrelated filter is never a tab.
         val families = listOf(
             // Preserve both Genesis order and retained Party's Sheet/Equipment/Currency/History order.
-            listOf("Sheet", "Combat", "Equipment", "Spells", "Features", "Resources", "Currency", "History"),
+            listOf("Sheet", "Combat", "Equipment", "Currency", "Spells", "Features", "Resources", "History"),
             listOf("My gear", "Campaign items"),
             listOf("My items", "All items"),
             listOf("All gear", "Equipped", "Attuned", "Favorites"),
