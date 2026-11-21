@@ -1,6 +1,7 @@
 package com.yazsras.astravar.rules.reforge
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 
@@ -49,7 +50,7 @@ import kotlinx.serialization.ExperimentalSerializationApi
     @Serializable data class Proficiency(val skill: String? = null, val save: Stat? = null, val expertise: Boolean = false) : EffectPayload()
     @Serializable data class DamageBonus(val component: DamageComponent, val qualifier: AttackQualifier = AttackQualifier()) : EffectPayload()
     @Serializable data class DamageConversion(val from: DamageKind, val to: DamageKind, val qualifier: AttackQualifier = AttackQualifier()) : EffectPayload()
-    @Serializable data class Defense(val type: DamageKind, val kind: DefenseKind, val nonmagicalOnly: Boolean = false) : EffectPayload()
+    @Serializable data class Defense(@SerialName("damageType") val type: DamageKind, val kind: DefenseKind, val nonmagicalOnly: Boolean = false) : EffectPayload()
     @Serializable data class ConditionImmunity(val condition: String) : EffectPayload()
     @Serializable data class Edge(val kind: RollKind, val edge: RollEdge, val key: String = "") : EffectPayload()
 }
