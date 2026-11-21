@@ -185,11 +185,22 @@ class CampaignNativeHttpsTest {
         assertEquals("PENDING_DEVICE_COMMIT", submitted.getValue("confirmation").jsonPrimitive.content)
         if (offlineBeforeDelivery) {
             val before = CampaignSyncDomain(db).snapshot(campaign)
+            val beforeConnection = client.snapshot()
             control("/__ci/fault", buildJsonObject { put("offline", true) })
-            assertTrue("Offline delivery must report failure", runCatching { client.sync() }.isFailure)
+            val failure = runCatching { client.sync() }.exceptionOrNull()
+            assertTrue("The synthetic 503 must remain an explicit transport failure", failure is OwnerSyncFailure)
+            assertEquals("SERVICE_UNAVAILABLE", (failure as OwnerSyncFailure).code)
             assertEquals("Offline delivery cannot fabricate a local commit", before, CampaignSyncDomain(db).snapshot(campaign))
             client.close(); client = CampaignConnectionClient(context)
-            assertTrue(client.snapshot().getValue("status").jsonPrimitive.content.contains("Offline"))
+            val retained = client.snapshot()
+            assertEquals("The first failed request is the grant read", "GRANT_READ", retained.getValue("failedStage").jsonPrimitive.content)
+            assertEquals("Known temporary service failures remain actionable", "SERVICE_UNAVAILABLE", retained.getValue("failureCode").jsonPrimitive.content)
+            assertEquals("A failed attempt must not refresh completion", beforeConnection.getValue("lastFullSyncAt"), retained.getValue("lastFullSyncAt"))
+            assertEquals("Temporary unavailability preserves the owner grant", beforeConnection.getValue("grant"), retained.getValue("grant"))
+            val pending = rpc("get_campaign_command_receipt", buildJsonObject {
+                put("campaignId", campaign); put("commandId", id)
+            }, allowReceiptPending = true)
+            assertEquals("Queued server work is not a committed device receipt", "RECEIPT_NOT_READY", mcpErrorCode(pending))
             control("/__ci/fault", buildJsonObject { put("offline", false) })
             offlineReconnectRecoveries++
         }

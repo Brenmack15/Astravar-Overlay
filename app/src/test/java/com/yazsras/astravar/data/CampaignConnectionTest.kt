@@ -533,6 +533,8 @@ class CampaignConnectionTest {
         val store = CampaignSyncDiagnostics(context)
         val setting = CampaignConnectionSettings(origin = origin, campaignId = campaignId, deviceId = deviceId)
         store.begin(setting); store.time(setting, "lastServerResponseAt", time)
+        store.failed(setting, "SERVICE_UNAVAILABLE")
+        assertEquals("SERVICE_UNAVAILABLE", store.snapshot(setting, 17).getValue("failureCode").jsonPrimitive.content)
         store.failed(setting, "PRIVATE_SECRET_PROVIDER_TEXT")
         assertEquals("REMOTE_REJECTED", store.snapshot(setting, 17).getValue("failureCode").jsonPrimitive.content)
         assertFalse(store.snapshot(setting, 17).toString().contains("PRIVATE_SECRET"))

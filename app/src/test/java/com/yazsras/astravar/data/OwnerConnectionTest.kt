@@ -74,6 +74,29 @@ class OwnerConnectionTest {
         assertTrue(job.isPersisted)
         OwnerConnectionSyncJob.cancel(context)
     }
+    @Test fun manualSyncRetainsScheduledRecoveryAfterSanitizedTransportFailures() = runBlocking {
+        val remote = Remote(); val client = paired(remote)
+        val scheduler = context.getSystemService(android.app.job.JobScheduler::class.java)
+        val publications = db.connection().publications()
+        for (code in listOf("NETWORK_UNAVAILABLE", "NETWORK_TIMEOUT", "TLS_FAILURE",
+            "SERVICE_AUTHORIZATION_REQUIRED", "CREDENTIAL_STORAGE_UNAVAILABLE")) {
+            OwnerConnectionSyncJob.schedule(context)
+            remote.failureCode = code
+            assertEquals(code, (runCatching { client.sync() }.exceptionOrNull() as OwnerSyncFailure).code)
+            assertTrue("A retryable failure must retain automatic recovery: $code", scheduler.allPendingJobs.any {
+                it.service.className == OwnerConnectionSyncJob::class.java.name
+            })
+            assertEquals(publications, db.connection().publications())
+            assertNotNull(vault.credential(origin, OwnerConnectionProtocol.CAMPAIGN))
+            assertEquals(16, current().score)
+        }
+        remote.failureCode = null
+        client.sync()
+        assertTrue(scheduler.allPendingJobs.any { it.service.className == OwnerConnectionSyncJob::class.java.name })
+        remote.failureCode = "ACCESS_DENIED"
+        assertTrue(runCatching { client.sync() }.isFailure)
+        assertFalse(scheduler.allPendingJobs.any { it.service.className == OwnerConnectionSyncJob::class.java.name })
+    }
     @Test fun proposal_does_not_mutate_then_approval_commits_once_and_independently_reads_back() = runBlocking {
         val remote = Remote(); val client = paired(remote)
         val proposal = remote.propose(20)
@@ -331,6 +354,7 @@ class OwnerConnectionTest {
         assertTrue(runCatching { client.sync() }.isFailure); assertEquals(2L, current().revision)
     }
     private inner class Remote : OwnerConnectionTransport {
+        var failureCode: String? = null
         var score = 16; var revision = 1L; var offline = false; var denied = false; var revoked = false
         var loseDecisionResponse = false; var advanceAfterDecision = false; var conflictNextPublication = false
         var conflictingDecision = false; var receiptsUnavailable = false; var decisionRequests = 0; var forge = false; var characterReads = 0; var receiptReads = 0
@@ -354,6 +378,7 @@ class OwnerConnectionTest {
             put("mode", OwnerConnectionProtocol.MODE); put("campaignId", OwnerConnectionProtocol.CAMPAIGN); pairs.forEach { (k,v) -> put(k,v) }
         }
         override suspend fun request(origin: String, path: String, credential: OwnerSyncCredential?, serviceAccess: String?, body: String?): OwnerSyncResponse {
+            failureCode?.let { throw OwnerSyncFailure(it) }
             this.serviceAccess = serviceAccess
             if (offline) throw IOException("Fictional network offline")
             if (denied || revoked) return OwnerSyncResponse(401, buildJsonObject { put("error", buildJsonObject { put("code", "CREDENTIAL_REVOKED_OR_EXPIRED") }) })

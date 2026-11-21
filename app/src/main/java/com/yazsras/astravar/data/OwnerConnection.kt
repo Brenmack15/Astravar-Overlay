@@ -361,7 +361,7 @@ class OwnerConnectionClient internal constructor(private val context: Context, p
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { val value = setting(); dao.settings(value.copy(status = when (e) {
             is OwnerSyncFailure -> "Connection needs attention (${e.code})"; else -> "Offline or unverified response · saved work retained" }))
-            if (e is OwnerSyncFailure && e.code !in setOf("REMOTE_UNAVAILABLE", "QUOTA_REACHED")) OwnerConnectionSyncJob.cancel(context)
+            if (e is OwnerSyncFailure && !isRetryableOwnerConnectionFailure(e.code)) OwnerConnectionSyncJob.cancel(context)
             throw e }
     }
     private suspend fun syncUnlocked() {
