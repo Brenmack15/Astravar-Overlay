@@ -70,12 +70,33 @@ class NotionTransferTest {
             itemDefinitions = listOf(ItemDefinition("existing", "Composite Armor")),
             items = listOf(ItemInstance("existing-instance", "existing", ItemState.WORN)))
         val preview = planNotionCharacterTransfer(original, transfer(), NotionTransferChoices(replaceConflictingStats = true))
-        assertEquals(listOf("Composite Armor"), preview.alreadyPresent)
+        assertTrue(preview.alreadyPresent.isEmpty())
+        assertTrue(preview.deferred.single().contains("source identity needs review"))
         assertEquals(1, preview.character.items.size)
         assertEquals(31, preview.character.currentHp)
         assertEquals(22, preview.character.hpDamage)
         assertEquals(mapOf(1 to 1, 2 to 0), preview.character.spellSlots)
         assertTrue(preview.warnings.any { it.contains("compare its accepted effects") })
+    }
+
+    @Test fun notionUuidSpellingsRemainOnePhysicalIdentityEvenAfterARename() {
+        val dashed = "9d66ac75-fdca-4a28-9734-019aba8b5666"
+        val compact = dashed.replace("-", "").uppercase()
+        val first = planNotionCharacterTransfer(character(), transfer(listOf(item(id = dashed))))
+        val again = planNotionCharacterTransfer(first.character, transfer(listOf(item(id = compact, name = "Renamed suit"))))
+        assertTrue(again.added.isEmpty())
+        assertEquals(listOf("Renamed suit"), again.alreadyPresent)
+        assertEquals(first.character.items, again.character.items)
+        assertFailsWith<IllegalArgumentException> {
+            validateNotionCharacterTransfer(transfer(listOf(item(id = dashed), item(id = compact))))
+        }
+    }
+
+    @Test fun markThreeDoesNotAliasMarkTwo() {
+        val first = planNotionCharacterTransfer(character(), transfer(listOf(item(name = "Astravar Mk.II"))))
+        val second = planNotionCharacterTransfer(first.character,
+            transfer(listOf(item("other-item-source", "Astravar Mk.III"))))
+        assertEquals(listOf("Astravar Mk.III"), second.added)
     }
 
     @Test fun mismatchedActorBadLedgerOrDuplicatedSourceIdentityFailsClosed() {
