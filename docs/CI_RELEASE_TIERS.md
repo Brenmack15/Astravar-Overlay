@@ -18,6 +18,23 @@ The orchestrator executes the fast gate first. Only after it passes do full regr
 
 PR checkout is the exact head SHA, not an undocumented merge artifact. Retain `SOURCE_COMMIT.txt`, checksums, plans and logs with the corresponding run. Full/native approval must refer to that same source; changing packaged code invalidates an earlier candidate's release evidence.
 
+The code53 hotfix adds an early mandatory native gate before the long release UI
+journeys. It installs frozen code52 in the isolated QA package, seeds an older
+RSA-OAEP key and encrypted credential sentinel, and updates in place with the
+same disposable debug signer. Real Android KeyStore and current Node/WebCrypto
+HTTPS fixtures then exercise authorization renewal, rejection and retry. The
+public-constructor Notion import test covers complete apply, repeated imports,
+backup validation, rollback and restoration before campaign HTTPS publication
+and independent readback. Failure stops the gate; it cannot create success scope
+evidence. This API36 Android16 emulator evidence is separate from physical
+Galaxy S26/Android17 acceptance and from the final owner's signing certificate.
+
+The code52 debug fixture is built from the exact source
+`f90371c58baed7379862883b2a966ff1113b0cee` using the current runner's debug signer.
+Its source, checksum, package, version and certificate are inspected. It does not
+replace or invalidate the frozen49/50 release-upgrade cache or its mandatory
+native journeys. No owner credential, key, or campaign data enters these fixtures.
+
 ## Caching and resource limits
 
 Pinned `gradle/actions/setup-gradle` restores dependencies and reusable Gradle state; Gradle build caching is enabled. Fork PRs are read-only consumers. Same-repository PRs may write only their isolated `refs/pull/N/merge` cache; base/default branches and other PRs cannot restore it. This lets the fast job seed subsequent full/native jobs and warm repeated updates to this long-lived PR without merging to main. Default-branch and explicit dispatch runs retain their own branch-scoped write access. No configuration-cache encryption key, owner signing secret, personal export, live database, or campaign record is cached. Build scans and dependency submissions are not enabled.

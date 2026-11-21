@@ -160,7 +160,12 @@ class GenesisConsolidationInstrumentationTest {
             device.setOrientationNatural(); device.unfreezeRotation()
             device.executeShellCommand("settings put system font_scale 1.0")
         }
-        tap("Change element")
+        // The element selector is above the attack/options/results. Rotation and
+        // font changes retain that lower reading position. Search upward first;
+        // traversing farther down spends the bounded observation window before
+        // returning to this known upper control on the longer Combat page.
+        ui.touch(ui.textBounds("Change element", product, scrollAttempts = 24,
+            interactive = true, preferLast = true, firstDirection = Direction.UP), "Change element")
         find("Choose an element")
         ui.tap(By.descStartsWith("Cold ").pkg(product), "Select cold on the retained element wheel")
         find("Cold")

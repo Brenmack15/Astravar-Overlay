@@ -5,6 +5,8 @@ set -euo pipefail
 : "${RUNNER_TEMP:?Isolated CI runner required}"
 : "${ASTRAVAR_BASELINE_DEBUG_APK:?Previous published debug APK required}"
 : "${ASTRAVAR_VERSION_CODE:?Exact candidate version code required}"
+astravar_bootstrap_gate=${ASTRAVAR_BOOTSTRAP_GATE:-false}
+[[ "$astravar_bootstrap_gate" == true || "$astravar_bootstrap_gate" == false ]]
 test -c /dev/kvm
 sudo chmod 666 /dev/kvm
 astravar_private=$(mktemp -d "$RUNNER_TEMP/astravar-hp-native.XXXXXX")
@@ -163,7 +165,11 @@ run_test() {
   return 0
 }
 timeout 10s adb -s "$astravar_serial" shell dumpsys connectivity >"$astravar_output/connectivity-before-tests.txt"
-run_test com.yazsras.astravar.data.LiveHpBaselineSeedTest baseline-seed.txt
+if [[ "$astravar_bootstrap_gate" == true ]]; then
+  run_test 'com.yazsras.astravar.data.OwnerBootstrapBaselineSeedTest#seedLegacyAliasOnBaseline' bootstrap-baseline-seed.txt
+else
+  run_test com.yazsras.astravar.data.LiveHpBaselineSeedTest baseline-seed.txt
+fi
 timeout 10s adb -s "$astravar_serial" shell am force-stop "$astravar_product"
 snapshot() {
   adb -s "$astravar_serial" shell "run-as $astravar_product sh -c 'for d in files databases shared_prefs no_backup; do if test -d \"\$d\"; then find \"\$d\" -type f; fi; done | sort | while read f; do sha256sum \"\$f\"; done'" | tr -d '\r' >"$1"
@@ -212,6 +218,27 @@ assert 0 <= value['guestMinusHostMs'] <= 5000, 'Owned guest clock synchronizatio
 PY
 # No credentials appear in command arguments/logs or retained artifacts.
 adb -s "$astravar_serial" shell "run-as $astravar_product sh -c 'mkdir -p files; cat >files/ci-https-config.json'" <"$astravar_private/client-config.json"
+if [[ "$astravar_bootstrap_gate" == true ]]; then
+  # Each test is mandatory and uses the real Android KeyStore / current Worker TLS
+  # fixture. Keep Notion's canonical-store test before older campaign fixtures.
+  run_test 'com.yazsras.astravar.data.OwnerBootstrapNativeTest#upgradeRepairsLegacyOaepAndPreservesCredentials' bootstrap-upgrade.txt
+  run_test 'com.yazsras.astravar.data.OwnerBootstrapNativeTest#freshRenewalAndSingleUseWorkWithWebCrypto' bootstrap-renewal.txt
+  run_test 'com.yazsras.astravar.data.OwnerBootstrapNativeTest#invalidBundlesAndInterruptedPersistenceRemainRetryable' bootstrap-negative.txt
+  run_test 'com.yazsras.astravar.data.NotionNativeImportTest#publicContextApplyBackupReimportAndRollbackPreserveIdentity' notion-public-import.txt 360
+  run_test 'com.yazsras.astravar.data.CampaignNativeHttpsTest#authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts' native-campaign-https.txt 360
+  git rev-parse HEAD >"$astravar_output/SOURCE_COMMIT.txt"
+  python3 - "$astravar_output/SCOPE.json" <<'PY_SCOPE'
+import json,os,pathlib,sys
+pathlib.Path(sys.argv[1]).write_text(json.dumps({
+ 'fictionalOnly':True,'emulatorApi':36,'nativeAndroidKeyStore':True,
+ 'webCryptoEncryptedBootstrap':True,'sameDebugKeyUpdate':'52 to '+os.environ['ASTRAVAR_VERSION_CODE'],
+ 'legacyAliasAndVaultPreserved':True,'nativePublicNotionImport':True,
+ 'nativeCampaignHttpsAndIndependentReadback':True,
+ 'actualOwnerSigningIdentityTestedInCi':False,'realChatGptHostInvocation':False,
+ 'physicalGalaxy':False,'android17':False},indent=2)+'\n')
+PY_SCOPE
+  exit 0
+fi
 run_test 'com.yazsras.astravar.data.LiveHpNativeHttpsTest#aNativeKeystorePublicationApprovalRejectionAndOfflineIntent' native-hp-first.txt
 timeout 10s adb -s "$astravar_serial" shell am force-stop "$astravar_product"
 # Keep the same durable temporary SQLite file while restarting the gateway.

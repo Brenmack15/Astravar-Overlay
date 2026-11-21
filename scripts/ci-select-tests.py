@@ -19,7 +19,8 @@ CRITICAL = {
 GROUPS = {
     'CampaignConnection': ['data.CampaignConnectionTest', 'data.CampaignConnectionProjectionTest', 'ui.CampaignConnectionUiTest'],
     'GenesisCampaign': ['data.GenesisAuthorityRepositoryTest', 'ui.GenesisCampaignUiTest'],
-    'Notion': ['ui.GenesisInventoryNavigationUiTest'],
+    'Notion': ['data.NotionTransferRepositoryTest', 'data.NotionTransferPublicConstructorTest', 'ui.GenesisInventoryNavigationUiTest'],
+    'GenesisStorage': ['data.NotionTransferRepositoryTest', 'data.NotionTransferPublicConstructorTest'],
     'GenesisInventory': ['data.GenesisInventoryTest', 'ui.GenesisInventoryNavigationUiTest', 'ui.GenesisInventoryHubUiTest'],
     'GenesisEquipment': ['data.GenesisInventoryTest', 'ui.GenesisEquipmentFavoritesUiTest'],
     'GenesisPager': ['ui.GenesisPagerTest', 'ui.GenesisCompactChromeTest'],

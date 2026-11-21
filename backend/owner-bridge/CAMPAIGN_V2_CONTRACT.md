@@ -101,3 +101,12 @@ and fingerprint using the existing scoped reader. Divergent HP, abilities,
 resources or equipment stop publication for reconciliation; synchronization does
 not rewrite either store to hide the conflict. An unrelated campaign is not
 scanned or exported for this check.
+
+### Publication hotfix contract
+
+Each complete canonical record (identity, kind, revision and fields) is bounded to
+48,000 UTF-8 bytes, matching the native publisher. The HTTP request remains bounded
+to 65,536 bytes. Unicode and JSON escaping count toward the wire limit; JavaScript
+UTF-16 string length is not the record-size contract. Initial and replayed
+publication acknowledgements carry the exact immutable persisted publication time.
+Current-record readback remains independent of that acknowledgement.
