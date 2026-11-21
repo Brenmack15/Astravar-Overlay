@@ -51,13 +51,52 @@ class CampaignConnectionUiTest {
             put("gameplayVerified", false); put("gameplayVerifiedAt", JsonNull)
         })
         assertNotNull(view.lastSyncAt)
+        assertNull(view.lastServerResponseAt)
         assertNull(view.gameplayVerifiedAt)
         show(view).use {
             compose.onNodeWithTag("campaign-connection-status").assertTextEquals("Connected · no eligible records")
             compose.onNodeWithTag("campaign-gameplay-verification-time").performScrollTo()
                 .assertTextEquals("Last complete gameplay verification: Not yet verified")
             compose.onNodeWithText("Current records independently verified: 0 of 0").performScrollTo().assertExists()
+            compose.onNodeWithTag("campaign-service-response-time").performScrollTo()
+                .assertTextEquals("Last successful service response: Not yet recorded")
         }
+    }
+
+    @Test fun failedPublicationShowsItsStageAndRetainedWorkSeparatelyFromServiceContact() {
+        val view = campaignConnectionView(buildJsonObject {
+            put("connected", true); put("status", "Synchronization retry required")
+            put("lastServerResponseAt", 50_000); put("lastUploadAttemptAt", 60_000)
+            put("lastPublicationAcceptedAt", 40_000); put("lastIndependentVerificationAt", 30_000)
+            put("lastFullSyncAt", 20_000); put("lastSyncAt", 10_000)
+            put("failedStage", "PUBLICATION_READBACK"); put("failureCode", "NETWORK_TIMEOUT")
+            put("pendingRecordCount", 17); put("localRecordCount", 17); put("verifiedRecordCount", 0)
+        })
+        assertEquals(50_000L, view.lastServerResponseAt)
+        assertEquals(60_000L, view.lastUploadAttemptAt)
+        assertEquals(40_000L, view.lastPublicationAcceptedAt)
+        assertEquals(30_000L, view.lastIndependentVerificationAt)
+        assertEquals(20_000L, view.lastFullSyncAt)
+        assertNull(view.gameplayVerifiedAt)
+        show(view).use {
+            compose.onNodeWithTag("campaign-sync-failed-stage").performScrollTo()
+                .assertTextEquals("Sync stopped at: publication readback")
+            compose.onNodeWithText("Records retained for publication or verification: 17").performScrollTo().assertExists()
+        }
+    }
+
+    @Test fun diagnosticFieldsRejectUnknownProviderValuesAndDoNotPromoteOldCompletionTimes() {
+        val view = campaignConnectionView(buildJsonObject {
+            put("currentStage", "provider-secret-stage"); put("failedStage", "provider-secret-failure")
+            put("failureCode", "provider-secret-code"); put("lastSyncAt", 1234)
+            put("lastServerResponseAt", -1); put("pendingRecordCount", -1)
+        })
+        assertEquals("", view.currentStage)
+        assertEquals("", view.failedStage)
+        assertNull(view.lastServerResponseAt)
+        assertNull(view.lastFullSyncAt)
+        assertEquals(0, view.pendingRecordCount)
+        assertFalse(view.toString().contains("provider-secret"))
     }
 
     @Test fun preparedCampaignShowsReviewedMembershipActionBeforeGameplaySharing() {

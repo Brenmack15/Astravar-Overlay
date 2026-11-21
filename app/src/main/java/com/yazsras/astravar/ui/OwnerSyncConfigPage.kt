@@ -12,6 +12,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.yazsras.astravar.data.OwnerConnectionClient
 import com.yazsras.astravar.data.CampaignSyncPreferences
 import com.yazsras.astravar.data.OwnerSyncFailure
+import com.yazsras.astravar.data.OwnerAuthorizationException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -39,9 +40,13 @@ import java.io.ByteArrayOutputStream
                 // Success text and connection state come from the persisted client result.
                 message = snapshot.text("message")
             } catch (e: CancellationException) { throw e }
+            catch (e: OwnerAuthorizationException) {
+                failed = true
+                message = e.code.safeMessage
+            }
             catch (e: OwnerSyncFailure) {
                 failed = true
-                message = when (e.code) {
+                message = ownerConnectionRecoveryMessage(e.code) ?: when (e.code) {
                     "AUTHENTICATION_REQUIRED" -> "Pair this device through the owner authorization page."
                     "CREDENTIAL_REVOKED_OR_EXPIRED", "CREDENTIAL_SCOPE_OR_EXPIRY", "INVALID_AUTHORIZATION", "UNAUTHORIZED" -> "Device authorization expired or was revoked. Pair again through the owner page."
                     "ACCESS_DENIED", "FORBIDDEN" -> "This device does not have the requested permission."
@@ -51,7 +56,7 @@ import java.io.ByteArrayOutputStream
                     "PAIRING_EXPIRED", "EXPIRED_TOKEN" -> "Pairing expired. Start a new pairing request."
                     "INVALID_AUTHORIZATION_BUNDLE" -> "The encrypted authorization file could not be verified for this device. Start private service authorization again."
                     "QUOTA_REACHED", "RATE_LIMITED" -> "The service limit was reached. Saved decisions remain queued; retry later."
-                    else -> "Connection could not be verified (${e.code.replace('_', ' ').lowercase()}). Saved decisions remain on this device."
+                    else -> "Connection could not be verified. Saved decisions remain on this device."
                 }
                 try { snapshot = client.snapshot() } catch (_: Exception) { /* retain last verified display */ }
             } catch (_: Exception) {
@@ -100,7 +105,8 @@ import java.io.ByteArrayOutputStream
                 require(bytes.isNotEmpty())
                 val saved = client.importServiceAuthorization(bytes)
                 JsonObject(saved + ("message" to JsonPrimitive(if (saved["connected"]?.jsonPrimitive?.booleanOrNull == true) "Encrypted service authorization renewed for this device. Sync to verify access." else "Encrypted service authorization imported for this device. Complete device pairing to connect.")))
-            } catch (e: IllegalArgumentException) {
+            } catch (e: OwnerAuthorizationException) { throw e }
+            catch (_: IllegalArgumentException) {
                 throw OwnerSyncFailure("INVALID_AUTHORIZATION_BUNDLE")
             } finally { bytes.fill(0) }
         }

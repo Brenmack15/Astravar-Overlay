@@ -23,6 +23,7 @@ import com.yazsras.astravar.data.CampaignConnectionSyncJob
 import com.yazsras.astravar.data.CampaignSyncNotifications
 import com.yazsras.astravar.data.CampaignSyncPreferences
 import com.yazsras.astravar.data.OwnerSyncFailure
+import com.yazsras.astravar.data.OwnerAuthorizationException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -70,9 +71,13 @@ import java.io.IOException
                 error = false
                 message = (snapshot["message"] as? JsonPrimitive)?.contentOrNull.orEmpty()
             } catch (e: CancellationException) { throw e }
+            catch (e: OwnerAuthorizationException) {
+                error = true
+                message = e.code.safeMessage
+            }
             catch (e: OwnerSyncFailure) {
                 error = true
-                message = when (e.code) {
+                message = ownerConnectionRecoveryMessage(e.code) ?: when (e.code) {
                     "AUTHENTICATION_REQUIRED", "CREDENTIAL_REVOKED_OR_EXPIRED", "CREDENTIAL_SCOPE_OR_EXPIRY" -> "Authentication expired or access was revoked. Renew authorization or pair this device again."
                     "PAIRING_PENDING", "AUTHORIZATION_PENDING" -> "Waiting for owner authorization. Astravar will check again while this screen is open."
                     "PAIRING_EXPIRED", "PAIRING_EXPIRED_OR_UNKNOWN" -> "The pairing code expired. Start a new pairing request."
@@ -80,7 +85,7 @@ import java.io.IOException
                     "ACCESS_DENIED", "SCOPE_DENIED", "FORBIDDEN" -> "This campaign operation is outside the saved owner permissions."
                     "PRIVATE_GATEWAY_AUTH_REQUIRED" -> "Private service authentication expired. Renew private service authorization below."
                     "INVALID_AUTHORIZATION_BUNDLE" -> "This encrypted authorization file could not be verified for this installation."
-                    else -> "Synchronization is pending or could not be verified (${e.code.replace('_', ' ').lowercase()}). Saved records and pending transactions are preserved."
+                    else -> "Synchronization is pending or could not be verified. Saved records and pending transactions are preserved."
                 }
                 runCatching { client.snapshot() }.getOrNull()?.let { snapshot = it }
             } catch (_: Exception) {
@@ -140,6 +145,7 @@ import java.io.IOException
                 } ?: throw OwnerSyncFailure("INVALID_AUTHORIZATION_BUNDLE")
             }
             try { require(bytes.isNotEmpty()); client.importServiceAuthorization(bytes) }
+            catch (e: OwnerAuthorizationException) { throw e }
             catch (_: IllegalArgumentException) { throw OwnerSyncFailure("INVALID_AUTHORIZATION_BUNDLE") }
             finally { bytes.fill(0) }
         }

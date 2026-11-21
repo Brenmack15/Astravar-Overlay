@@ -12,6 +12,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.yazsras.astravar.data.CampaignSyncStage
+import com.yazsras.astravar.data.campaignSyncFailureCode
 import kotlinx.serialization.json.*
 import java.text.DateFormat
 import java.util.Date
@@ -56,8 +58,16 @@ data class CampaignConnectionView(
     val verifiedRecordCount: Int = 0, val pendingPublicationCount: Int = 0, val pendingRemovalCount: Int = 0,
     val pendingDeviceCommandCount: Int = 0, val pendingReceiptCount: Int = 0,
     val gameplayVerified: Boolean = false, val gameplayVerifiedAt: Long? = null,
-    val canonicalReviewProfileId: String = ""
+    val canonicalReviewProfileId: String = "",
+    val lastServerResponseAt: Long? = null, val lastUploadAttemptAt: Long? = null,
+    val lastPublicationAcceptedAt: Long? = null, val lastIndependentVerificationAt: Long? = null,
+    val lastFullSyncAt: Long? = null, val currentStage: String = "", val failedStage: String = "",
+    val failureCode: String = "", val pendingRecordCount: Int = 0
 )
+
+private fun connectionTime(value: Long?) = value?.let {
+    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM).format(Date(it))
+} ?: "Not yet recorded"
 
 @Composable fun CampaignConnectionContent(view: CampaignConnectionView,
     onPair: (String, String, String, Set<String>, Set<String>) -> Unit,
@@ -103,9 +113,22 @@ data class CampaignConnectionView(
             Text("Campaign: ${view.campaignId.ifBlank { "Not selected" }}", color = RebuildPalette.Muted)
             if (view.readinessDetail.isNotBlank()) Text(view.readinessDetail, color = RebuildPalette.Muted,
                 modifier = Modifier.testTag("campaign-readiness-detail"))
-            Text("Last service contact: ${view.lastSyncAt?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM).format(Date(it)) } ?: "Not yet verified"}", color = RebuildPalette.Muted)
+            Text("Last successful service response: ${connectionTime(view.lastServerResponseAt)}", color = RebuildPalette.Muted,
+                modifier = Modifier.testTag("campaign-service-response-time"))
+            Text("Last upload attempt: ${connectionTime(view.lastUploadAttemptAt)}", color = RebuildPalette.Muted)
+            Text("Last accepted publication: ${connectionTime(view.lastPublicationAcceptedAt)}", color = RebuildPalette.Muted)
+            Text("Last independent record verification: ${connectionTime(view.lastIndependentVerificationAt)}", color = RebuildPalette.Muted)
+            Text("Last fully completed synchronization: ${connectionTime(view.lastFullSyncAt)}", color = RebuildPalette.Muted)
             Text("Last complete gameplay verification: ${view.gameplayVerifiedAt?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM).format(Date(it)) } ?: "Not yet verified"}", color = RebuildPalette.Muted,
                 modifier = Modifier.testTag("campaign-gameplay-verification-time"))
+            if (view.failedStage.isNotBlank()) {
+                Text("Sync stopped at: ${view.failedStage.replace('_', ' ').lowercase()}", color = RebuildPalette.GoldBright,
+                    modifier = Modifier.testTag("campaign-sync-failed-stage"))
+                Text(ownerConnectionRecoveryMessage(view.failureCode)
+                    ?: "This stage needs verification. Saved records and pending transactions are retained. Retry Sync now; review permissions or conflicts if it continues.",
+                    color = RebuildPalette.Muted)
+            } else if (view.currentStage.isNotBlank()) Text("Sync stage: ${view.currentStage.replace('_', ' ').lowercase()}", color = RebuildPalette.Muted)
+            if (view.pendingRecordCount > 0) Text("Records retained for publication or verification: ${view.pendingRecordCount}", color = RebuildPalette.GoldBright)
             if (view.connected) {
                 if (view.canonicalReviewProfileId.isNotBlank()) {
                     Text("Record eligibility and verification are blocked until shared values are reconciled.", color = RebuildPalette.GoldBright,
@@ -383,6 +406,15 @@ internal fun campaignConnectionView(snapshot: JsonObject, now: Long = System.cur
         campaignId = snapshot.connectionText("campaignId"), selectedProfileId = snapshot.connectionText("selectedProfileId"),
         deviceId = snapshot.connectionText("deviceId"), deviceName = snapshot.connectionText("deviceName").ifBlank { "Android device" },
         account = snapshot.connectionText("accountLabel"), lastSyncAt = snapshot.connectionLong("lastSyncAt")?.takeIf { it > 0 },
+        lastServerResponseAt = snapshot.connectionLong("lastServerResponseAt")?.takeIf { it > 0 },
+        lastUploadAttemptAt = snapshot.connectionLong("lastUploadAttemptAt")?.takeIf { it > 0 },
+        lastPublicationAcceptedAt = snapshot.connectionLong("lastPublicationAcceptedAt")?.takeIf { it > 0 },
+        lastIndependentVerificationAt = snapshot.connectionLong("lastIndependentVerificationAt")?.takeIf { it > 0 },
+        lastFullSyncAt = snapshot.connectionLong("lastFullSyncAt")?.takeIf { it > 0 },
+        currentStage = snapshot.connectionText("currentStage").takeIf { value -> CampaignSyncStage.entries.any { it.name == value } }.orEmpty(),
+        failedStage = snapshot.connectionText("failedStage").takeIf { value -> CampaignSyncStage.entries.any { it.name == value } }.orEmpty(),
+        failureCode = snapshot.connectionText("failureCode").let { if (it.isBlank()) "" else campaignSyncFailureCode(it) },
+        pendingRecordCount = snapshot.connectionLong("pendingRecordCount")?.coerceIn(0, Int.MAX_VALUE.toLong())?.toInt() ?: 0,
         localRecordCount = snapshot.connectionLong("localRecordCount")?.coerceIn(0, Int.MAX_VALUE.toLong())?.toInt() ?: 0,
         readiness = snapshot.connectionText("readiness"), readinessTitle = snapshot.connectionText("readinessTitle"),
         readinessDetail = snapshot.connectionText("readinessDetail"),
