@@ -36,6 +36,7 @@ import java.util.Locale
     var selected by remember { mutableStateOf<NotionCharacterTransfer?>(null) }
     var includeStats by rememberSaveable { mutableStateOf(true) }
     var includeItems by rememberSaveable { mutableStateOf(true) }
+    var includeSpells by remember { mutableStateOf(false) }
     var replaceStats by rememberSaveable { mutableStateOf(false) }
     var includeWallet by rememberSaveable { mutableStateOf(false) }
     var consent by remember { mutableStateOf(false) }
@@ -44,7 +45,7 @@ import java.util.Locale
 
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null && !busy) {
-            busy = true; error = ""; selected = null; consent = false; verifiedBackup = null; outcome = null
+            busy = true; error = ""; selected = null; consent = false; includeSpells = false; verifiedBackup = null; outcome = null
             scope.launch {
                 try {
                     val text = withContext(Dispatchers.IO) {
@@ -102,7 +103,7 @@ import java.util.Locale
         }
     }
 
-    val choices = NotionTransferChoices(includeStats, includeItems, replaceStats)
+    val choices = NotionTransferChoices(includeStats, includeItems, replaceStats, spells = includeSpells)
     val proposed = remember(selected, saved, choices) {
         selected?.let { runCatching { planNotionCharacterTransfer(saved.character, it, choices) } }
     }
@@ -145,6 +146,8 @@ import java.util.Locale
                 color = RebuildPalette.Ice)
             Text("Saved locally. Campaign sharing still requires reviewed membership, authorized scopes and verified synchronization.",
                 color = RebuildPalette.Muted)
+            if (done.spellsAdded > 0 || done.spellsPreviouslyPresent > 0)
+                Text("Spells added ${done.spellsAdded} · previously present ${done.spellsPreviouslyPresent}", color = RebuildPalette.Ice)
             done.warnings.take(12).forEach { Text(it, color = RebuildPalette.Muted) }
         }
         val transfer = selected
@@ -174,10 +177,22 @@ import java.util.Locale
                 Checkbox(includeItems, { includeItems = it; consent = false })
                 Text("Add confirmed ${transfer.character.name}-owned carried, equipped and stored items. Skip duplicate names and IDs.", Modifier.weight(1f))
             }
+            transfer.reviewedSpellbook?.let { book ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Checkbox(includeSpells, { includeSpells = it; consent = false })
+                    Text("Review spell preparation and casting class level from ${book.spells.size} source entries.", Modifier.weight(1f))
+                }
+            }
             val plan = proposed?.getOrNull()
             if (plan != null) {
                 Text("Preview: ${plan.added.size} new items · ${plan.alreadyPresent.size} already present · " +
                     "${plan.deferred.size} intentionally deferred.", color = RebuildPalette.Ice)
+                if (includeSpells) {
+                    if (plan.castingLevelChanged) Text("Casting class level → ${plan.character.spellcastingClassLevel}")
+                    PlayerDisclosure("Spells to add (${plan.addedSpells.size})") { plan.addedSpells.forEach { Text(it) } }
+                    if (plan.presentSpells.isNotEmpty()) PlayerDisclosure("Spells already present (${plan.presentSpells.size})") { plan.presentSpells.forEach { Text(it) } }
+                    if (plan.deferredSpells.isNotEmpty()) PlayerDisclosure("Spells and conflicts held for review (${plan.deferredSpells.size})") { plan.deferredSpells.forEach { Text(it) } }
+                }
                 val projection = CharacterCalculator.calculate(plan.character)
                 Text("Proposed level ${plan.character.level} · AC ${projection.armorClass.value ?: "unknown"} · " +
                     "max HP ${projection.maximumHp.value ?: "unknown"} · current HP ${projection.currentHp ?: "unknown"}. Stored HP and recorded damage are retained.", color = RebuildPalette.Ice)
