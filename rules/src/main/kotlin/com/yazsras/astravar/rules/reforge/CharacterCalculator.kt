@@ -24,7 +24,7 @@ object CharacterCalculator {
             val effective=bounded.copy(value=bounded.value?.coerceAtLeast(0))
             CalculatedAbility(permanent,effective,effective.value?.let(::abilityModifier))
         }
-        val pb = proficiencyBonus(character.level)
+        val pb = character.reviewedProficiency?.bonus ?: proficiencyBonus(character.level)
         val saves = Stat.entries.associateWith { stat ->
             val proficient = stat in character.saveProficiencies || active.any { (it.effect.payload as? EffectPayload.Proficiency)?.save == stat }
             val base = abilities.getValue(stat).modifier?.plus(if(proficient) pb else 0)
@@ -182,6 +182,12 @@ object CharacterCalculator {
         SkillRules.validate(c)
         require(c.id.isNotBlank() && c.id.length<=200 && c.name.length in 1..200)
         require(c.level in 1..20 && c.revision>=0 && c.schemaVersion==1)
+        c.reviewedProficiency?.let {
+            require(it.bonus in -1000..1000 && it.source.id.isNotBlank() && it.source.name.isNotBlank() &&
+                it.source.acceptance in setOf(Acceptance.OFFICIAL, Acceptance.ACCEPTED_HOMEBREW)) {
+                "An independent proficiency bonus needs an approved rules source."
+            }
+        }
         require(c.baseAbilities.values.all { it==null || it in 0..100 })
         require(c.permanentAdvancements.values.all { it in -100..100 })
         require(c.baseMaxHp==null || c.baseMaxHp in 0..1_000_000)

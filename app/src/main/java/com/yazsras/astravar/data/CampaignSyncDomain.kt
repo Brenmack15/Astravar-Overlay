@@ -225,6 +225,15 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             setOf(PlayableMechanicsSync.BONUS, PlayableMechanicsSync.STATE, PlayableMechanicsSync.DEFENSE)) { "Equipment v1 accepts one native edit per transaction." }
         require(operations.none { it.kind == PlayableMechanicsSync.STATS })
         val before = snapshot(campaignId, includeReadOnly = false, mechanics = native).associateBy { key(it.kind,it.recordId) }
+        // An active item can also change both actors' calculated statistics. Reforge
+        // audits and republishes those projections under its own immutable commands.
+        val singleMove = operations.singleOrNull()?.takeIf { it.type == "move_item" && it.kind == "item" }
+        val transfer = operations.singleOrNull { it.type == "move_item" && "playableTransfer" in it.fields }
+        require(operations.none { "playableTransfer" in it.fields } || transfer != null && operations.size == 1) {
+            "A revision-checked playable transfer must be its own transaction."
+        }
+        if (transfer != null) validatePlayableTransfer(campaignId, transfer)
+        val managedMove = singleMove?.takeIf { readGenesisAuthorityItem(db, it.recordId)?.ownerActorId != null }
         val childIds = operations.indices.map { "campaign-sync-${campaignHash(commandId).take(40)}-$it" }
         childIds.forEach { require(db.recordsDao().receipt(it) == null && db.ledgerDao().event(it) == null) { "Child command collision." } }
         val created = mutableSetOf<String>()
@@ -295,8 +304,16 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         }
         // For a native command, the signed outcome names the edited equipment row.
         // Reforge commits and audits derived projections in this transaction; sync publishes them independently.
-        val changed = if (native) after.filter { it.kind == PlayableMechanicsSync.EQUIPMENT && it.recordId == operations.single().recordId }
-        else after.filter { before[key(it.kind,it.recordId)] != it && it.kind !in setOf("audit", "configuration", "roll-history") }
+        val differences = after.filter { before[key(it.kind,it.recordId)] != it && it.kind !in setOf("audit", "configuration", "roll-history") }
+        val changed = when {
+            native -> after.filter { it.kind == PlayableMechanicsSync.EQUIPMENT && it.recordId == operations.single().recordId }
+            managedMove != null -> {
+                val direct = differences.filter { it.recordId == managedMove.recordId && it.kind in setOf("item", "item-placement") }
+                require(transfer != null || direct.size == differences.size) { "This move changes calculated values. Use a revision-checked playable transfer." }
+                direct
+            }
+            else -> differences
+        }
         require(changed.isNotEmpty())
         val now = System.currentTimeMillis()
         val receipt = CommandReceipt(parentId, fingerprint, "CAMPAIGN_SYNC_V2", campaignId,
@@ -305,6 +322,25 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             0, receipt.resultingRevision, now, campaignJson.encodeToString(operations.mapNotNull { before[key(it.kind,it.recordId)] }), receipt.outcomeJson))
         db.recordsDao().insert(receipt)
         receipt
+    }
+
+    private suspend fun validatePlayableTransfer(campaignId: String, op: CampaignSyncOperation) {
+        val f = op.fields
+        require(op.kind == "item" && f.keys == setOf("expectedPlacementRevision", "holderProfileId", "state", "playableTransfer") &&
+            f.text("state") == "Carried") { "Transfer the complete reviewed item as carried." }
+        val proof = f.getValue("playableTransfer").jsonObject
+        require(proof.keys == setOf("version", "fromId", "fromRevision", "toRevision") && proof.int("version") == 1)
+        val sender = proof.text("fromId")
+        val recipient = f.text("holderProfileId")
+        require(sender != recipient && readGenesisAuthorityItem(db, op.recordId)?.ownerActorId == sender &&
+            db.partyDao().placement(op.recordId)?.holderProfileId == sender) { "Playable item ownership changed." }
+        suspend fun confirm(actorId: String, revision: Long) {
+            val actor = requireNotNull(db.genesisAuthorityDao().actor(actorId))
+            require(actor.playable && actor.campaignId == campaignId && actor.role in setOf(GenesisActorRole.PLAYER, GenesisActorRole.COMPANION) &&
+                revision > 0 && db.reforgeDao().character(actorId)?.revision == revision) { "Playable actor or revision changed." }
+        }
+        confirm(sender, proof.long("fromRevision"))
+        confirm(recipient, proof.long("toRevision"))
     }
 
     private suspend fun applyOne(campaignId: String, op: CampaignSyncOperation, current: CampaignSyncRecord?, source: String, child: String) {
@@ -376,7 +412,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
                 party.adjustCurrency(CurrencyCommand(op.recordId, op.expectedRevision, f.long("copperDelta"), f.long("silverDelta"), f.long("goldDelta"), source, child, f.long("electrumDelta"), f.long("platinumDelta")))
             }
             "move_item" -> {
-                require(op.kind == "item"); f.allowed("expectedPlacementRevision", "holderProfileId", "containerItemId", "installedProjectId", "state")
+                require(op.kind == "item"); f.allowed("expectedPlacementRevision", "holderProfileId", "containerItemId", "installedProjectId", "state", "playableTransfer")
                 require(f.containsKey("expectedPlacementRevision")) { "Confirm the existing placement revision, including an explicit unknown placement." }
                 val oldPlacement = db.partyDao().placement(op.recordId)
                 fun placementField(name: String, old: String?) = if (f.containsKey(name)) f.optional(name) else old

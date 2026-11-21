@@ -75,7 +75,7 @@ function proposedEquipment(before, op) {
 }
 
 const FIELD_KEYS={
- 'playable-stat':'id schemaVersion revision profileId actorRole target key label effective base advancement permanent modifier source',
+ 'playable-stat':'id schemaVersion revision profileId actorRole target key label effective base advancement permanent modifier source sourceId sourceRevision sourceAcceptance',
  'playable-equipment':'id schemaVersion revision profileId definitionId state attuned operating bonuses defenses source',
  'character-profile':'id name currentHp maximumHp temporaryHp armorClass level revision source updatedAt',
  'character-ability':'profileId key score magicModifier notes revision source updatedAt',
@@ -274,6 +274,9 @@ export class CampaignBridge{
   scopes.push('character');
   if(op.type==='edit_equipment_defense')scopes.push('combat');
   if(op.fields.actorRole==='COMPANION')scopes.push('companions');
+ }else if(op.type==='move_item' && Object.hasOwn(op.fields,'playableTransfer')){
+  if(b.operations.length!==1)fail(400,'SINGLE_EQUIPMENT_EDIT_REQUIRED');
+  scopes.push('character','companions');
  }}if(new Set(prepared.map(x=>x.kind+'|'+x.recordId)).size!==prepared.length)fail(400,'DUPLICATE_RECORD_OPERATION');if(scopes.some(s=>!JSON.parse(g.write_scopes_json).includes(s)))fail(403,'WRITE_SCOPE_DENIED');const auto=scopes.every(s=>JSON.parse(g.auto_scopes_json).includes(s));const fingerprint=await sha256(canonical({campaignId:campaign,commandId:b.commandId,grantRevision:g.revision,operations:prepared,source:b.source}));const value={commandId:b.commandId,campaignId:campaign,grantRevision:g.revision,operations:prepared,source:b.source,fingerprint,status:auto?'PENDING_DELIVERY':'PENDING_APPROVAL',createdAt:this.now()};if(wireBytes(this.envelope(campaign,{grant:this.grantJson(g),commands:[value],verifiedAt:this.now()}))>MAX_PENDING_BYTES)fail(413,'COMMAND_DELIVERY_TOO_LARGE');const expectedRecords=prepared.flatMap(op=>[{recordId:op.recordId,kind:op.kind,revision:op.expectedRevision+1,fields:op.proposedFields},...op.sideEffects.map(effect=>({recordId:effect.recordId,kind:effect.kind,revision:effect.expectedRevision+1,fields:effect.fields}))]).map(r=>({...r,fields:{...r.fields,source:'x'.repeat(2200),updatedAt:this.now()}}));if(wireBytes({commandId:b.commandId,fingerprint,status:'APPLIED',localReceiptId:'0'.repeat(200),records:expectedRecords})>60*1024)fail(413,'TRANSACTION_RECEIPT_TOO_LARGE');try{await this.s('INSERT INTO bridge_campaign_commands(owner_id,campaign_id,command_id,grant_id,grant_revision,request_fingerprint,fingerprint,command_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)',this.ownerId,campaign,b.commandId,g.id,g.revision,requestFingerprint,fingerprint,canonical(value),this.now()).run();}catch(e){for(const code of ['REVISION_CONFLICT','HOLDER_REVISION_CONFLICT','GRANT_REVISION_CONFLICT','PENDING_LIMIT'])if(String(e).includes(code))fail(code==='PENDING_LIMIT'?429:409,code);throw e;}
  // The command is already durably queued. Best-effort push wakeup is ALWAYS
  // asynchronous and never changes the response or the commit/receipt contract.
@@ -309,11 +312,30 @@ export class CampaignBridge{
    case 'adjust_currency':exact(op.fields,[],['copperDelta','silverDelta','goldDelta','electrumDelta','platinumDelta']);if(op.kind!=='wallet'||!before||!Object.keys(op.fields).length)fail(400,'INVALID_OPERATION_KIND');for(const unit of ['copper','silver','gold','electrum','platinum'])if(Object.hasOwn(op.fields,unit+'Delta')){integer(op.fields[unit+'Delta'],-1000000000,1000000000);if(before[unit]==null)fail(409,'RESOURCE_UNKNOWN');after[unit]=integer(before[unit]+op.fields[unit+'Delta']);}break;
    case 'consume_item':{exact(op.fields,['quantity']);if(op.kind!=='item'||!before)fail(400,'INVALID_OPERATION_KIND');integer(op.fields.quantity,1,1000000);if(before.quantity==null)fail(409,'RESOURCE_UNKNOWN');after.quantity=integer(before.quantity-op.fields.quantity);if(after.quantity===0){after.itemState='Consumed';const p=await placement();if(p){const fields={...p.fields,state:'Consumed',containerItemId:null,installedProjectId:null,revision:p.row.revision+1};sideEffects.push({recordId:op.recordId,kind:'item-placement',expectedRevision:p.row.revision,currentFields:p.fields,fields});after.location=location(fields);}}break;}
    case 'move_item':{
-    exact(op.fields,['expectedPlacementRevision'],['holderProfileId','containerItemId','installedProjectId','state']);if(op.kind!=='item'||!before)fail(400,'INVALID_OPERATION_KIND');
+    exact(op.fields,['expectedPlacementRevision'],['holderProfileId','containerItemId','installedProjectId','state','playableTransfer']);if(op.kind!=='item'||!before)fail(400,'INVALID_OPERATION_KIND');
     if(before.archived||['Consumed','Sold','Lost'].includes(before.itemState)||before.quantity===0)fail(409,'ITEM_UNAVAILABLE');
     if(op.fields.expectedPlacementRevision!==null)integer(op.fields.expectedPlacementRevision,1);
     for(const k of ['holderProfileId','containerItemId','installedProjectId'])if(Object.hasOwn(op.fields,k)&&op.fields[k]!==null)id(op.fields[k]);
     const p=await placement();if((p?.row.revision??null)!==op.fields.expectedPlacementRevision)fail(409,'REVISION_CONFLICT');
+    if(Object.hasOwn(op.fields,'playableTransfer')){
+     if(!mechanicsReadScopes.every(scope=>JSON.parse(g.write_scopes_json).includes(scope)))fail(403,'WRITE_SCOPE_DENIED');
+     exact(op.fields,['expectedPlacementRevision','holderProfileId','state','playableTransfer']);
+     const proof=op.fields.playableTransfer;
+     exact(proof,['version','fromId','fromRevision','toRevision']);
+     id(proof.fromId);integer(proof.fromRevision,1);integer(proof.toRevision,1);
+     if(proof.version!==1||op.fields.state!=='Carried'||!op.fields.holderProfileId||proof.fromId===op.fields.holderProfileId||
+         p?.fields.holderProfileId!==proof.fromId)fail(409,'PLAYABLE_TRANSFER_CONFLICT');
+     const equipment=await this.getRecord(campaign,'playable-equipment',op.recordId);
+     if(!equipment||equipment.grant_id!==g.id||this.now()-equipment.last_device_sync_at>FRESHNESS)fail(409,'DEVICE_SYNC_STALE');
+     if(JSON.parse(equipment.fields_json).profileId!==proof.fromId)fail(409,'PLAYABLE_TRANSFER_CONFLICT');
+     for(const [profileId,revision] of [[proof.fromId,proof.fromRevision],[op.fields.holderProfileId,proof.toRevision]]){
+      const statId='stat-'+await sha256([profileId,'ABILITY','INT'].join('\u0000'));
+      const actor=await this.getRecord(campaign,'playable-stat',statId);
+      if(!actor||actor.grant_id!==g.id||this.now()-actor.last_device_sync_at>FRESHNESS)fail(409,'DEVICE_SYNC_STALE');
+      const current=JSON.parse(actor.fields_json);
+      if(actor.revision!==revision||current.profileId!==profileId||!['PLAYER','COMPANION'].includes(current.actorRole))fail(409,'PLAYABLE_ACTOR_CONFLICT');
+     }
+    }
     const selected=k=>Object.hasOwn(op.fields,k)?op.fields[k]:p?.fields[k]??null;
     const state=Object.hasOwn(op.fields,'state')?op.fields.state:p?.fields.state??'Carried';if(!['Carried','Equipped','Installed','Stored','Consumed'].includes(state))fail(400,'INVALID_PLACEMENT_STATE');
     const fields={itemId:op.recordId,holderProfileId:selected('holderProfileId'),containerItemId:selected('containerItemId'),installedProjectId:selected('installedProjectId'),state,revision:(p?.row.revision??0)+1,source:before.source??'',updatedAt:before.updatedAt??0};

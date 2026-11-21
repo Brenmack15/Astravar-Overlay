@@ -48,7 +48,12 @@ internal object PlayableMechanicsSync {
             }
             add(stat("DERIVED", "AC", "Armor Class", calculated.armorClass.value))
             add(stat("DERIVED", "INITIATIVE", "Initiative", calculated.initiative.value))
-            add(stat("DERIVED", "PROFICIENCY", "Proficiency bonus", calculated.proficiencyBonus))
+            add(stat("DERIVED", "PROFICIENCY", "Proficiency bonus", calculated.proficiencyBonus) {
+                c.reviewedProficiency?.source?.let {
+                    put("source", it.name); put("sourceId", it.id); put("sourceRevision", it.revision)
+                    put("sourceAcceptance", it.acceptance.name)
+                }
+            })
             add(stat("DERIVED", "SPEED", "Speed", calculated.speed.value))
             add(stat("DERIVED", "SPELL_ATTACK", "Spell attack", calculated.spellAttack.value))
             add(stat("DERIVED", "SPELL_SAVE_DC", "Spell save DC", calculated.spellSaveDc.value))

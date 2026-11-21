@@ -14,6 +14,8 @@ import kotlinx.serialization.ExperimentalSerializationApi
 )
 @Serializable enum class Acceptance { OFFICIAL, ACCEPTED_HOMEBREW, PROPOSED, UNVERIFIED, RETIRED }
 @Serializable data class RuleSource(val id: String, val name: String, val acceptance: Acceptance = Acceptance.UNVERIFIED, val revision: Long = 0)
+/** An explicitly reviewed creature or homebrew proficiency, independent of class tier. */
+@Serializable data class ReviewedProficiency(val bonus: Int, val source: RuleSource)
 @Serializable enum class ItemState { STORED, CARRIED, WORN, HELD }
 @Serializable enum class Recharge { NONE, SHORT_REST, LONG_REST, DAWN }
 @Serializable data class ResourcePool(
@@ -142,7 +144,8 @@ import kotlinx.serialization.ExperimentalSerializationApi
     /** Standard/previously stored skills use their original key; custom skills use their ID. */
     @EncodeDefault(EncodeDefault.Mode.NEVER) val pinnedSkillIds: Set<String> = emptySet(),
     /** Connected armor state; adoption never deletes the original weapon archive. */
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val armor: GenesisArmorState? = null
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val armor: GenesisArmorState? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val reviewedProficiency: ReviewedProficiency? = null
 )
 @Serializable data class CalculationContext(
     val targetCreatureType: String? = null, val damageType: DamageKind? = null,

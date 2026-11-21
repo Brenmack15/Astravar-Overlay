@@ -442,6 +442,58 @@ class CampaignNativeHttpsTest {
         edit("set_equipment_state", buildJsonObject { put("operating", false) })
         verifyInt(21)
         assertFalse(coldImmunity())
+
+        val owlId = "ci-native-equipment-owl"
+        authority.createActor("Fixture owl", GenesisActorRole.COMPANION, campaign, actorId, ReforgeCharacter(
+            owlId, "Fixture owl", level = 9, baseAbilities = mapOf(Stat.INT to 8), baseMaxHp = 12, currentHp = 5,
+            reviewedProficiency = ReviewedProficiency(3, RuleSource("fixture:independent-pb", "Reviewed creature tier", Acceptance.ACCEPTED_HOMEBREW)),
+            resources = listOf(ResourcePool("repair", "Repair", 1, 0))), "ci-equipment-owl")
+        client.sync()
+        suspend fun transferTo(holder: String) {
+            val rev = record("item", stone.id).getValue("revision").jsonPrimitive.long
+            val currentPlacement = record("item-placement", stone.id)
+            val placement = currentPlacement.getValue("revision")
+            val sender = currentPlacement.getValue("fields").jsonObject.getValue("holderProfileId").jsonPrimitive.content
+            fun actorRevision(id: String) = mcp("get_playable_statistics", JsonObject(arguments + ("profileId" to JsonPrimitive(id))))
+                .getValue("records").jsonArray.first().jsonObject.getValue("revision")
+            val senderRevision = actorRevision(sender)
+            val recipientRevision = actorRevision(holder)
+            val receipt = submitAndVerify(operation("move_item", "item", stone.id, rev, buildJsonObject {
+                put("expectedPlacementRevision", placement); put("holderProfileId", holder); put("state", "Carried")
+                putJsonObject("playableTransfer") {
+                    put("version", 1); put("fromId", sender); put("fromRevision", senderRevision); put("toRevision", recipientRevision)
+                }
+            }))
+            assertEquals(2, receipt.getValue("records").jsonArray.size)
+            assertEquals(holder, record("playable-equipment", stone.id).getValue("fields").jsonObject.getValue("profileId").jsonPrimitive.content)
+        }
+        fun owlInt() = mcp("get_playable_statistics", JsonObject(arguments + ("profileId" to JsonPrimitive(owlId))))
+            .getValue("records").jsonArray.map { it.jsonObject.getValue("fields").jsonObject }.single {
+                it["target"] == JsonPrimitive("ABILITY") && it["key"] == JsonPrimitive("INT")
+            }
+        suspend fun owlEdit(change: JsonObject) {
+            val rev = record("playable-equipment", stone.id).getValue("revision").jsonPrimitive.long
+            submitAndVerify(operation("set_equipment_state", "playable-equipment", stone.id, rev,
+                JsonObject(change + mapOf("actorRole" to JsonPrimitive("COMPANION"), "actorRevision" to owlInt().getValue("revision")))))
+        }
+        val owlStatistics = mcp("get_playable_statistics", JsonObject(arguments + ("profileId" to JsonPrimitive(owlId))))
+        val pb = owlStatistics.getValue("records").jsonArray.map { it.jsonObject.getValue("fields").jsonObject }
+            .single { it["key"] == JsonPrimitive("PROFICIENCY") }
+        assertEquals(3, pb.getValue("effective").jsonPrimitive.int)
+        assertEquals("fixture:independent-pb", pb.getValue("sourceId").jsonPrimitive.content)
+        transferTo(owlId)
+        if (!record("playable-equipment", stone.id).getValue("fields").jsonObject.getValue("operating").jsonPrimitive.boolean)
+            owlEdit(buildJsonObject { put("operating", true) })
+        owlEdit(buildJsonObject { put("state", "HELD") })
+        assertEquals(9, owlInt().getValue("effective").jsonPrimitive.int)
+        transferTo(actorId)
+        assertEquals(8, owlInt().getValue("effective").jsonPrimitive.int)
+        assertEquals(8, owlInt().getValue("base").jsonPrimitive.int)
+        val owl = requireNotNull(ReforgeRepository(db).get(owlId)).character
+        assertEquals(5, owl.currentHp)
+        assertEquals(0, owl.resources.single().current)
+        assertTrue(owl.items.isEmpty())
+        verifyInt(21)
     }
 
     @Test fun authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts() = runBlocking {
@@ -563,6 +615,7 @@ class CampaignNativeHttpsTest {
             put("atomicPurchase", true); put("atomicCompanionAcquireAndAssign", true); put("acquisitionReceiptRecords", assignedRecords.size)
             put("staleAndForeignAcquisitionHolderRejected", true); put("idempotentRetries", true); put("staleAndDisabledScopeRejected", true)
             put("nativeEquipmentReceiptAndCalculatedReadback", true)
+            put("companionTransferAndReturnWithDerivedReadbacks", true)
             put("receiptAndAndroidReadback", true); put("serverRevocationVerified", true)
             put("mcpRequests", mcpRequests); put("observedMcpErrors", mcpErrors); put("expectedNegativeTestErrors", 5)
             put("independentReadWriteRevocation", true)
