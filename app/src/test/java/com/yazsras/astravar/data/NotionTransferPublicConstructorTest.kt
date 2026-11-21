@@ -39,6 +39,16 @@ class NotionTransferPublicConstructorTest {
         } finally { singletonField.set(null, previousStorage) }
     }
 
+    @Test fun closingProductionSyncClientLeavesTheApplicationDatabaseOpen() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val storage = GenesisApplicationStorage.open(context).also { fixtureStorage = it }
+        storage.awaitReady()
+        val original = storage.db.recordsDao().allCharacterProfiles()
+        CampaignConnectionClient(context).close()
+        assertTrue(storage.db.isOpen)
+        assertEquals(original, storage.db.recordsDao().allCharacterProfiles())
+    }
+
     @Test fun publicImportUsesOneTransactionForBackupRollbackAndRepeatedApply() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val storage = GenesisApplicationStorage.open(context).also { fixtureStorage = it }

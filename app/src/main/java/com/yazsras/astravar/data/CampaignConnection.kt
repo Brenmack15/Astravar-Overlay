@@ -90,9 +90,9 @@ class CampaignConnectionClient internal constructor(private val context: Context
     constructor(context: Context) : this(context.applicationContext, CampaignConnectionDb.open(context), GenesisApplicationStorage.open(context.applicationContext).db,
         OwnerSyncCredentialVault(context), OwnerConnectionHttpsTransport(), weaponDb = AstravarDb.open(context),
         requestPushToken = CampaignPushy::requestToken, disableMessaging = CampaignPushy::disable) {
-        prepareCampaign = GenesisApplicationStorage.open(context.applicationContext)::awaitReady
+        applicationStorage = GenesisApplicationStorage.open(context.applicationContext)
     }
-    private var prepareCampaign: suspend () -> Unit = {}
+    private var applicationStorage: GenesisApplicationStorage? = null
     private fun supportsMechanics(value: CampaignConnectionSettings) =
         grant(value)["playableMechanicsVersion"]?.jsonPrimitive?.intOrNull == 1 &&
             activeRead(value).containsAll(PlayableMechanicsSync.readScopes)
@@ -318,7 +318,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         val commands = dao.commands().filter { belongs(it, value) }
         var canonicalReviewProfileId: String? = null
         val current = try {
-            if (value.campaignId.isBlank()) emptyList() else { prepareCampaign(); domain.snapshot(value.campaignId, mechanics = supportsMechanics(value)) }
+            if (value.campaignId.isBlank()) emptyList() else { applicationStorage?.awaitReady(); domain.snapshot(value.campaignId, mechanics = supportsMechanics(value)) }
         } catch (review: CampaignCanonicalReviewRequired) {
             // Display the explicit repair action without treating blocked projections
             // as deleted records. Publication still calls the strict domain snapshot.
@@ -523,7 +523,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         dao.settings(value.copy(status = status, lastError = code))
     }
     private suspend fun syncUnlocked() {
-        prepareCampaign()
+        applicationStorage?.awaitReady()
         requireAutomaticAllowed()
         syncContinuationRequired = false
         var value = setting(); syncDiagnostics.begin(value); credential(value)
@@ -714,7 +714,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
             require(manual || authorized(value, command)) { "Trusted DM Auto-Sync scope is disabled." }
         }
         val receipt = try {
-            prepareCampaign()
+            applicationStorage?.awaitReady()
             existing ?: campaignDb.withTransaction {
                 requireAutomaticAllowed()
                 verifyBaseline(value, command)
@@ -928,5 +928,9 @@ class CampaignConnectionClient internal constructor(private val context: Context
         dao.settings(value.copy(deviceId = "", revokePending = false, localAutoSyncJson = "[]", grantJson = "{}", status = "Disconnected · server revocation confirmed"))
         CampaignConnectionSyncJob.cancel(context)
     }
-    fun close() { db.close(); campaignDb.close(); weaponDb?.close() }
+    fun close() {
+        db.close()
+        if (applicationStorage == null) campaignDb.close()
+        weaponDb?.close()
+    }
 }
