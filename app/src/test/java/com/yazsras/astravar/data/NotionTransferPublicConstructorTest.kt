@@ -56,7 +56,7 @@ class NotionTransferPublicConstructorTest {
             listOf(NotionInventoryFact("constructor-lantern", source, "Synthetic lantern", "Equipment", "Maker",
                 "Carried", "Confirmed", 1, knownProperties = "Synthetic provenance")),
             listOf(NotionCurrencyFact("constructor-currency", "Synthetic estimate", 20, "Confirmed", source)), 20)
-        val choices = NotionTransferChoices(stats = false)
+        val choices = NotionTransferChoices(stats = true)
         val initial = storage.backup.exportWithProof()
         assertTrue(storage.backup.previewRestore(initial.text).valid)
         PartyRecordsRepository(storage.db).saveWallet(PartyWallet("constructor-wallet", original.character.id,
