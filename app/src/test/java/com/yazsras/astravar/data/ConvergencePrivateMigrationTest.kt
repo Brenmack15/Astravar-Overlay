@@ -44,6 +44,11 @@ class ConvergencePrivateMigrationTest {
             assertEquals(expected.entities.toSet() + before, db.recordsDao().allEntities().toSet())
             assertEquals(expected.facts.toSet(), db.recordsDao().allFacts().toSet())
             assertTrue(expected.facts.isNotEmpty())
+            val visible = CampaignSyncDomain(db).snapshot(requireNotNull(preview.archive).campaignId)
+            assertEquals(expected.entities.map { it.id }.toSet(), visible.filter { it.kind == "connection" }.map { it.recordId }.toSet())
+            assertEquals(expected.facts.map { it.id }.toSet(), visible.filter { it.kind == "fact" }.map { it.recordId }.toSet())
+            assertTrue(CampaignSyncDomain(db).snapshot("local-campaign").none { it.recordId in expected.entities.map { entity -> entity.id } })
+
             val rollback = reopened.rollback(receipt.packageHash, confirmed = true)
             assertEquals(listOf(before), db.recordsDao().allEntities())
             assertTrue(db.recordsDao().allFacts().isEmpty())
