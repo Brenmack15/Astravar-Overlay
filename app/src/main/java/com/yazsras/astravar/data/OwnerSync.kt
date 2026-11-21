@@ -98,10 +98,11 @@ class OwnerSyncCredentialVault(context: Context, private val now: () -> Long = S
     private val preferences = context.applicationContext.getSharedPreferences("astravar-owner-sync-credentials", Context.MODE_PRIVATE)
     companion object {
     private const val ALIAS = "astravar-owner-sync-device-v1"
-    private fun androidKey(): SecretKey {
+    private val vaultLock = Any()
+    private fun androidKey(): SecretKey = synchronized(vaultLock) {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (store.getKey(ALIAS, null) as? SecretKey)?.let { return it }
-        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
+        if (store.containsAlias(ALIAS)) return@synchronized requireNotNull(store.getKey(ALIAS, null) as? SecretKey)
+        KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
             init(KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setRandomizedEncryptionRequired(true).build())
@@ -140,7 +141,7 @@ class OwnerSyncCredentialVault(context: Context, private val now: () -> Long = S
             throw OwnerSyncFailure("CREDENTIAL_PERSISTENCE_FAILED")
         } finally { plaintext.fill(0) }
     }
-    @Synchronized fun enroll(value: OwnerSyncCredential) {
+    fun enroll(value: OwnerSyncCredential) = synchronized(vaultLock) {
         require(value.expiresAt > now()) { "Enrollment credential has expired." }
         val body = buildJsonObject {
             put("credentialId", value.credentialId); put("campaignId", value.campaignId)
@@ -151,7 +152,7 @@ class OwnerSyncCredentialVault(context: Context, private val now: () -> Long = S
     override suspend fun credential(origin: String, campaignId: String): OwnerSyncCredential? = withContext(Dispatchers.IO) {
         read(OwnerSyncProtocol.origin(origin), OwnerSyncProtocol.id(campaignId))
     }
-    @Synchronized private fun read(origin: String, campaignId: String): OwnerSyncCredential? {
+    private fun read(origin: String, campaignId: String): OwnerSyncCredential? = synchronized(vaultLock) {
         val name = entry(origin, campaignId)
         val blob = preferences.getString(name, null) ?: return null
         return try {
@@ -168,17 +169,17 @@ class OwnerSyncCredentialVault(context: Context, private val now: () -> Long = S
             throw OwnerSyncFailure("CREDENTIAL_STORAGE_UNAVAILABLE")
         }
     }
-    @Synchronized fun forget(origin: String, campaignId: String) {
+    fun forget(origin: String, campaignId: String) = synchronized(vaultLock) {
         check(preferences.edit().remove(entry(OwnerSyncProtocol.origin(origin), OwnerSyncProtocol.id(campaignId))).commit())
     }
     /** Optional outer private-Site access stays separately encrypted and never enters a backup. */
-    @Synchronized fun storeServiceAccess(origin: String, campaignId: String, bearer: String) {
+    fun storeServiceAccess(origin: String, campaignId: String, bearer: String) = synchronized(vaultLock) {
         val endpoint = OwnerSyncProtocol.origin(origin); OwnerSyncProtocol.id(campaignId)
         require(bearer.length in 32..8192 && bearer.none { it == '\r' || it == '\n' })
         val name = entry(endpoint, campaignId) + "-service"
         persist(name, bearer.toByteArray(Charsets.UTF_8))
     }
-    @Synchronized fun serviceAccess(origin: String, campaignId: String): String? {
+    fun serviceAccess(origin: String, campaignId: String): String? = synchronized(vaultLock) {
         val name = entry(OwnerSyncProtocol.origin(origin), OwnerSyncProtocol.id(campaignId)) + "-service"
         val blob = preferences.getString(name, null) ?: return null
         return try {
@@ -187,11 +188,11 @@ class OwnerSyncCredentialVault(context: Context, private val now: () -> Long = S
             finally { plain.fill(0) }
         } catch (_: Exception) { throw OwnerSyncFailure("CREDENTIAL_STORAGE_UNAVAILABLE") }
     }
-    @Synchronized fun forgetServiceAccess(origin: String, campaignId: String) {
+    fun forgetServiceAccess(origin: String, campaignId: String) = synchronized(vaultLock) {
         check(preferences.edit().remove(entry(OwnerSyncProtocol.origin(origin), OwnerSyncProtocol.id(campaignId)) + "-service").commit())
     }
     /** Local disconnect is not proof of server revocation. The service must revoke the credential too. */
-    @Synchronized fun forgetAll() { check(preferences.edit().clear().commit()) }
+    fun forgetAll() = synchronized(vaultLock) { check(preferences.edit().clear().commit()) }
 }
 
 /** Queue/receipts only, never a second character/inventory authority. */

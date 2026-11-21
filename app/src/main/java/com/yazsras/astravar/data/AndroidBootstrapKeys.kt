@@ -4,12 +4,14 @@ import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import java.security.KeyPair
+import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.PrivateKey
 import java.security.SecureRandom
 import java.security.spec.MGF1ParameterSpec
+import java.security.spec.X509EncodedKeySpec
 import javax.crypto.Cipher
 import javax.crypto.spec.OAEPParameterSpec
 import javax.crypto.spec.PSource
@@ -24,8 +26,11 @@ internal object AndroidBootstrapKeys {
     fun compatible(pair: KeyPair): Boolean = try {
         val probe = ByteArray(32).also { SecureRandom().nextBytes(it) }
         try {
+            // Match WebCrypto's exported SPKI view. A Keystore-backed public-key wrapper can
+            // select the hardware cipher provider even though this key permits DECRYPT only.
+            val publicKey = KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(pair.public.encoded))
             val wrapped = Cipher.getInstance("RSA/ECB/OAEPPadding").apply {
-                init(Cipher.ENCRYPT_MODE, pair.public, parameters())
+                init(Cipher.ENCRYPT_MODE, publicKey, parameters())
             }.doFinal(probe)
             val recovered = Cipher.getInstance("RSA/ECB/OAEPPadding").apply {
                 init(Cipher.DECRYPT_MODE, pair.private, parameters())

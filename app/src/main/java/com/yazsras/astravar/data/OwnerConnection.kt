@@ -80,6 +80,12 @@ internal fun requireOwnerResponseType(status: Int, contentType: String?) {
         throw OwnerSyncFailure(if (status == 401 || status == 403) "SERVICE_AUTHORIZATION_REQUIRED" else "NON_JSON_RESPONSE")
     }
 }
+/** Keep sanitized transport failures equivalent to the IOException recovery they replace. */
+internal fun isRetryableOwnerConnectionFailure(code: String): Boolean = code in setOf(
+    "REMOTE_UNAVAILABLE", "SERVICE_UNAVAILABLE", "OPERATION_FAILED", "QUOTA_REACHED",
+    "PRIVATE_GATEWAY_AUTH_REQUIRED", "SERVICE_AUTHORIZATION_REQUIRED", "NETWORK_UNAVAILABLE",
+    "NETWORK_TIMEOUT", "TLS_FAILURE", "CREDENTIAL_STORAGE_UNAVAILABLE", "CREDENTIAL_PERSISTENCE_FAILED"
+)
 internal fun parseOwnerConnectionResponse(status: Int, contentType: String?, bytes: ByteArray): OwnerSyncResponse {
     requireOwnerResponseType(status, contentType)
     val json = try { Json.parseToJsonElement(bytes.toString(Charsets.UTF_8)) as? JsonObject }

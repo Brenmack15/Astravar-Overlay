@@ -16,6 +16,9 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.IOException
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import javax.crypto.spec.SecretKeySpec
 
 @RunWith(RobolectricTestRunner::class)
@@ -281,6 +284,65 @@ class OwnerSyncTest {
         assertEquals(old, vault.serviceAccess(origin, campaign))
         vault.storeServiceAccess(origin, campaign, replacement)
         assertEquals(replacement, vault.serviceAccess(origin, campaign))
+    }
+
+    @Test fun anotherVaultCannotOverwriteOrBeOverwrittenByAnInFlightFailedRenewal() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("synthetic-vault-concurrent-failure", Context.MODE_PRIVATE)
+        preferences.edit().clear().commit()
+        val insideCommit = CountDownLatch(1)
+        val releaseCommit = CountDownLatch(1)
+        var failCommit = false
+        val wrapped = object : SharedPreferences by preferences {
+            override fun edit(): SharedPreferences.Editor {
+                val editor = preferences.edit()
+                return object : SharedPreferences.Editor by editor {
+                    override fun putString(key: String, value: String?): SharedPreferences.Editor { editor.putString(key, value); return this }
+                    override fun remove(key: String): SharedPreferences.Editor { editor.remove(key); return this }
+                    override fun commit(): Boolean {
+                        if (failCommit) {
+                            failCommit = false
+                            insideCommit.countDown()
+                            check(releaseCommit.await(5, TimeUnit.SECONDS))
+                            editor.commit()
+                            return false
+                        }
+                        return editor.commit()
+                    }
+                }
+            }
+        }
+        val isolated = object : ContextWrapper(context) {
+            override fun getApplicationContext(): Context = this
+            override fun getSharedPreferences(name: String, mode: Int): SharedPreferences = wrapped
+        }
+        val key = SecretKeySpec(ByteArray(32) { 6 }, "AES")
+        val firstVault = OwnerSyncCredentialVault(isolated, { clock }) { key }
+        val secondVault = OwnerSyncCredentialVault(isolated, { clock }) { key }
+        firstVault.storeServiceAccess(origin, campaign, "old-service-token".repeat(3))
+        val firstError = AtomicReference<Throwable?>()
+        val secondError = AtomicReference<Throwable?>()
+        failCommit = true
+        val first = Thread { firstError.set(runCatching {
+            firstVault.storeServiceAccess(origin, campaign, "failed-service-token".repeat(3))
+        }.exceptionOrNull()) }
+        val second = Thread { secondError.set(runCatching {
+            secondVault.storeServiceAccess(origin, campaign, "successful-service-token".repeat(3))
+        }.exceptionOrNull()) }
+        first.start()
+        try {
+            assertTrue(insideCommit.await(5, TimeUnit.SECONDS))
+            second.start()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (second.state != Thread.State.BLOCKED && second.isAlive && System.nanoTime() < deadline) Thread.yield()
+            assertEquals("Other clients must wait for the shared vault transaction", Thread.State.BLOCKED, second.state)
+        } finally {
+            releaseCommit.countDown(); first.join(5_000); if (second.state != Thread.State.NEW) second.join(5_000)
+        }
+        assertFalse(first.isAlive); assertFalse(second.isAlive)
+        assertEquals("CREDENTIAL_PERSISTENCE_FAILED", (firstError.get() as OwnerSyncFailure).code)
+        assertNull(secondError.get())
+        assertEquals("successful-service-token".repeat(3), firstVault.serviceAccess(origin, campaign))
     }
 
     private inner class FakeRemote : OwnerSyncTransport {

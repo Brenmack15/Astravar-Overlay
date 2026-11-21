@@ -4,6 +4,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OwnerConnectionResponseTest {
+    @Test fun sanitizedNetworkAndKeystoreFailuresRetainAutomaticRecoveryWithoutRetryingRevokedGrants() {
+        for (code in listOf("NETWORK_UNAVAILABLE", "NETWORK_TIMEOUT", "TLS_FAILURE", "CREDENTIAL_STORAGE_UNAVAILABLE",
+            "CREDENTIAL_PERSISTENCE_FAILED", "SERVICE_AUTHORIZATION_REQUIRED", "PRIVATE_GATEWAY_AUTH_REQUIRED")) {
+            assertTrue(code, isRetryableOwnerConnectionFailure(code))
+        }
+        for (code in listOf("CREDENTIAL_REVOKED_OR_EXPIRED", "AUTHENTICATION_REQUIRED", "REVISION_CONFLICT", "ACCESS_DENIED")) {
+            assertFalse(code, isRetryableOwnerConnectionFailure(code))
+        }
+    }
     @Test fun outerGatewayAuthorizationFailureDoesNotBecomeDeviceRevocation() {
         for (status in listOf(401, 403)) {
             val failure = runCatching { parseOwnerConnectionResponse(status, "text/html", "private error body".toByteArray()) }.exceptionOrNull() as OwnerSyncFailure

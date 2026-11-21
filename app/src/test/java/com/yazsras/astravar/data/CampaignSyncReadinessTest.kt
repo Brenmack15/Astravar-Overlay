@@ -23,6 +23,12 @@ class CampaignSyncReadinessTest {
         check(CampaignSyncReadiness.CAMPAIGN_MISMATCH, ready.copy(actorHasOtherCampaign = true))
         check(CampaignSyncReadiness.VALUES_REVIEW_REQUIRED, ready.copy(actorPlayable = false))
     }
+    @Test fun temporarilyUnavailableCredentialStorageDoesNotRequireRepairingOwnerGrant() {
+        check(CampaignSyncReadiness.CREDENTIAL_STORAGE_UNAVAILABLE,
+            ready.copy(connected = false, error = "CREDENTIAL_STORAGE_UNAVAILABLE", pendingPublications = 1))
+        check(CampaignSyncReadiness.AUTHORIZATION_REQUIRED,
+            ready.copy(connected = false, error = "CREDENTIAL_REVOKED_OR_EXPIRED"))
+    }
     @Test fun heartbeatAndPermissionNeverMasqueradeAsGameplayVerification() {
         check(CampaignSyncReadiness.NO_ELIGIBLE_RECORDS, ready.copy(eligible = 0, verified = 0))
         check(CampaignSyncReadiness.PERMISSION_DENIED, ready.copy(readAccess = false))

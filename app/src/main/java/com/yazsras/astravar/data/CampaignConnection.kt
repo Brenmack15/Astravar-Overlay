@@ -144,7 +144,6 @@ class CampaignConnectionClient internal constructor(private val context: Context
             syncDiagnostics.time(value, "lastServerResponseAt", now())
         if (result.status !in 200..299) {
             val code = (result.json["error"] as? JsonObject)?.get("code")?.jsonPrimitive?.content
-            val expectedMode = if (path.startsWith("/v2/")) CampaignConnectionProtocol.MODE else OwnerConnectionProtocol.MODE
             if (result.status < 500 && result.json["mode"]?.jsonPrimitive?.content != expectedMode) throw OwnerSyncFailure("PRIVATE_GATEWAY_AUTH_REQUIRED")
             if (authenticated && result.status == 401 && code == "CREDENTIAL_REVOKED_OR_EXPIRED" &&
                 result.json["mode"]?.jsonPrimitive?.content == CampaignConnectionProtocol.MODE) {
@@ -350,7 +349,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
             actor?.campaignId != null && actor.campaignId != value.campaignId, actor?.playable == true,
             activeRead(value).isNotEmpty(), value.grantBody != null, eligible.size, verified, pendingPublications,
             pendingDevice + if (moreServerPending) 1 else 0, pendingReceipts, commands.any { it.state in setOf("CONFLICT", "DECISION_CONFLICT") },
-            value.lastError, value.lastDeviceSyncAt, now(), pendingRemovals = pendingRemovals,
+            credentialFailure ?: value.lastError, value.lastDeviceSyncAt, now(), pendingRemovals = pendingRemovals,
             canonicalValuesRequireReview = canonicalReviewProfileId != null))
         val diagnostics = syncDiagnostics.snapshot(value, eligible.size - verified + pendingRemovals)
         return buildJsonObject {
