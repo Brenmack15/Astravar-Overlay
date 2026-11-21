@@ -20,7 +20,7 @@ class OwnerConnectionSyncJob : JobService() {
             try { client.automaticSync() }
             catch (e: CancellationException) { throw e }
             catch (e: OwnerSyncFailure) {
-                retry = e.code in setOf("REMOTE_UNAVAILABLE", "QUOTA_REACHED")
+                retry = isRetryableOwnerConnectionFailure(e.code)
                 if (!retry) cancel(applicationContext)
             }
             catch (_: java.io.IOException) { retry = true }

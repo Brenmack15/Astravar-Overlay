@@ -22,7 +22,7 @@ if awk -v serial="$astravar_serial" '$1 == serial { found=1 } END { exit !found 
   printf '%s\n' 'Refusing a pre-existing device at the reserved CI emulator serial.' >&2
   exit 1
 fi
-"$ANDROID_HOME/emulator/emulator" -avd AstravarCI -port 5580 -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect >validation/emulator.log 2>&1 &
+"$ANDROID_HOME/emulator/emulator" -avd AstravarCI -port 5580 -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader >validation/emulator.log 2>&1 &
 astravar_emulator_pid=$!
 cleanup() {
   local astravar_status=$?

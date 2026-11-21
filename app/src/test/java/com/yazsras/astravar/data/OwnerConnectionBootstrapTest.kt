@@ -63,6 +63,7 @@ class OwnerConnectionBootstrapTest {
         val result = helper().importEncryptedBundle(encrypted.bytes())
         assertEquals(origin, result.origin); assertEquals(campaign, result.campaignId); assertEquals(bearer, result.serviceAccessBearer)
         assertFalse(result.toString().contains(bearer))
+        helper().completeImport(result) {}
         assertTrue(runCatching { helper().importEncryptedBundle(encrypted.bytes()) }.isFailure)
     }
     @Test fun expired_or_superseded_challenge_is_rejected() {
@@ -100,6 +101,7 @@ class OwnerConnectionBootstrapTest {
         val result = helper().importEncryptedBundle(encrypted.bytes())
         assertEquals(origin, result.origin); assertEquals(target, result.campaignId)
         assertEquals(bearer, result.serviceAccessBearer)
+        helper().completeImport(result) {}
         assertTrue(runCatching { helper().importEncryptedBundle(encrypted.bytes()) }.isFailure)
     }
     @Test fun valid_encryption_for_another_campaign_cannot_replace_the_pending_scope() {
@@ -120,4 +122,89 @@ class OwnerConnectionBootstrapTest {
         clock += 600_001
         assertTrue(runCatching { service.importEncryptedBundle(current.bytes()) }.isFailure)
     }
+    private fun error(code: OwnerAuthorizationError, action: () -> Unit) {
+        val failure = runCatching(action).exceptionOrNull()
+        assertTrue(failure is OwnerAuthorizationException)
+        assertEquals(code, (failure as OwnerAuthorizationException).code)
+        assertNull(failure.cause)
+        assertFalse(failure.toString().contains(bearer))
+    }
+
+    @Test fun failedPersistenceAndInterruptedImportRemainRetryableUntilDurableCompletion() {
+        val service = helper(); val encrypted = bundle(begin(service))
+        val validated = service.importEncryptedBundle(encrypted.bytes())
+        assertEquals(bearer, helper().importEncryptedBundle(encrypted.bytes()).serviceAccessBearer)
+        error(OwnerAuthorizationError.LOCAL_STORAGE_FAILED) {
+            service.completeImport(validated) { throw IllegalStateException(bearer) }
+        }
+        var persisted: String? = null
+        // Simulate process interruption after the idempotent store, before consuming the request.
+        error(OwnerAuthorizationError.LOCAL_STORAGE_FAILED) {
+            helper().completeImport(validated) { persisted = validated.serviceAccessBearer; throw IllegalStateException("synthetic interruption") }
+        }
+        assertEquals(bearer, persisted)
+        val retried = helper().importEncryptedBundle(encrypted.bytes())
+        helper().completeImport(retried) { persisted = retried.serviceAccessBearer }
+        assertEquals(bearer, persisted)
+        error(OwnerAuthorizationError.REQUEST_SUPERSEDED) { helper().importEncryptedBundle(encrypted.bytes()) }
+        error(OwnerAuthorizationError.REQUEST_SUPERSEDED) { helper().completeImport(validated) { fail("Already consumed") } }
+    }
+
+    @Test fun completionRechecksSupersessionAndExpiryAcrossClientInstances() {
+        val service = helper(); val old = service.importEncryptedBundle(bundle(begin(service)).bytes())
+        val currentBytes = bundle(begin(helper())).bytes()
+        error(OwnerAuthorizationError.REQUEST_SUPERSEDED) { service.completeImport(old) { fail("Superseded callback") } }
+        val current = helper().importEncryptedBundle(currentBytes)
+        clock += 600_001
+        error(OwnerAuthorizationError.REQUEST_EXPIRED) { helper().completeImport(current) { fail("Expired callback") } }
+    }
+
+    @Test fun beginCryptographyFailureDoesNotSupersedeAValidPendingRequest() {
+        val service = helper(); val encrypted = bundle(begin(service)).bytes()
+        val unavailable = OwnerConnectionBootstrap(context, { clock }, { throw IllegalStateException(bearer) })
+        error(OwnerAuthorizationError.STRONG_CRYPTO_UNAVAILABLE) { unavailable.begin(origin, campaign) }
+        val retained = helper().importEncryptedBundle(encrypted)
+        helper().completeImport(retained) {}
+    }
+
+    @Test fun malformedExpiredSupersededAndWrongScopeHaveDistinctRedactedErrors() {
+        val service = helper(); val original = bundle(begin(service))
+        error(OwnerAuthorizationError.MALFORMED_BUNDLE) { service.importEncryptedBundle("{".toByteArray()) }
+        error(OwnerAuthorizationError.MALFORMED_BUNDLE) { service.importEncryptedBundle(byteArrayOf(0xc0.toByte(), 0xaf.toByte())) }
+        error(OwnerAuthorizationError.UNSUPPORTED_CRYPTO_PARAMETERS) {
+            service.importEncryptedBundle(JsonObject(original + ("algorithm" to JsonPrimitive("RSA-OAEP-SHA1"))).bytes())
+        }
+        error(OwnerAuthorizationError.WRONG_SCOPE) {
+            service.importEncryptedBundle(JsonObject(original + ("campaignId" to JsonPrimitive("wrong-campaign"))).bytes())
+        }
+        val iv = original.getValue("iv").jsonPrimitive.content
+        val altered = (if (iv.first() == 'A') "B" else "A") + iv.drop(1)
+        error(OwnerAuthorizationError.CRYPTO_VERIFICATION_FAILED) {
+            service.importEncryptedBundle(JsonObject(original + ("iv" to JsonPrimitive(altered))).bytes())
+        }
+        begin(service)
+        error(OwnerAuthorizationError.REQUEST_SUPERSEDED) { service.importEncryptedBundle(original.bytes()) }
+        val expired = bundle(begin(service)); clock += 600_001
+        error(OwnerAuthorizationError.REQUEST_EXPIRED) { service.importEncryptedBundle(expired.bytes()) }
+    }
+
+    @Test fun wrongKeyFailurePreservesPendingRequestForCorrectInstallationKey() {
+        val service = helper(); val encrypted = bundle(begin(service)); val correct = pair
+        pair = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
+        error(OwnerAuthorizationError.CRYPTO_VERIFICATION_FAILED) { service.importEncryptedBundle(encrypted.bytes()) }
+        pair = correct
+        val result = helper().importEncryptedBundle(encrypted.bytes())
+        helper().completeImport(result) {}
+    }
+
+    @Test fun twoValidatedClientsCannotPersistTheSameConsumedRequestTwice() {
+        val encrypted = bundle(begin(helper())).bytes()
+        val one = helper().importEncryptedBundle(encrypted)
+        val two = helper().importEncryptedBundle(encrypted)
+        var stores = 0
+        helper().completeImport(one) { stores++ }
+        error(OwnerAuthorizationError.REQUEST_SUPERSEDED) { helper().completeImport(two) { stores++ } }
+        assertEquals(1, stores)
+    }
+
 }

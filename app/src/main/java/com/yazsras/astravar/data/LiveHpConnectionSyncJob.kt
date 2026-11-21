@@ -19,7 +19,7 @@ class LiveHpConnectionSyncJob : JobService() {
             var retry = false
             try { client = LiveHpConnectionClient(applicationContext); client.foreground() }
             catch (e: CancellationException) { throw e }
-            catch (e: OwnerSyncFailure) { retry = e.code in setOf("REMOTE_UNAVAILABLE", "QUOTA_REACHED"); if (!retry) cancel(applicationContext) }
+            catch (e: OwnerSyncFailure) { retry = isRetryableOwnerConnectionFailure(e.code); if (!retry) cancel(applicationContext) }
             catch (_: java.io.IOException) { retry = true }
             catch (_: Exception) { cancel(applicationContext) }
             finally { client?.close(); jobFinished(params, retry) }

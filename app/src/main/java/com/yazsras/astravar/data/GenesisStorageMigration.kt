@@ -252,7 +252,8 @@ class GenesisApplicationStorage private constructor(private val context: Context
     private val mutex = Mutex()
     private val mutableStatus = MutableStateFlow<GenesisStorageStatus>(GenesisStorageStatus.Loading)
     val status: StateFlow<GenesisStorageStatus> = mutableStatus
-    private val db = CampaignLedgerDb.open(context)
+    // Multi-repository commands must share this Room instance and its transaction context.
+    internal val db = CampaignLedgerDb.open(context)
     val campaign = CampaignLedgerRepository(db)
     val playable = ReforgeRepository(db, ready = ::awaitReady)
     val authority = GenesisAuthorityRepository(db, ready = ::awaitReady)

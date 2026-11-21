@@ -42,8 +42,7 @@ class CampaignConnectionWorker(context: Context, parameters: WorkerParameters) :
                 "CREDENTIAL_REVOKED_OR_EXPIRED", "AUTHENTICATION_REQUIRED", "CAMPAIGN_NOT_AUTHORIZED", "CAMPAIGN_GRANT_EXPIRED", "CREDENTIAL_SCOPE_OR_EXPIRY" -> {
                     CampaignConnectionSyncJob.cancel(applicationContext); Result.failure()
                 }
-                "REMOTE_UNAVAILABLE", "SERVICE_UNAVAILABLE", "OPERATION_FAILED", "QUOTA_REACHED", "PRIVATE_GATEWAY_AUTH_REQUIRED" -> retryBounded()
-                else -> Result.failure()
+                else -> if (isRetryableOwnerConnectionFailure(error.code)) retryBounded() else Result.failure()
             }
         } catch (_: java.io.IOException) { retryBounded() }
         catch (_: Exception) { Result.failure() }

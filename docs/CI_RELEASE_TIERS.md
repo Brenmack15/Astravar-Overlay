@@ -14,15 +14,32 @@ Automatic PR tiers are active on this feature branch. GitHub's **Run workflow** 
 
 Configure branch protection to require **Astravar required verification**. This check always runs and fails if the plan, fast gate or an applicable full/native gate is missing, canceled or unsuccessful. Path selection happens inside the workflow; it does not leave a filtered required workflow permanently pending. Changes to shared test fixtures or removed tests require full verification.
 
-The orchestrator executes the fast gate first. Only after it passes do full regression and native acceptance run concurrently. This stops cheap source/rules/targeted failures before expensive emulator work while preserving parallel release feedback. Standalone full/native dispatch definitions are retained, subject to the default-branch UI availability above. Current-source verification always uses the Genesis historical lane and code52 expectations, regardless of branch name; retained historical branches keep their own workflow files. Current Genesis development no longer starts these twice on push and PR. Explicit native runs use a separate concurrency group and are not canceled by routine PR updates.
+The orchestrator executes the fast gate first. Only after it passes do full regression and native acceptance run concurrently. This stops cheap source/rules/targeted failures before expensive emulator work while preserving parallel release feedback. Standalone full/native dispatch definitions are retained, subject to the default-branch UI availability above. Current-source verification always uses the Genesis historical lane and code53 expectations, regardless of branch name; retained historical branches keep their own workflow files. Current Genesis development no longer starts these twice on push and PR. Explicit native runs use a separate concurrency group and are not canceled by routine PR updates.
 
 PR checkout is the exact head SHA, not an undocumented merge artifact. Retain `SOURCE_COMMIT.txt`, checksums, plans and logs with the corresponding run. Full/native approval must refer to that same source; changing packaged code invalidates an earlier candidate's release evidence.
+
+The code53 hotfix adds an early mandatory native gate before the long release UI
+journeys. It installs frozen code52 in the isolated QA package, seeds an older
+RSA-OAEP key and encrypted credential sentinel, and updates in place with the
+same disposable debug signer. Real Android KeyStore and current Node/WebCrypto
+HTTPS fixtures then exercise authorization renewal, rejection and retry. The
+public-constructor Notion import test covers complete apply, repeated imports,
+backup validation, rollback and restoration before campaign HTTPS publication
+and independent readback. Failure stops the gate; it cannot create success scope
+evidence. This API37 Android17 emulator evidence is separate from physical
+Galaxy S26 acceptance and from the final owner's signing certificate.
+
+The code52 debug fixture is built from the exact source
+`f90371c58baed7379862883b2a966ff1113b0cee` using the current runner's debug signer.
+Its source, checksum, package, version and certificate are inspected. It does not
+replace or invalidate the frozen49/50 release-upgrade cache or its mandatory
+native journeys. No owner credential, key, or campaign data enters these fixtures.
 
 ## Caching and resource limits
 
 Pinned `gradle/actions/setup-gradle` restores dependencies and reusable Gradle state; Gradle build caching is enabled. Fork PRs are read-only consumers. Same-repository PRs may write only their isolated `refs/pull/N/merge` cache; base/default branches and other PRs cannot restore it. This lets the fast job seed subsequent full/native jobs and warm repeated updates to this long-lived PR without merging to main. Default-branch and explicit dispatch runs retain their own branch-scoped write access. No configuration-cache encryption key, owner signing secret, personal export, live database, or campaign record is cached. Build scans and dependency submissions are not enabled.
 
-The SDK helper uses installed API36, build-tools35 and platform-tools when present. It downloads only absent packages. Native runs additionally require the API36 Google APIs x86_64 system image and emulator. A checksum-pinned command-line bootstrap remains available if the runner lacks sdkmanager. Runner images and installed-package metadata are build evidence, not claims of Samsung/Android17 acceptance.
+The SDK helper uses installed API36, build-tools35 and platform-tools when present. It downloads only absent packages. The historical native suite retains the API36 Google APIs x86_64 image. The focused authorization/import gate uses the stable Android17 API37.0 default x86_64 image, emulator37.3.10 or newer, and4096MiB guest memory. The focused SDK helper installs only missing image packages or an older emulator. A checksum-pinned command-line bootstrap remains available if the runner lacks sdkmanager. Runner images and installed-package metadata are build evidence, not claims of Samsung/Android17 acceptance.
 
 Historical versions49 and50 have fixed source SHAs. A trusted exact-key cache retains each built APK with source/build-input identity, payload hashes, checksum and original CI certificate. Cache keys include the helper and inspector hashes; there is no prefix fallback. A complete cache miss builds the frozen source. Partial or altered caches fail closed. Each use verifies the old signature/package/alignment, re-signs with the current run's disposable key, compares every non-signature ZIP entry and verifies the same certificate as the candidate. Only a successful baseline build/inspection step on same-repository PR, explicit-dispatch or default-branch runs saves caches within its existing GitHub cache scope. Saving happens before emulator journeys: the cache proves immutable build-input validation only, while every native upgrade and release gate remains independently required even if a later journey fails. No signing key is cached. This removes repeated historical compilation on a warm trusted cache without replacing upgrade testing.
 
@@ -83,6 +100,6 @@ The 5–15minute Tier A objective is a target for warm caches, not a measured gu
 
 ## Owner-compatible release boundary
 
-The owner certificate is `4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847`; package is `com.yazsras.astravar`. Current candidate defaults are version52 / `4.0.0-unification1`. Keep the original private key in the established owner environment. A CI disposable certificate is never an update workaround.
+The owner certificate is `4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847`; package is `com.yazsras.astravar`. Current candidate defaults are version53 / `4.0.0-unification2`. Keep the original private key in the established owner environment. A CI disposable certificate is never an update workaround.
 
 Use `docs/BUILD_AND_SIGNING.md` and current release evidence to privately sign or re-sign the exact tested optimized payload, prove every non-signature entry is unchanged, inspect metadata/signature/alignment, verify monotonically appropriate version against the owner's installed app, and record final SHA256/source/certificate. Validate upgrade and persistence on isolated fixtures; physical installation/consent remains separately evidenced. Never uninstall or clear data to bypass signing incompatibility. Publishing a production release is a separate authorized action.

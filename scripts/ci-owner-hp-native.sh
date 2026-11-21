@@ -5,6 +5,18 @@ set -euo pipefail
 : "${RUNNER_TEMP:?Isolated CI runner required}"
 : "${ASTRAVAR_BASELINE_DEBUG_APK:?Previous published debug APK required}"
 : "${ASTRAVAR_VERSION_CODE:?Exact candidate version code required}"
+astravar_bootstrap_gate=${ASTRAVAR_BOOTSTRAP_GATE:-false}
+[[ "$astravar_bootstrap_gate" == true || "$astravar_bootstrap_gate" == false ]]
+astravar_image='system-images;android-36;google_apis;x86_64'
+astravar_gpu=swiftshader
+astravar_memory_args=()
+astravar_expected_api=36
+if [[ "$astravar_bootstrap_gate" == true ]]; then
+  astravar_image='system-images;android-37.0;default;x86_64'
+  astravar_gpu=swiftshader
+  astravar_memory_args=(-memory 4096)
+  astravar_expected_api=37
+fi
 test -c /dev/kvm
 sudo chmod 666 /dev/kvm
 astravar_private=$(mktemp -d "$RUNNER_TEMP/astravar-hp-native.XXXXXX")
@@ -73,16 +85,57 @@ start_server() {
   return 1
 }
 start_server
+# `adb root` restarts adbd, so its transport can close before the host receives
+# the acknowledgement. Only the fresh AVD owned by this process may recover that
+# handshake; reconnecting and proving uid=0 is mandatory before remounting.
+verify_owned_emulator() {
+  [[ "$astravar_verified_emulator" == 1 ]] || return 1
+  kill -0 "$astravar_emulator_pid" 2>/dev/null || return 1
+  [[ "$(timeout 5s adb -s "$astravar_serial" shell getprop ro.kernel.qemu | tr -d '\r')" == 1 ]] || return 1
+  [[ "$(timeout 5s adb -s "$astravar_serial" emu avd name | tr -d '\r' | awk 'NR == 1 { print }')" == AstravarHpCI ]] || return 1
+  [[ "$(timeout 5s adb -s "$astravar_serial" shell getprop ro.build.version.sdk | tr -d '\r')" == "$astravar_expected_api" ]] || return 1
+}
+root_owned_emulator() {
+  local astravar_phase=$1 astravar_root_status=0 astravar_uid astravar_attempt
+  local astravar_root_log="$astravar_output/$astravar_phase.txt"
+  verify_owned_emulator || return 1
+  timeout 15s adb -s "$astravar_serial" root >"$astravar_root_log" 2>&1 || astravar_root_status=$?
+  cat "$astravar_root_log"
+  if [[ "$astravar_root_status" != 0 ]]; then
+    # Reject timeouts and explicit denials. The observed Android 17 restart can
+    # return 1/255 with a closed transport (or no response at all).
+    [[ "$astravar_root_status" == 1 || "$astravar_root_status" == 255 ]] || return 1
+    if [[ -s "$astravar_root_log" ]]; then
+      grep -Eq '^(adb: unable to connect for root: closed|error: closed)$' "$astravar_root_log" || return 1
+      if grep -Evq '^(adb: unable to connect for root: closed|error: closed)$' "$astravar_root_log"; then return 1; fi
+    fi
+  fi
+  if grep -Eqi 'cannot run as root|permission denied|unauthorized' "$astravar_root_log"; then return 1; fi
+  timeout 15s adb -s "$astravar_serial" wait-for-device || return 1
+  verify_owned_emulator || return 1
+  for astravar_attempt in $(seq 1 5); do
+    kill -0 "$astravar_emulator_pid" 2>/dev/null || return 1
+    astravar_uid=$(timeout 3s adb -s "$astravar_serial" shell id -u 2>/dev/null | tr -d '\r' || true)
+    if [[ "$astravar_uid" == 0 ]]; then
+      verify_owned_emulator || return 1
+      printf '%s\n' 'Verified owned emulator adbd uid=0.' >>"$astravar_root_log"
+      return 0
+    fi
+    sleep 1
+  done
+  printf '%s\n' 'Owned emulator root restart did not establish uid=0.' >&2
+  return 1
+}
 export ANDROID_AVD_HOME="$astravar_private/avd"
 export ANDROID_USER_HOME="$astravar_private/android-user"
 mkdir -p "$ANDROID_AVD_HOME" "$ANDROID_USER_HOME"
 printf 'no\n' | timeout -k 5s 40s avdmanager create avd --force -n AstravarHpCI -p "$ANDROID_AVD_HOME/AstravarHpCI.avd" \
-  -k 'system-images;android-36;google_apis;x86_64' --device pixel_6
+  -k "$astravar_image" --device pixel_6
 # Keep the emulator's normal upstream DNS so Android can genuinely validate network
 # connectivity for WorkManager's CONNECTED constraint. Only the two HTTPS fixture
 # names are overridden in the owned guest hosts file below; production TLS is unchanged.
 "$ANDROID_HOME/emulator/emulator" -avd AstravarHpCI -port 5584 -accel on \
-  -no-window -no-audio -no-snapshot -no-boot-anim -writable-system -gpu swiftshader_indirect >"$astravar_output/emulator.log" 2>&1 &
+  -no-window -no-audio -no-snapshot -no-boot-anim -writable-system -gpu "$astravar_gpu" "${astravar_memory_args[@]}" >"$astravar_output/emulator.log" 2>&1 &
 astravar_emulator_pid=$!
 kill -0 "$astravar_emulator_pid"
 timeout -k 5s 120s adb -s "$astravar_serial" wait-for-device
@@ -98,8 +151,9 @@ astravar_avd_name=$(timeout 10s adb -s "$astravar_serial" emu avd name | tr -d '
 test "$astravar_avd_name" = AstravarHpCI
 kill -0 "$astravar_emulator_pid"
 astravar_verified_emulator=1
-timeout 15s adb -s "$astravar_serial" root
-timeout 15s adb -s "$astravar_serial" wait-for-device
+test "$(timeout 10s adb -s "$astravar_serial" shell getprop ro.build.version.sdk | tr -d '\r')" = "$astravar_expected_api"
+timeout 10s adb -s "$astravar_serial" shell getprop ro.build.version.release >"$astravar_output/android-version.txt"
+root_owned_emulator initial-root
 # Resolve only the two reserved fixture names through the owned emulator OS.
 # The session-only writable image is destroyed with this fresh AVD. No device
 # credentials exist yet, no CA is installed system-wide, and TLS hostname
@@ -132,8 +186,7 @@ test "$astravar_remounted_booted" = 1
 kill -0 "$astravar_emulator_pid"
 test "$(adb -s "$astravar_serial" shell getprop ro.kernel.qemu | tr -d '\r')" = 1
 test "$(timeout 10s adb -s "$astravar_serial" emu avd name | tr -d '\r' | awk 'NR == 1 { print }')" = AstravarHpCI
-timeout 15s adb -s "$astravar_serial" root
-timeout 15s adb -s "$astravar_serial" wait-for-device
+root_owned_emulator remounted-root
 timeout -k 5s 30s adb -s "$astravar_serial" remount >>"$astravar_output/hosts-remount.txt" 2>&1
 timeout 10s adb -s "$astravar_serial" shell "printf '\n127.0.0.1 hp-bridge.example wrong-hp-bridge.example\n' >> /system/etc/hosts"
 timeout 10s adb -s "$astravar_serial" shell "grep -F '127.0.0.1 hp-bridge.example wrong-hp-bridge.example' /system/etc/hosts" >"$astravar_output/hosts-mapping.txt"
@@ -163,7 +216,11 @@ run_test() {
   return 0
 }
 timeout 10s adb -s "$astravar_serial" shell dumpsys connectivity >"$astravar_output/connectivity-before-tests.txt"
-run_test com.yazsras.astravar.data.LiveHpBaselineSeedTest baseline-seed.txt
+if [[ "$astravar_bootstrap_gate" == true ]]; then
+  run_test 'com.yazsras.astravar.data.OwnerBootstrapBaselineSeedTest#seedLegacyAliasOnBaseline' bootstrap-baseline-seed.txt
+else
+  run_test com.yazsras.astravar.data.LiveHpBaselineSeedTest baseline-seed.txt
+fi
 timeout 10s adb -s "$astravar_serial" shell am force-stop "$astravar_product"
 snapshot() {
   adb -s "$astravar_serial" shell "run-as $astravar_product sh -c 'for d in files databases shared_prefs no_backup; do if test -d \"\$d\"; then find \"\$d\" -type f; fi; done | sort | while read f; do sha256sum \"\$f\"; done'" | tr -d '\r' >"$1"
@@ -212,6 +269,27 @@ assert 0 <= value['guestMinusHostMs'] <= 5000, 'Owned guest clock synchronizatio
 PY
 # No credentials appear in command arguments/logs or retained artifacts.
 adb -s "$astravar_serial" shell "run-as $astravar_product sh -c 'mkdir -p files; cat >files/ci-https-config.json'" <"$astravar_private/client-config.json"
+if [[ "$astravar_bootstrap_gate" == true ]]; then
+  # Each test is mandatory and uses the real Android KeyStore / current Worker TLS
+  # fixture. Keep Notion's canonical-store test before older campaign fixtures.
+  run_test 'com.yazsras.astravar.data.OwnerBootstrapNativeTest#upgradeRepairsLegacyOaepAndPreservesCredentials' bootstrap-upgrade.txt
+  run_test 'com.yazsras.astravar.data.OwnerBootstrapNativeTest#freshRenewalAndSingleUseWorkWithWebCrypto' bootstrap-renewal.txt
+  run_test 'com.yazsras.astravar.data.OwnerBootstrapNativeTest#invalidBundlesAndInterruptedPersistenceRemainRetryable' bootstrap-negative.txt
+  run_test 'com.yazsras.astravar.data.NotionNativeImportTest#publicContextApplyBackupReimportAndRollbackPreserveIdentity' notion-public-import.txt 360
+  run_test 'com.yazsras.astravar.data.CampaignNativeHttpsTest#authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts' native-campaign-https.txt 360
+  git rev-parse HEAD >"$astravar_output/SOURCE_COMMIT.txt"
+  python3 - "$astravar_output/SCOPE.json" <<'PY_SCOPE'
+import json,os,pathlib,sys
+pathlib.Path(sys.argv[1]).write_text(json.dumps({
+ 'fictionalOnly':True,'emulatorApi':37,'nativeAndroidKeyStore':True,
+ 'webCryptoEncryptedBootstrap':True,'sameDebugKeyUpdate':'52 to '+os.environ['ASTRAVAR_VERSION_CODE'],
+ 'legacyAliasAndVaultPreserved':True,'nativePublicNotionImport':True,
+ 'nativeCampaignHttpsAndIndependentReadback':True,
+ 'actualOwnerSigningIdentityTestedInCi':False,'realChatGptHostInvocation':False,
+ 'physicalGalaxy':False,'android17':True},indent=2)+'\n')
+PY_SCOPE
+  exit 0
+fi
 run_test 'com.yazsras.astravar.data.LiveHpNativeHttpsTest#aNativeKeystorePublicationApprovalRejectionAndOfflineIntent' native-hp-first.txt
 timeout 10s adb -s "$astravar_serial" shell am force-stop "$astravar_product"
 # Keep the same durable temporary SQLite file while restarting the gateway.

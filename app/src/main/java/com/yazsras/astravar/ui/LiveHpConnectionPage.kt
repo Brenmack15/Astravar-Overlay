@@ -16,6 +16,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.yazsras.astravar.data.LiveHpConnectionClient
 import com.yazsras.astravar.data.CampaignSyncPreferences
 import com.yazsras.astravar.data.OwnerSyncFailure
+import com.yazsras.astravar.data.OwnerAuthorizationException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -43,9 +44,13 @@ import java.io.ByteArrayOutputStream
             try {
                 snapshot = action(); error = false; message = snapshot.hpText("message")
             } catch (e: CancellationException) { throw e }
+            catch (e: OwnerAuthorizationException) {
+                error = true
+                message = e.code.safeMessage
+            }
             catch (e: OwnerSyncFailure) {
                 error = true
-                message = when (e.code) {
+                message = ownerConnectionRecoveryMessage(e.code) ?: when (e.code) {
                     "AUTHENTICATION_REQUIRED", "CREDENTIAL_REVOKED_OR_EXPIRED" -> "This HP connection needs owner authorization. Pair or renew the connection."
                     "PAIRING_PENDING", "AUTHORIZATION_PENDING" -> "Waiting for owner approval. Astravar will check again automatically."
                     "PAIRING_EXPIRED", "PAIRING_EXPIRED_OR_UNKNOWN" -> "Pairing expired. Start pairing again."
@@ -101,6 +106,7 @@ import java.io.ByteArrayOutputStream
                 } ?: throw OwnerSyncFailure("INVALID_AUTHORIZATION_BUNDLE")
             }
             try { require(bytes.isNotEmpty()); client.importServiceAuthorization(bytes) }
+            catch (e: OwnerAuthorizationException) { throw e }
             catch (_: IllegalArgumentException) { throw OwnerSyncFailure("INVALID_AUTHORIZATION_BUNDLE") }
             finally { bytes.fill(0) }
         }

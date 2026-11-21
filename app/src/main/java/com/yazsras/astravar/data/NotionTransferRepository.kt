@@ -30,9 +30,8 @@ class NotionTransferRepository internal constructor(
     private val playable: ReforgeRepository = ReforgeRepository(db),
     private val backup: GenesisAuthorityBackupRepository = GenesisAuthorityBackupRepository(db)
 ) {
-    constructor(context: Context) : this(CampaignLedgerDb.open(context.applicationContext),
-        GenesisApplicationStorage.open(context.applicationContext).playable,
-        GenesisApplicationStorage.open(context.applicationContext).backup)
+    private constructor(storage: GenesisApplicationStorage) : this(storage.db, storage.playable, storage.backup)
+    constructor(context: Context) : this(GenesisApplicationStorage.open(context.applicationContext))
     private val party = PartyRecordsRepository(db)
     private val authority = GenesisAuthorityRepository(db)
 

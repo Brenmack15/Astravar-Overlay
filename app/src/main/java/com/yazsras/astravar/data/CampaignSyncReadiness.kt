@@ -3,6 +3,7 @@ package com.yazsras.astravar.data
 /** Delivery evidence only. This never enrolls actors, changes a grant, or writes gameplay. */
 internal enum class CampaignSyncReadiness(val title: String, val detail: String) {
     DISCONNECTED("Device disconnected", "Pair this device with the selected campaign to authorize access."),
+    CREDENTIAL_STORAGE_UNAVAILABLE("Credential storage temporarily unavailable", "Unlock the device and retry. Saved encrypted credentials and queued work are retained; this is not proof that owner authorization was revoked."),
     AUTHORIZATION_REQUIRED("Authorization expired or revoked", "Renew owner authorization. Queued transactions remain saved for review."),
     REVOCATION_PENDING("Revocation pending", "Local access is disabled. Retry synchronization to confirm server revocation."),
     NO_CAMPAIGN("No campaign selected", "Select the existing character and authorize its campaign."),
@@ -36,6 +37,7 @@ internal fun campaignSyncReadiness(input: CampaignSyncReadinessInput): CampaignS
     when {
         revokePending -> CampaignSyncReadiness.REVOCATION_PENDING
         hasDevice && !hasCampaign -> CampaignSyncReadiness.NO_CAMPAIGN
+        error == "CREDENTIAL_STORAGE_UNAVAILABLE" -> CampaignSyncReadiness.CREDENTIAL_STORAGE_UNAVAILABLE
         !connected -> if (hasDevice) CampaignSyncReadiness.AUTHORIZATION_REQUIRED else CampaignSyncReadiness.DISCONNECTED
         !hasCampaign -> CampaignSyncReadiness.NO_CAMPAIGN
         error in setOf("ACCESS_DENIED", "READ_SCOPE_DENIED", "WRITE_SCOPE_DENIED", "CAMPAIGN_NOT_AUTHORIZED", "PRIVATE_GATEWAY_AUTH_REQUIRED") || !readAccess -> CampaignSyncReadiness.PERMISSION_DENIED
