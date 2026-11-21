@@ -2,6 +2,7 @@ package com.yazsras.astravar.rules.reforge
 
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import org.junit.Test
 import kotlin.test.*
@@ -19,6 +20,27 @@ class ReforgeAcceptanceTest {
             effect("constitution",EffectPayload.Number(NumericTarget.ABILITY,NumberOperation.SET,16,Stat.CON.name)),
             effect("armor-class",EffectPayload.Number(NumericTarget.ARMOR_CLASS,NumberOperation.SET,20))
         ))),items=listOf(ItemInstance("armor","armor-def")),spellSlots=mapOf(1 to 2,2 to 1,3 to 0))
+
+    @Test fun damageDefenseRoundTripsAcrossEquipmentDraftAndFullCharacter() {
+        val defense = effect("poison-resistance", EffectPayload.Defense(DamageKind.POISON, DefenseKind.RESISTANCE))
+        val effects = listOf(defense)
+        val draftSerializer = ListSerializer(EffectDefinition.serializer())
+        val draftJson = Json { encodeDefaults = true; ignoreUnknownKeys = false }
+        // The equipment editor saves a List<EffectDefinition> with the default "type"
+        // sealed-class discriminator. DamageKind must not use that same JSON key.
+        val draft = draftJson.encodeToString(draftSerializer, effects)
+        assertContains(draft, "\"damageType\":\"POISON\"")
+        assertEquals(effects, draftJson.decodeFromString(draftSerializer, draft))
+        val original = fixture().let { character ->
+            character.copy(itemDefinitions = character.itemDefinitions.map {
+                it.copy(effects = it.effects + defense)
+            })
+        }
+        val saved = Json.encodeToString(original)
+        val restored = Json.decodeFromString<ReforgeCharacter>(saved)
+        assertEquals(original, restored)
+        assertEquals(defense, restored.itemDefinitions.single().effects.last())
+    }
 
     @Test fun automaticAbilityScoresAreReversibleAndPermanentValuesAreUnchanged() {
         val before=fixture();val equipped=GameplayRules.equip(before,"armor",ItemState.WORN)
