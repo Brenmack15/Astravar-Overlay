@@ -8,7 +8,7 @@ set -euo pipefail
 astravar_bootstrap_gate=${ASTRAVAR_BOOTSTRAP_GATE:-false}
 [[ "$astravar_bootstrap_gate" == true || "$astravar_bootstrap_gate" == false ]]
 astravar_image='system-images;android-36;google_apis;x86_64'
-astravar_gpu=swiftshader_indirect
+astravar_gpu=swiftshader
 astravar_memory_args=()
 astravar_expected_api=36
 if [[ "$astravar_bootstrap_gate" == true ]]; then
@@ -85,6 +85,47 @@ start_server() {
   return 1
 }
 start_server
+# `adb root` restarts adbd, so its transport can close before the host receives
+# the acknowledgement. Only the fresh AVD owned by this process may recover that
+# handshake; reconnecting and proving uid=0 is mandatory before remounting.
+verify_owned_emulator() {
+  [[ "$astravar_verified_emulator" == 1 ]] || return 1
+  kill -0 "$astravar_emulator_pid" 2>/dev/null || return 1
+  [[ "$(timeout 5s adb -s "$astravar_serial" shell getprop ro.kernel.qemu | tr -d '\r')" == 1 ]] || return 1
+  [[ "$(timeout 5s adb -s "$astravar_serial" emu avd name | tr -d '\r' | awk 'NR == 1 { print }')" == AstravarHpCI ]] || return 1
+  [[ "$(timeout 5s adb -s "$astravar_serial" shell getprop ro.build.version.sdk | tr -d '\r')" == "$astravar_expected_api" ]] || return 1
+}
+root_owned_emulator() {
+  local astravar_phase=$1 astravar_root_status=0 astravar_uid astravar_attempt
+  local astravar_root_log="$astravar_output/$astravar_phase.txt"
+  verify_owned_emulator || return 1
+  timeout 15s adb -s "$astravar_serial" root >"$astravar_root_log" 2>&1 || astravar_root_status=$?
+  cat "$astravar_root_log"
+  if [[ "$astravar_root_status" != 0 ]]; then
+    # Reject timeouts and explicit denials. The observed Android 17 restart can
+    # return 1/255 with a closed transport (or no response at all).
+    [[ "$astravar_root_status" == 1 || "$astravar_root_status" == 255 ]] || return 1
+    if [[ -s "$astravar_root_log" ]]; then
+      grep -Eq '^(adb: unable to connect for root: closed|error: closed)$' "$astravar_root_log" || return 1
+      if grep -Evq '^(adb: unable to connect for root: closed|error: closed)$' "$astravar_root_log"; then return 1; fi
+    fi
+  fi
+  if grep -Eqi 'cannot run as root|permission denied|unauthorized' "$astravar_root_log"; then return 1; fi
+  timeout 15s adb -s "$astravar_serial" wait-for-device || return 1
+  verify_owned_emulator || return 1
+  for astravar_attempt in $(seq 1 5); do
+    kill -0 "$astravar_emulator_pid" 2>/dev/null || return 1
+    astravar_uid=$(timeout 3s adb -s "$astravar_serial" shell id -u 2>/dev/null | tr -d '\r' || true)
+    if [[ "$astravar_uid" == 0 ]]; then
+      verify_owned_emulator || return 1
+      printf '%s\n' 'Verified owned emulator adbd uid=0.' >>"$astravar_root_log"
+      return 0
+    fi
+    sleep 1
+  done
+  printf '%s\n' 'Owned emulator root restart did not establish uid=0.' >&2
+  return 1
+}
 export ANDROID_AVD_HOME="$astravar_private/avd"
 export ANDROID_USER_HOME="$astravar_private/android-user"
 mkdir -p "$ANDROID_AVD_HOME" "$ANDROID_USER_HOME"
@@ -112,8 +153,7 @@ kill -0 "$astravar_emulator_pid"
 astravar_verified_emulator=1
 test "$(timeout 10s adb -s "$astravar_serial" shell getprop ro.build.version.sdk | tr -d '\r')" = "$astravar_expected_api"
 timeout 10s adb -s "$astravar_serial" shell getprop ro.build.version.release >"$astravar_output/android-version.txt"
-timeout 15s adb -s "$astravar_serial" root
-timeout 15s adb -s "$astravar_serial" wait-for-device
+root_owned_emulator initial-root
 # Resolve only the two reserved fixture names through the owned emulator OS.
 # The session-only writable image is destroyed with this fresh AVD. No device
 # credentials exist yet, no CA is installed system-wide, and TLS hostname
@@ -146,8 +186,7 @@ test "$astravar_remounted_booted" = 1
 kill -0 "$astravar_emulator_pid"
 test "$(adb -s "$astravar_serial" shell getprop ro.kernel.qemu | tr -d '\r')" = 1
 test "$(timeout 10s adb -s "$astravar_serial" emu avd name | tr -d '\r' | awk 'NR == 1 { print }')" = AstravarHpCI
-timeout 15s adb -s "$astravar_serial" root
-timeout 15s adb -s "$astravar_serial" wait-for-device
+root_owned_emulator remounted-root
 timeout -k 5s 30s adb -s "$astravar_serial" remount >>"$astravar_output/hosts-remount.txt" 2>&1
 timeout 10s adb -s "$astravar_serial" shell "printf '\n127.0.0.1 hp-bridge.example wrong-hp-bridge.example\n' >> /system/etc/hosts"
 timeout 10s adb -s "$astravar_serial" shell "grep -F '127.0.0.1 hp-bridge.example wrong-hp-bridge.example' /system/etc/hosts" >"$astravar_output/hosts-mapping.txt"

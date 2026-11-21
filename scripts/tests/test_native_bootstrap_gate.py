@@ -69,11 +69,17 @@ git() { printf '%s\\n' 0123456789012345678901234567890123456789; }
         selector = SCRIPT[start:end]
         for enabled, image, gpu, memory, api in [
                 ('true', 'system-images;android-37.0;default;x86_64', 'swiftshader', '-memory 4096', '37'),
-                ('false', 'system-images;android-36;google_apis;x86_64', 'swiftshader_indirect', '', '36')]:
+                ('false', 'system-images;android-36;google_apis;x86_64', 'swiftshader', '', '36')]:
             shell = 'astravar_bootstrap_gate='+enabled+'\n'+selector+\
                 'printf "%s|%s|%s|%s" "$astravar_image" "$astravar_gpu" "${astravar_memory_args[*]}" "$astravar_expected_api"'
             result = subprocess.run(['bash', '-c', shell], capture_output=True, text=True, check=True)
             self.assertEqual('|'.join((image, gpu, memory, api)), result.stdout)
+
+    def test_historical_lane_retains_api36_with_supported_software_renderer(self):
+        historical = (ROOT / 'scripts/ci-emulator.sh').read_text()
+        self.assertIn('system-images;android-36;google_apis;x86_64', historical)
+        self.assertIn('-gpu swiftshader >validation/emulator.log', historical)
+        self.assertNotIn('swiftshader_indirect', historical)
 
     def test_legacy_runner_remains_available(self):
         result, root, methods = self.run_gate(enabled=False)
