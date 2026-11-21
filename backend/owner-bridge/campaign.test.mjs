@@ -299,10 +299,16 @@ test('native equipment v1 validates typed intent, separate grants, immutable rec
   schemaVersion:1,id:'stone',profileId:profile,definitionId:'stone-template',revision:1,
   state:'CARRIED',operating:true,attuned:false,bonuses:[],source:'Android Reforge equipment v1'
  }};
- await f.publish([record]);
+ const statId = 'stat-'+await sha256([profile,'ABILITY','INT'].join('\u0000'));
+ const stat = {kind:'playable-stat',recordId:statId,revision:5,fields:{id:statId,schemaVersion:1,revision:5,
+  profileId:profile,actorRole:'PLAYER',target:'ABILITY',key:'INT',label:'INT',base:21,
+  advancement:0,permanent:21,effective:21,modifier:5,source:'Android Reforge calculator v1'}};
+ await f.publish([record,stat]);
  const bonus = {id:uuid(),label:'Fictional enchantment',target:'ABILITY',key:'INT',amount:1,
   enabled:true,stackingKey:null,expiresAtGameSeconds:null};
  const edit = op('edit_equipment_bonus',record.kind,record.recordId,{actorRevision:5,bonus});
+ await fails(f.submit([{...edit,fields:{...edit.fields,actorRole:'COMPANION'}}]),'PLAYABLE_ACTOR_CONFLICT');
+ await fails(f.submit([{...edit,fields:{...edit.fields,actorRevision:4}}]),'PLAYABLE_ACTOR_CONFLICT');
  await f.enable(['inventory']);
  const manual = await f.submit([edit]);
  assert.equal(manual.command.status,'PENDING_APPROVAL');

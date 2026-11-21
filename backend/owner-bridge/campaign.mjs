@@ -25,7 +25,7 @@ function proposedEquipment(before, op) {
  const fields = op.fields;
  integer(fields.actorRevision, 1);
  if (op.type === 'set_equipment_state') {
-  const keys = Object.keys(fields).filter(k => k !== 'actorRevision');
+  const keys = Object.keys(fields).filter(k => !['actorRevision','actorRole'].includes(k));
   if (keys.length !== 1) fail(400,'INVALID_EQUIPMENT_STATE');
   const key = keys[0], value = fields[key];
   if (key === 'state') {
@@ -35,7 +35,7 @@ function proposedEquipment(before, op) {
   return {...before,[key]:value};
  }
  const removing = Object.hasOwn(fields,'removeId');
- exact(fields, ['actorRevision',removing ? 'removeId' : 'bonus']);
+ exact(fields, ['actorRevision',removing ? 'removeId' : 'bonus'], ['actorRole']);
  const bonuses = [...before.bonuses];
  if (removing) {
   const index = bonuses.findIndex(b => b.id === commandId(fields.removeId));
@@ -258,6 +258,7 @@ export class CampaignBridge{
  if(equipmentOperations.includes(op.type)){
   if(b.operations.length !== 1)fail(400,'SINGLE_EQUIPMENT_EDIT_REQUIRED');
   scopes.push('character');
+  if(op.fields.actorRole==='COMPANION')scopes.push('companions');
  }}if(new Set(prepared.map(x=>x.kind+'|'+x.recordId)).size!==prepared.length)fail(400,'DUPLICATE_RECORD_OPERATION');if(scopes.some(s=>!JSON.parse(g.write_scopes_json).includes(s)))fail(403,'WRITE_SCOPE_DENIED');const auto=scopes.every(s=>JSON.parse(g.auto_scopes_json).includes(s));const fingerprint=await sha256(canonical({campaignId:campaign,commandId:b.commandId,grantRevision:g.revision,operations:prepared,source:b.source}));const value={commandId:b.commandId,campaignId:campaign,grantRevision:g.revision,operations:prepared,source:b.source,fingerprint,status:auto?'PENDING_DELIVERY':'PENDING_APPROVAL',createdAt:this.now()};if(wireBytes(this.envelope(campaign,{grant:this.grantJson(g),commands:[value],verifiedAt:this.now()}))>MAX_PENDING_BYTES)fail(413,'COMMAND_DELIVERY_TOO_LARGE');const expectedRecords=prepared.flatMap(op=>[{recordId:op.recordId,kind:op.kind,revision:op.expectedRevision+1,fields:op.proposedFields},...op.sideEffects.map(effect=>({recordId:effect.recordId,kind:effect.kind,revision:effect.expectedRevision+1,fields:effect.fields}))]).map(r=>({...r,fields:{...r.fields,source:'x'.repeat(2200),updatedAt:this.now()}}));if(wireBytes({commandId:b.commandId,fingerprint,status:'APPLIED',localReceiptId:'0'.repeat(200),records:expectedRecords})>60*1024)fail(413,'TRANSACTION_RECEIPT_TOO_LARGE');try{await this.s('INSERT INTO bridge_campaign_commands(owner_id,campaign_id,command_id,grant_id,grant_revision,request_fingerprint,fingerprint,command_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)',this.ownerId,campaign,b.commandId,g.id,g.revision,requestFingerprint,fingerprint,canonical(value),this.now()).run();}catch(e){for(const code of ['REVISION_CONFLICT','HOLDER_REVISION_CONFLICT','GRANT_REVISION_CONFLICT','PENDING_LIMIT'])if(String(e).includes(code))fail(code==='PENDING_LIMIT'?429:409,code);throw e;}
  // The command is already durably queued. Best-effort push wakeup is ALWAYS
  // asynchronous and never changes the response or the commit/receipt contract.
@@ -272,6 +273,15 @@ export class CampaignBridge{
    case 'edit_equipment_bonus':
    case 'set_equipment_state':
     after=proposedEquipment(before,op);
+    {
+     const role=op.fields.actorRole??'PLAYER';
+     if(!['PLAYER','COMPANION'].includes(role))fail(400,'INVALID_ACTOR_ROLE');
+     const statId='stat-'+await sha256([before.profileId,'ABILITY','INT'].join('\u0000'));
+     const actor=await this.getRecord(campaign,'playable-stat',statId);
+     if(!actor||actor.grant_id!==g.id||this.now()-actor.last_device_sync_at>FRESHNESS)fail(409,'DEVICE_SYNC_STALE');
+     const proof=JSON.parse(actor.fields_json);
+     if(actor.revision!==op.fields.actorRevision||proof.profileId!==before.profileId||proof.actorRole!==role)fail(409,'PLAYABLE_ACTOR_CONFLICT');
+    }
     break;
    case 'adjust_hp':exact(op.fields,['delta']);if(op.kind!=='character-profile'||!before)fail(400,'INVALID_OPERATION_KIND');integer(op.fields.delta,-1000000,1000000);if(before.currentHp==null||before.maximumHp==null)fail(409,'RESOURCE_UNKNOWN');after.currentHp=integer(before.currentHp+op.fields.delta,0,before.maximumHp);scope='hp';break;
    case 'adjust_resource':

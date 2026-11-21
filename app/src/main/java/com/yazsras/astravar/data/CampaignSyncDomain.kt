@@ -71,6 +71,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         // A reviewed playable actor owns its current mechanics. Do not publish
         // stale source projections merely because campaign membership is valid.
         // This reads only each scoped character, never a complete database export.
+        val managedItems = db.genesisAuthorityDao().itemMembership().associateBy { it.itemId }
         val playableRecords = mutableListOf<CampaignSyncRecord>()
         associations.values.filter { it.campaignId == campaignId && it.playable }.forEach { actor ->
             val saved = db.reforgeDao().character(actor.actorId)?.saved()
@@ -82,13 +83,11 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             val character = saved.character
             if (mechanics && !character.archived && actor.role != GenesisActorRole.NPC) {
                 if (includeReadOnly) playableRecords += PlayableMechanicsSync.statistics(character, actor.role)
-                if (actor.role == GenesisActorRole.PLAYER) {
-                    val definitions = character.itemDefinitions.associateBy { it.id }
-                    for (item in character.items) {
-                        val authority = requireNotNull(readGenesisAuthorityItem(db, item.id))
-                        require(authority.ownerActorId == actor.actorId)
-                        playableRecords += PlayableMechanicsSync.equipment(character, item, definitions.getValue(item.definitionId), authority)
-                    }
+                val definitions = character.itemDefinitions.associateBy { it.id }
+                for (item in character.items) {
+                    val authority = requireNotNull(managedItems[item.id])
+                    require(authority.ownerActorId == actor.actorId)
+                    playableRecords += PlayableMechanicsSync.equipment(character, item, definitions.getValue(item.definitionId), authority.revision)
                 }
             }
         }
@@ -102,7 +101,6 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             .filter { p -> p.id !in diagnostics && allSheets.none { it.profileId == p.id && it.campaignId != campaignId } && unassigned("character-profile",p.id) }.map { it.id } else emptyList())
             .filter(::actorInScope).toSet().minus(diagnostics)
         val placements = db.partyDao().allPlacements()
-        val managedItems = db.genesisAuthorityDao().allItems().associateBy { it.itemId }
         val itemIds = (mapped("item") + placements.filter { it.holderProfileId in profileIds }.map { it.itemId } +
             if (local) db.ledgerDao().allItems().filter { unassigned("item",it.id) && placements.none { p -> p.itemId==it.id && p.holderProfileId!=null && p.holderProfileId !in profileIds } }.map {it.id} else emptyList())
             .filter { itemId ->

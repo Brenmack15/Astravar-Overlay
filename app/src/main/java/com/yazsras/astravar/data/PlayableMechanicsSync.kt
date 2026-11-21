@@ -50,11 +50,11 @@ internal object PlayableMechanicsSync {
     }
 
     fun equipment(c: ReforgeCharacter, item: ItemInstance, definition: ItemDefinition,
-        authority: GenesisItemAuthority): CampaignSyncRecord {
+        revision: Long): CampaignSyncRecord {
         val owned = definition.effects.filter { it.source.id == origin(item.id) && it.id.startsWith("dm-bonus:") && it.payload is EffectPayload.Number }
-        return CampaignSyncRecord(item.id, EQUIPMENT, authority.revision, buildJsonObject {
+        return CampaignSyncRecord(item.id, EQUIPMENT, revision, buildJsonObject {
             put("schemaVersion", 1); put("id", item.id); put("profileId", c.id); put("definitionId", definition.id)
-            put("revision", authority.revision); put("state", item.state.name); put("attuned", item.attuned)
+            put("revision", revision); put("state", item.state.name); put("attuned", item.attuned)
             put("operating", item.operating); put("bonuses", campaignJson.encodeToJsonElement(owned.map(::bonus)))
             put("source", "Android Reforge equipment v1")
         })
@@ -65,7 +65,9 @@ internal object PlayableMechanicsSync {
         val row = requireNotNull(readGenesisAuthorityItem(db, op.recordId))
         check(row.revision == op.expectedRevision)
         val actor = requireNotNull(row.ownerActorId?.let { db.genesisAuthorityDao().actor(it) })
-        require(actor.playable && actor.role == GenesisActorRole.PLAYER && actor.campaignId == campaignId)
+        val role = op.fields["actorRole"]?.jsonPrimitive?.content ?: "PLAYER"
+        require(actor.playable && actor.role.name == role && actor.role != GenesisActorRole.NPC && actor.campaignId == campaignId)
+        val editFields = op.fields - "actorRole"
         val repo = ReforgeRepository(db)
         val saved = requireNotNull(repo.get(actor.actorId))
         val c = saved.character
@@ -77,7 +79,7 @@ internal object PlayableMechanicsSync {
             reforgeJson.decodeFromString<ItemInstance>(row.instanceJson) == item)
         val next = when (op.type) {
             STATE -> {
-                require(op.fields.size == 2)
+                require(editFields.size == 2)
                 when {
                     "state" in op.fields -> GameplayRules.equip(c, item.id, ItemState.valueOf(op.fields.getValue("state").jsonPrimitive.content))
                     "attuned" in op.fields -> GameplayRules.attune(c, item.id, op.fields.getValue("attuned").jsonPrimitive.boolean)
@@ -90,7 +92,7 @@ internal object PlayableMechanicsSync {
             BONUS -> {
                 require(c.items.count { it.definitionId == def.id } == 1) { "Shared definitions need a separate review." }
                 val removal = op.fields["removeId"]?.jsonPrimitive?.content
-                require(op.fields.keys == setOf("actorRevision", if (removal != null) "removeId" else "bonus"))
+                require(editFields.keys == setOf("actorRevision", if (removal != null) "removeId" else "bonus"))
                 val input = if (removal == null) campaignJson.decodeFromJsonElement<Bonus>(op.fields.getValue("bonus")) else null
                 val id = removal ?: requireNotNull(input).id
                 require(uuid.matches(id))
@@ -124,7 +126,19 @@ internal object PlayableMechanicsSync {
             else -> error("Unsupported equipment operation.")
         }
         require(next != c) { "The requested state is already active." }
-        repo.save(actor.actorId, saved.revision, GameplayRules.preserveCapacities(c, next),
-            "Equipment change · ${source.take(180)}", command)
+        val result = repo.save(actor.actorId, saved.revision, GameplayRules.preserveCapacities(c, next),
+            "Equipment change · ${source.take(180)}", "$command-playable")
+        val updated = requireNotNull(readGenesisAuthorityItem(db, item.id))
+        check(updated.revision == Math.addExact(row.revision, 1))
+        val finalItem = result.character.items.single { it.id == item.id }
+        val finalDef = result.character.itemDefinitions.single { it.id == finalItem.definitionId }
+        val before = equipment(c, item, def, row.revision).fields.toString()
+        val after = equipment(result.character, finalItem, finalDef, updated.revision).fields.toString()
+        val now = System.currentTimeMillis()
+        val fingerprint = campaignHash(OwnerSyncProtocol.canonical(campaignJson.encodeToJsonElement(op)))
+        db.recordsDao().insert(CampaignAudit(command, command, EQUIPMENT, item.id, "EQUIPMENT_EDIT_V1",
+            source, row.revision, updated.revision, now, before, after))
+        db.recordsDao().insert(CommandReceipt(command, fingerprint, "EQUIPMENT_EDIT_V1", item.id,
+            updated.revision, now, outcomeJson = after))
     }
 }

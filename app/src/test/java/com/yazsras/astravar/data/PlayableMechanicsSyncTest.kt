@@ -70,6 +70,12 @@ class PlayableMechanicsSyncTest {
             db.close()
             db = open()
             assertEquals(stat(active, "INT"), stat(read(), "INT"))
+            val checkedBackup = GenesisAuthorityBackupRepository(db).snapshot()
+            val incompleteHistory = checkedBackup.playable.copy(changes = checkedBackup.playable.changes.filterNot {
+                it.commandId.endsWith("-playable") && it.commandId.startsWith("campaign-sync-")
+            })
+            assertTrue(genesisAuthorityBackupErrors(checkedBackup.authority, checkedBackup.campaign, incompleteHistory)
+                .any { it.startsWith("Native equipment audit") })
             val backup = GenesisAuthorityBackupRepository(db).exportWithProof()
             val restore = GenesisAuthorityBackupRepository(target)
             val preview = restore.previewRestore(backup.text)
@@ -85,6 +91,34 @@ class PlayableMechanicsSyncTest {
             assertEquals(21, stat(inactive, "INT").getValue("effective").jsonPrimitive.int)
             assertEquals(21, stat(inactive, "INT").getValue("base").jsonPrimitive.int)
             assertEquals(0, ReforgeRepository(db).get(actorId)!!.character.spellSlots[1])
+            val repo = ReforgeRepository(db)
+            val owl = GenesisAuthorityRepository(db).createActor("Test owl", GenesisActorRole.COMPANION, campaign, actorId,
+                playable = ReforgeCharacter("fixture-owl", "Test owl", baseAbilities = mapOf(Stat.INT to 8),
+                    currentHp = 5, baseMaxHp = 12, resources = listOf(ResourcePool("repair", "Repair", 1, 0))),
+                commandId = "convergence-owl-create")
+            val owlId = owl.actor.actorId
+            val (_, received) = repo.transferItem(requireNotNull(repo.get(actorId)).character,
+                requireNotNull(owl.playable).character, itemId, "convergence-transfer-out")
+            assertTrue(requireNotNull(repo.get(actorId)).character.items.isEmpty())
+            suspend fun owlEdit(id: String, fields: JsonObject) {
+                val row = read().single { it.kind == PlayableMechanicsSync.EQUIPMENT && it.recordId == itemId }
+                val rev = requireNotNull(repo.get(owlId)).revision
+                val edit = CampaignSyncOperation(PlayableMechanicsSync.STATE, itemId, row.kind, row.revision,
+                    JsonObject(fields + mapOf("actorRevision" to JsonPrimitive(rev), "actorRole" to JsonPrimitive("COMPANION"))))
+                apply(id, edit)
+            }
+            if (!received.character.items.single().operating)
+                owlEdit("convergence-owl-enable", buildJsonObject { put("operating", true) })
+            owlEdit("convergence-owl-hold", buildJsonObject { put("state", "HELD") })
+            val owlRead = requireNotNull(repo.get(owlId)).character
+            assertEquals(9, CharacterCalculator.calculate(owlRead).abilities.getValue(Stat.INT).effective.value)
+            assertEquals(5, owlRead.currentHp)
+            assertEquals(0, owlRead.resources.single().current)
+            repo.transferItem(owlRead, requireNotNull(repo.get(actorId)).character, itemId, "convergence-transfer-back")
+            assertTrue(requireNotNull(repo.get(owlId)).character.items.isEmpty())
+            assertEquals(8, CharacterCalculator.calculate(requireNotNull(repo.get(owlId)).character).abilities.getValue(Stat.INT).effective.value)
+            assertEquals(actorId, db.partyDao().placement(itemId)?.holderProfileId)
+            assertEquals(1, db.ledgerDao().allItems().count { it.id == itemId })
         } finally {
             target.close(); db.close(); context.deleteDatabase(name)
         }
