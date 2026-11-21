@@ -27,6 +27,22 @@ internal fun genesisAuthorityBackupErrors(
     val campaignProofs = mutableMapOf<String, GenesisCampaignRecord>()
     val itemProofs = mutableMapOf<String, ReforgeSavedCharacter>()
     val playableHistory = playable.changes.associateBy { it.commandId }
+    for (audit in campaign.records.audit.filter { it.recordType == PlayableMechanicsSync.EQUIPMENT }) {
+        verify("Native equipment audit ${audit.id}") {
+            require(audit.kind == "EQUIPMENT_EDIT_V1" && audit.resultingRevision == Math.addExact(audit.priorRevision, 1))
+            val change = requireNotNull(playableHistory["${audit.commandId}-playable"])
+            fun verifySnapshot(raw: String?, revision: Long, fields: String?) {
+                val c = reforgeJson.decodeFromString<ReforgeSavedCharacter>(requireNotNull(raw)).character
+                require(c.id == change.profileId)
+                val item = c.items.single { it.id == audit.recordId }
+                val definition = c.itemDefinitions.single { it.id == item.definitionId }
+                require(PlayableMechanicsSync.equipment(c, item, definition, revision).fields ==
+                    campaignJson.parseToJsonElement(requireNotNull(fields)))
+            }
+            verifySnapshot(change.beforeJson, audit.priorRevision, audit.beforeJson)
+            verifySnapshot(change.afterJson, audit.resultingRevision, audit.afterJson)
+        }
+    }
     val unrelatedCommands = (campaign.events.map { it.commandId } + campaign.records.receipts.map { it.commandId } +
         campaign.records.audit.map { it.id } + playable.changes.map { it.commandId } + playable.rolls.map { it.id }).toSet()
     authority.receipts.forEach { receipt -> verify("Authority receipt ${receipt.commandId}") {

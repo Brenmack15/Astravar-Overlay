@@ -27,6 +27,8 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
     companion object {
         fun receiptId(commandId: String) = "campaign-sync-${campaignHash(commandId).take(48)}"
         fun category(kind: String): String = when (kind) {
+            PlayableMechanicsSync.STATS -> "character"
+            PlayableMechanicsSync.EQUIPMENT -> "inventory"
             "character-profile", "character-ability", "party-sheet" -> "character"
             "companion-state", "companion-resource" -> "companions"
             "item", "item-placement", "item-details", "item-property" -> "inventory"
@@ -37,6 +39,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             else -> error("Unsupported campaign record kind.")
         }
         fun requiredReadScopes(record: CampaignSyncRecord): Set<String> = when (record.kind) {
+            PlayableMechanicsSync.STATS, PlayableMechanicsSync.EQUIPMENT -> PlayableMechanicsSync.readScopes
             "character-profile" -> setOf("character", "hp")
             "party-sheet" -> setOf("character", "hp", "resources")
             "audit" -> setOf("hp", "resources", "inventory", "currency", "character", "companions", "engineering", "continuity", "combat")
@@ -53,7 +56,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         CampaignSyncRecord(id, kind, revision, campaignJson.encodeToJsonElement(value).jsonObject)
 
     /** Membership is explicit: imported source IDs and current placements, never a blanket campaign reassignment. */
-    suspend fun snapshot(campaignId: String, includeReadOnly: Boolean = true): List<CampaignSyncRecord> = db.withTransaction {
+    suspend fun snapshot(campaignId: String, includeReadOnly: Boolean = true, mechanics: Boolean = false): List<CampaignSyncRecord> = db.withTransaction {
         OwnerSyncProtocol.id(campaignId)
         val local = campaignId == "local-campaign"
         val diagnostics = setOf(OwnerConnectionProtocol.PROFILE, RemoteStatProtocol.PROFILE_ID)
@@ -68,6 +71,8 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         // A reviewed playable actor owns its current mechanics. Do not publish
         // stale source projections merely because campaign membership is valid.
         // This reads only each scoped character, never a complete database export.
+        val managedItems = db.genesisAuthorityDao().itemMembership().associateBy { it.itemId }
+        val playableRecords = mutableListOf<CampaignSyncRecord>()
         associations.values.filter { it.campaignId == campaignId && it.playable }.forEach { actor ->
             val saved = db.reforgeDao().character(actor.actorId)?.saved()
                 ?: throw CampaignCanonicalReviewRequired(actor.actorId)
@@ -75,6 +80,16 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
                 db.recordsDao().characterProfile(actor.actorId) == null) throw CampaignCanonicalReviewRequired(actor.actorId)
             if (genesisReadbackProjectionErrors(db, actor.actorId, saved).isNotEmpty())
                 throw CampaignCanonicalReviewRequired(actor.actorId)
+            val character = saved.character
+            if (mechanics && !character.archived && actor.role != GenesisActorRole.NPC) {
+                if (includeReadOnly) playableRecords += PlayableMechanicsSync.statistics(character, actor.role)
+                val definitions = character.itemDefinitions.associateBy { it.id }
+                for (item in character.items) {
+                    val authority = requireNotNull(managedItems[item.id])
+                    require(authority.ownerActorId == actor.actorId)
+                    playableRecords += PlayableMechanicsSync.equipment(character, item, definitions.getValue(item.definitionId), authority.revision)
+                }
+            }
         }
         val sheets = allSheets.filter { effectiveCampaign(it.profileId, it.campaignId) == campaignId && it.profileId !in diagnostics }
             .map { it.copy(campaignId = campaignId) }
@@ -86,7 +101,6 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             .filter { p -> p.id !in diagnostics && allSheets.none { it.profileId == p.id && it.campaignId != campaignId } && unassigned("character-profile",p.id) }.map { it.id } else emptyList())
             .filter(::actorInScope).toSet().minus(diagnostics)
         val placements = db.partyDao().allPlacements()
-        val managedItems = db.genesisAuthorityDao().allItems().associateBy { it.itemId }
         val itemIds = (mapped("item") + placements.filter { it.holderProfileId in profileIds }.map { it.itemId } +
             if (local) db.ledgerDao().allItems().filter { unassigned("item",it.id) && placements.none { p -> p.itemId==it.id && p.holderProfileId!=null && p.holderProfileId !in profileIds } }.map {it.id} else emptyList())
             .filter { itemId ->
@@ -99,7 +113,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             .filter(::actorInScope).toSet()
         val companionIds = (profileIds + mapped("companion") + if(local) db.recordsDao().allCompanionStates().filter {unassigned("companion",it.companionId) && unassigned("character-profile",it.companionId) && allSheets.none {s -> s.profileId==it.companionId && s.campaignId!=campaignId}}.map {it.companionId} else emptyList())
             .filter(::actorInScope).toSet()
-        val output = mutableListOf<CampaignSyncRecord>()
+        val output = playableRecords
         db.recordsDao().allCharacterProfiles().filter { it.id in profileIds }.forEach { output += envelope("character-profile", it.id, it.revision, it) }
         db.recordsDao().allCharacterAbilities().filter { it.profileId in profileIds }.forEach { output += envelope("character-ability", it.id, it.revision, it) }
         sheets.forEach { output += envelope("party-sheet", it.profileId, it.revision, it.copy(contentJson = CampaignLocalFormBoundary.sheetContent(it.sheet))) }
@@ -206,7 +220,11 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         val parentId = receiptId(commandId)
         db.recordsDao().receipt(parentId)?.let { require(it.fingerprint == fingerprint) { "Command ID collision." }; return@withTransaction it }
         genesisRejectAuthorityCommandReuse(db, parentId)
-        val before = snapshot(campaignId, includeReadOnly = false).associateBy { key(it.kind,it.recordId) }
+        val native = operations.any { it.kind == PlayableMechanicsSync.EQUIPMENT }
+        if (native) require(operations.size == 1 && operations.single().type in
+            setOf(PlayableMechanicsSync.BONUS, PlayableMechanicsSync.STATE, PlayableMechanicsSync.DEFENSE)) { "Equipment v1 accepts one native edit per transaction." }
+        require(operations.none { it.kind == PlayableMechanicsSync.STATS })
+        val before = snapshot(campaignId, includeReadOnly = false, mechanics = native).associateBy { key(it.kind,it.recordId) }
         val childIds = operations.indices.map { "campaign-sync-${campaignHash(commandId).take(40)}-$it" }
         childIds.forEach { require(db.recordsDao().receipt(it) == null && db.ledgerDao().event(it) == null) { "Child command collision." } }
         val created = mutableSetOf<String>()
@@ -270,12 +288,15 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
                 }
             }
         }
-        val after = snapshot(campaignId, includeReadOnly = false)
+        val after = snapshot(campaignId, includeReadOnly = false, mechanics = native)
         operations.forEach { operation ->
             val committed = after.singleOrNull { it.kind == operation.kind && it.recordId == operation.recordId }
             check(committed != null && committed.revision == operation.expectedRevision + 1) { "Committed record escaped campaign scope or revision contract." }
         }
-        val changed = after.filter { before[key(it.kind,it.recordId)] != it && it.kind !in setOf("audit", "configuration", "roll-history") }
+        // For a native command, the signed outcome names the edited equipment row.
+        // Reforge commits and audits derived projections in this transaction; sync publishes them independently.
+        val changed = if (native) after.filter { it.kind == PlayableMechanicsSync.EQUIPMENT && it.recordId == operations.single().recordId }
+        else after.filter { before[key(it.kind,it.recordId)] != it && it.kind !in setOf("audit", "configuration", "roll-history") }
         require(changed.isNotEmpty())
         val now = System.currentTimeMillis()
         val receipt = CommandReceipt(parentId, fingerprint, "CAMPAIGN_SYNC_V2", campaignId,
@@ -290,6 +311,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         val f = op.fields
         val expected = expected(op.expectedRevision)
         when (op.type) {
+            PlayableMechanicsSync.DEFENSE, PlayableMechanicsSync.STATE, PlayableMechanicsSync.BONUS -> PlayableMechanicsSync.edit(db, campaignId, op, child, source)
             "acquire_item" -> {
                 require(op.kind == "item" && current == null && op.expectedRevision == 0L)
                 val destination = f["placement"]?.jsonObject

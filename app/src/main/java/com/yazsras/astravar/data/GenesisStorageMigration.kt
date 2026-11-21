@@ -262,7 +262,7 @@ class GenesisApplicationStorage private constructor(private val context: Context
 
     fun retry() { scope.launch { runCatching { awaitReady() } } }
 
-    private suspend fun awaitReady() = mutex.withLock {
+    internal suspend fun awaitReady() = mutex.withLock {
         if (mutableStatus.value == GenesisStorageStatus.Ready) return@withLock
         mutableStatus.value = GenesisStorageStatus.Loading
         try {

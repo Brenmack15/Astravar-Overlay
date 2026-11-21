@@ -292,6 +292,7 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
         val audit = (r.audit + c.audit).associateBy { it.id }
         val allReceipts = (r.receipts + c.receipts).associateBy { it.commandId }
         val recordIds = mapOf(
+            "playable-equipment" to itemIds,
             "item" to itemIds, "project" to projectIds, "connection" to entityIds, "companion" to companionIds,
             "stage" to (r.stages + c.stages).map { it.id }.toSet(),
             "requirement" to (r.requirements + c.requirements).map { it.id }.toSet(),

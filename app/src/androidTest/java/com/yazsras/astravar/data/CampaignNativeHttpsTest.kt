@@ -1,5 +1,6 @@
 package com.yazsras.astravar.data
 
+import com.yazsras.astravar.rules.reforge.*
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -214,7 +215,7 @@ class CampaignNativeHttpsTest {
         client.sync()
         val receipt = mcp("get_campaign_command_receipt", buildJsonObject { put("campaignId", campaign); put("commandId", id) }).getValue("receipt").jsonObject
         assertEquals("APPLIED", receipt.getValue("status").jsonPrimitive.content)
-        val local = CampaignConnectionProjection.project(CampaignSyncDomain(db).snapshot(campaign), allScopes)
+        val local = CampaignConnectionProjection.project(CampaignSyncDomain(db).snapshot(campaign, mechanics = true), allScopes)
         for (raw in receipt.getValue("records").jsonArray) {
             val saved = raw.jsonObject
             val kind = saved.getValue("kind").jsonPrimitive.content; val recordId = saved.getValue("recordId").jsonPrimitive.content
@@ -336,7 +337,7 @@ class CampaignNativeHttpsTest {
             assertEquals(checkpointId, committed.getValue("recordId").jsonPrimitive.content)
             assertEquals(1L, committed.getValue("revision").jsonPrimitive.long)
             assertEquals("The immutable receipt matches an independent MCP read", committed, record("checkpoint", checkpointId))
-            val android = CampaignConnectionProjection.project(CampaignSyncDomain(db).snapshot(campaign), allScopes)
+            val android = CampaignConnectionProjection.project(CampaignSyncDomain(db).snapshot(campaign, mechanics = true), allScopes)
                 .single { it.kind == "checkpoint" && it.recordId == checkpointId }
             assertEquals("The worker committed the named Android Room store", campaignJson.encodeToJsonElement(android), committed)
             val timings = CampaignPushStore(context)
@@ -388,6 +389,59 @@ class CampaignNativeHttpsTest {
                 if (screenWasOn) device.wakeUp() else device.sleep()
             }
         }
+    }
+
+    private suspend fun verifyEquipmentEffectOverHttps() {
+        val authority = GenesisAuthorityRepository(db)
+        authority.prepareOwnerLocalCampaign(commandId = "ci-equipment-campaign")
+        val actorId = "ci-native-equipment-actor"
+        val definition = ItemDefinition("ci-native-stone-definition", "Fictional test stone")
+        val stone = ItemInstance("ci-native-stone", definition.id)
+        val actor = authority.createActor("Fixture artificer", GenesisActorRole.PLAYER, campaign,
+            playable = ReforgeCharacter(actorId, "Fixture artificer", baseAbilities = mapOf(Stat.INT to 21)),
+            commandId = "ci-equipment-actor")
+        authority.createItem(actorId, requireNotNull(actor.playable).revision, definition, stone, "ci-equipment-grant")
+        client.sync()
+        val arguments = buildJsonObject { put("campaignId", campaign); put("profileId", actorId); put("limit", 100) }
+        fun intelligence(): JsonObject = mcp("get_playable_statistics", arguments).getValue("records").jsonArray
+            .map { it.jsonObject.getValue("fields").jsonObject }.single { it.getValue("target").jsonPrimitive.content == "ABILITY" && it.getValue("key").jsonPrimitive.content == "INT" }
+        suspend fun edit(type: String, change: JsonObject) {
+            val equipment = record("playable-equipment", stone.id)
+            val actorRevision = intelligence().getValue("revision")
+            submitAndVerify(operation(type, "playable-equipment", stone.id, equipment.getValue("revision").jsonPrimitive.long,
+                JsonObject(change + ("actorRevision" to actorRevision))))
+        }
+        fun verifyInt(effective: Int) {
+            val read = intelligence()
+            assertEquals(21, read.getValue("base").jsonPrimitive.int)
+            assertEquals(effective, read.getValue("effective").jsonPrimitive.int)
+        }
+        verifyInt(21)
+        edit("edit_equipment_bonus", buildJsonObject {
+            putJsonObject("bonus") {
+                put("id", "5b1731bc-c1c1-455a-bf15-ef145af7d061"); put("label", "Synthetic Intellect")
+                put("target", "ABILITY"); put("key", "INT"); put("amount", 1); put("enabled", true)
+                put("stackingKey", JsonNull); put("expiresAtGameSeconds", JsonNull)
+            }
+        })
+        verifyInt(21)
+        edit("set_equipment_state", buildJsonObject { put("state", "HELD") })
+        verifyInt(22)
+        edit("edit_equipment_defense", buildJsonObject {
+            putJsonObject("defense") {
+                put("id", "edf27ed3-d934-4b12-ad26-ad5fcfe84537"); put("label", "Synthetic cold ward")
+                put("damageType", "COLD"); put("kind", "IMMUNITY"); put("nonmagicalOnly", false)
+                put("enabled", true); put("expiresAtGameSeconds", JsonNull)
+            }
+        })
+        fun coldImmunity() = mcp("get_playable_statistics", arguments).getValue("records").jsonArray.any {
+            val f = it.jsonObject.getValue("fields").jsonObject
+            f.getValue("target").jsonPrimitive.content == "DAMAGE_DEFENSE" && f.getValue("key").jsonPrimitive.content == "COLD:IMMUNITY:ALL"
+        }
+        assertTrue(coldImmunity())
+        edit("set_equipment_state", buildJsonObject { put("operating", false) })
+        verifyInt(21)
+        assertFalse(coldImmunity())
     }
 
     @Test fun authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts() = runBlocking {
@@ -484,6 +538,7 @@ class CampaignNativeHttpsTest {
         client.setAutoSync(allScopes)
         submitAndVerify(operation("adjust_hp", "character-profile", player, 2, fields("delta" to JsonPrimitive(-1))), loseDecisionResponse = true)
         assertEquals("Lost acknowledgement recovery applies exactly once", 8, db.recordsDao().characterProfile(player)!!.currentHp)
+        verifyEquipmentEffectOverHttps()
         val reduced = client.restrictPermissions(allScopes - "inventory", allScopes - setOf("inventory", "hp"))
         assertFalse("Read/write revocation is confirmed on the server", reduced.getValue("grantPending").jsonPrimitive.boolean)
         assertFalse(reduced.getValue("grant").jsonObject.getValue("readScopes").jsonArray.any { it.jsonPrimitive.content == "inventory" })
@@ -507,6 +562,7 @@ class CampaignNativeHttpsTest {
             put("hp", 8); put("gold", 6); put("spellSlots", 1); put("companionCharges", 1)
             put("atomicPurchase", true); put("atomicCompanionAcquireAndAssign", true); put("acquisitionReceiptRecords", assignedRecords.size)
             put("staleAndForeignAcquisitionHolderRejected", true); put("idempotentRetries", true); put("staleAndDisabledScopeRejected", true)
+            put("nativeEquipmentReceiptAndCalculatedReadback", true)
             put("receiptAndAndroidReadback", true); put("serverRevocationVerified", true)
             put("mcpRequests", mcpRequests); put("observedMcpErrors", mcpErrors); put("expectedNegativeTestErrors", 5)
             put("independentReadWriteRevocation", true)

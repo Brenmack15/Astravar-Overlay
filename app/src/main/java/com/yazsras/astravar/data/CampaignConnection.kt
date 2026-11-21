@@ -87,9 +87,15 @@ class CampaignConnectionClient internal constructor(private val context: Context
     // Pushy installation, even when running a release build.
     private val requestPushToken: ((Context, String) -> Unit)? = null,
     private val disableMessaging: (Context) -> Unit = {}) {
-    constructor(context: Context) : this(context.applicationContext, CampaignConnectionDb.open(context), CampaignLedgerDb.open(context),
+    constructor(context: Context) : this(context.applicationContext, CampaignConnectionDb.open(context), GenesisApplicationStorage.open(context.applicationContext).db,
         OwnerSyncCredentialVault(context), OwnerConnectionHttpsTransport(), weaponDb = AstravarDb.open(context),
-        requestPushToken = CampaignPushy::requestToken, disableMessaging = CampaignPushy::disable)
+        requestPushToken = CampaignPushy::requestToken, disableMessaging = CampaignPushy::disable) {
+        applicationStorage = GenesisApplicationStorage.open(context.applicationContext)
+    }
+    private var applicationStorage: GenesisApplicationStorage? = null
+    private fun supportsMechanics(value: CampaignConnectionSettings) =
+        grant(value)["playableMechanicsVersion"]?.jsonPrimitive?.intOrNull == 1 &&
+            activeRead(value).containsAll(PlayableMechanicsSync.readScopes)
     private val dao = db.connection()
     private val domain = CampaignSyncDomain(campaignDb, weaponDb)
     private val pushStore = CampaignPushStore(context)
@@ -312,7 +318,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         val commands = dao.commands().filter { belongs(it, value) }
         var canonicalReviewProfileId: String? = null
         val current = try {
-            if (value.campaignId.isBlank()) emptyList() else domain.snapshot(value.campaignId)
+            if (value.campaignId.isBlank()) emptyList() else { applicationStorage?.awaitReady(); domain.snapshot(value.campaignId, mechanics = supportsMechanics(value)) }
         } catch (review: CampaignCanonicalReviewRequired) {
             // Display the explicit repair action without treating blocked projections
             // as deleted records. Publication still calls the strict domain snapshot.
@@ -517,6 +523,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         dao.settings(value.copy(status = status, lastError = code))
     }
     private suspend fun syncUnlocked() {
+        applicationStorage?.awaitReady()
         requireAutomaticAllowed()
         syncContinuationRequired = false
         var value = setting(); syncDiagnostics.begin(value); credential(value)
@@ -588,7 +595,16 @@ class CampaignConnectionClient internal constructor(private val context: Context
         val data = parsed(command); val g = checkedGrant(value, grant(value))
         require(data.getValue("grantRevision") == g.getValue("revision")) { "Campaign grant changed. Review this transaction again." }
         val ops = operations(command)
-        val required = ops.map(::operationCategory).toSet()
+        val required = ops.flatMap {
+            if (it.kind == PlayableMechanicsSync.EQUIPMENT) {
+                require(supportsMechanics(value))
+                buildSet {
+                    addAll(PlayableMechanicsSync.writeScopes)
+                    if (it.fields["actorRole"]?.jsonPrimitive?.content == "COMPANION") add("companions")
+                    if (it.type == PlayableMechanicsSync.DEFENSE) add("combat")
+                }
+            } else setOf(operationCategory(it))
+        }.toSet()
         require(required.all(activeWrite(value)::contains)) { "Write scope is disabled." }
         return required
     }
@@ -640,7 +656,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         return records
     }
     private suspend fun verifyBaseline(value: CampaignConnectionSettings, command: CampaignConnectionCommand) {
-        val local = visible(value, domain.snapshot(value.campaignId, includeReadOnly = false)).associateBy { it.kind to it.recordId }
+        val local = visible(value, domain.snapshot(value.campaignId, includeReadOnly = false, mechanics = supportsMechanics(value))).associateBy { it.kind to it.recordId }
         for (raw in parsed(command).getValue("operations").jsonArray) {
             val operation = raw.jsonObject
             val kind = operation.getValue("kind").jsonPrimitive.content
@@ -701,6 +717,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
             require(manual || authorized(value, command)) { "Trusted DM Auto-Sync scope is disabled." }
         }
         val receipt = try {
+            applicationStorage?.awaitReady()
             existing ?: campaignDb.withTransaction {
                 requireAutomaticAllowed()
                 verifyBaseline(value, command)
@@ -776,7 +793,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         for (publication in dao.publications().filter { it.origin == value.origin && it.campaignId == value.campaignId && it.deviceId == value.deviceId && it.state == "PENDING" }) flushPublication(value, publication)
         val mirrors = dao.mirrors(value.origin, value.campaignId, value.deviceId).associateBy { it.kind to it.recordId }
         syncDiagnostics.stage(value, CampaignSyncStage.LOCAL_SNAPSHOT)
-        val committed = visible(value, domain.snapshot(value.campaignId))
+        val committed = visible(value, domain.snapshot(value.campaignId, mechanics = supportsMechanics(value)))
         val identities = committed.map { it.kind to it.recordId }.toSet()
         val readScopes = activeRead(value)
         val removed = mirrors.values.filter { (it.kind to it.recordId) !in identities && canReadKind(it.kind, it.recordId, readScopes) }
@@ -816,7 +833,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
             val publication = CampaignConnectionPublication(id, value.origin, value.campaignId, value.deviceId, body)
             dao.insert(publication); flushPublication(value, publication)
         }
-        val current = visible(value, domain.snapshot(value.campaignId))
+        val current = visible(value, domain.snapshot(value.campaignId, mechanics = supportsMechanics(value)))
         // The backend refreshes the whole mirror only when every current local identity/revision/hash agrees.
         // A restore or missing row therefore becomes a visible conflict, never a falsely fresh historical value.
         syncDiagnostics.stage(value, CampaignSyncStage.SNAPSHOT_CONFIRMATION)
@@ -841,6 +858,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         it in setOf("recordId", "kind", "revision", "fields")
     }))
     private fun canReadKind(kind: String, id: String, scopes: Set<String>): Boolean = when (kind) {
+        PlayableMechanicsSync.STATS, PlayableMechanicsSync.EQUIPMENT -> scopes.containsAll(PlayableMechanicsSync.readScopes)
         "character-profile" -> "hp" in scopes || "character" in scopes
         "party-sheet" -> scopes.any { it in setOf("character", "hp", "resources") }
         "audit" -> scopes.containsAll(CampaignConnectionProtocol.categories)
@@ -913,5 +931,9 @@ class CampaignConnectionClient internal constructor(private val context: Context
         dao.settings(value.copy(deviceId = "", revokePending = false, localAutoSyncJson = "[]", grantJson = "{}", status = "Disconnected · server revocation confirmed"))
         CampaignConnectionSyncJob.cancel(context)
     }
-    fun close() { db.close(); campaignDb.close(); weaponDb?.close() }
+    fun close() {
+        db.close()
+        if (applicationStorage == null) campaignDb.close()
+        weaponDb?.close()
+    }
 }

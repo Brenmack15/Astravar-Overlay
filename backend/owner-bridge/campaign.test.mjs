@@ -292,3 +292,54 @@ test('V2 narrowed continuity diagnostic never counts retained private archive bo
  assert.equal(connection.synchronizationState,'NO_DEVICE_RECORDS');
  assert.equal((await f.sync.read(connector,campaign)).records.length,0);
 });
+
+test('native equipment v1 validates typed intent, separate grants, immutable receipt and subsequent read', async t => {
+ const f = await setup(t);
+ const record = {kind:'playable-equipment',recordId:'stone',revision:1,fields:{
+  schemaVersion:1,id:'stone',profileId:profile,definitionId:'stone-template',revision:1,
+  state:'CARRIED',operating:true,attuned:false,bonuses:[],source:'Android Reforge equipment v1'
+ }};
+ const statId = 'stat-'+await sha256([profile,'ABILITY','INT'].join('\u0000'));
+ const stat = {kind:'playable-stat',recordId:statId,revision:5,fields:{id:statId,schemaVersion:1,revision:5,
+  profileId:profile,actorRole:'PLAYER',target:'ABILITY',key:'INT',label:'INT',base:21,
+  advancement:0,permanent:21,effective:21,modifier:5,source:'Android Reforge calculator v1'}};
+ await f.publish([record,stat]);
+ const bonus = {id:uuid(),label:'Fictional enchantment',target:'ABILITY',key:'INT',amount:1,
+  enabled:true,stackingKey:null,expiresAtGameSeconds:null};
+ const edit = op('edit_equipment_bonus',record.kind,record.recordId,{actorRevision:5,bonus});
+ await fails(f.submit([{...edit,fields:{...edit.fields,actorRole:'COMPANION'}}]),'PLAYABLE_ACTOR_CONFLICT');
+ await fails(f.submit([{...edit,fields:{...edit.fields,actorRevision:4}}]),'PLAYABLE_ACTOR_CONFLICT');
+ await f.enable(['inventory']);
+ const manual = await f.submit([edit]);
+ assert.equal(manual.command.status,'PENDING_APPROVAL');
+ await f.sync.decide(f.principal,campaign,decision(manual.command,{status:'REJECTED'}));
+ await f.enable(['character','inventory']);
+ const {command} = await f.submit([edit]);
+ assert.equal(command.status,'PENDING_DELIVERY');
+ assert.deepEqual(command.operations[0].proposedFields.bonuses,[bonus]);
+ await fails(f.sync.getReceipt(connector,campaign,command.commandId),'RECEIPT_NOT_READY');
+ const saved = {recordId:'stone',kind:record.kind,revision:2,fields:{...record.fields,revision:2,bonuses:[bonus]}};
+ await f.sync.decide(f.principal,campaign,decision(command,{rows:[saved]}));
+ assert.equal((await f.sync.getReceipt(connector,campaign,command.commandId)).receipt.status,'APPLIED');
+ const read = await f.sync.read(connector,campaign,{kinds:[record.kind],recordId:'stone'});
+ assert.deepEqual(read.records[0].fields.bonuses,[bonus]);
+ await fails(f.submit([edit]),'REVISION_CONFLICT');
+ await fails(f.submit([op('set_record',record.kind,'stone',{operating:false},2)]),'READ_ONLY_RECORD_KIND');
+ const defense={id:uuid(),label:'Disposable cold ward',damageType:'COLD',kind:'IMMUNITY',nonmagicalOnly:false,enabled:true,expiresAtGameSeconds:null};
+ const ward=op('edit_equipment_defense',record.kind,'stone',{actorRevision:5,defense},2);
+ await fails(f.submit([{...ward,fields:{actorRevision:5,defense:{...defense,damageType:'unknown'}}}]),'INVALID_DAMAGE_DEFENSE');
+ const manualWard=await f.submit([ward]);
+ assert.equal(manualWard.command.status,'PENDING_APPROVAL');
+ await f.sync.decide(f.principal,campaign,decision(manualWard.command,{status:'REJECTED'}));
+ await f.enable(['character','inventory','combat']);
+ const submitted=await f.submit([ward]);
+ assert.equal(submitted.command.status,'PENDING_DELIVERY');
+ const fields=submitted.command.operations[0].proposedFields;
+ assert.deepEqual(fields.defenses,[defense]);
+ await f.sync.decide(f.principal,campaign,decision(submitted.command,{rows:[{...saved,revision:3,fields:{...fields,revision:3}}]}));
+ assert.equal((await f.sync.getReceipt(connector,campaign,submitted.command.commandId)).receipt.status,'APPLIED');
+ assert.deepEqual((await f.sync.read(connector,campaign,{kinds:[record.kind],recordId:'stone'})).records[0].fields.defenses,[defense]);
+ const remove=await f.submit([op('edit_equipment_defense',record.kind,'stone',{actorRevision:5,removeId:defense.id},3)]);
+ assert.equal(Object.hasOwn(remove.command.operations[0].proposedFields,'defenses'),false);
+
+});

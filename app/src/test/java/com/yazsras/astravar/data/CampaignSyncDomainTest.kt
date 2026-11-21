@@ -30,6 +30,47 @@ class CampaignSyncDomainTest {
         ledger.party.saveSheet("synthetic-player",PartySheetData(resources=listOf(SheetResource("Level 2",2,3),SheetResource("Unknown charge"))),source=source)
         ledger.party.saveWallet(PartyWallet("synthetic-wallet","synthetic-player","Fictional wallet",gold=10),source=source)
     } }
+    @Test fun merchantPurchaseAndCheckpointRecoverTogetherFromAFreshRepository() = runBlocking {
+        val merchant = "scenario-merchant"
+        val item = "scenario-purchased-item"
+        val buyer = "synthetic-player"
+        domain.apply(campaign, "scenario-first-meeting", source, listOf(
+            CampaignSyncOperation("set_record", merchant, "connection", 0, buildJsonObject { put("name", "Fixture merchant") })
+        ))
+        val profile = requireNotNull(db.recordsDao().characterProfile(buyer))
+        val wallet = requireNotNull(db.partyDao().allWallets().singleOrNull { it.id == "synthetic-wallet" })
+        val operations = listOf(
+            CampaignSyncOperation("adjust_currency", wallet.id, "wallet", wallet.revision, buildJsonObject { put("goldDelta", -3) }),
+            CampaignSyncOperation("acquire_item", item, "item", 0, buildJsonObject {
+                put("title", "Fixture purchase"); put("quantity", 1); put("evidenceStatus", "Confirmed")
+                put("placement", buildJsonObject {
+                    put("holderProfileId", buyer); put("expectedHolderRevision", profile.revision); put("state", "Carried")
+                })
+            }),
+            CampaignSyncOperation("set_record", merchant, "connection", 1, buildJsonObject { put("relationship", "Trusted customer") }),
+            CampaignSyncOperation("set_record", "scenario-receipt", "milestone", 0, buildJsonObject {
+                put("entityId", merchant); put("title", "Purchase complete"); put("detail", "Sold one fixture item for 3 GP.")
+            }),
+            CampaignSyncOperation("save_checkpoint", "scenario-checkpoint", "checkpoint", 0, buildJsonObject {
+                put("title", "After the sale"); put("scene", "Fixture shop"); put("lastConfirmedAction", "Purchased one fixture item")
+                put("unresolvedChoice", "Choose whether to return"); put("recordReferences", JsonArray(listOf(merchant, item).map(::JsonPrimitive)))
+            })
+        )
+        val result = domain.apply(campaign, "scenario-purchase", source, operations)
+        val reopened = CampaignSyncDomain(db)
+        assertEquals(result, db.recordsDao().receipt(CampaignSyncDomain.receiptId("scenario-purchase")))
+        assertEquals(result, reopened.apply(campaign, "scenario-purchase", source, operations))
+        val view = reopened.snapshot(campaign)
+        fun row(kind: String, id: String) = view.single { it.kind == kind && it.recordId == id }.fields
+        assertEquals(7L, row("wallet", wallet.id).getValue("gold").jsonPrimitive.long)
+        assertEquals(JsonNull, row("wallet", wallet.id)["platinum"])
+        assertEquals(1, row("item", item).getValue("quantity").jsonPrimitive.int)
+        assertEquals(buyer, row("item-placement", item).getValue("holderProfileId").jsonPrimitive.content)
+        assertEquals("Trusted customer", row("connection", merchant).getValue("relationship").jsonPrimitive.content)
+        assertEquals(merchant, row("milestone", "scenario-receipt").getValue("entityId").jsonPrimitive.content)
+        assertEquals("Choose whether to return", row("checkpoint", "scenario-checkpoint").getValue("unresolvedChoice").jsonPrimitive.content)
+    }
+
     @After fun close() = db.close()
     private fun fields(vararg pairs: Pair<String,JsonElement>) = JsonObject(mapOf(*pairs))
     private fun number(value: Int) = JsonPrimitive(value)

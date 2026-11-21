@@ -55,13 +55,18 @@ data class NotionTransferPlan(
 
 private fun notionName(value: String): String = value.lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
 
+private val notionUuid = Regex("(?i)(?:[0-9a-f]{32}|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})")
+
+private fun notionSourceKey(id: String): String =
+    if (notionUuid.matches(id)) id.replace("-", "").lowercase(Locale.ROOT) else id
+
 private fun notionSameItem(existing: String, incoming: String): Boolean {
     val a = notionName(existing)
     val b = notionName(incoming)
     if (a == b) return true
     // Earlier handwritten sheets often abbreviate the completed composite suit.
     return a.contains("astravar") && b.contains("astravar") &&
-        a.contains("mkii") && b.contains("mkii")
+        Regex("mkii(?![ivx])").containsMatchIn(a) && Regex("mkii(?![ivx])").containsMatchIn(b)
 }
 
 private fun notionActiveItem(fact: NotionInventoryFact, ownerLabel: String): Boolean =
@@ -82,7 +87,7 @@ fun validateNotionCharacterTransfer(value: NotionCharacterTransfer) {
     require(c.baselineConstitutionModifier == null || c.baselineConstitutionModifier in -100..100)
     require(c.armoredAc == null || c.armoredAc in 0..1000)
     require(value.inventory.size <= 1000 && value.currency.size <= 1000)
-    require(value.inventory.map { it.sourceId }.distinct().size == value.inventory.size) { "Duplicate Notion item identities." }
+    require(value.inventory.map { notionSourceKey(it.sourceId) }.distinct().size == value.inventory.size) { "Duplicate Notion item identities." }
     require(value.currency.map { it.eventId }.distinct().size == value.currency.size) { "Duplicate currency event identities." }
     fun urlOk(url: String) = url.startsWith("https://www.notion.so/") || url.startsWith("https://app.notion.com/")
     require(urlOk(c.sourceUrl)) { "Character source must be an original Notion URL." }
@@ -185,9 +190,17 @@ fun planNotionCharacterTransfer(
             }
             val instanceId = "notion-instance-${item.sourceId}"
             val definitionId = "notion-definition-${item.sourceId}"
-            if (instances.any { it.id == instanceId } || definitions.any { notionSameItem(it.name, item.name) }) {
+            val sourceKey = notionSourceKey(item.sourceId)
+            val matched = instances.filter { it.id.startsWith("notion-instance-") &&
+                notionSourceKey(it.id.removePrefix("notion-instance-")) == sourceKey }
+            require(matched.size <= 1) { "Several saved physical items claim this Notion source. Reconcile their identities first." }
+            if (matched.isNotEmpty()) {
                 present += item.name
-                if (item.acceptedNumericEffects.isNotEmpty()) warnings += "${item.name}: an existing suit was preserved; compare its accepted effects before changing it."
+                continue
+            }
+            if (definitions.any { it.id == definitionId || notionSameItem(it.name, item.name) }) {
+                deferred += "${item.name} (possible existing item; source identity needs review)"
+                warnings += "${item.name}: a matching definition or name is already saved. Verify the physical identity and compare its accepted effects before importing."
                 continue
             }
             val description = buildString {

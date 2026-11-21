@@ -71,6 +71,8 @@ class GenesisAuthorityConverters {
     @TypeConverter fun roleFromString(role: String): GenesisActorRole = GenesisActorRole.valueOf(role)
 }
 
+data class GenesisItemMembership(val itemId: String, val ownerActorId: String?, val revision: Long)
+
 @Dao interface GenesisAuthorityDao {
     @Query("SELECT EXISTS(SELECT 1 FROM genesis_campaigns) OR EXISTS(SELECT 1 FROM genesis_actor_authority) OR EXISTS(SELECT 1 FROM genesis_item_authority) OR EXISTS(SELECT 1 FROM genesis_authority_receipts) OR EXISTS(SELECT 1 FROM genesis_encounters) OR EXISTS(SELECT 1 FROM genesis_encounter_participants)") suspend fun hasAuthority(): Boolean
     @Query("SELECT * FROM genesis_campaigns ORDER BY name,id") fun campaigns(): Flow<List<GenesisCampaignRecord>>
@@ -83,6 +85,8 @@ class GenesisAuthorityConverters {
     @Query("SELECT * FROM genesis_actor_authority WHERE actorId=:id") suspend fun actor(id: String): GenesisActorAuthority?
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(value: GenesisActorAuthority)
     @Update suspend fun update(value: GenesisActorAuthority)
+    @Query("SELECT itemId, ownerActorId, revision FROM genesis_item_authority ORDER BY itemId")
+    suspend fun itemMembership(): List<GenesisItemMembership>
     @Query("SELECT * FROM genesis_item_authority ORDER BY itemId") suspend fun allItems(): List<GenesisItemAuthority>
     @Query("SELECT * FROM genesis_item_authority WHERE itemId=:id") suspend fun item(id: String): GenesisItemAuthority?
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(value: GenesisItemAuthority)
