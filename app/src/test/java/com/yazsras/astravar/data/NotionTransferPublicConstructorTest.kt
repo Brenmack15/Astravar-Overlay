@@ -3,8 +3,13 @@ package com.yazsras.astravar.data
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.rules.reforge.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -13,9 +18,30 @@ import org.robolectric.annotation.Config
 /** The installed app's constructor, with only fictional records in Robolectric's app sandbox. */
 @RunWith(RobolectricTestRunner::class) @Config(sdk = [35])
 class NotionTransferPublicConstructorTest {
+    private val singletonField = GenesisApplicationStorage::class.java.getDeclaredField("instance").apply { isAccessible = true }
+    private var previousStorage: Any? = null
+    private var fixtureStorage: GenesisApplicationStorage? = null
+
+    @Before fun isolateCanonicalStorage() {
+        // Robolectric reuses sandbox classloaders. Do not retain this test's DB in an app singleton.
+        previousStorage = singletonField.get(null)
+        singletonField.set(null, null)
+    }
+
+    @After fun restoreCanonicalStorage(): Unit = runBlocking {
+        try {
+            fixtureStorage?.let { storage ->
+                val scopeField = GenesisApplicationStorage::class.java.getDeclaredField("scope").apply { isAccessible = true }
+                val scope = scopeField.get(storage) as CoroutineScope
+                scope.coroutineContext[Job]?.cancelAndJoin()
+                storage.db.close()
+            }
+        } finally { singletonField.set(null, previousStorage) }
+    }
+
     @Test fun publicImportUsesOneTransactionForBackupRollbackAndRepeatedApply() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val storage = GenesisApplicationStorage.open(context)
+        val storage = GenesisApplicationStorage.open(context).also { fixtureStorage = it }
         val importer = NotionTransferRepository(context)
         val dbField = NotionTransferRepository::class.java.getDeclaredField("db").apply { isAccessible = true }
         assertSame("Public constructor must join the canonical Room transaction", storage.db, dbField.get(importer))
