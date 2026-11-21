@@ -45,6 +45,8 @@ git() { printf '%s\\n' 0123456789012345678901234567890123456789; }
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(METHODS, methods)
         scope = json.loads((root/'SCOPE.json').read_text())
+        self.assertEqual(37, scope['emulatorApi'])
+        self.assertTrue(scope['android17'])
         self.assertTrue(scope['nativePublicNotionImport'])
         self.assertTrue(scope['nativeCampaignHttpsAndIndependentReadback'])
         self.assertFalse(scope['actualOwnerSigningIdentityTestedInCi'])
@@ -60,6 +62,18 @@ git() { printf '%s\\n' 0123456789012345678901234567890123456789; }
                 self.assertEqual(METHODS[:index+1], methods)
                 self.assertFalse((root/'SCOPE.json').exists())
                 self.assertFalse((root/'legacy-path.txt').exists())
+
+    def test_only_focused_lane_uses_android17_and_four_gib_guest(self):
+        start = SCRIPT.index("astravar_image=")
+        end = SCRIPT.index('test -c /dev/kvm', start)
+        selector = SCRIPT[start:end]
+        for enabled, image, gpu, memory, api in [
+                ('true', 'system-images;android-37.0;default;x86_64', 'swiftshader', '-memory 4096', '37'),
+                ('false', 'system-images;android-36;google_apis;x86_64', 'swiftshader_indirect', '', '36')]:
+            shell = 'astravar_bootstrap_gate='+enabled+'\n'+selector+\
+                'printf "%s|%s|%s|%s" "$astravar_image" "$astravar_gpu" "${astravar_memory_args[*]}" "$astravar_expected_api"'
+            result = subprocess.run(['bash', '-c', shell], capture_output=True, text=True, check=True)
+            self.assertEqual('|'.join((image, gpu, memory, api)), result.stdout)
 
     def test_legacy_runner_remains_available(self):
         result, root, methods = self.run_gate(enabled=False)

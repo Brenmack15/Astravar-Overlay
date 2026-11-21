@@ -74,6 +74,10 @@ jobs:
           else
             bash scripts/ci-android-sdk.sh native
           fi
+      - name: Prepare stable Android 17 authorization and import fixture
+        if: env.GENESIS_GATE == 'true'
+        timeout-minutes: 10
+        run: bash scripts/ci-android17-sdk.sh
       - name: Restore immutable historical APK build cache
         if: env.GENESIS_GATE == 'true'
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830

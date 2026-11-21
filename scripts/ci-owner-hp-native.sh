@@ -7,6 +7,16 @@ set -euo pipefail
 : "${ASTRAVAR_VERSION_CODE:?Exact candidate version code required}"
 astravar_bootstrap_gate=${ASTRAVAR_BOOTSTRAP_GATE:-false}
 [[ "$astravar_bootstrap_gate" == true || "$astravar_bootstrap_gate" == false ]]
+astravar_image='system-images;android-36;google_apis;x86_64'
+astravar_gpu=swiftshader_indirect
+astravar_memory_args=()
+astravar_expected_api=36
+if [[ "$astravar_bootstrap_gate" == true ]]; then
+  astravar_image='system-images;android-37.0;default;x86_64'
+  astravar_gpu=swiftshader
+  astravar_memory_args=(-memory 4096)
+  astravar_expected_api=37
+fi
 test -c /dev/kvm
 sudo chmod 666 /dev/kvm
 astravar_private=$(mktemp -d "$RUNNER_TEMP/astravar-hp-native.XXXXXX")
@@ -79,12 +89,12 @@ export ANDROID_AVD_HOME="$astravar_private/avd"
 export ANDROID_USER_HOME="$astravar_private/android-user"
 mkdir -p "$ANDROID_AVD_HOME" "$ANDROID_USER_HOME"
 printf 'no\n' | timeout -k 5s 40s avdmanager create avd --force -n AstravarHpCI -p "$ANDROID_AVD_HOME/AstravarHpCI.avd" \
-  -k 'system-images;android-36;google_apis;x86_64' --device pixel_6
+  -k "$astravar_image" --device pixel_6
 # Keep the emulator's normal upstream DNS so Android can genuinely validate network
 # connectivity for WorkManager's CONNECTED constraint. Only the two HTTPS fixture
 # names are overridden in the owned guest hosts file below; production TLS is unchanged.
 "$ANDROID_HOME/emulator/emulator" -avd AstravarHpCI -port 5584 -accel on \
-  -no-window -no-audio -no-snapshot -no-boot-anim -writable-system -gpu swiftshader_indirect >"$astravar_output/emulator.log" 2>&1 &
+  -no-window -no-audio -no-snapshot -no-boot-anim -writable-system -gpu "$astravar_gpu" "${astravar_memory_args[@]}" >"$astravar_output/emulator.log" 2>&1 &
 astravar_emulator_pid=$!
 kill -0 "$astravar_emulator_pid"
 timeout -k 5s 120s adb -s "$astravar_serial" wait-for-device
@@ -100,6 +110,8 @@ astravar_avd_name=$(timeout 10s adb -s "$astravar_serial" emu avd name | tr -d '
 test "$astravar_avd_name" = AstravarHpCI
 kill -0 "$astravar_emulator_pid"
 astravar_verified_emulator=1
+test "$(timeout 10s adb -s "$astravar_serial" shell getprop ro.build.version.sdk | tr -d '\r')" = "$astravar_expected_api"
+timeout 10s adb -s "$astravar_serial" shell getprop ro.build.version.release >"$astravar_output/android-version.txt"
 timeout 15s adb -s "$astravar_serial" root
 timeout 15s adb -s "$astravar_serial" wait-for-device
 # Resolve only the two reserved fixture names through the owned emulator OS.
@@ -230,12 +242,12 @@ if [[ "$astravar_bootstrap_gate" == true ]]; then
   python3 - "$astravar_output/SCOPE.json" <<'PY_SCOPE'
 import json,os,pathlib,sys
 pathlib.Path(sys.argv[1]).write_text(json.dumps({
- 'fictionalOnly':True,'emulatorApi':36,'nativeAndroidKeyStore':True,
+ 'fictionalOnly':True,'emulatorApi':37,'nativeAndroidKeyStore':True,
  'webCryptoEncryptedBootstrap':True,'sameDebugKeyUpdate':'52 to '+os.environ['ASTRAVAR_VERSION_CODE'],
  'legacyAliasAndVaultPreserved':True,'nativePublicNotionImport':True,
  'nativeCampaignHttpsAndIndependentReadback':True,
  'actualOwnerSigningIdentityTestedInCi':False,'realChatGptHostInvocation':False,
- 'physicalGalaxy':False,'android17':False},indent=2)+'\n')
+ 'physicalGalaxy':False,'android17':True},indent=2)+'\n')
 PY_SCOPE
   exit 0
 fi

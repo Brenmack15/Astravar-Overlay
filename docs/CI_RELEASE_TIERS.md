@@ -26,8 +26,8 @@ HTTPS fixtures then exercise authorization renewal, rejection and retry. The
 public-constructor Notion import test covers complete apply, repeated imports,
 backup validation, rollback and restoration before campaign HTTPS publication
 and independent readback. Failure stops the gate; it cannot create success scope
-evidence. This API36 Android16 emulator evidence is separate from physical
-Galaxy S26/Android17 acceptance and from the final owner's signing certificate.
+evidence. This API37 Android17 emulator evidence is separate from physical
+Galaxy S26 acceptance and from the final owner's signing certificate.
 
 The code52 debug fixture is built from the exact source
 `f90371c58baed7379862883b2a966ff1113b0cee` using the current runner's debug signer.
@@ -39,7 +39,7 @@ native journeys. No owner credential, key, or campaign data enters these fixture
 
 Pinned `gradle/actions/setup-gradle` restores dependencies and reusable Gradle state; Gradle build caching is enabled. Fork PRs are read-only consumers. Same-repository PRs may write only their isolated `refs/pull/N/merge` cache; base/default branches and other PRs cannot restore it. This lets the fast job seed subsequent full/native jobs and warm repeated updates to this long-lived PR without merging to main. Default-branch and explicit dispatch runs retain their own branch-scoped write access. No configuration-cache encryption key, owner signing secret, personal export, live database, or campaign record is cached. Build scans and dependency submissions are not enabled.
 
-The SDK helper uses installed API36, build-tools35 and platform-tools when present. It downloads only absent packages. Native runs additionally require the API36 Google APIs x86_64 system image and emulator. A checksum-pinned command-line bootstrap remains available if the runner lacks sdkmanager. Runner images and installed-package metadata are build evidence, not claims of Samsung/Android17 acceptance.
+The SDK helper uses installed API36, build-tools35 and platform-tools when present. It downloads only absent packages. The historical native suite retains the API36 Google APIs x86_64 image. The focused authorization/import gate uses the stable Android17 API37.0 default x86_64 image, emulator37.3.10 or newer, and4096MiB guest memory. The focused SDK helper installs only missing image packages or an older emulator. A checksum-pinned command-line bootstrap remains available if the runner lacks sdkmanager. Runner images and installed-package metadata are build evidence, not claims of Samsung/Android17 acceptance.
 
 Historical versions49 and50 have fixed source SHAs. A trusted exact-key cache retains each built APK with source/build-input identity, payload hashes, checksum and original CI certificate. Cache keys include the helper and inspector hashes; there is no prefix fallback. A complete cache miss builds the frozen source. Partial or altered caches fail closed. Each use verifies the old signature/package/alignment, re-signs with the current run's disposable key, compares every non-signature ZIP entry and verifies the same certificate as the candidate. Only a successful baseline build/inspection step on same-repository PR, explicit-dispatch or default-branch runs saves caches within its existing GitHub cache scope. Saving happens before emulator journeys: the cache proves immutable build-input validation only, while every native upgrade and release gate remains independently required even if a later journey fails. No signing key is cached. This removes repeated historical compilation on a warm trusted cache without replacing upgrade testing.
 
