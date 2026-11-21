@@ -311,7 +311,9 @@ class PlayerFirstJourneyInstrumentationTest {
         // The second Back follows the surrounding companion route to the roster.
         device.pressBack()
         find("Go to combat")
-        find("6 / 12")
+        // The companion health card is above the combat action. Reobserve the exact
+        // value in that direction before walking to the bottom of a long sheet.
+        ui.textBounds("6 / 12", product, scrollAttempts = 18, firstDirection = Direction.UP)
 
         restart()
         ui.ensurePrimaryTab(product, "Character")
