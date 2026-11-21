@@ -75,7 +75,7 @@ function proposedEquipment(before, op) {
 }
 
 const FIELD_KEYS={
- 'playable-stat':'id schemaVersion revision profileId actorRole target key label effective base advancement permanent modifier source',
+ 'playable-stat':'id schemaVersion revision profileId actorRole target key label effective base advancement permanent modifier source sourceId sourceRevision sourceAcceptance',
  'playable-equipment':'id schemaVersion revision profileId definitionId state attuned operating bonuses defenses source',
  'character-profile':'id name currentHp maximumHp temporaryHp armorClass level revision source updatedAt',
  'character-ability':'profileId key score magicModifier notes revision source updatedAt',

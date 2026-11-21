@@ -93,6 +93,14 @@ import kotlinx.serialization.json.Json
     var languages by rememberSaveable { mutableStateOf(character.languages.joinToString(", ")) }
     var tools by rememberSaveable { mutableStateOf(character.toolProficiencies.joinToString(", ")) }
     var portrait by rememberSaveable { mutableStateOf(character.portraitRef) }
+    val originalProficiency = character.reviewedProficiency
+    var independent by rememberSaveable { mutableStateOf(originalProficiency != null) }
+    var proficiencyText by rememberSaveable { mutableStateOf(originalProficiency?.bonus?.toString().orEmpty()) }
+    var proficiencySource by rememberSaveable { mutableStateOf(originalProficiency?.source?.name.orEmpty()) }
+    val proficiencyValue = proficiencyText.trim().toIntOrNull()
+    val validProficiency = !independent || (proficiencyValue != null && proficiencyValue in -1000..1000 && proficiencySource.isNotBlank())
+    val proficiencyChanged = independent != (originalProficiency != null) || independent &&
+        (proficiencyValue != originalProficiency?.bonus || proficiencySource.trim() != originalProficiency?.source?.name)
     val featureDraft = rememberUiDraftText(remember(character.id) { Json.encodeToString(character.features) })
     val parsedFeatures = remember(featureDraft.value) { runCatching { Json.decodeFromString<List<CharacterFeature>>(requireNotNull(featureDraft.value)) }.getOrNull() }
     val features = parsedFeatures.orEmpty()
@@ -112,10 +120,16 @@ import kotlinx.serialization.json.Json
     fun split(value: String) = value.split(',').map(String::trim).filter(String::isNotBlank).toSet()
     val changed = species != character.species || className != character.className || subclass != character.subclass ||
         background != character.background || split(languages) != character.languages || split(tools) != character.toolProficiencies ||
-        portrait != character.portraitRef || features != character.features
+        portrait != character.portraitRef || features != character.features || proficiencyChanged
     PlayerSheet("Identity & features", onDismiss, dirty = changed || featureOpen, actions = {
         PlayerButton(onClick = { onSave(character.copy(species = species.trim(), className = className.trim(), subclass = subclass.trim(),
-            background = background.trim(), languages = split(languages), toolProficiencies = split(tools), portraitRef = portrait, features = features)) }, enabled = !featureOpen && featureDraft.canSave && parsedFeatures != null) { Text("Save identity") }
+            background = background.trim(), languages = split(languages), toolProficiencies = split(tools), portraitRef = portrait, features = features,
+            reviewedProficiency = when {
+                !proficiencyChanged -> originalProficiency
+                !independent -> null
+                else -> ReviewedProficiency(requireNotNull(proficiencyValue), RuleSource("manual-proficiency:${character.id}",
+                    proficiencySource.trim(), Acceptance.ACCEPTED_HOMEBREW))
+            })) }, enabled = validProficiency && !featureOpen && featureDraft.canSave && parsedFeatures != null) { Text("Save identity") }
     }) {
         Field("Species", species, { species = it.take(200) })
         Field("Class", className, { className = it.take(200) })
@@ -123,6 +137,13 @@ import kotlinx.serialization.json.Json
         Field("Background", background, { background = it.take(2000) }, single = false)
         Field("Languages (comma separated)", languages, { languages = it.take(2000) })
         Field("Tool proficiencies (comma separated)", tools, { tools = it.take(2000) })
+        PlayerDisclosure("Proficiency bonus") {
+            Toggle("Use an independently confirmed bonus", independent) { independent = it }
+            if (independent) {
+                Field("Confirmed bonus", proficiencyText, { proficiencyText = it.take(6) })
+                Field("Approved rules source", proficiencySource, { proficiencySource = it.take(500) })
+            } else Text("Level ${character.level} proficiency: +${CharacterCalculator.proficiencyBonus(character.level)}")
+        }
         PlayerOutlinedButton(onClick = { image.launch(arrayOf("image/*")) }) { Text("Choose portrait") }
         if (portrait != null) PlayerTextButton(onClick = { portrait = null }) { Text("Remove portrait") }
         Text("Class labels and feature descriptions do not activate mechanical bonuses. Add reviewed effects to equipment or configure training separately.", color = RebuildPalette.Muted)

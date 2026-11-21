@@ -445,7 +445,8 @@ class CampaignNativeHttpsTest {
 
         val owlId = "ci-native-equipment-owl"
         authority.createActor("Fixture owl", GenesisActorRole.COMPANION, campaign, actorId, ReforgeCharacter(
-            owlId, "Fixture owl", baseAbilities = mapOf(Stat.INT to 8), baseMaxHp = 12, currentHp = 5,
+            owlId, "Fixture owl", level = 9, baseAbilities = mapOf(Stat.INT to 8), baseMaxHp = 12, currentHp = 5,
+            reviewedProficiency = ReviewedProficiency(3, RuleSource("fixture:independent-pb", "Reviewed creature tier", Acceptance.ACCEPTED_HOMEBREW)),
             resources = listOf(ResourcePool("repair", "Repair", 1, 0))), "ci-equipment-owl")
         client.sync()
         suspend fun transferTo(holder: String) {
@@ -475,6 +476,11 @@ class CampaignNativeHttpsTest {
             submitAndVerify(operation("set_equipment_state", "playable-equipment", stone.id, rev,
                 JsonObject(change + mapOf("actorRole" to JsonPrimitive("COMPANION"), "actorRevision" to owlInt().getValue("revision")))))
         }
+        val owlStatistics = mcp("get_playable_statistics", JsonObject(arguments + ("profileId" to JsonPrimitive(owlId))))
+        val pb = owlStatistics.getValue("records").jsonArray.map { it.jsonObject.getValue("fields").jsonObject }
+            .single { it["key"] == JsonPrimitive("PROFICIENCY") }
+        assertEquals(3, pb.getValue("effective").jsonPrimitive.int)
+        assertEquals("fixture:independent-pb", pb.getValue("sourceId").jsonPrimitive.content)
         transferTo(owlId)
         if (!record("playable-equipment", stone.id).getValue("fields").jsonObject.getValue("operating").jsonPrimitive.boolean)
             owlEdit(buildJsonObject { put("operating", true) })
