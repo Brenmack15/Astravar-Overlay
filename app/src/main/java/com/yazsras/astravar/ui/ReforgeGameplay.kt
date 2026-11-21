@@ -251,6 +251,8 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
     var target by rememberSaveable { mutableStateOf(NumericTarget.ABILITY) }
     var operation by rememberSaveable { mutableStateOf(NumberOperation.SET) }
     var ability by rememberSaveable { mutableStateOf(Stat.STR) }
+    val skillTargets = remember(character) { SkillRules.entries(character) }
+    var selectedSkill by rememberSaveable { mutableStateOf("Investigation") }
     var amount by rememberSaveable { mutableStateOf("") }
     var effectName by rememberSaveable { mutableStateOf("") }
     val effectsDraft = rememberReforgeDraft(originalDefinition?.effects ?: emptyList(), ListSerializer(EffectDefinition.serializer()))
@@ -317,8 +319,14 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
             Choices("Effect type", listOf("Statistic", "Damage dice", "Damage defense", "Advantage / Disadvantage"), effectType) { effectType = it }
             when (effectType) {
                 "Statistic" -> {
-                    Choices("Statistic", listOf(NumericTarget.ABILITY, NumericTarget.ARMOR_CLASS, NumericTarget.MAX_HP, NumericTarget.INITIATIVE, NumericTarget.SPEED, NumericTarget.SPELL_ATTACK, NumericTarget.SPELL_DC), target) { target = it }
+                    Choices("Statistic", listOf(NumericTarget.ABILITY, NumericTarget.SKILL, NumericTarget.ARMOR_CLASS, NumericTarget.MAX_HP, NumericTarget.INITIATIVE, NumericTarget.SPEED, NumericTarget.SPELL_ATTACK, NumericTarget.SPELL_DC), target) { target = it }
                     if (target == NumericTarget.ABILITY) Choices("Ability", Stat.entries, ability) { ability = it }
+                    if (target == NumericTarget.SKILL) {
+                        Choices("Skill", skillTargets.map { it.id }, selectedSkill, display = { id ->
+                            val entry = skillTargets.first { it.id == id }
+                            if (entry.custom) "${entry.name} (custom · $id)" else entry.name
+                        }) { selectedSkill = it }
+                    }
                     Choices("Operation", NumberOperation.entries, operation) { operation = it }
                     Field("Value", amount, { amount = it })
                 }
@@ -340,7 +348,12 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
                 try {
                     val id = UUID.randomUUID().toString()
                     val payload = when (effectType) {
-                        "Statistic" -> EffectPayload.Number(target, operation, optionalInt(amount, "Effect value", -100, 10000) ?: error("Enter a value"), if (target == NumericTarget.ABILITY) ability.name else if (target == NumericTarget.SPEED) "walk" else "")
+                        "Statistic" -> EffectPayload.Number(target, operation, optionalInt(amount, "Effect value", -100, 10000) ?: error("Enter a value"), when (target) {
+                            NumericTarget.ABILITY -> ability.name
+                            NumericTarget.SKILL -> selectedSkill
+                            NumericTarget.SPEED -> "walk"
+                            else -> ""
+                        })
                         "Damage dice" -> EffectPayload.DamageBonus(DamageComponent("$id:damage", effectName.ifBlank { "Additional damage" }, damageKind, SecureDice.parse(damageDice), critical), AttackQualifier(attackIds = qualifier?.let { setOf(it) } ?: emptySet()))
                         "Damage defense" -> EffectPayload.Defense(damageKind, defense)
                         else -> EffectPayload.Edge(rollKind, edge)

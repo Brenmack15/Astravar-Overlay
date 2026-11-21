@@ -292,3 +292,31 @@ test('V2 narrowed continuity diagnostic never counts retained private archive bo
  assert.equal(connection.synchronizationState,'NO_DEVICE_RECORDS');
  assert.equal((await f.sync.read(connector,campaign)).records.length,0);
 });
+
+test('native equipment v1 validates typed intent, separate grants, immutable receipt and subsequent read', async t => {
+ const f = await setup(t);
+ const record = {kind:'playable-equipment',recordId:'stone',revision:1,fields:{
+  schemaVersion:1,id:'stone',profileId:profile,definitionId:'stone-template',revision:1,
+  state:'CARRIED',operating:true,attuned:false,bonuses:[],source:'Android Reforge equipment v1'
+ }};
+ await f.publish([record]);
+ const bonus = {id:uuid(),label:'Fictional enchantment',target:'ABILITY',key:'INT',amount:1,
+  enabled:true,stackingKey:null,expiresAtGameSeconds:null};
+ const edit = op('edit_equipment_bonus',record.kind,record.recordId,{actorRevision:5,bonus});
+ await f.enable(['inventory']);
+ const manual = await f.submit([edit]);
+ assert.equal(manual.command.status,'PENDING_APPROVAL');
+ await f.sync.decide(f.principal,campaign,decision(manual.command,{status:'REJECTED'}));
+ await f.enable(['character','inventory']);
+ const {command} = await f.submit([edit]);
+ assert.equal(command.status,'PENDING_DELIVERY');
+ assert.deepEqual(command.operations[0].proposedFields.bonuses,[bonus]);
+ await fails(f.sync.getReceipt(connector,campaign,command.commandId),'RECEIPT_NOT_READY');
+ const saved = {recordId:'stone',kind:record.kind,revision:2,fields:{...record.fields,revision:2,bonuses:[bonus]}};
+ await f.sync.decide(f.principal,campaign,decision(command,{rows:[saved]}));
+ assert.equal((await f.sync.getReceipt(connector,campaign,command.commandId)).receipt.status,'APPLIED');
+ const read = await f.sync.read(connector,campaign,{kinds:[record.kind],recordId:'stone'});
+ assert.deepEqual(read.records[0].fields.bonuses,[bonus]);
+ await fails(f.submit([edit]),'REVISION_CONFLICT');
+ await fails(f.submit([op('set_record',record.kind,'stone',{operating:false},2)]),'READ_ONLY_RECORD_KIND');
+});
