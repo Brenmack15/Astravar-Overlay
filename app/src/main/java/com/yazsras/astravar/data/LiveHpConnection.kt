@@ -152,7 +152,9 @@ class LiveHpConnectionClient internal constructor(private val context: Context, 
         val matches = campaignDb.recordsDao().allCharacterProfiles().filter { runCatching { campaignFor(it.id) }.getOrNull() == enrollment.campaignId }
         require(matches.isNotEmpty()) { "Authorization must match an existing selected character campaign." }
         if (old.origin.isNotBlank() && old.origin != enrollment.origin) require(vault.credential(old.origin, old.campaignId) == null) { "Revoke the current connection before changing services." }
-        vault.storeServiceAccess(enrollment.origin, enrollment.campaignId, enrollment.serviceAccessBearer)
+        bootstrap.completeImport(enrollment) {
+            vault.storeServiceAccess(enrollment.origin, enrollment.campaignId, enrollment.serviceAccessBearer)
+        }
         if (old.origin.isBlank()) dao.settings(old.copy(origin = enrollment.origin, status = "Private service authorization imported · select character and pair"))
         else if (old.origin == enrollment.origin) dao.settings(old.copy(status = "Private service access renewed · sync to verify"))
         else {

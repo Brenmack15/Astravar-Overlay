@@ -109,19 +109,44 @@ class OwnerSyncCredentialVault(context: Context, private val now: () -> Long = S
     }
     }
     private fun entry(origin: String, campaign: String) = OwnerSyncProtocol.hash("$origin\n$campaign")
+    private fun decrypt(name: String, blob: String): ByteArray {
+        val bytes = Base64.decode(blob, Base64.NO_WRAP)
+        require(bytes.size >= 29)
+        return Cipher.getInstance("AES/GCM/NoPadding").run {
+            init(Cipher.DECRYPT_MODE, keyProvider(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
+            updateAAD(name.toByteArray(Charsets.UTF_8))
+            doFinal(bytes.copyOfRange(12, bytes.size))
+        }
+    }
+    /** Verify encryption before replacing a usable credential; failed writes retain the prior blob. */
+    private fun persist(name: String, plaintext: ByteArray) {
+        val previous = preferences.getString(name, null)
+        var attemptedWrite = false
+        try {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+                init(Cipher.ENCRYPT_MODE, keyProvider()); updateAAD(name.toByteArray(Charsets.UTF_8))
+            }
+            val blob = Base64.encodeToString(cipher.iv + cipher.doFinal(plaintext), Base64.NO_WRAP)
+            val verified = decrypt(name, blob)
+            try { check(MessageDigest.isEqual(plaintext, verified)) } finally { verified.fill(0) }
+            attemptedWrite = true
+            check(preferences.edit().putString(name, blob).commit())
+            check(preferences.getString(name, null) == blob)
+        } catch (_: Exception) {
+            if (attemptedWrite) runCatching {
+                // SharedPreferences may update its in-memory map even when the disk commit fails.
+                preferences.edit().let { if (previous == null) it.remove(name) else it.putString(name, previous) }.commit()
+            }
+            throw OwnerSyncFailure("CREDENTIAL_PERSISTENCE_FAILED")
+        } finally { plaintext.fill(0) }
+    }
     @Synchronized fun enroll(value: OwnerSyncCredential) {
         require(value.expiresAt > now()) { "Enrollment credential has expired." }
         val body = buildJsonObject {
             put("credentialId", value.credentialId); put("campaignId", value.campaignId)
             put("origin", value.origin); put("expiresAt", value.expiresAt); put("bearer", value.bearer)
         }.toString().toByteArray(Charsets.UTF_8)
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, keyProvider()) }
-        val name = entry(value.origin, value.campaignId)
-        cipher.updateAAD(name.toByteArray(Charsets.UTF_8))
-        val encrypted = cipher.doFinal(body)
-        val blob = Base64.encodeToString(cipher.iv + encrypted, Base64.NO_WRAP)
-        check(preferences.edit().putString(name, blob).commit()) { "Device credential was not saved." }
-        body.fill(0)
+        persist(entry(value.origin, value.campaignId), body)
     }
     override suspend fun credential(origin: String, campaignId: String): OwnerSyncCredential? = withContext(Dispatchers.IO) {
         read(OwnerSyncProtocol.origin(origin), OwnerSyncProtocol.id(campaignId))
@@ -130,24 +155,17 @@ class OwnerSyncCredentialVault(context: Context, private val now: () -> Long = S
         val name = entry(origin, campaignId)
         val blob = preferences.getString(name, null) ?: return null
         return try {
-            val bytes = Base64.decode(blob, Base64.NO_WRAP)
-            require(bytes.size >= 29)
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
-                init(Cipher.DECRYPT_MODE, keyProvider(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
-                updateAAD(name.toByteArray(Charsets.UTF_8))
-            }
-            val plaintext = cipher.doFinal(bytes.copyOfRange(12, bytes.size))
-            val json = Json.parseToJsonElement(plaintext.toString(Charsets.UTF_8)).jsonObject
-            plaintext.fill(0)
+            val plaintext = decrypt(name, blob)
+            val json = try { Json.parseToJsonElement(plaintext.toString(Charsets.UTF_8)).jsonObject }
+                finally { plaintext.fill(0) }
             val value = OwnerSyncCredential(json.getValue("credentialId").jsonPrimitive.content,
                 json.getValue("campaignId").jsonPrimitive.content, json.getValue("origin").jsonPrimitive.content,
                 json.getValue("expiresAt").jsonPrimitive.long, json.getValue("bearer").jsonPrimitive.content)
-            if (value.origin != origin || value.campaignId != campaignId || value.expiresAt <= now()) {
-                preferences.edit().remove(name).commit(); null
-            } else value
+            require(value.origin == origin && value.campaignId == campaignId)
+            if (value.expiresAt <= now()) null else value
         } catch (_: Exception) {
-            // A restored encrypted preference without its hardware-bound key is deliberately unusable.
-            preferences.edit().remove(name).commit(); null
+            // Fail closed without destroying recoverable state after a transient Keystore failure.
+            throw OwnerSyncFailure("CREDENTIAL_STORAGE_UNAVAILABLE")
         }
     }
     @Synchronized fun forget(origin: String, campaignId: String) {
@@ -158,23 +176,16 @@ class OwnerSyncCredentialVault(context: Context, private val now: () -> Long = S
         val endpoint = OwnerSyncProtocol.origin(origin); OwnerSyncProtocol.id(campaignId)
         require(bearer.length in 32..8192 && bearer.none { it == '\r' || it == '\n' })
         val name = entry(endpoint, campaignId) + "-service"
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, keyProvider()); updateAAD(name.toByteArray(Charsets.UTF_8)) }
-        val bytes = bearer.toByteArray(Charsets.UTF_8)
-        val encrypted = cipher.doFinal(bytes); bytes.fill(0)
-        check(preferences.edit().putString(name, Base64.encodeToString(cipher.iv + encrypted, Base64.NO_WRAP)).commit())
+        persist(name, bearer.toByteArray(Charsets.UTF_8))
     }
     @Synchronized fun serviceAccess(origin: String, campaignId: String): String? {
         val name = entry(OwnerSyncProtocol.origin(origin), OwnerSyncProtocol.id(campaignId)) + "-service"
         val blob = preferences.getString(name, null) ?: return null
         return try {
-            val bytes = Base64.decode(blob, Base64.NO_WRAP); require(bytes.size >= 29)
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
-                init(Cipher.DECRYPT_MODE, keyProvider(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
-                updateAAD(name.toByteArray(Charsets.UTF_8))
-            }
-            val plain = cipher.doFinal(bytes.copyOfRange(12, bytes.size))
-            val result = plain.toString(Charsets.UTF_8); plain.fill(0); result
-        } catch (_: Exception) { preferences.edit().remove(name).commit(); null }
+            val plain = decrypt(name, blob)
+            try { plain.toString(Charsets.UTF_8).also { require(it.length in 32..8192 && it.none { c -> c == '\r' || c == '\n' }) } }
+            finally { plain.fill(0) }
+        } catch (_: Exception) { throw OwnerSyncFailure("CREDENTIAL_STORAGE_UNAVAILABLE") }
     }
     @Synchronized fun forgetServiceAccess(origin: String, campaignId: String) {
         check(preferences.edit().remove(entry(OwnerSyncProtocol.origin(origin), OwnerSyncProtocol.id(campaignId)) + "-service").commit())

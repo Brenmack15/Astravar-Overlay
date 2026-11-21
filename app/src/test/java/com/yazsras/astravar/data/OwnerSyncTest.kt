@@ -1,6 +1,8 @@
 package com.yazsras.astravar.data
 
 import android.content.Context
+import android.content.ContextWrapper
+import android.content.SharedPreferences
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.runBlocking
@@ -211,8 +213,70 @@ class OwnerSyncTest {
         val vault = OwnerSyncCredentialVault(context, { clock }, { SecretKeySpec(ByteArray(32) { 1 }, "AES") })
         vault.forgetAll(); vault.enroll(credential)
         val other = OwnerSyncCredentialVault(context, { clock }, { SecretKeySpec(ByteArray(32) { 2 }, "AES") })
-        assertNull(other.credential(origin, campaign))
-        assertNull(vault.credential(origin, campaign))
+        assertEquals("CREDENTIAL_STORAGE_UNAVAILABLE", (runCatching { other.credential(origin, campaign) }.exceptionOrNull() as OwnerSyncFailure).code)
+        assertEquals(credential.bearer, vault.credential(origin, campaign)?.bearer)
+    }
+
+    @Test fun transientKeystoreFailurePreservesDeviceAndServiceCredentialsForRecovery() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        var unavailable = false
+        val key = SecretKeySpec(ByteArray(32) { 4 }, "AES")
+        val vault = OwnerSyncCredentialVault(context, { clock }) {
+            if (unavailable) throw IllegalStateException("secret provider detail") else key
+        }
+        vault.forgetAll(); vault.enroll(credential); vault.storeServiceAccess(origin, campaign, "service-token".repeat(4))
+        val preferences = context.getSharedPreferences("astravar-owner-sync-credentials", Context.MODE_PRIVATE)
+        val before = preferences.all.toMap()
+        unavailable = true
+        for (failure in listOf(runCatching { vault.credential(origin, campaign) }.exceptionOrNull(),
+            runCatching { vault.serviceAccess(origin, campaign) }.exceptionOrNull())) {
+            assertEquals("CREDENTIAL_STORAGE_UNAVAILABLE", (failure as OwnerSyncFailure).code)
+            assertNull(failure.cause)
+            assertFalse(failure.toString().contains("secret provider detail"))
+        }
+        assertEquals("CREDENTIAL_PERSISTENCE_FAILED", (runCatching {
+            vault.storeServiceAccess(origin, campaign, "new-service-token".repeat(4))
+        }.exceptionOrNull() as OwnerSyncFailure).code)
+        assertEquals(before, preferences.all)
+        unavailable = false
+        assertEquals(credential.bearer, vault.credential(origin, campaign)?.bearer)
+        assertEquals("service-token".repeat(4), vault.serviceAccess(origin, campaign))
+    }
+
+    @Test fun failedPreferenceCommitRestoresPriorServiceCredentialAndCanRetry() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("synthetic-vault-commit-failure", Context.MODE_PRIVATE)
+        preferences.edit().clear().commit()
+        var failNextCommit = false
+        val wrapped = object : SharedPreferences by preferences {
+            override fun edit(): SharedPreferences.Editor {
+                val editor = preferences.edit()
+                return object : SharedPreferences.Editor by editor {
+                    override fun commit(): Boolean {
+                        val saved = editor.commit()
+                        if (failNextCommit) { failNextCommit = false; return false }
+                        return saved
+                    }
+                }
+            }
+        }
+        val isolated = object : ContextWrapper(context) {
+            override fun getApplicationContext(): Context = this
+            override fun getSharedPreferences(name: String, mode: Int): SharedPreferences = wrapped
+        }
+        val vault = OwnerSyncCredentialVault(isolated, { clock }) { SecretKeySpec(ByteArray(32) { 5 }, "AES") }
+        val old = "previous-service-token".repeat(3)
+        val replacement = "replacement-service-token".repeat(3)
+        vault.storeServiceAccess(origin, campaign, old)
+        val before = preferences.all.toMap()
+        failNextCommit = true
+        assertEquals("CREDENTIAL_PERSISTENCE_FAILED", (runCatching {
+            vault.storeServiceAccess(origin, campaign, replacement)
+        }.exceptionOrNull() as OwnerSyncFailure).code)
+        assertEquals(before, preferences.all)
+        assertEquals(old, vault.serviceAccess(origin, campaign))
+        vault.storeServiceAccess(origin, campaign, replacement)
+        assertEquals(replacement, vault.serviceAccess(origin, campaign))
     }
 
     private inner class FakeRemote : OwnerSyncTransport {

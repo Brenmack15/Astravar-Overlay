@@ -8,15 +8,15 @@ GitHub Actions uses disposable verification keys and never receives that key.
 
 ## Current recovered baseline
 
-The latest recovered delivered build is `4.0.0-genesis2`, code51, source
-`65978f76f59a842657b16b5ce39ad8f9702ec5bb`. The actual owner APK was independently
-inspected again on November 15, 2026: package, version, certificate, non-debug
-configuration, supplied branding and 16 KiB alignment passed. Its SHA-256 is
-`81c4ab63e4aba980bc7881919d6e90333e2f72f3031d43db2fbbe1fa17d5e644`.
-This is certificate/artifact evidence, not proof of the phone's installed version.
+The previous delivered owner build is `4.0.0-unification1`, code52, source
+`f90371c58baed7379862883b2a966ff1113b0cee`. Its recorded owner APK SHA-256 is
+`89867ca4ebf0025296aaadd11069e8a3043e7e68b56d3a77af05a74c2a8ea9be`.
+The owner reports installing it. Reinspect the actual pinned APK and full
+certificate before signing its successor; this report does not establish a
+physical phone update to code53.
 
 `scripts/owner_release_sign.py` pins that complete baseline digest and requires
-the candidate version code to exceed51. For each subsequent delivered release,
+the candidate version code to exceed52. For each subsequent delivered release,
 advance the pinned baseline and minimum code in a reviewed change after verifying
 the actual previous owner APK. Never lower the minimum to bypass an update failure.
 

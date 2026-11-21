@@ -12,10 +12,13 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
 import java.net.URL
 import java.security.SecureRandom
 import java.util.UUID
+import javax.net.ssl.SSLException
 
 object OwnerConnectionProtocol {
     const val MODE = "ASTRAVAR_OWNER_BRIDGE_V1"
@@ -71,6 +74,18 @@ fun interface OwnerConnectionTransport {
     suspend fun delete(origin: String, path: String, credential: OwnerSyncCredential?, serviceAccess: String?): OwnerSyncResponse =
         throw OwnerSyncFailure("DELETE_TRANSPORT_UNAVAILABLE")
 }
+internal fun requireOwnerResponseType(status: Int, contentType: String?) {
+    if (status in 300..399) throw OwnerSyncFailure("REDIRECT_DENIED")
+    if (!contentType?.substringBefore(';')?.trim().equals("application/json", ignoreCase = true)) {
+        throw OwnerSyncFailure(if (status == 401 || status == 403) "SERVICE_AUTHORIZATION_REQUIRED" else "NON_JSON_RESPONSE")
+    }
+}
+internal fun parseOwnerConnectionResponse(status: Int, contentType: String?, bytes: ByteArray): OwnerSyncResponse {
+    requireOwnerResponseType(status, contentType)
+    val json = try { Json.parseToJsonElement(bytes.toString(Charsets.UTF_8)) as? JsonObject }
+        catch (_: Exception) { null }
+    return OwnerSyncResponse(status, json ?: throw OwnerSyncFailure("MALFORMED_SERVICE_RESPONSE"))
+}
 /** Device credentials and optional Site credentials are sent only to the enrolled, HTTPS origin. */
 class OwnerConnectionHttpsTransport : OwnerConnectionTransport {
     override suspend fun request(origin: String, path: String, credential: OwnerSyncCredential?, serviceAccess: String?, body: String?): OwnerSyncResponse =
@@ -92,15 +107,18 @@ class OwnerConnectionHttpsTransport : OwnerConnectionTransport {
                 connection.doOutput = true; connection.setRequestProperty("Content-Type", "application/json"); connection.setFixedLengthStreamingMode(bytes.size)
                 connection.outputStream.use { out -> out.write(bytes) } }
             val status = connection.responseCode
-            if (status in 300..399) throw OwnerSyncFailure("REDIRECT_DENIED")
-            if (connection.contentType?.substringBefore(';')?.trim() != "application/json") throw OwnerSyncFailure("NON_JSON_RESPONSE")
+            requireOwnerResponseType(status, connection.contentType)
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val bytes = stream?.use { input -> val out = ByteArrayOutputStream(); val buffer = ByteArray(8192)
                 while (true) { val count = input.read(buffer); if (count < 0) break
                     if (out.size() + count > 1_048_576) throw OwnerSyncFailure("RESPONSE_TOO_LARGE"); out.write(buffer, 0, count) }; out.toByteArray() }
                 ?: throw OwnerSyncFailure("EMPTY_RESPONSE")
-            OwnerSyncResponse(status, Json.parseToJsonElement(bytes.toString(Charsets.UTF_8)).jsonObject)
-        } finally { connection.disconnect() }
+            parseOwnerConnectionResponse(status, connection.contentType, bytes)
+        } catch (e: OwnerSyncFailure) { throw e }
+        catch (_: SocketTimeoutException) { throw OwnerSyncFailure("NETWORK_TIMEOUT") }
+        catch (_: SSLException) { throw OwnerSyncFailure("TLS_FAILURE") }
+        catch (_: IOException) { throw OwnerSyncFailure("NETWORK_UNAVAILABLE") }
+        finally { connection.disconnect() }
     }
 }
 
@@ -211,7 +229,9 @@ class OwnerConnectionClient internal constructor(private val context: Context, p
         require(enrollment.campaignId == OwnerConnectionProtocol.CAMPAIGN)
         val current = setting()
         if (current.origin.isNotBlank() && current.origin != enrollment.origin) require(vault.credential(current.origin, current.campaignId) == null) { "Revoke this device before changing services." }
-        vault.storeServiceAccess(enrollment.origin, enrollment.campaignId, enrollment.serviceAccessBearer)
+        bootstrap.completeImport(enrollment) {
+            vault.storeServiceAccess(enrollment.origin, enrollment.campaignId, enrollment.serviceAccessBearer)
+        }
         val changedOrigin = current.origin.isNotBlank() && current.origin != enrollment.origin
         db.withTransaction {
             if (changedOrigin) {
