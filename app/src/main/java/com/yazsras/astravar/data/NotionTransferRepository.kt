@@ -3,6 +3,8 @@ package com.yazsras.astravar.data
 import android.content.Context
 import androidx.room.withTransaction
 import com.yazsras.astravar.rules.reforge.*
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import java.util.UUID
@@ -13,11 +15,14 @@ import java.util.UUID
     val verifiedBackupFingerprint: String
 )
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class NotionTransferOutcome(
     val profile: ReforgeSavedCharacter,
     val itemsAdded: Int, val itemsPreviouslyPresent: Int,
     val walletAdded: Boolean, val walletPreviouslyPresent: Boolean,
-    val warnings: List<String>
+    val warnings: List<String>,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val spellsAdded: Int = 0,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val spellsPreviouslyPresent: Int = 0
 )
 
 /**
@@ -156,7 +161,8 @@ class NotionTransferRepository internal constructor(
                     created = true
                 }
             }
-            val outcome = NotionTransferOutcome(updated, plan.added.size, plan.alreadyPresent.size, created, already, plan.warnings)
+            val outcome = NotionTransferOutcome(updated, plan.added.size, plan.alreadyPresent.size, created, already, plan.warnings + plan.deferredSpells,
+                plan.addedSpells.size, plan.presentSpells.size)
             val receipt = GenesisAuthorityReceipt(commandId, "notion-transfer", fingerprint, requestJson,
                 campaignJson.encodeToString(outcome), System.currentTimeMillis())
             db.genesisAuthorityDao().insert(receipt)

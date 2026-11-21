@@ -26,7 +26,8 @@ internal fun genesisValidateNotionTransfer(
     }
     val plan = planNotionCharacterTransfer(selected.character, request.transfer, request.choices)
     require(outcome.itemsAdded == plan.added.size && outcome.itemsPreviouslyPresent == plan.alreadyPresent.size &&
-        outcome.warnings == plan.warnings) { "Import summary differs from its reviewed source." }
+        outcome.spellsAdded == plan.addedSpells.size && outcome.spellsPreviouslyPresent == plan.presentSpells.size &&
+        outcome.warnings == plan.warnings + plan.deferredSpells) { "Import summary differs from its reviewed source." }
     require(outcome.profile.origin == selected.origin && outcome.profile.createdAt == selected.createdAt) {
         "Import changed the original character provenance."
     }

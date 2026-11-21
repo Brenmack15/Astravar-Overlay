@@ -78,6 +78,37 @@ class NotionTransferRepositoryTest {
         assertTrue(sync.any { it.kind == "item" && it.recordId == itemId })
     }
 
+    @Test fun reviewedSpellReceiptSurvivesReplayRestoreAndLateRollback() = runBlocking {
+        val campaign = authority.createCampaign("Spell rehearsal", commandId = "spellbook-campaign")
+        val original = actor(campaign.id)
+        val saved = ReforgeRepository(db).save(original.character.id, original.revision, original.character.copy(
+            className = "Artificer", subclass = "Armorer", rules = RuleVersion(classVersion = "legacy-artificer-infusions-2020")),
+            "Configure synthetic source", "bind-spellbook-source")
+        val page = "f040eb5572c944cab462ab15feeeeec7"
+        val spell = NotionSpellFact(page, "https://app.notion.com/p/$page", "fixture-v1", "spark", "Confirmed",
+            "Synthetic spark", 1, SpellPreparation.ALWAYS_PREPARED, false, "1 Action", "Self", "V", "1 minute", false)
+        val source = transfer().copy(reviewedSpellbook = NotionSpellbook(saved.character.rules.classVersion, 1, listOf(spell), spell.nativeId))
+        val choices = NotionTransferChoices(stats = false, items = false, spells = true)
+        val before = proof()
+        val importer = NotionTransferRepository(db)
+        val first = importer.commit(saved, source, choices, false, before, "source-spells-first")
+        assertEquals(first, importer.commit(saved, source, choices, false, before, "source-spells-first"))
+        val replay = importer.commit(first.profile, source, choices, false, proof(), "source-spells-repeat")
+        assertEquals(1, first.spellsAdded)
+        assertEquals(0, replay.spellsAdded)
+        assertEquals(1, replay.spellsPreviouslyPresent)
+        assertEquals(first.profile, replay.profile)
+        assertEquals(saved.character.spellSlots, replay.profile.character.spellSlots)
+        assertEquals(spell.definition(), replay.profile.character.spells.single())
+        val exported = backup.exportWithProof()
+        assertTrue(backup.previewRestore(exported.text).valid)
+        val amendedBook = source.copy(reviewedSpellbook = NotionSpellbook(saved.character.rules.classVersion, 1,
+            listOf(spell, spell.copy(spellKey = "second", name = "Second synthetic spell")), spell.nativeId), provisionalGpEquivalent = null)
+        rejected { importer.commit(replay.profile, amendedBook, choices, true, exported.currentFingerprint, "source-spells-fail") }
+        assertEquals(exported.currentFingerprint, proof())
+        assertNull(db.genesisAuthorityDao().receipt("source-spells-fail"))
+    }
+
     @Test fun repeatedImportPreservesItemIdentityRevisionAndCurrentResources() = runBlocking {
         val original = actor()
         val first = importer.commit(original, transfer(), choices, false, proof(), "fictional-first-import")

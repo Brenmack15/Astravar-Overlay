@@ -25,8 +25,9 @@ test('MCP preserves five fictional tools and adds HP and scoped campaign tools w
   const discovery = await (await handleMcp(request(rpc('server/discover')), bridge, { ownerId })).json();
   assert.deepEqual(discovery.result.supportedVersions, [MCP_VERSION]);
   const listed = await (await handleMcp(request(rpc('tools/list')), bridge, { ownerId })).json();
-  assert.equal(listed.result.tools.length, 31);
-  assert.deepEqual(listed.result.tools.slice(21, 26).map(tool => tool.name), ['get_character', 'get_character_abilities', 'propose_record_update', 'get_pending_updates', 'get_command_receipt']);
+  assert.equal(listed.result.tools.length, 32);
+  assert.equal(listed.result.tools.find(tool => tool.name === 'get_playable_spells').annotations.readOnlyHint, true);
+  assert.deepEqual(listed.result.tools.slice(22, 27).map(tool => tool.name), ['get_character', 'get_character_abilities', 'propose_record_update', 'get_pending_updates', 'get_command_receipt']);
   assert.deepEqual(listed.result.tools.map(tool => tool.name), TOOLS.map(tool => tool.name));
   assert.equal(listed.result.tools.some(tool => /approve|commit|revoke|enroll/.test(tool.name)), false);
 });

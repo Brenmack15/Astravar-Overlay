@@ -1,5 +1,7 @@
 package com.yazsras.astravar.rules.reforge
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import java.util.Locale
 
@@ -32,25 +34,31 @@ const val NOTION_CHARACTER_TRANSFER_FORMAT = "astravar-notion-character-transfer
     val status: String, val sourceUrl: String, val receipt: String = ""
 )
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class NotionCharacterTransfer(
     val format: String, val transferId: String, val capturedDate: String,
     val character: NotionCharacterFacts, val inventory: List<NotionInventoryFact>,
     val currency: List<NotionCurrencyFact>,
     /** A ledger-derived number, NOT an independently verified current wallet. */
-    val provisionalGpEquivalent: Long?, val walletVerified: Boolean = false
+    val provisionalGpEquivalent: Long?, val walletVerified: Boolean = false,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val reviewedSpellbook: NotionSpellbook? = null
 )
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class NotionTransferChoices(
     val stats: Boolean = true, val items: Boolean = true,
-    val replaceConflictingStats: Boolean = false
+    val replaceConflictingStats: Boolean = false,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val spells: Boolean = false
 )
 
 data class NotionTransferPlan(
     val character: ReforgeCharacter,
     val added: List<String>, val alreadyPresent: List<String>, val deferred: List<String>,
-    val warnings: List<String>, val statsChanged: Boolean
+    val warnings: List<String>, val statsChanged: Boolean,
+    val addedSpells: List<String> = emptyList(), val presentSpells: List<String> = emptyList(),
+    val deferredSpells: List<String> = emptyList(), val castingLevelChanged: Boolean = false
 ) {
-    val changed: Boolean get() = statsChanged || added.isNotEmpty()
+    val changed: Boolean get() = statsChanged || added.isNotEmpty() || addedSpells.isNotEmpty() || castingLevelChanged
 }
 
 private fun notionName(value: String): String = value.lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
@@ -81,6 +89,7 @@ fun validateNotionCharacterTransfer(value: NotionCharacterTransfer) {
     val c = value.character
     require(c.name.isNotBlank() && c.name.length <= 200 && c.ownerLabel.isNotBlank() && c.ownerLabel.length <= 100)
     require(c.targetProfileId == null || c.targetProfileId.matches(Regex("[a-zA-Z0-9:_-]{1,120}")))
+    value.reviewedSpellbook?.let { validateNotionSpellbook(it, c.level) }
     require(c.level in 1..20 && c.permanentAbilities.keys.containsAll(Stat.entries))
     require(c.permanentAbilities.values.all { it in 0..100 })
     require(c.baseMaxHp == null || c.baseMaxHp in 0..1_000_000)
@@ -169,11 +178,13 @@ fun planNotionCharacterTransfer(
         // the character at AC 20 even after removing the imported suit.
         if (facts.armoredAc != null) warnings +=
             "Notion AC ${facts.armoredAc} is a worn-armor total, not a permanent base AC; it applies only if a matching equipped item has an accepted AC effect."
-        if (next.rules.classVersion == "unconfigured" && facts.className.equals("Artificer", true)) {
+        if (next.rules.classVersion == "unconfigured" && facts.className.equals("Artificer", true) &&
+            (transfer.reviewedSpellbook == null || transfer.reviewedSpellbook.classVersion == "legacy-artificer-infusions-2020" &&
+                next.className.equals(facts.className, true))) {
             next = next.copy(rules = next.rules.copy(core = RuleFamily.LEGACY_2014,
                 classVersion = "legacy-artificer-infusions-2020"))
         }
-        if (next.spellcastingClassLevel == null && facts.className.equals("Artificer", true)) {
+        if (transfer.reviewedSpellbook == null && next.spellcastingClassLevel == null && facts.className.equals("Artificer", true)) {
             next = next.copy(spellcastingClassLevel = next.level)
         }
     }
@@ -236,7 +247,11 @@ fun planNotionCharacterTransfer(
         }
         next = next.copy(itemDefinitions = definitions, items = instances)
     }
-    CharacterCalculator.validate(next)
-    return NotionTransferPlan(next, added, present, deferred, warnings, next.copy(itemDefinitions = current.itemDefinitions,
-        items = current.items) != current)
+    val statsChanged = next.copy(itemDefinitions = current.itemDefinitions, items = current.items) != current
+    val spellReview = transfer.reviewedSpellbook?.takeIf { choices.spells }?.let { reviewNotionSpells(next, facts, it) }
+    val result = spellReview?.character ?: next
+    CharacterCalculator.validate(result)
+    return NotionTransferPlan(result, added, present, deferred, warnings, statsChanged,
+        spellReview?.added.orEmpty(), spellReview?.present.orEmpty(), spellReview?.deferred.orEmpty(),
+        next.spellcastingClassLevel != result.spellcastingClassLevel)
 }

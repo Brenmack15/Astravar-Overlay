@@ -398,11 +398,38 @@ class CampaignNativeHttpsTest {
         val definition = ItemDefinition("ci-native-stone-definition", "Fictional test stone")
         val stone = ItemInstance("ci-native-stone", definition.id)
         val actor = authority.createActor("Fixture artificer", GenesisActorRole.PLAYER, campaign,
-            playable = ReforgeCharacter(actorId, "Fixture artificer", baseAbilities = mapOf(Stat.INT to 21)),
+            playable = ReforgeCharacter(actorId, "Fixture artificer", level = 3, className = "Artificer", subclass = "Armorer",
+                rules = RuleVersion(classVersion = "legacy-artificer-infusions-2020"), baseAbilities = mapOf(Stat.INT to 21),
+                spellSlots = mapOf(1 to 0, 2 to null)),
             commandId = "ci-equipment-actor")
         authority.createItem(actorId, requireNotNull(actor.playable).revision, definition, stone, "ci-equipment-grant")
+        val sourcePage = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        val sourceUrl = "https://app.notion.com/p/$sourcePage"
+        val spell = NotionSpellFact(sourcePage, sourceUrl, "fixture-r1", "guiding-glint", "Confirmed",
+            "Fictional Guiding Glint", 1, SpellPreparation.ALWAYS_PREPARED, true, "1 Action", "30 ft.", "V", "1 minute", false)
+        val native = requireNotNull(ReforgeRepository(db).get(actorId))
+        val transfer = NotionCharacterTransfer(NOTION_CHARACTER_TRANSFER_FORMAT, "https-fixture-spells", "2026-11-21",
+            NotionCharacterFacts(native.character.name, "Fixture", sourceUrl, 3, "Gnome", "Artificer", "Armorer",
+                Stat.entries.associateWith { 10 }, targetProfileId = actorId), emptyList(), emptyList(), null,
+            reviewedSpellbook = NotionSpellbook(native.character.rules.classVersion, 3, listOf(spell), spell.nativeId))
+        val savedSpell = NotionTransferRepository(db).commit(native, transfer,
+            NotionTransferChoices(stats = false, items = false, spells = true), false,
+            GenesisAuthorityBackupRepository(db).exportWithProof().currentFingerprint, "https-reviewed-spell-import")
+        assertEquals(1, savedSpell.spellsAdded)
         client.sync()
         val arguments = buildJsonObject { put("campaignId", campaign); put("profileId", actorId); put("limit", 100) }
+        val spellRows = mcp("get_playable_spells", arguments).getValue("records").jsonArray.map { it.jsonObject }
+        val published = spellRows.single { it.getValue("fields").jsonObject["subject"] == JsonPrimitive("SPELL") }
+        val fresh = record("playable-spell", published.getValue("recordId").jsonPrimitive.content)
+        val spellFields = fresh.getValue("fields").jsonObject
+        assertEquals(savedSpell.profile.revision, fresh.getValue("revision").jsonPrimitive.long)
+        assertEquals(campaignJson.encodeToJsonElement(spell.definition()), spellFields.getValue("data"))
+        val casting = spellRows.single { it.getValue("fields").jsonObject["subject"] == JsonPrimitive("CASTING") }
+            .getValue("fields").jsonObject.getValue("data").jsonObject
+        val slots = casting.getValue("slots").jsonArray.map { it.jsonObject }.associateBy { it.getValue("level").jsonPrimitive.int }
+        assertEquals(JsonPrimitive(0), slots.getValue(1)["current"])
+        assertEquals(JsonNull, slots.getValue(2)["current"])
+        assertEquals(JsonNull, casting["concentrationSpellId"])
         fun intelligence(): JsonObject = mcp("get_playable_statistics", arguments).getValue("records").jsonArray
             .map { it.jsonObject.getValue("fields").jsonObject }.single { it.getValue("target").jsonPrimitive.content == "ABILITY" && it.getValue("key").jsonPrimitive.content == "INT" }
         suspend fun edit(type: String, change: JsonObject) {
@@ -614,6 +641,7 @@ class CampaignNativeHttpsTest {
             put("hp", 8); put("gold", 6); put("spellSlots", 1); put("companionCharges", 1)
             put("atomicPurchase", true); put("atomicCompanionAcquireAndAssign", true); put("acquisitionReceiptRecords", assignedRecords.size)
             put("staleAndForeignAcquisitionHolderRejected", true); put("idempotentRetries", true); put("staleAndDisabledScopeRejected", true)
+            put("nativeImportedSpellbookAndSpentSlotReadback", true)
             put("nativeEquipmentReceiptAndCalculatedReadback", true)
             put("companionTransferAndReturnWithDerivedReadbacks", true)
             put("receiptAndAndroidReadback", true); put("serverRevocationVerified", true)

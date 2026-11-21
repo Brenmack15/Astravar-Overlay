@@ -30,17 +30,21 @@ class NotionNativeImportTest {
         val campaign = storage.authority.createCampaign("Synthetic Notion campaign $suffix", commandId = "notion-campaign-$suffix")
         val original = requireNotNull(storage.authority.createActor("Synthetic maker $suffix", GenesisActorRole.PLAYER,
             campaign.id, playable = ReforgeCharacter("native-notion-maker-$suffix", "Synthetic maker $suffix",
+                className = "Artificer", subclass = "Armorer", rules = RuleVersion(classVersion = "legacy-artificer-infusions-2020"),
                 currentHp = 7, baseMaxHp = 20, baseAbilities = Stat.entries.associateWith { 14 },
                 baselineConstitutionModifier = 2, temporaryHp = 3, hpDamage = 13, spellSlots = mapOf(1 to 1)),
             commandId = "notion-actor-$suffix").playable)
         val source = "https://app.notion.com/p/33333333333333333333333333333333"
+        val fixtureSpell = NotionSpellFact("33333333333333333333333333333333", source, "fixture-r1", "test-light", "Confirmed",
+            "Synthetic light", 1, SpellPreparation.ALWAYS_PREPARED, false, "1 Action", "Self", "V", "1 minute", false)
         val transfer = NotionCharacterTransfer(NOTION_CHARACTER_TRANSFER_FORMAT, "native-notion-transfer-$suffix", "2026-11-21",
             NotionCharacterFacts(original.character.name, "Maker", source, 1, "Gnome", "Artificer", "Armorer",
                 Stat.entries.associateWith { 10 }),
             listOf(NotionInventoryFact("native-lantern-$suffix", source, "Synthetic lantern", "Equipment", "Maker",
                 "Carried", "Confirmed", 1, knownProperties = "Synthetic accepted provenance; no inferred magic.")),
-            listOf(NotionCurrencyFact("native-currency-$suffix", "Synthetic estimate", 20, "Confirmed", source)), 20)
-        val choices = NotionTransferChoices(stats = false)
+            listOf(NotionCurrencyFact("native-currency-$suffix", "Synthetic estimate", 20, "Confirmed", source)), 20,
+            reviewedSpellbook = NotionSpellbook("legacy-artificer-infusions-2020", 1, listOf(fixtureSpell), fixtureSpell.nativeId))
+        val choices = NotionTransferChoices(stats = false, spells = true)
         val stale = storage.backup.exportWithProof()
         assertTrue(storage.backup.previewRestore(stale.text).valid)
         val wallet = PartyWallet("native-wallet-$suffix", original.character.id, "Existing purse", gold = 7, campaignId = campaign.id)
@@ -69,6 +73,11 @@ class NotionNativeImportTest {
         assertEquals(0, second.itemsAdded)
         assertEquals(1, second.itemsPreviouslyPresent)
         assertEquals(first.profile, second.profile)
+        assertEquals(1, first.spellsAdded)
+        assertEquals(0, second.spellsAdded)
+        assertEquals(1, second.spellsPreviouslyPresent)
+        assertEquals(SpellPreparation.ALWAYS_PREPARED, second.profile.character.spells.single().preparation)
+        assertEquals(original.character.spellSlots, second.profile.character.spellSlots)
         val itemId = "notion-instance-native-lantern-$suffix"
         assertEquals(1, storage.db.ledgerDao().allItems().count { it.id == itemId })
         assertEquals(1, storage.db.partyDao().allReferences().count { it.recordId == itemId })
@@ -115,6 +124,6 @@ class NotionNativeImportTest {
             assertEquals(7L, restored.partyDao().allWallets().single { it.id == wallet.id }.gold)
         } finally { restored.close() }
         File(context.getExternalFilesDir(null), "notion-native-import.json").writeText(
-            """{"syntheticOnly":true,"publicContextConstructor":true,"backupValidated":true,"repeatIdempotent":true,"lateFailureAtomic":true,"retryRecovered":true,"independentRestoreReopened":true,"durationMs":${(System.nanoTime() - started) / 1_000_000}}""")
+            """{"syntheticOnly":true,"publicContextConstructor":true,"backupValidated":true,"repeatIdempotent":true,"reviewedSpellPreparationPreserved":true,"lateFailureAtomic":true,"retryRecovered":true,"independentRestoreReopened":true,"durationMs":${(System.nanoTime() - started) / 1_000_000}}""")
     }
 }
