@@ -35,7 +35,7 @@ class PlayableMechanicsSyncTest {
             authority.createItem(actorId, requireNotNull(actor.playable).revision, ItemDefinition("test-def", "Test stone"),
                 ItemInstance(itemId, "test-def"), "convergence-create")
             suspend fun read(database: CampaignLedgerDb = db) = CampaignSyncDomain(database).snapshot(campaign, mechanics = true)
-            fun stat(rows: List<CampaignSyncRecord>, key: String) = rows.single { it.kind == "playable-stat" && it.fields["key"]?.jsonPrimitive?.content == key }.fields
+            fun stat(rows: List<CampaignSyncRecord>, key: String) = rows.single { it.kind == "playable-stat" && it.fields["target"]?.jsonPrimitive?.content in setOf("SKILL", "ABILITY") && it.fields["key"]?.jsonPrimitive?.content == key }.fields
             suspend fun operation(type: String, fields: JsonObject): CampaignSyncOperation {
                 val rows = read()
                 val equipment = rows.single { it.kind == "playable-equipment" }
@@ -63,6 +63,12 @@ class PlayableMechanicsSyncTest {
             val active = read()
             assertEquals(21, stat(active, "INT").getValue("base").jsonPrimitive.int)
             assertEquals(22, stat(active, "INT").getValue("effective").jsonPrimitive.int)
+            val readProjection = CharacterCalculator.calculate(requireNotNull(ReforgeRepository(db).get(actorId)).character)
+            fun derived(target: String, key: String) = active.single { it.kind == PlayableMechanicsSync.STATS &&
+                it.fields["target"]?.jsonPrimitive?.content == target && it.fields["key"]?.jsonPrimitive?.content == key }.fields["effective"]
+            assertEquals(JsonPrimitive(readProjection.saves.getValue(Stat.INT).value), derived("SAVE", "INT"))
+            assertEquals(JsonPrimitive(readProjection.spellSaveDc.value), derived("DERIVED", "SPELL_SAVE_DC"))
+            assertEquals(JsonPrimitive(readProjection.armorClass.value), derived("DERIVED", "AC"))
             assertEquals(15, stat(active, "Investigation").getValue("effective").jsonPrimitive.int)
             assertEquals(6, stat(active, "Arcana").getValue("effective").jsonPrimitive.int)
             assertEquals(6, stat(active, "skill:forensics").getValue("effective").jsonPrimitive.int)

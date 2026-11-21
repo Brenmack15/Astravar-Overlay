@@ -7,7 +7,7 @@ const read=(name,description,properties={},required=Object.keys(properties))=>({
 const page={after:{type:'string',maxLength:400},limit:{type:'integer',minimum:1,maximum:100}};
 export const CAMPAIGN_TOOLS=Object.freeze([
  read('get_campaign_state','Read a bounded, source-linked active-session aggregate of owner-authorized Android campaign records. Unknowns and stale synchronization remain explicit.',page,[]),
- read('get_playable_statistics','Read versioned Reforge base, permanent and effective abilities and independent skill totals for one reviewed actor.',{profileId:id,...page},['profileId']),
+ read('get_playable_statistics','Read calculated abilities, skills, saving throws, AC, movement, senses, initiative and spell attack/DC for one reviewed actor. Each record has a target, key and revision.',{profileId:id,...page},['profileId']),
  read('get_playable_equipment','Read physical equipment state and v1 DM-authored additive bonuses for one reviewed character or companion. Use the separately read actor revision for a native edit.',{profileId:id,...page},['profileId']),
  read('get_character_resources','Read a compact versioned view of separately scoped saved spell slots and companion resource counters, with current values, unknowns, provenance and revisions; never infer remaining values.',{profileId:id,...page},['profileId']),
  read('get_party','Read owner-approved player and companion profiles and sheets. Fields outside granted categories remain redacted.',page,[]),

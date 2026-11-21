@@ -404,7 +404,7 @@ class CampaignNativeHttpsTest {
         client.sync()
         val arguments = buildJsonObject { put("campaignId", campaign); put("profileId", actorId); put("limit", 100) }
         fun intelligence(): JsonObject = mcp("get_playable_statistics", arguments).getValue("records").jsonArray
-            .map { it.jsonObject.getValue("fields").jsonObject }.single { it.getValue("key").jsonPrimitive.content == "INT" }
+            .map { it.jsonObject.getValue("fields").jsonObject }.single { it.getValue("target").jsonPrimitive.content == "ABILITY" && it.getValue("key").jsonPrimitive.content == "INT" }
         suspend fun edit(type: String, change: JsonObject) {
             val equipment = record("playable-equipment", stone.id)
             val actorRevision = intelligence().getValue("revision")

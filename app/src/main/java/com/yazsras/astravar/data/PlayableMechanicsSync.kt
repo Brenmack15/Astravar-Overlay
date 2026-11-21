@@ -38,6 +38,17 @@ internal object PlayableMechanicsSync {
                     put("permanent", JsonPrimitive(value.permanent)); put("modifier", JsonPrimitive(value.modifier))
                 })
             }
+            for ((ability, save) in calculated.saves) {
+                add(stat("SAVE", ability.name, ability.name, save.value))
+            }
+            add(stat("DERIVED", "AC", "Armor Class", calculated.armorClass.value))
+            add(stat("DERIVED", "INITIATIVE", "Initiative", calculated.initiative.value))
+            add(stat("DERIVED", "PROFICIENCY", "Proficiency bonus", calculated.proficiencyBonus))
+            add(stat("DERIVED", "SPEED", "Speed", calculated.speed.value))
+            add(stat("DERIVED", "SPELL_ATTACK", "Spell attack", calculated.spellAttack.value))
+            add(stat("DERIVED", "SPELL_SAVE_DC", "Spell save DC", calculated.spellSaveDc.value))
+            for ((mode, value) in calculated.movement) add(stat("MOVEMENT", mode, mode, value))
+            for ((sense, value) in calculated.senses) add(stat("SENSE", sense, sense, value))
             SkillRules.entries(c, calculated).forEach { add(stat("SKILL", it.id, it.name, it.calculation.value)) }
         }
     }
