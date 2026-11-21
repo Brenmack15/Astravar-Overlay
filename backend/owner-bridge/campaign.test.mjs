@@ -382,3 +382,23 @@ test('playable item transfer checks both actor revisions and scoped approval', a
  await narrow.publish(rows);
  await fails(narrow.submit([move(proof)]),'WRITE_SCOPE_DENIED');
 });
+
+test('native spellbook publication respects actor filtering, all four read scopes and read-only operations', async t => {
+ const f = await setup(t);
+ const data = {id:'fixture-spell',name:'Glint',level:1,preparation:'ALWAYS_PREPARED',sourceVersion:'fixture-r1'};
+ const fields = {id:'spell-record',profileId:profile,actorRole:'PLAYER',revision:3,schemaVersion:1,subject:'SPELL',source:'Android Reforge v1',
+  part:'header',data,contentSha256:await sha256(canonical(data)),contentBytes:Buffer.byteLength(canonical(data)),parts:0};
+ const row = {kind:'playable-spell',recordId:fields.id,revision:fields.revision,fields};
+ assert.equal((await f.sync.getGrant(f.principal,campaign)).grant.playableSpellbookVersion,1);
+ await f.publish([row]);
+ const read = await f.sync.read(connector,campaign,{kinds:['playable-spell'],profileId:profile});
+ assert.equal(read.records.length,1);
+ assert.deepEqual(read.records[0].fields,fields);
+ assert.equal((await f.sync.read(connector,campaign,{kinds:['playable-spell'],profileId:'other-actor'})).records.length,0);
+ await assert.rejects(f.submit([{type:'set_record',recordId:fields.id,kind:row.kind,expectedRevision:3,fields:{data}}]),
+  error=>error.code==='READ_ONLY_RECORD_KIND');
+ for (const missing of ['character','companions','combat','resources']) {
+  const reduced = CAMPAIGN_SCOPES.filter(scope=>scope!==missing);
+  assert.throws(()=>projectCampaignRecord(row,reduced),error=>error.code==='READ_SCOPE_DENIED');
+ }
+});
