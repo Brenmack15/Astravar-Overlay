@@ -45,6 +45,7 @@ class CampaignConnectionTest {
         CampaignSyncPreferences(context).notificationsEnabled = false
         CampaignSyncPreferences(context).pushyEnabled = true
         context.getSharedPreferences("astravar-campaign-push", Context.MODE_PRIVATE).edit().clear().commit()
+        context.getSharedPreferences("astravar-campaign-sync-diagnostics", Context.MODE_PRIVATE).edit().clear().commit()
         journal = Room.inMemoryDatabaseBuilder(context, CampaignConnectionDb::class.java).build()
         campaign = Room.inMemoryDatabaseBuilder(context, CampaignLedgerDb::class.java).build()
         vault = OwnerSyncCredentialVault(context, { time }) { SecretKeySpec(ByteArray(32) { 9 }, "AES") }
@@ -55,12 +56,12 @@ class CampaignConnectionTest {
     @After fun close() { journal.close(); campaign.close() }
     private fun client(remote: Remote, crash: suspend () -> Unit = {}) = CampaignConnectionClient(context,journal,campaign,vault,remote,{ time },crash)
     private suspend fun current() = requireNotNull(campaign.recordsDao().characterProfile(profileId))
-    private suspend fun paired(remote: Remote): CampaignConnectionClient {
+    private suspend fun paired(remote: Remote, syncNow: Boolean = true): CampaignConnectionClient {
         val scopes = CampaignConnectionProtocol.scopeArray(CampaignConnectionProtocol.categories).toString()
         vault.enroll(OwnerSyncCredential(deviceId,campaignId,origin,time+1_000_000,"q".repeat(43)))
         journal.connection().settings(CampaignConnectionSettings(origin=origin,campaignId=campaignId,profileId=profileId,deviceName="Fixture device",deviceId=deviceId,
             requestedReadJson=scopes,requestedWriteJson=scopes,grantJson=remote.grant.toString()))
-        return client(remote).also { it.sync() }
+        return client(remote).also { if (syncNow) it.sync() }
     }
     @Test fun connectedHeartbeatWithoutExplicitMembershipPublishesNoCharacterUntilReviewedEnrollment() = runBlocking {
         val authority = GenesisAuthorityRepository(campaign)
@@ -455,13 +456,107 @@ class CampaignConnectionTest {
         assertTrue(commands.all { journal.connection().command(it)?.state == "VERIFIED" })
         assertEquals(2,remote.decisions.size)
     }
+    private suspend fun publicationFixture(remote: Remote, sceneSize: Int = 20): CampaignConnectionClient {
+        remote.grant = JsonObject(remote.grant + ("readScopes" to JsonArray(listOf(JsonPrimitive("continuity")))) +
+            ("writeScopes" to JsonArray(emptyList())))
+        repeat(17) { index -> PartyRecordsRepository(campaign).saveCheckpoint(
+            CampaignCheckpoint("synthetic-checkpoint-$index", "Synthetic checkpoint $index", scene = "x".repeat(sceneSize)),
+            source = "Isolated publication fixture", commandId = "synthetic-checkpoint-command-$index") }
+        return paired(remote, syncNow = false)
+    }
+    @Test fun initialPublicationFailureShowsServiceContactAndRetainsAll17EligibleRecords() = runBlocking {
+        val remote = Remote(); val c = publicationFixture(remote); remote.rejectPublication = true
+        assertTrue(runCatching { c.sync() }.isFailure)
+        val state = c.snapshot()
+        assertEquals(17, state.getValue("localRecordCount").jsonPrimitive.int)
+        assertEquals(17, state.getValue("pendingRecordCount").jsonPrimitive.int)
+        assertEquals(0, state.getValue("verifiedRecordCount").jsonPrimitive.int)
+        assertEquals(time, state.getValue("lastServerResponseAt").jsonPrimitive.long)
+        assertEquals(time, state.getValue("lastUploadAttemptAt").jsonPrimitive.long)
+        assertEquals(0L, state.getValue("lastPublicationAcceptedAt").jsonPrimitive.long)
+        assertEquals(0L, state.getValue("lastFullSyncAt").jsonPrimitive.long)
+        assertEquals("PUBLICATION_UPLOAD", state.getValue("failedStage").jsonPrimitive.content)
+        assertEquals(17, campaign.partyDao().allCheckpoints().size)
+        remote.rejectPublication = false; client(remote).sync()
+        assertEquals(17, c.snapshot().getValue("verifiedRecordCount").jsonPrimitive.int)
+    }
+    @Test fun lostAcknowledgementRetriesSamePublicationAndVerifies17RecordsIndependently() = runBlocking {
+        val remote = Remote(); val c = publicationFixture(remote); remote.losePublication = true
+        assertTrue(runCatching { c.sync() }.isFailure)
+        val frozen = journal.connection().publications().single()
+        assertEquals("PENDING", frozen.state)
+        assertEquals(17, remote.records.size)
+        time += 10
+        client(remote).sync()
+        assertEquals("VERIFIED", journal.connection().publications().single { it.commandId == frozen.commandId }.state)
+        assertEquals(frozen.body, remote.publicationBodies.getValue(frozen.commandId))
+        assertEquals(17, remote.records.size)
+        val state = c.snapshot()
+        assertEquals(17, state.getValue("verifiedRecordCount").jsonPrimitive.int)
+        assertEquals(time, state.getValue("lastIndependentVerificationAt").jsonPrimitive.long)
+        assertEquals(time, state.getValue("lastFullSyncAt").jsonPrimitive.long)
+    }
+    @Test fun incorrectAcknowledgementOrPartialReadbackNeverMarksRecordsVerified() = runBlocking {
+        val remote = Remote(); val c = publicationFixture(remote); remote.wrongPublicationAck = true
+        assertTrue(runCatching { c.sync() }.isFailure)
+        assertEquals("PUBLICATION_ACKNOWLEDGEMENT", c.snapshot().getValue("failedStage").jsonPrimitive.content)
+        remote.wrongPublicationAck = false; remote.partialPublicationReadback = true
+        assertTrue(runCatching { c.sync() }.isFailure)
+        val state = c.snapshot()
+        assertEquals("PUBLICATION_VALIDATION", state.getValue("failedStage").jsonPrimitive.content)
+        assertEquals(0, state.getValue("verifiedRecordCount").jsonPrimitive.int)
+        assertEquals(time, state.getValue("lastPublicationAcceptedAt").jsonPrimitive.long)
+        assertEquals(0L, state.getValue("lastIndependentVerificationAt").jsonPrimitive.long)
+        remote.partialPublicationReadback = false; c.sync()
+        assertEquals(17, c.snapshot().getValue("verifiedRecordCount").jsonPrimitive.int)
+    }
+    @Test fun interruptionAfterAcceptancePreservesPendingPublicationForRecovery() = runBlocking {
+        val remote = Remote(); val c = publicationFixture(remote); remote.cancelPublicationReadback = true
+        assertTrue(runCatching { c.sync() }.exceptionOrNull() is kotlinx.coroutines.CancellationException)
+        assertEquals("SYNC_INTERRUPTED", c.snapshot().getValue("failureCode").jsonPrimitive.content)
+        assertEquals("PENDING", journal.connection().publications().single().state)
+        remote.cancelPublicationReadback = false; client(remote).sync()
+        assertEquals(17, c.snapshot().getValue("verifiedRecordCount").jsonPrimitive.int)
+    }
+    @Test fun laterBatchFailureRetainsEarlierVerificationAndRetriesOnlyPendingWork() = runBlocking {
+        val remote = Remote(); val c = publicationFixture(remote, 3000); remote.failPublicationAttempt = 2
+        assertTrue(runCatching { c.sync() }.isFailure)
+        val before = c.snapshot().getValue("verifiedRecordCount").jsonPrimitive.int
+        assertTrue(before in 1..16)
+        assertEquals(17, campaign.partyDao().allCheckpoints().size)
+        assertEquals(1, journal.connection().publications().count { it.state == "PENDING" })
+        remote.failPublicationAttempt = 0; client(remote).sync()
+        assertEquals(17, c.snapshot().getValue("verifiedRecordCount").jsonPrimitive.int)
+        assertEquals(17, remote.records.size)
+    }
+    @Test fun diagnosticMetadataIsBoundToEnrollmentAndRejectsProviderText() {
+        val store = CampaignSyncDiagnostics(context)
+        val setting = CampaignConnectionSettings(origin = origin, campaignId = campaignId, deviceId = deviceId)
+        store.begin(setting); store.time(setting, "lastServerResponseAt", time)
+        store.failed(setting, "PRIVATE_SECRET_PROVIDER_TEXT")
+        assertEquals("REMOTE_REJECTED", store.snapshot(setting, 17).getValue("failureCode").jsonPrimitive.content)
+        assertFalse(store.snapshot(setting, 17).toString().contains("PRIVATE_SECRET"))
+        val other = store.snapshot(setting.copy(deviceId = "different-device"), 0)
+        assertEquals(0L, other.getValue("lastServerResponseAt").jsonPrimitive.long)
+        assertEquals("", other.getValue("failedStage").jsonPrimitive.content)
+    }
     private inner class Remote: OwnerConnectionTransport {
         var grant=buildJsonObject { put("grantId","fixture-grant");put("revision",1);put("readScopes",CampaignConnectionProtocol.scopeArray(CampaignConnectionProtocol.categories));put("writeScopes",CampaignConnectionProtocol.scopeArray(CampaignConnectionProtocol.categories));put("autoSyncScopes",JsonArray(emptyList()));put("expiresAt",time+1_000_000) }
         val records=linkedMapOf<Pair<String,String>,JsonObject>()
         val publications=linkedMapOf<String,List<JsonObject>>()
         val commands=linkedMapOf<String,JsonObject>(); val decisions=linkedMapOf<String,JsonObject>()
         val grantCommands=mutableMapOf<String,String>();val grantRequests=mutableListOf<String>()
+        val publicationBodies = linkedMapOf<String, String>()
+        val publicationTimes = linkedMapOf<String, Long>()
+        val publicationRemovals = linkedMapOf<String, JsonArray>()
         var failPublicationReadback = false
+        var rejectPublication = false
+        var losePublication = false
+        var wrongPublicationAck = false
+        var partialPublicationReadback = false
+        var cancelPublicationReadback = false
+        var publicationAttempts = 0
+        var failPublicationAttempt = 0
         var loseDecision=false;var loseGrant=false;var offline=false;var lastDecision:String?=null;var receiptReads=0;var recordReads=0
         var blockPending: Pair<CompletableDeferred<Unit>,CompletableDeferred<Unit>>? = null
         var pendingLimit = Int.MAX_VALUE
@@ -499,12 +594,31 @@ class CampaignConnectionTest {
                 }
                 path.endsWith("/records") -> {
                     val rows=b!!.getValue("records").jsonArray.map {it.jsonObject}
-                    (b["removed"] as? JsonArray).orEmpty().forEach { raw -> val r=raw.jsonObject;records.remove(r.getValue("kind").jsonPrimitive.content to r.getValue("recordId").jsonPrimitive.content) }
-                    rows.forEach {r -> records[r.getValue("kind").jsonPrimitive.content to r.getValue("recordId").jsonPrimitive.content]=r}
-                    publications[b.getValue("commandId").jsonPrimitive.content]=rows
-                    answer("published" to b.getValue("records"),"publishedAt" to JsonPrimitive(time))
+                    if (rows.isNotEmpty()) {
+                        publicationAttempts++
+                        if (rejectPublication || publicationAttempts == failPublicationAttempt) throw IOException("Synthetic publication unavailable")
+                    }
+                    val id=b.getValue("commandId").jsonPrimitive.content
+                    if (id !in publicationBodies) {
+                        val removed=(b["removed"] as? JsonArray) ?: JsonArray(emptyList())
+                        removed.forEach { raw -> val r=raw.jsonObject;records.remove(r.getValue("kind").jsonPrimitive.content to r.getValue("recordId").jsonPrimitive.content) }
+                        rows.forEach {r -> records[r.getValue("kind").jsonPrimitive.content to r.getValue("recordId").jsonPrimitive.content]=r}
+                        publications[id]=rows; publicationBodies[id]=body!!; publicationTimes[id]=time; publicationRemovals[id]=removed
+                    } else require(publicationBodies[id] == body)
+                    if (losePublication && rows.isNotEmpty()) { losePublication=false; throw IOException("Synthetic lost acknowledgement") }
+                    val published=JsonArray(rows.map { JsonObject(it.filterKeys { key -> key in setOf("kind","recordId","revision") }) })
+                    answer("published" to if (wrongPublicationAck && rows.isNotEmpty()) JsonArray(emptyList()) else published,
+                        "removed" to publicationRemovals.getValue(id), "publishedAt" to JsonPrimitive(publicationTimes.getValue(id)))
                 }
-                path.contains("/publications/") -> {if (failPublicationReadback) throw IOException("Fixture lost independent publication readback");val rows=publications.getValue(path.substringAfterLast('/')).map { row -> records.getValue(row.getValue("kind").jsonPrimitive.content to row.getValue("recordId").jsonPrimitive.content) }; answer("records" to JsonArray(rows))}
+                path.contains("/publications/") -> {
+                    if (cancelPublicationReadback) throw kotlinx.coroutines.CancellationException("Synthetic interruption")
+                    if (failPublicationReadback) throw IOException("Fixture lost independent publication readback")
+                    val id=path.substringAfterLast('/')
+                    val rows=publications.getValue(id).map { row -> records.getValue(row.getValue("kind").jsonPrimitive.content to row.getValue("recordId").jsonPrimitive.content) }
+                    answer("commandId" to JsonPrimitive(id),"source" to JsonPrimitive("INDEPENDENT_CURRENT_ANDROID_MIRROR_READBACK"),
+                        "records" to JsonArray(if (partialPublicationReadback) rows.dropLast(1) else rows),
+                        "removed" to publicationRemovals.getValue(id),"verifiedAt" to JsonPrimitive(time))
+                }
                 path.contains("/records/") -> {recordReads++;val kind=path.substringAfter("/records/").substringBefore('/');val id=java.net.URLDecoder.decode(path.substringAfterLast('/'),"UTF-8");(records[kind to id]?.let { answer("records" to JsonArray(listOf(it))) } ?: OwnerSyncResponse(404,buildJsonObject {put("mode",CampaignConnectionProtocol.MODE);put("error",buildJsonObject{put("code","RECORD_NOT_PUBLISHED")})})).also { afterRecordRead?.invoke() }}
                 path.endsWith("/decisions") -> {
                     lastDecision=body;val id=b!!.getValue("commandId").jsonPrimitive.content

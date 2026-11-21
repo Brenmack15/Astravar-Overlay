@@ -252,6 +252,10 @@ class OwnerSyncTest {
             override fun edit(): SharedPreferences.Editor {
                 val editor = preferences.edit()
                 return object : SharedPreferences.Editor by editor {
+                    override fun putString(key: String, value: String?): SharedPreferences.Editor {
+                        editor.putString(key, value); return this
+                    }
+                    override fun remove(key: String): SharedPreferences.Editor { editor.remove(key); return this }
                     override fun commit(): Boolean {
                         val saved = editor.commit()
                         if (failNextCommit) { failNextCommit = false; return false }

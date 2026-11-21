@@ -93,6 +93,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
     private val dao = db.connection()
     private val domain = CampaignSyncDomain(campaignDb, weaponDb)
     private val pushStore = CampaignPushStore(context)
+    private val syncDiagnostics = CampaignSyncDiagnostics(context)
     private var automaticOperation = false
     private var syncContinuationRequired = false
     private fun requireAutomaticAllowed() {
@@ -138,6 +139,9 @@ class CampaignConnectionClient internal constructor(private val context: Context
         val auth = if (authenticated) credential(value) else null
         val result = if (delete) transport.delete(value.origin, path, auth, vault.serviceAccess(value.origin, value.campaignId))
             else transport.request(value.origin, path, auth, vault.serviceAccess(value.origin, value.campaignId), body)
+        val expectedMode = if (path.startsWith("/v2/")) CampaignConnectionProtocol.MODE else OwnerConnectionProtocol.MODE
+        if (result.json["mode"]?.jsonPrimitive?.content == expectedMode && result.json["campaignId"]?.jsonPrimitive?.content == value.campaignId)
+            syncDiagnostics.time(value, "lastServerResponseAt", now())
         if (result.status !in 200..299) {
             val code = (result.json["error"] as? JsonObject)?.get("code")?.jsonPrimitive?.content
             val expectedMode = if (path.startsWith("/v2/")) CampaignConnectionProtocol.MODE else OwnerConnectionProtocol.MODE
@@ -173,12 +177,14 @@ class CampaignConnectionClient internal constructor(private val context: Context
     }
     suspend fun importServiceAuthorization(bytes: ByteArray): JsonObject = lock.withLock {
         val enrollment = bootstrap.importEncryptedBundle(bytes)
-        require(enrollment.campaignId != OwnerConnectionProtocol.CAMPAIGN)
-        require(campaignDb.recordsDao().allCharacterProfiles().any { campaignFor(it.id) == enrollment.campaignId }) { "Service authorization does not match an existing campaign." }
-        vault.storeServiceAccess(enrollment.origin, enrollment.campaignId, enrollment.serviceAccessBearer)
         val value = setting()
+        if (enrollment.campaignId == OwnerConnectionProtocol.CAMPAIGN ||
+            campaignDb.recordsDao().allCharacterProfiles().none { campaignFor(it.id) == enrollment.campaignId } ||
+            (value.origin.isNotBlank() && value.origin != enrollment.origin) ||
+            (value.deviceId.isNotBlank() && value.campaignId != enrollment.campaignId))
+            throw OwnerAuthorizationException(OwnerAuthorizationError.WRONG_SCOPE)
+        bootstrap.completeImport(enrollment) { vault.storeServiceAccess(enrollment.origin, enrollment.campaignId, enrollment.serviceAccessBearer) }
         if (value.origin.isBlank()) dao.settings(value.copy(origin = enrollment.origin, status = "Service authorization ready · pair a campaign"))
-        else require(value.origin == enrollment.origin) { "Revoke the current service before replacing its authorization." }
         snapshotUnlocked()
     }
     suspend fun beginPairing(origin: String, profileId: String, deviceName: String, readScopes: Set<String>, writeScopes: Set<String>): JsonObject = lock.withLock {
@@ -278,6 +284,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         if (write != CampaignConnectionProtocol.parseScopes(g.getValue("writeScopes"))) put("writeScopes", CampaignConnectionProtocol.scopeArray(write))
     })
     private suspend fun flushGrant(value: CampaignConnectionSettings) {
+        syncDiagnostics.stage(value, CampaignSyncStage.GRANT_UPDATE)
         var current = value
         // At most the preserved previous change and the explicitly selected latest change.
         repeat(2) {
@@ -316,7 +323,9 @@ class CampaignConnectionClient internal constructor(private val context: Context
         val actor = value.profileId.takeIf { it.isNotBlank() }?.let { campaignDb.genesisAuthorityDao().actor(it) }
         val selectedCampaign = value.campaignId.takeIf { it.isNotBlank() }?.let { campaignDb.genesisAuthorityDao().campaign(it) }
         val localById = current.associateBy { it.kind to it.recordId }
-        val secret = if (value.origin.isBlank() || value.campaignId.isBlank()) null else vault.credential(value.origin, value.campaignId)
+        var credentialFailure: String? = null
+        val secret = if (value.origin.isBlank() || value.campaignId.isBlank()) null else try { vault.credential(value.origin, value.campaignId) }
+            catch (e: OwnerSyncFailure) { credentialFailure = campaignSyncFailureCode(e.code); null }
         val g = grant(value)
         val connected = secret?.credentialId == value.deviceId && value.deviceId.isNotBlank() && secret.expiresAt > now() &&
             !value.revokePending && runCatching { checkedGrant(value, g) }.isSuccess
@@ -343,7 +352,9 @@ class CampaignConnectionClient internal constructor(private val context: Context
             pendingDevice + if (moreServerPending) 1 else 0, pendingReceipts, commands.any { it.state in setOf("CONFLICT", "DECISION_CONFLICT") },
             value.lastError, value.lastDeviceSyncAt, now(), pendingRemovals = pendingRemovals,
             canonicalValuesRequireReview = canonicalReviewProfileId != null))
+        val diagnostics = syncDiagnostics.snapshot(value, eligible.size - verified + pendingRemovals)
         return buildJsonObject {
+            put("syncDiagnostics", diagnostics); diagnostics.forEach { (key, entry) -> put(key, entry) }
             put("connected", connected); put("origin", value.origin)
             put("readiness", readiness.name); put("readinessTitle", readiness.title); put("readinessDetail", readiness.detail)
             put("canonicalReviewProfileId", canonicalReviewProfileId?.let(::JsonPrimitive) ?: JsonNull)
@@ -361,7 +372,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
             put("sourceCampaignPrepared", selectedCampaign != null && !selectedCampaign.archived)
             put("deviceName", value.deviceName); put("accountLabel", value.accountLabel)
             put("status", if (value.deviceId.isNotBlank() && !value.revokePending && (secret == null || secret.expiresAt <= now() || runCatching { checkedGrant(value, g) }.isFailure)) "Authentication expired" else value.status)
-            put("lastError", value.lastError); put("lastSyncAt", value.lastSyncAt); put("lastDeviceSyncAt", value.lastDeviceSyncAt)
+            put("lastError", credentialFailure ?: value.lastError); put("lastSyncAt", value.lastSyncAt); put("lastDeviceSyncAt", value.lastDeviceSyncAt)
             put("syncContinuationRequired", syncContinuationRequired)
             put("serverPendingUnfetched", value.status in setOf("Pending delivery · more queued transactions", "Pending approval · additional queued transactions"))
             put("automaticSyncPaused", CampaignSyncPreferences(context).paused)
@@ -488,24 +499,32 @@ class CampaignConnectionClient internal constructor(private val context: Context
     }
     private suspend fun failure(error: Exception) {
         val value = setting()
-        val code = (error as? OwnerSyncFailure)?.code ?: "CONNECTION_UNVERIFIED"
+        val code = when (error) {
+            is OwnerSyncFailure -> campaignSyncFailureCode(error.code)
+            is java.net.SocketTimeoutException -> "NETWORK_TIMEOUT"
+            is javax.net.ssl.SSLException -> "TLS_FAILURE"
+            is java.io.IOException -> "NETWORK_UNAVAILABLE"
+            else -> "CONNECTION_UNVERIFIED"
+        }
+        syncDiagnostics.failed(value, code)
         val status = when {
             CampaignSyncPreferences(context).paused -> "Paused"
             value.revokePending -> "Server revocation pending"
             code.contains("EXPIRED") || code in setOf("AUTHENTICATION_REQUIRED", "CREDENTIAL_REVOKED_OR_EXPIRED") -> "Authentication expired"
             code.contains("CONFLICT") || code == "GRANT_CHANGED" -> "Conflict requires review"
             code in setOf("ACCESS_DENIED", "READ_SCOPE_DENIED", "WRITE_SCOPE_DENIED", "CAMPAIGN_NOT_AUTHORIZED", "PRIVATE_GATEWAY_AUTH_REQUIRED") -> "Permission denied · pending delivery retained"
-            else -> "Offline · pending delivery retained"
+            else -> "Synchronization retry required · pending delivery retained"
         }
         dao.settings(value.copy(status = status, lastError = code))
     }
     private suspend fun syncUnlocked() {
         requireAutomaticAllowed()
         syncContinuationRequired = false
-        var value = setting(); credential(value)
+        var value = setting(); syncDiagnostics.begin(value); credential(value)
         if (value.revokePending) { revokeUnlocked(value); return }
         dao.settings(value.copy(status = "Syncing", lastError = "")); notifySync()
         flushGrant(setting()); value = setting()
+        syncDiagnostics.stage(value, CampaignSyncStage.GRANT_READ)
         val g = checkedGrant(value, request(value, base(value) + "/grant"))
         dao.settings(value.copy(grantJson = g.toString())); value = setting()
         registerPush(value)
@@ -516,6 +535,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         // /pending is byte-bounded. A collapsed wake burst must drain subsequent pages,
         // but an unapproved first page must never become a network/CPU retry loop.
         for (page in 0 until 4) {
+            syncDiagnostics.stage(value, CampaignSyncStage.PENDING_FETCH)
             val pending = request(value, base(value) + "/pending")
             val hasMore = pending["hasMore"]?.let {
                 require(it is JsonPrimitive && !it.isString && it.booleanOrNull != null) { "Invalid pending pagination metadata." }
@@ -538,7 +558,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         }
         publish(value)
         val conflict = dao.commands().any { belongs(it, value) && it.state in setOf("CONFLICT", "DECISION_CONFLICT") }
-        val queued = dao.commands().any { belongs(it, value) && it.state in setOf("APPLIED_PENDING", "APPLYING", "REJECTED_PENDING") }
+        val queued = dao.commands().any { belongs(it, value) && it.state in setOf("PENDING_APPROVAL", "PENDING_DELIVERY", "APPLIED_PENDING", "APPLYING", "REJECTED_PENDING", "CONFLICT_PENDING") }
         dao.settings(setting().copy(status = when {
             syncContinuationRequired -> "Pending delivery · more queued transactions"
             conflict -> "Conflict requires review"
@@ -546,6 +566,10 @@ class CampaignConnectionClient internal constructor(private val context: Context
             queued -> "Pending delivery"
             else -> "Connected"
         }, lastSyncAt = now(), lastError = ""))
+        if (!syncContinuationRequired && !conflict && !approvalBlocksQueue && !queued) {
+            syncDiagnostics.time(value, "lastFullSyncAt", now())
+            syncDiagnostics.stage(value, CampaignSyncStage.COMPLETE)
+        } else syncDiagnostics.stage(value, CampaignSyncStage.WAITING_FOR_PENDING_WORK)
     }
     private fun parsed(command: CampaignConnectionCommand): JsonObject = Json.parseToJsonElement(command.body).jsonObject.also {
         require(it.getValue("commandId").jsonPrimitive.content == command.commandId)
@@ -665,6 +689,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         }
     }
     private suspend fun finishLocal(value: CampaignConnectionSettings, command: CampaignConnectionCommand, manual: Boolean = false, recoverOnly: Boolean = false) {
+        syncDiagnostics.stage(value, if (recoverOnly) CampaignSyncStage.LOCAL_COMMIT_RECOVERY else CampaignSyncStage.LOCAL_COMMIT)
         requireAutomaticAllowed()
         require(command.state == "APPLYING"); parsed(command)
         val localId = CampaignConnectionProtocol.localCommand(value.origin, value.campaignId, command.commandId)
@@ -705,6 +730,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         put("localReceiptId", receiptId?.let(::JsonPrimitive) ?: JsonNull); put("records", campaignJson.encodeToJsonElement(records))
     })
     private suspend fun readRecord(value: CampaignConnectionSettings, record: CampaignSyncRecord): CampaignSyncRecord {
+        syncDiagnostics.stage(value, CampaignSyncStage.RECORD_READBACK)
         val result = request(value, base(value) + "/records/${record.kind}/${java.net.URLEncoder.encode(record.recordId, "UTF-8")}")
         val raw = (result["record"] as? JsonObject) ?: result.getValue("records").jsonArray.single().jsonObject
         val decoded = campaignJson.decodeFromJsonElement<CampaignSyncRecord>(JsonObject(raw.filterKeys { it in setOf("recordId", "kind", "revision", "fields") }))
@@ -712,6 +738,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         return decoded
     }
     private suspend fun flushDecision(value: CampaignConnectionSettings, command: CampaignConnectionCommand) {
+        syncDiagnostics.stage(value, CampaignSyncStage.DECISION_UPLOAD)
         val body = requireNotNull(command.decisionBody); val decision = Json.parseToJsonElement(body).jsonObject
         val frozenOutputs = campaignJson.decodeFromJsonElement<List<CampaignSyncRecord>>(decision.getValue("records"))
         if (visible(value, frozenOutputs) != frozenOutputs) {
@@ -726,6 +753,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         require(result.getValue("commandId").jsonPrimitive.content == command.commandId && result.getValue("fingerprint").jsonPrimitive.content == command.fingerprint)
         require(result.getValue("status") == decision.getValue("status") && result.getValue("localReceiptId") == decision.getValue("localReceiptId"))
         require(result.getValue("deviceCredentialId").jsonPrimitive.content == value.deviceId)
+        syncDiagnostics.stage(value, CampaignSyncStage.RECEIPT_READBACK)
         require(request(value, base(value) + "/receipts/${command.commandId}").getValue("receipt") == result)
         if (decision.getValue("status").jsonPrimitive.content == "APPLIED") {
             val saved = requireNotNull(campaignDb.recordsDao().receipt(CampaignSyncDomain.receiptId(CampaignConnectionProtocol.localCommand(value.origin, value.campaignId, command.commandId))))
@@ -748,6 +776,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
     private suspend fun publish(value: CampaignConnectionSettings) {
         for (publication in dao.publications().filter { it.origin == value.origin && it.campaignId == value.campaignId && it.deviceId == value.deviceId && it.state == "PENDING" }) flushPublication(value, publication)
         val mirrors = dao.mirrors(value.origin, value.campaignId, value.deviceId).associateBy { it.kind to it.recordId }
+        syncDiagnostics.stage(value, CampaignSyncStage.LOCAL_SNAPSHOT)
         val committed = visible(value, domain.snapshot(value.campaignId))
         val identities = committed.map { it.kind to it.recordId }.toSet()
         val readScopes = activeRead(value)
@@ -774,7 +803,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         var batchBytes = 0
         for (record in changed) {
             val size = OwnerSyncProtocol.canonical(campaignJson.encodeToJsonElement(record)).toByteArray(Charsets.UTF_8).size
-            require(size <= 48_000) { "A campaign record exceeds the bounded sync format. Its source must be split before publication." }
+            if (size > 48_000) throw OwnerSyncFailure("RECORD_TOO_LARGE")
             if (batch.isNotEmpty() && (batch.size >= 80 || batchBytes + size > 48_000)) {
                 batches += batch; batch = mutableListOf(); batchBytes = 0
             }
@@ -791,12 +820,16 @@ class CampaignConnectionClient internal constructor(private val context: Context
         val current = visible(value, domain.snapshot(value.campaignId))
         // The backend refreshes the whole mirror only when every current local identity/revision/hash agrees.
         // A restore or missing row therefore becomes a visible conflict, never a falsely fresh historical value.
+        syncDiagnostics.stage(value, CampaignSyncStage.SNAPSHOT_CONFIRMATION)
+        syncDiagnostics.time(value, "lastUploadAttemptAt", now())
         val heartbeat = request(value, base(value) + "/records", OwnerSyncProtocol.canonical(buildJsonObject {
             put("commandId", UUID.randomUUID().toString()); put("records", JsonArray(emptyList()))
             put("snapshotFingerprint", snapshotFingerprint(current))
         }))
         val verifiedAt = heartbeat["publishedAt"]?.jsonPrimitive?.long ?: error("Missing verified synchronization timestamp.")
         require(verifiedAt > 0 && verifiedAt <= now() + 60_000)
+        require(heartbeat.getValue("published").jsonArray.isEmpty() && heartbeat.getValue("removed").jsonArray.isEmpty())
+        syncDiagnostics.time(value, "lastPublicationAcceptedAt", now())
         dao.settings(setting().copy(lastDeviceSyncAt = verifiedAt))
     }
     private fun snapshotFingerprint(records: List<CampaignSyncRecord>): String = OwnerSyncProtocol.hash(OwnerSyncProtocol.canonical(buildJsonArray {
@@ -823,9 +856,30 @@ class CampaignConnectionClient internal constructor(private val context: Context
         if (visible(value, records) != records || removed.any { !canReadKind(it.getValue("kind").jsonPrimitive.content, it.getValue("recordId").jsonPrimitive.content, readScopes) }) {
             dao.update(publication.copy(state = "SCOPE_REVOKED", receiptJson = null)); return
         }
+        syncDiagnostics.stage(value, CampaignSyncStage.PUBLICATION_UPLOAD)
+        syncDiagnostics.time(value, "lastUploadAttemptAt", now())
         val result = request(value, base(value) + "/records", publication.body)
-        val readback = request(value, base(value) + "/publications/${publication.commandId}").getValue("records").jsonArray.map { decodeRecord(it.jsonObject) }
-        require(readback.sortedWith(compareBy({ it.kind }, { it.recordId })) == records.sortedWith(compareBy({ it.kind }, { it.recordId }))) { "Published revisions failed independent current-record readback." }
+        syncDiagnostics.stage(value, CampaignSyncStage.PUBLICATION_ACKNOWLEDGEMENT)
+        val expectedPublished = buildJsonArray { records.forEach { record -> add(buildJsonObject {
+            put("recordId", record.recordId); put("kind", record.kind); put("revision", record.revision)
+        }) } }
+        val acceptedAt = (result["publishedAt"] as? JsonPrimitive)?.longOrNull
+        if (result["published"] != expectedPublished || result["removed"] != JsonArray(removed) ||
+            acceptedAt == null || acceptedAt <= 0 || acceptedAt > now() + 60_000)
+            throw OwnerSyncFailure("PUBLICATION_ACKNOWLEDGEMENT_INVALID")
+        syncDiagnostics.time(value, "lastPublicationAcceptedAt", now())
+        syncDiagnostics.stage(value, CampaignSyncStage.PUBLICATION_READBACK)
+        val verification = request(value, base(value) + "/publications/${publication.commandId}")
+        val verifiedAt = (verification["verifiedAt"] as? JsonPrimitive)?.longOrNull
+        if ((verification["commandId"] as? JsonPrimitive)?.content != publication.commandId ||
+            (verification["source"] as? JsonPrimitive)?.content != "INDEPENDENT_CURRENT_ANDROID_MIRROR_READBACK" ||
+            verification["removed"] != JsonArray(removed) || verifiedAt == null || verifiedAt <= 0 || verifiedAt > now() + 60_000)
+            throw OwnerSyncFailure("PUBLICATION_READBACK_INVALID")
+        val readback = (verification["records"] as? JsonArray)?.map { decodeRecord(it.jsonObject) }
+            ?: throw OwnerSyncFailure("PUBLICATION_READBACK_INVALID")
+        syncDiagnostics.stage(value, CampaignSyncStage.PUBLICATION_VALIDATION)
+        if (readback.sortedWith(compareBy({ it.kind }, { it.recordId })) != records.sortedWith(compareBy({ it.kind }, { it.recordId })))
+            throw OwnerSyncFailure("PUBLICATION_REVISION_MISMATCH")
         for (row in removed) {
             val path = base(value) + "/records/${row.getValue("kind").jsonPrimitive.content}/${java.net.URLEncoder.encode(row.getValue("recordId").jsonPrimitive.content, "UTF-8")}"
             val error = runCatching { request(value, path) }.exceptionOrNull()
@@ -837,6 +891,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
                 OwnerSyncProtocol.hash(OwnerSyncProtocol.canonical(campaignJson.encodeToJsonElement(record)))))
             dao.update(publication.copy(state = "VERIFIED", receiptJson = OwnerSyncProtocol.canonical(result)))
         }
+        syncDiagnostics.time(value, "lastIndependentVerificationAt", now())
     }
     suspend fun revoke(): JsonObject = lock.withLock {
         val value = setting(); credential(value)
