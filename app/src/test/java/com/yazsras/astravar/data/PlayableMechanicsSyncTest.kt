@@ -60,6 +60,17 @@ class PlayableMechanicsSyncTest {
             assertTrue(runCatching { apply("convergence-other-command", hold) }.isFailure)
             assertTrue(runCatching { apply("convergence-add", hold) }.isFailure)
             apply("convergence-skill", operation(PlayableMechanicsSync.BONUS, bonus(skillId, NumericTarget.SKILL, "Investigation")))
+            val defenseId = "31882a16-0aeb-4a17-8813-4491b5be8fc1"
+            fun defense(kind: DefenseKind) = buildJsonObject {
+                val value = PlayableMechanicsSync.Defense(defenseId, "Synthetic ward", DamageKind.COLD, kind, false, true, null)
+                put("defense", campaignJson.encodeToJsonElement(value))
+            }
+            apply("convergence-resistance", operation(PlayableMechanicsSync.DEFENSE, defense(DefenseKind.RESISTANCE)))
+            apply("convergence-immunity", operation(PlayableMechanicsSync.DEFENSE, defense(DefenseKind.IMMUNITY)))
+            fun coldWard(rows: List<CampaignSyncRecord>) = rows.filter {
+                it.kind == PlayableMechanicsSync.STATS && it.fields["target"]?.jsonPrimitive?.content == "DAMAGE_DEFENSE"
+            }.map { it.fields.getValue("key").jsonPrimitive.content }
+            assertEquals(listOf("COLD:IMMUNITY:ALL"), coldWard(read()))
             val active = read()
             assertEquals(21, stat(active, "INT").getValue("base").jsonPrimitive.int)
             assertEquals(22, stat(active, "INT").getValue("effective").jsonPrimitive.int)
@@ -88,6 +99,12 @@ class PlayableMechanicsSyncTest {
             assertTrue(preview.conflicts.joinToString(), preview.valid)
             restore.restore(preview, "convergence-restore")
             assertEquals(stat(active, "INT"), stat(read(target), "INT"))
+            assertEquals(listOf("COLD:IMMUNITY:ALL"), coldWard(read(target)))
+            val ward = requireNotNull(ReforgeRepository(target).get(actorId)).character
+            val nativeWard = CharacterCalculator.calculate(ward).defenses.single()
+            assertEquals(EffectPayload.Defense(DamageKind.COLD, DefenseKind.IMMUNITY), nativeWard)
+            apply("convergence-remove-defense", operation(PlayableMechanicsSync.DEFENSE, buildJsonObject { put("removeId", defenseId) }))
+            assertTrue(coldWard(read()).isEmpty())
             val invalid = operation(PlayableMechanicsSync.BONUS, bonus(skillId, NumericTarget.SKILL, "absent-custom-skill"))
             assertTrue(runCatching { apply("convergence-invalid", invalid) }.isFailure)
             assertNull(db.recordsDao().receipt(CampaignSyncDomain.receiptId("convergence-invalid")))

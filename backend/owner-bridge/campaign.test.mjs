@@ -325,4 +325,21 @@ test('native equipment v1 validates typed intent, separate grants, immutable rec
  assert.deepEqual(read.records[0].fields.bonuses,[bonus]);
  await fails(f.submit([edit]),'REVISION_CONFLICT');
  await fails(f.submit([op('set_record',record.kind,'stone',{operating:false},2)]),'READ_ONLY_RECORD_KIND');
+ const defense={id:uuid(),label:'Disposable cold ward',damageType:'COLD',kind:'IMMUNITY',nonmagicalOnly:false,enabled:true,expiresAtGameSeconds:null};
+ const ward=op('edit_equipment_defense',record.kind,'stone',{actorRevision:5,defense},2);
+ await fails(f.submit([{...ward,fields:{actorRevision:5,defense:{...defense,damageType:'unknown'}}}]),'INVALID_DAMAGE_DEFENSE');
+ const manualWard=await f.submit([ward]);
+ assert.equal(manualWard.command.status,'PENDING_APPROVAL');
+ await f.sync.decide(f.principal,campaign,decision(manualWard.command,{status:'REJECTED'}));
+ await f.enable(['character','inventory','combat']);
+ const submitted=await f.submit([ward]);
+ assert.equal(submitted.command.status,'PENDING_DELIVERY');
+ const fields=submitted.command.operations[0].proposedFields;
+ assert.deepEqual(fields.defenses,[defense]);
+ await f.sync.decide(f.principal,campaign,decision(submitted.command,{rows:[{...saved,revision:3,fields:{...fields,revision:3}}]}));
+ assert.equal((await f.sync.getReceipt(connector,campaign,submitted.command.commandId)).receipt.status,'APPLIED');
+ assert.deepEqual((await f.sync.read(connector,campaign,{kinds:[record.kind],recordId:'stone'})).records[0].fields.defenses,[defense]);
+ const remove=await f.submit([op('edit_equipment_defense',record.kind,'stone',{actorRevision:5,removeId:defense.id},3)]);
+ assert.equal(Object.hasOwn(remove.command.operations[0].proposedFields,'defenses'),false);
+
 });

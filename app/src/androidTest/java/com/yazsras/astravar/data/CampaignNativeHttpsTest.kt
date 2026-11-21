@@ -427,8 +427,21 @@ class CampaignNativeHttpsTest {
         verifyInt(21)
         edit("set_equipment_state", buildJsonObject { put("state", "HELD") })
         verifyInt(22)
+        edit("edit_equipment_defense", buildJsonObject {
+            putJsonObject("defense") {
+                put("id", "edf27ed3-d934-4b12-ad26-ad5fcfe84537"); put("label", "Synthetic cold ward")
+                put("damageType", "COLD"); put("kind", "IMMUNITY"); put("nonmagicalOnly", false)
+                put("enabled", true); put("expiresAtGameSeconds", JsonNull)
+            }
+        })
+        fun coldImmunity() = mcp("get_playable_statistics", arguments).getValue("records").jsonArray.any {
+            val f = it.jsonObject.getValue("fields").jsonObject
+            f.getValue("target").jsonPrimitive.content == "DAMAGE_DEFENSE" && f.getValue("key").jsonPrimitive.content == "COLD:IMMUNITY:ALL"
+        }
+        assertTrue(coldImmunity())
         edit("set_equipment_state", buildJsonObject { put("operating", false) })
         verifyInt(21)
+        assertFalse(coldImmunity())
     }
 
     @Test fun authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts() = runBlocking {

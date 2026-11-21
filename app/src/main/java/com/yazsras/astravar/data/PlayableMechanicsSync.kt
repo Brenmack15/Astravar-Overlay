@@ -9,6 +9,7 @@ internal object PlayableMechanicsSync {
     const val STATS = "playable-stat"
     const val EQUIPMENT = "playable-equipment"
     const val BONUS = "edit_equipment_bonus"
+    const val DEFENSE = "edit_equipment_defense"
     const val STATE = "set_equipment_state"
     val readScopes = setOf("character", "companions", "inventory")
     val writeScopes = setOf("character", "inventory")
@@ -17,6 +18,10 @@ internal object PlayableMechanicsSync {
     @Serializable
     data class Bonus(val id: String, val label: String, val target: NumericTarget, val key: String,
         val amount: Int, val enabled: Boolean, val stackingKey: String?, val expiresAtGameSeconds: Long?)
+
+    @Serializable
+    data class Defense(val id: String, val label: String, val damageType: DamageKind, val kind: DefenseKind,
+        val nonmagicalOnly: Boolean, val enabled: Boolean, val expiresAtGameSeconds: Long?)
 
     fun statistics(c: ReforgeCharacter, role: GenesisActorRole): List<CampaignSyncRecord> {
         val calculated = CharacterCalculator.calculate(c)
@@ -49,6 +54,10 @@ internal object PlayableMechanicsSync {
             add(stat("DERIVED", "SPELL_SAVE_DC", "Spell save DC", calculated.spellSaveDc.value))
             for ((mode, value) in calculated.movement) add(stat("MOVEMENT", mode, mode, value))
             for ((sense, value) in calculated.senses) add(stat("SENSE", sense, sense, value))
+            for (defense in calculated.defenses.distinct()) {
+                val key = listOf(defense.type.name, defense.kind.name, if (defense.nonmagicalOnly) "NONMAGICAL" else "ALL").joinToString(":")
+                add(stat("DAMAGE_DEFENSE", key, defense.kind.name, 1))
+            }
             SkillRules.entries(c, calculated).forEach { add(stat("SKILL", it.id, it.name, it.calculation.value)) }
         }
     }
@@ -63,12 +72,69 @@ internal object PlayableMechanicsSync {
     fun equipment(c: ReforgeCharacter, item: ItemInstance, definition: ItemDefinition,
         revision: Long): CampaignSyncRecord {
         val owned = definition.effects.filter { it.source.id == origin(item.id) && it.id.startsWith("dm-bonus:") && it.payload is EffectPayload.Number }
+        val defenses = definition.effects.mapNotNull { effect ->
+            val payload = effect.payload as? EffectPayload.Defense ?: return@mapNotNull null
+            if (effect.source.id != origin(item.id) || !effect.id.startsWith("dm-defense:")) return@mapNotNull null
+            Defense(effect.id.removePrefix("dm-defense:"), effect.name, payload.type, payload.kind, payload.nonmagicalOnly,
+                effect.enabled, effect.expiresAtGameSeconds)
+        }
         return CampaignSyncRecord(item.id, EQUIPMENT, revision, buildJsonObject {
             put("schemaVersion", 1); put("id", item.id); put("profileId", c.id); put("definitionId", definition.id)
             put("revision", revision); put("state", item.state.name); put("attuned", item.attuned)
             put("operating", item.operating); put("bonuses", campaignJson.encodeToJsonElement(owned.map(::bonus)))
+            if (defenses.isNotEmpty()) put("defenses", campaignJson.encodeToJsonElement(defenses))
             put("source", "Android Reforge equipment v1")
         })
+    }
+
+    private fun editEffect(c: ReforgeCharacter, item: ItemInstance, def: ItemDefinition, type: String,
+        fields: Map<String, JsonElement>): ReforgeCharacter {
+        require(c.items.count { it.definitionId == def.id } == 1) { "Shared definitions need a separate review." }
+        val kind = if (type == DEFENSE) "defense" else "bonus"
+        val removal = fields["removeId"]?.jsonPrimitive?.content
+        require(fields.keys == setOf("actorRevision", if (removal == null) kind else "removeId"))
+        val raw = if (removal == null) fields.getValue(kind).jsonObject else null
+        val id = removal ?: requireNotNull(raw).getValue("id").jsonPrimitive.content
+        require(uuid.matches(id))
+        val prefix = "dm-$kind:"
+        val nativeId = prefix + id
+        val existing = def.effects.singleOrNull { it.id == nativeId }
+        require(existing == null || existing.source.id == origin(item.id) &&
+            if (type == DEFENSE) existing.payload is EffectPayload.Defense else existing.payload is EffectPayload.Number)
+        require(c.effects.none { it.id == nativeId } && c.itemDefinitions.none { it.id != def.id && it.effects.any { e -> e.id == nativeId } })
+        val effects = if (raw == null) {
+            require(existing != null)
+            def.effects.filterNot { it.id == nativeId }
+        } else {
+            val label = raw.getValue("label").jsonPrimitive.content
+            require(label.isNotBlank() && label.length <= 100)
+            val expiresAt = raw.getValue("expiresAtGameSeconds").let { if (it is JsonNull) null else it.jsonPrimitive.long }
+            require(expiresAt == null || expiresAt >= 0)
+            val enabled = raw.getValue("enabled").jsonPrimitive.boolean
+            val payload = if (type == DEFENSE) {
+                val input = campaignJson.decodeFromJsonElement<Defense>(raw)
+                EffectPayload.Defense(input.damageType, input.kind, input.nonmagicalOnly)
+            } else {
+                val input = campaignJson.decodeFromJsonElement<Bonus>(raw)
+                require(input.amount in -100..100)
+                require(input.stackingKey == null || input.stackingKey.matches(Regex("[A-Za-z0-9._:-]{1,80}")))
+                require(when (input.target) {
+                    NumericTarget.ABILITY -> Stat.entries.any { it.name == input.key }
+                    NumericTarget.SKILL -> SkillRules.entries(c).any { it.id == input.key }
+                    else -> false
+                })
+                EffectPayload.Number(input.target, NumberOperation.ADD, input.amount, input.key)
+            }
+            val source = RuleSource(origin(item.id), def.name, Acceptance.ACCEPTED_HOMEBREW)
+            val stacking = if (type == DEFENSE) existing?.stackingKey else raw["stackingKey"]?.jsonPrimitive?.contentOrNull
+            val effect = (existing ?: EffectDefinition(nativeId, label, source, payload)).copy(name = label, payload = payload,
+                enabled = enabled, stackingKey = stacking, expiresAtGameSeconds = expiresAt)
+            if (existing == null) {
+                require(def.effects.count { it.source.id == origin(item.id) && it.id.startsWith(prefix) } < 24)
+                def.effects + effect
+            } else def.effects.map { if (it.id == nativeId) effect else it }
+        }
+        return c.copy(itemDefinitions = c.itemDefinitions.map { if (it.id == def.id) it.copy(effects = effects) else it })
     }
 
     suspend fun edit(db: CampaignLedgerDb, campaignId: String, op: CampaignSyncOperation, command: String, source: String) {
@@ -100,40 +166,7 @@ internal object PlayableMechanicsSync {
                     else -> error("Unsupported equipment state field.")
                 }
             }
-            BONUS -> {
-                require(c.items.count { it.definitionId == def.id } == 1) { "Shared definitions need a separate review." }
-                val removal = op.fields["removeId"]?.jsonPrimitive?.content
-                require(editFields.keys == setOf("actorRevision", if (removal != null) "removeId" else "bonus"))
-                val input = if (removal == null) campaignJson.decodeFromJsonElement<Bonus>(op.fields.getValue("bonus")) else null
-                val id = removal ?: requireNotNull(input).id
-                require(uuid.matches(id))
-                val nativeId = "dm-bonus:$id"
-                val existing = def.effects.singleOrNull { it.id == nativeId }
-                require(existing == null || existing.source.id == origin(item.id))
-                require(c.effects.none { it.id == nativeId } && c.itemDefinitions.none { it.id != def.id && it.effects.any { e -> e.id == nativeId } })
-                val effects = if (input == null) {
-                    require(existing != null); def.effects.filterNot { it.id == nativeId }
-                } else {
-                    require(input.label.isNotBlank() && input.label.length <= 100 && input.amount in -100..100)
-                    require(input.stackingKey == null || input.stackingKey.matches(Regex("[A-Za-z0-9._:-]{1,80}")))
-                    require(input.expiresAtGameSeconds == null || input.expiresAtGameSeconds >= 0)
-                    require(when (input.target) {
-                        NumericTarget.ABILITY -> Stat.entries.any { it.name == input.key }
-                        NumericTarget.SKILL -> SkillRules.entries(c).any { it.id == input.key }
-                        else -> false
-                    })
-                    val payload = EffectPayload.Number(input.target, NumberOperation.ADD, input.amount, input.key)
-                    val effect = (existing ?: EffectDefinition(nativeId, input.label,
-                        RuleSource(origin(item.id), def.name, Acceptance.ACCEPTED_HOMEBREW), payload))
-                        .copy(name = input.label, payload = payload, enabled = input.enabled,
-                            stackingKey = input.stackingKey, expiresAtGameSeconds = input.expiresAtGameSeconds)
-                    if (existing == null) {
-                        require(def.effects.count { it.source.id == origin(item.id) } < 24)
-                        def.effects + effect
-                    } else def.effects.map { if (it.id == nativeId) effect else it }
-                }
-                c.copy(itemDefinitions = c.itemDefinitions.map { if (it.id == def.id) it.copy(effects = effects) else it })
-            }
+            DEFENSE, BONUS -> editEffect(c, item, def, op.type, editFields)
             else -> error("Unsupported equipment operation.")
         }
         require(next != c) { "The requested state is already active." }

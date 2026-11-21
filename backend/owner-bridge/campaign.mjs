@@ -18,7 +18,7 @@ const exact=(v,required,optional=[])=>{if(!v||typeof v!=='object'||Array.isArray
 export function campaignScopeList(v){if(!Array.isArray(v)||v.length>CAMPAIGN_SCOPES.length||new Set(v).size!==v.length||v.some(s=>!CAMPAIGN_SCOPES.includes(s)))fail(400,'INVALID_CAMPAIGN_SCOPES');return [...v].sort();}
 export function validateCampaignAccess(v){exact(v,['readScopes','writeScopes']);const readScopes=campaignScopeList(v.readScopes),writeScopes=campaignScopeList(v.writeScopes);if(!readScopes.length||writeScopes.some(s=>!readScopes.includes(s)))fail(400,'INVALID_CAMPAIGN_SCOPES');return{readScopes,writeScopes};}
 const mechanicsReadScopes = ['character','inventory','companions'];
-const equipmentOperations = ['edit_equipment_bonus','set_equipment_state'];
+const equipmentOperations = ['edit_equipment_bonus','edit_equipment_defense','set_equipment_state'];
 
 function proposedEquipment(before, op) {
  if (op.kind !== 'playable-equipment' || before?.schemaVersion !== 1) fail(409,'PLAYABLE_EQUIPMENT_REQUIRED');
@@ -34,35 +34,49 @@ function proposedEquipment(before, op) {
   if (before[key] === value) fail(409,'EQUIPMENT_UNCHANGED');
   return {...before,[key]:value};
  }
+ const defense = op.type === 'edit_equipment_defense';
+ const field = defense ? 'defense' : 'bonus';
+ const list = defense ? 'defenses' : 'bonuses';
  const removing = Object.hasOwn(fields,'removeId');
- exact(fields, ['actorRevision',removing ? 'removeId' : 'bonus'], ['actorRole']);
- const bonuses = [...before.bonuses];
+ exact(fields, ['actorRevision',removing ? 'removeId' : field], ['actorRole']);
+ const entries = [...(before[list] ?? [])];
+ const entry = removing ? null : fields[field];
+ const id = commandId(removing ? fields.removeId : entry?.id);
+ const index = entries.findIndex(old => old.id === id);
  if (removing) {
-  const index = bonuses.findIndex(b => b.id === commandId(fields.removeId));
   if (index < 0) fail(409,'EFFECT_NOT_FOUND');
-  bonuses.splice(index,1);
+  entries.splice(index,1);
  } else {
-  const b = fields.bonus;
-  exact(b,['id','label','target','key','amount','enabled','stackingKey','expiresAtGameSeconds']);
-  commandId(b.id); text(b.label,100); text(b.key,160); integer(b.amount,-100,100);
-  if (!['ABILITY','SKILL'].includes(b.target) || (b.target === 'ABILITY' && !['STR','DEX','CON','INT','WIS','CHA'].includes(b.key)) ||
-      typeof b.enabled !== 'boolean' || (b.stackingKey !== null && (typeof b.stackingKey !== 'string' || !/^[A-Za-z0-9._:-]{1,80}$/.test(b.stackingKey)))) fail(400,'INVALID_EQUIPMENT_BONUS');
-  if (b.expiresAtGameSeconds !== null) integer(b.expiresAtGameSeconds);
-  const index = bonuses.findIndex(old => old.id === b.id);
-  if (index < 0) {
-   if (bonuses.length >= 24) fail(400,'EQUIPMENT_BONUS_LIMIT');
-   bonuses.push(b);
+  const common = ['id','label','enabled','expiresAtGameSeconds'];
+  if (defense) {
+   exact(entry,[...common,'damageType','kind','nonmagicalOnly']);
+   if (!['ACID','BLUDGEONING','COLD','FIRE','FORCE','LIGHTNING','NECROTIC','PIERCING','POISON','PSYCHIC','RADIANT','SLASHING','THUNDER'].includes(entry.damageType) ||
+       !['RESISTANCE','IMMUNITY','VULNERABILITY'].includes(entry.kind) || typeof entry.nonmagicalOnly !== 'boolean') fail(400,'INVALID_DAMAGE_DEFENSE');
   } else {
-   if (canonical(bonuses[index]) === canonical(b)) fail(409,'EQUIPMENT_UNCHANGED');
-   bonuses[index] = b;
+   exact(entry,[...common,'target','key','amount','stackingKey']);
+   text(entry.key,160); integer(entry.amount,-100,100);
+   if (!['ABILITY','SKILL'].includes(entry.target) || (entry.target === 'ABILITY' && !['STR','DEX','CON','INT','WIS','CHA'].includes(entry.key)) ||
+       (entry.stackingKey !== null && (typeof entry.stackingKey !== 'string' || !/^[A-Za-z0-9._:-]{1,80}$/.test(entry.stackingKey)))) fail(400,'INVALID_EQUIPMENT_BONUS');
+  }
+  text(entry.label,100);
+  if (typeof entry.enabled !== 'boolean') fail(400,'INVALID_REQUEST');
+  if (entry.expiresAtGameSeconds !== null) integer(entry.expiresAtGameSeconds);
+  if (index < 0) {
+   if (entries.length >= 24) fail(400,defense ? 'DAMAGE_DEFENSE_LIMIT' : 'EQUIPMENT_BONUS_LIMIT');
+   entries.push(entry);
+  } else {
+   if (canonical(entries[index]) === canonical(entry)) fail(409,'EQUIPMENT_UNCHANGED');
+   entries[index] = entry;
   }
  }
- return {...before,bonuses};
+ const after = {...before,[list]:entries};
+ if (defense && !entries.length) delete after.defenses;
+ return after;
 }
 
 const FIELD_KEYS={
  'playable-stat':'id schemaVersion revision profileId actorRole target key label effective base advancement permanent modifier source',
- 'playable-equipment':'id schemaVersion revision profileId definitionId state attuned operating bonuses source',
+ 'playable-equipment':'id schemaVersion revision profileId definitionId state attuned operating bonuses defenses source',
  'character-profile':'id name currentHp maximumHp temporaryHp armorClass level revision source updatedAt',
  'character-ability':'profileId key score magicModifier notes revision source updatedAt',
  'party-sheet':'profileId contentJson revision source updatedAt campaignId',
@@ -258,6 +272,7 @@ export class CampaignBridge{
  if(equipmentOperations.includes(op.type)){
   if(b.operations.length !== 1)fail(400,'SINGLE_EQUIPMENT_EDIT_REQUIRED');
   scopes.push('character');
+  if(op.type==='edit_equipment_defense')scopes.push('combat');
   if(op.fields.actorRole==='COMPANION')scopes.push('companions');
  }}if(new Set(prepared.map(x=>x.kind+'|'+x.recordId)).size!==prepared.length)fail(400,'DUPLICATE_RECORD_OPERATION');if(scopes.some(s=>!JSON.parse(g.write_scopes_json).includes(s)))fail(403,'WRITE_SCOPE_DENIED');const auto=scopes.every(s=>JSON.parse(g.auto_scopes_json).includes(s));const fingerprint=await sha256(canonical({campaignId:campaign,commandId:b.commandId,grantRevision:g.revision,operations:prepared,source:b.source}));const value={commandId:b.commandId,campaignId:campaign,grantRevision:g.revision,operations:prepared,source:b.source,fingerprint,status:auto?'PENDING_DELIVERY':'PENDING_APPROVAL',createdAt:this.now()};if(wireBytes(this.envelope(campaign,{grant:this.grantJson(g),commands:[value],verifiedAt:this.now()}))>MAX_PENDING_BYTES)fail(413,'COMMAND_DELIVERY_TOO_LARGE');const expectedRecords=prepared.flatMap(op=>[{recordId:op.recordId,kind:op.kind,revision:op.expectedRevision+1,fields:op.proposedFields},...op.sideEffects.map(effect=>({recordId:effect.recordId,kind:effect.kind,revision:effect.expectedRevision+1,fields:effect.fields}))]).map(r=>({...r,fields:{...r.fields,source:'x'.repeat(2200),updatedAt:this.now()}}));if(wireBytes({commandId:b.commandId,fingerprint,status:'APPLIED',localReceiptId:'0'.repeat(200),records:expectedRecords})>60*1024)fail(413,'TRANSACTION_RECEIPT_TOO_LARGE');try{await this.s('INSERT INTO bridge_campaign_commands(owner_id,campaign_id,command_id,grant_id,grant_revision,request_fingerprint,fingerprint,command_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)',this.ownerId,campaign,b.commandId,g.id,g.revision,requestFingerprint,fingerprint,canonical(value),this.now()).run();}catch(e){for(const code of ['REVISION_CONFLICT','HOLDER_REVISION_CONFLICT','GRANT_REVISION_CONFLICT','PENDING_LIMIT'])if(String(e).includes(code))fail(code==='PENDING_LIMIT'?429:409,code);throw e;}
  // The command is already durably queued. Best-effort push wakeup is ALWAYS
@@ -271,6 +286,7 @@ export class CampaignBridge{
   const location=v=>v.containerItemId?'Item:'+v.containerItemId:v.installedProjectId?'Project:'+v.installedProjectId:v.holderProfileId?'Actor:'+v.holderProfileId:'Unknown';
   switch(op.type){
    case 'edit_equipment_bonus':
+   case 'edit_equipment_defense':
    case 'set_equipment_state':
     after=proposedEquipment(before,op);
     {

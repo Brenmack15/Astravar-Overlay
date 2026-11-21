@@ -222,7 +222,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         genesisRejectAuthorityCommandReuse(db, parentId)
         val native = operations.any { it.kind == PlayableMechanicsSync.EQUIPMENT }
         if (native) require(operations.size == 1 && operations.single().type in
-            setOf(PlayableMechanicsSync.BONUS, PlayableMechanicsSync.STATE)) { "Equipment v1 accepts one native edit per transaction." }
+            setOf(PlayableMechanicsSync.BONUS, PlayableMechanicsSync.STATE, PlayableMechanicsSync.DEFENSE)) { "Equipment v1 accepts one native edit per transaction." }
         require(operations.none { it.kind == PlayableMechanicsSync.STATS })
         val before = snapshot(campaignId, includeReadOnly = false, mechanics = native).associateBy { key(it.kind,it.recordId) }
         val childIds = operations.indices.map { "campaign-sync-${campaignHash(commandId).take(40)}-$it" }
@@ -311,7 +311,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         val f = op.fields
         val expected = expected(op.expectedRevision)
         when (op.type) {
-            PlayableMechanicsSync.STATE, PlayableMechanicsSync.BONUS -> PlayableMechanicsSync.edit(db, campaignId, op, child, source)
+            PlayableMechanicsSync.DEFENSE, PlayableMechanicsSync.STATE, PlayableMechanicsSync.BONUS -> PlayableMechanicsSync.edit(db, campaignId, op, child, source)
             "acquire_item" -> {
                 require(op.kind == "item" && current == null && op.expectedRevision == 0L)
                 val destination = f["placement"]?.jsonObject

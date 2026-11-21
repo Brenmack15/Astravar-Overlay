@@ -598,8 +598,11 @@ class CampaignConnectionClient internal constructor(private val context: Context
         val required = ops.flatMap {
             if (it.kind == PlayableMechanicsSync.EQUIPMENT) {
                 require(supportsMechanics(value))
-                if (it.fields["actorRole"]?.jsonPrimitive?.content == "COMPANION")
-                    PlayableMechanicsSync.writeScopes + "companions" else PlayableMechanicsSync.writeScopes
+                buildSet {
+                    addAll(PlayableMechanicsSync.writeScopes)
+                    if (it.fields["actorRole"]?.jsonPrimitive?.content == "COMPANION") add("companions")
+                    if (it.type == PlayableMechanicsSync.DEFENSE) add("combat")
+                }
             } else setOf(operationCategory(it))
         }.toSet()
         require(required.all(activeWrite(value)::contains)) { "Write scope is disabled." }
