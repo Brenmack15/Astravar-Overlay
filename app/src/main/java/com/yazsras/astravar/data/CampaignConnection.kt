@@ -603,6 +603,9 @@ class CampaignConnectionClient internal constructor(private val context: Context
                     if (it.fields["actorRole"]?.jsonPrimitive?.content == "COMPANION") add("companions")
                     if (it.type == PlayableMechanicsSync.DEFENSE) add("combat")
                 }
+            } else if (it.type == "move_item" && "playableTransfer" in it.fields) {
+                require(supportsMechanics(value))
+                setOf("inventory", "character", "companions")
             } else setOf(operationCategory(it))
         }.toSet()
         require(required.all(activeWrite(value)::contains)) { "Write scope is disabled." }

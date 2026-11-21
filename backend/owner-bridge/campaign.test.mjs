@@ -343,3 +343,42 @@ test('native equipment v1 validates typed intent, separate grants, immutable rec
  assert.equal(Object.hasOwn(remove.command.operations[0].proposedFields,'defenses'),false);
 
 });
+
+test('playable item transfer checks both actor revisions and scoped approval', async t => {
+ const f = await setup(t);
+ const item = itemRecord(), owl = 'fixture-owl';
+ const placement = envelope('item-placement',item.recordId,{itemId:item.recordId,holderProfileId:profile,
+  containerItemId:null,installedProjectId:null,state:'Carried'});
+ const evidence = {kind:'playable-equipment',recordId:item.recordId,revision:1,fields:{id:item.recordId,
+  schemaVersion:1,revision:1,profileId:profile,definitionId:'stone-definition',bonuses:[],state:'CARRIED',
+  operating:true,attuned:false,source:'Android Reforge equipment v1'}};
+ async function actorProof(id,role,revision){
+  const key='stat-'+await sha256([id,'ABILITY','INT'].join('\u0000'));
+  return {kind:'playable-stat',recordId:key,revision,fields:{id:key,schemaVersion:1,revision,
+   profileId:id,actorRole:role,target:'ABILITY',key:'INT',label:'INT',base:8,advancement:0,permanent:8,
+   effective:8,modifier:-1,source:'Android Reforge calculator v1'}};
+ }
+ const rows=[profileRecord(),envelope('character-profile',owl,{id:owl,name:'Owl'}),item,placement,evidence,
+  await actorProof(profile,'PLAYER',3),await actorProof(owl,'COMPANION',4)];
+ await f.publish(rows);
+ const proof={version:1,fromId:profile,fromRevision:3,toRevision:4};
+ const move=(value)=>op('move_item','item',item.recordId,{expectedPlacementRevision:1,holderProfileId:owl,state:'Carried',playableTransfer:value});
+ await fails(f.submit([move({...proof,toRevision:3})]),'PLAYABLE_ACTOR_CONFLICT');
+ await fails(f.submit([move({...proof,fromId:owl})]),'PLAYABLE_TRANSFER_CONFLICT');
+ await f.enable(['character','inventory']);
+ const manual=await f.submit([move(proof)]);
+ assert.equal(manual.command.status,'PENDING_APPROVAL');
+ await f.sync.decide(f.principal,campaign,decision(manual.command,{status:'REJECTED'}));
+ await f.enable(['character','companions','inventory']);
+ const {command}=await f.submit([move(proof)]);
+ assert.equal(command.status,'PENDING_DELIVERY');
+ await f.sync.decide(f.principal,campaign,decision(command));
+ const receipt=(await f.sync.getReceipt(connector,campaign,command.commandId)).receipt;
+ assert.equal(receipt.status,'APPLIED');
+ assert.equal(receipt.records.length,2);
+ const after=await f.sync.read(connector,campaign,{kinds:['item-placement'],recordId:item.recordId});
+ assert.equal(after.records[0].fields.holderProfileId,owl);
+ const narrow=await setup(t,{writeScopes:['inventory']});
+ await narrow.publish(rows);
+ await fails(narrow.submit([move(proof)]),'WRITE_SCOPE_DENIED');
+});
