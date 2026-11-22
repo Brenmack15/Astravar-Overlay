@@ -76,6 +76,43 @@ class GenesisCraftingTest {
         assertEquals(before, authority.backup.snapshot())
         return requireNotNull(error)
     }
+    @Test fun campaignBoundProjectAndPhysicalDonorsMustAgreeThroughFinalAcceptance() = runBlocking {
+        val alpha = authority.createCampaign("North workshop", commandId = "north-campaign").id
+        val beta = authority.createCampaign("South workshop", commandId = "south-campaign").id
+        authority.createActor("North maker", GenesisActorRole.PLAYER, alpha,
+            playable = ReforgeCharacter(firstId, "North maker"), commandId = "north-maker")
+        authority.createActor("South maker", GenesisActorRole.PLAYER, beta,
+            playable = ReforgeCharacter(secondId, "South maker"), commandId = "south-maker")
+        gear(firstId, firstMaterial, 3)
+        gear(secondId, secondMaterial, 2)
+        val project = InventionProject("North fixture", status = "Construction", id = projectId)
+        campaign.records.saveInCampaign(alpha, "project", projectId, null, source, "create-north-project") {
+            campaign.records.saveProject(project, source = source, commandId = "create-north-project")
+        }
+        suspend fun consume(id: String) = MaterialConsumption(id, requireNotNull(db.ledgerDao().getItem(id)).revision, 1)
+        val north = consume(firstMaterial)
+        val south = consume(secondMaterial)
+        rejectUnchanged { crafting.review(projectId, listOf(south), output(), firstId, source = source) }
+        rejectUnchanged { crafting.review(projectId, listOf(south), output(), secondId, source = source) }
+        val frozen = crafting.review(projectId, listOf(north), output(), firstId, source = source)
+        val proof = ExternalRecordReference("foreign-material-scope", "test-inventory", "assigned-material",
+            "item", firstMaterial, campaignId = beta)
+        campaign.party.saveExternalReference(proof, source = source, commandId = "register-other-inventory")
+        rejectUnchanged { crafting.accept(frozen, "stale-material-scope") }
+        assertEquals(3, db.ledgerDao().getItem(firstMaterial)?.quantity)
+        assertEquals(2, db.ledgerDao().getItem(secondMaterial)?.quantity)
+        assertTrue(db.recordsDao().allCrafts().isEmpty())
+        campaign.party.saveExternalReference(proof.copy(campaignId = alpha), 1, source, "restore-material-scope")
+        val eligible = crafting.review(projectId, listOf(north), output(), firstId, source = source)
+        val outcome = crafting.accept(eligible, "north-craft")
+        assertEquals(outcome, crafting.accept(eligible, "north-craft"))
+        reopen()
+        assertEquals(outcome, crafting.completed(projectId, eligible.fingerprint, "north-craft"))
+        assertEquals(2, db.ledgerDao().getItem(firstMaterial)?.quantity)
+        assertEquals(2, db.ledgerDao().getItem(secondMaterial)?.quantity)
+        assertEquals(firstId, db.partyDao().placement(outcome.outputId)?.holderProfileId)
+    }
+
     private fun unchangedGameplay(before: ReforgeSavedCharacter, after: ReforgeSavedCharacter) {
         assertEquals(before.origin, after.origin)
         assertEquals(before.createdAt, after.createdAt)
