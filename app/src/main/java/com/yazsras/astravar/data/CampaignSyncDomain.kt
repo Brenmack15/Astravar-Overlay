@@ -62,7 +62,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
 
     /** Membership is explicit: imported source IDs and current placements, never a blanket campaign reassignment. */
     suspend fun snapshot(campaignId: String, includeReadOnly: Boolean = true, mechanics: Boolean = false,
-        spellbook: Boolean = false, loadout: Boolean = false, actions: Boolean = false): List<CampaignSyncRecord> = db.withTransaction {
+        spellbook: Boolean = false, loadout: Boolean = false, actions: Boolean = false, strikes: Boolean = false): List<CampaignSyncRecord> = db.withTransaction {
         OwnerSyncProtocol.id(campaignId)
         val local = campaignId == "local-campaign"
         val diagnostics = setOf(OwnerConnectionProtocol.PROFILE, RemoteStatProtocol.PROFILE_ID)
@@ -79,6 +79,10 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         // This reads only each scoped character, never a complete database export.
         val managedItems = db.genesisAuthorityDao().itemMembership().associateBy { it.itemId }
         val playableRecords = mutableListOf<CampaignSyncRecord>()
+        val encounters = if (strikes && loadout && includeReadOnly) db.genesisEncounterDao().allEncounters()
+            .filter { it.campaignId == campaignId && it.status == GenesisEncounterStatus.ACTIVE }
+            .mapNotNull { db.genesisEncounterDao().get(it.id)?.ordered() }
+            .filter { row -> row.participants.all { associations[it.actorId]?.campaignId == campaignId } } else emptyList()
         associations.values.filter { it.campaignId == campaignId && it.playable }.forEach { actor ->
             val saved = db.reforgeDao().character(actor.actorId)?.saved()
                 ?: throw CampaignCanonicalReviewRequired(actor.actorId)
@@ -91,6 +95,15 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
                 playableRecords += PlayableActionSync.current(db, character, actor.role)
             if (loadout && includeReadOnly && !character.archived && actor.role != GenesisActorRole.NPC)
                 playableRecords += PlayableLoadoutProjection.records(character, actor.role)
+            if (!character.archived && actor.role != GenesisActorRole.NPC) for (encounter in encounters) {
+                if (encounter.participants.none { it.actorId == character.id }) continue
+                val e = encounter.record
+                playableRecords += playableReadEnvelope(PlayableLoadoutProjection.KIND,"loadout",character.copy(revision=e.revision),
+                    actor.role,"ENCOUNTER",e.id + ":" + actor.role.name,buildJsonObject {
+                        put("encounterId",e.id); put("encounterRevision",e.revision); put("round",e.round); put("currentActorId",e.currentActorId)
+                        put("participants",campaignJson.encodeToJsonElement(encounter.participants.map { it.actorId }))
+                    })
+            }
             if (spellbook && includeReadOnly && !character.archived && actor.role != GenesisActorRole.NPC)
                 playableRecords += PlayableSpellbookProjection.records(character, actor.role)
             if (mechanics && !character.archived && actor.role != GenesisActorRole.NPC) {

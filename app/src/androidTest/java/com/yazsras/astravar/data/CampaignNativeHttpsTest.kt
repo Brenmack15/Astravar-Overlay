@@ -216,7 +216,7 @@ class CampaignNativeHttpsTest {
         val receipt = mcp("get_campaign_command_receipt", buildJsonObject { put("campaignId", campaign); put("commandId", id) }).getValue("receipt").jsonObject
         assertEquals("APPLIED", receipt.getValue("status").jsonPrimitive.content)
         val nativeRows = CampaignSyncDomain(db).snapshot(campaign, mechanics = true, spellbook = true,
-            loadout = true, actions = true)
+            loadout = true, actions = true, strikes = true)
         val local = CampaignConnectionProjection.project(nativeRows, allScopes)
         for (raw in receipt.getValue("records").jsonArray) {
             val saved = raw.jsonObject
@@ -404,6 +404,8 @@ class CampaignNativeHttpsTest {
         val actor = authority.createActor("Fixture artificer", GenesisActorRole.PLAYER, campaign,
             playable = ReforgeCharacter(actorId, "Fixture artificer", level = 3, className = "Artificer", subclass = "Armorer",
                 rules = RuleVersion(classVersion = "legacy-artificer-infusions-2020"), baseAbilities = mapOf(Stat.INT to 21),
+                attacks = listOf(AttackDefinition("fixture-tap","Fictional tap",ability=Stat.INT,fixedAttackBonus=4,
+                    addAbilityToDamage=false,damage=listOf(DamageComponent("tap","Tap",DamageKind.FORCE,DiceFormula(flat=2))))),
                 spellSlots = mapOf(1 to 0, 2 to null)),
             commandId = "ci-equipment-actor")
         authority.createItem(actorId, requireNotNull(actor.playable).revision, definition, stone, "ci-equipment-grant")
@@ -483,7 +485,7 @@ class CampaignNativeHttpsTest {
 
         val owlId = "ci-native-equipment-owl"
         authority.createActor("Fixture owl", GenesisActorRole.COMPANION, campaign, actorId, ReforgeCharacter(
-            owlId, "Fixture owl", level = 9, baseAbilities = mapOf(Stat.INT to 8), baseMaxHp = 12, currentHp = 5,
+            owlId, "Fixture owl", level = 9, baseAc=12, temporaryHp=0, baseAbilities = mapOf(Stat.INT to 8), baseMaxHp = 12, currentHp = 5,
             reviewedProficiency = ReviewedProficiency(3, RuleSource("fixture:independent-pb", "Reviewed creature tier", Acceptance.ACCEPTED_HOMEBREW)),
             resources = listOf(ResourcePool("repair", "Repair", 1, 0))), "ci-equipment-owl")
         client.sync()
@@ -558,6 +560,24 @@ class CampaignNativeHttpsTest {
         val cast = castingState()
         assertEquals(JsonPrimitive(restoredSlots - 1),available(cast,1))
         assertEquals(JsonPrimitive(spell.nativeId),cast["concentrationSpellId"])
+
+        val encounterRepo = authority.encounters
+        val draft = encounterRepo.saveDraft("ci-https-encounter",null,campaign,"Fixture encounter","",listOf(
+            GenesisEncounterParticipantInput(actorId,requireNotNull(authority.actor(actorId)).revision,18),
+            GenesisEncounterParticipantInput(owlId,requireNotNull(authority.actor(owlId)).revision,5)),"ci-strike-draft")
+        encounterRepo.start(encounterRepo.reviewStart(draft.record.id,draft.record.revision),"ci-strike-start")
+        client.sync()
+        fun activeEncounter() = mcp("get_playable_loadout",arguments).getValue("records").jsonArray.map { it.jsonObject }
+            .single { it.getValue("fields").jsonObject["subject"] == JsonPrimitive("ENCOUNTER") }.getValue("fields").jsonObject.getValue("data").jsonObject
+        val active = activeEncounter()
+        actorAction("resolve_encounter_attack", buildJsonObject {
+            put("targetRole","COMPANION"); put("targetId",owlId); put("targetRevision",record("playable-action",owlId).getValue("revision"))
+            put("encounterId",draft.record.id); put("encounterRevision",active.getValue("encounterRevision"))
+            put("attackId","fixture-tap"); put("naturalD20",15); putJsonObject("rolledDamage") { put("tap",2) }; put("finishTurn",true)
+        })
+        assertEquals(JsonPrimitive(3),record("character-profile",owlId).getValue("fields").jsonObject["currentHp"])
+        assertEquals(JsonPrimitive(owlId),activeEncounter()["currentActorId"])
+
     }
 
     @Test fun authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts() = runBlocking {

@@ -68,6 +68,7 @@ internal suspend fun genesisRequireAuthorityCommand(db: CampaignLedgerDb, receip
         }
         "notion-transfer" -> genesisRequireNotionTransfer(db, receipt)
         "craft-items" -> genesisRequireCraftCommand(db, receipt)
+        ENCOUNTER_STRIKE -> readEncounterStrike(db, receipt)
         GENESIS_ENCOUNTER_COMMAND -> genesisRequireEncounterCommand(db, receipt)
         else -> error("Unsupported connected command kind.")
     }
