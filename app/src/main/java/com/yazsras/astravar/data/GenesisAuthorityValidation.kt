@@ -32,8 +32,10 @@ internal fun genesisAuthorityBackupErrors(
     if (actionsByRevision.size != actionAudits.size) errors += "Duplicate action at one playable revision."
     val actionReceipts = campaign.records.receipts.associateBy { it.commandId }
     for (audit in actionAudits) verify("Resolved action ${audit.id}") {
-        PlayableActionSync.verifyAudit(audit, requireNotNull(playableHistory[audit.commandId + "-playable"]),
-            requireNotNull(actionReceipts[audit.commandId]), actionsByRevision[audit.recordId to audit.priorRevision])
+        val strike = receipts[audit.commandId + "-strike"]
+        val child = strike?.let { genesisChild(it.commandId,"attacker") } ?: (audit.commandId + "-playable")
+        PlayableActionSync.verifyAudit(audit, requireNotNull(playableHistory[child]), requireNotNull(actionReceipts[audit.commandId]),
+            actionsByRevision[audit.recordId to audit.priorRevision],strike)
     }
     for (audit in campaign.records.audit.filter { it.recordType == PlayableMechanicsSync.EQUIPMENT }) {
         verify("Native equipment audit ${audit.id}") {
@@ -165,6 +167,13 @@ internal fun genesisAuthorityBackupErrors(
                 val review = campaignJson.decodeFromString<GenesisCraftingReview>(receipt.requestJson)
                 require(outcome.outputId in items) { "Crafted physical output authority is missing." }
                 itemProofs[receipt.commandId] = outcome.actors.single { it.character.id == review.outputOwnerActorId }
+            }
+            ENCOUNTER_STRIKE -> {
+                val result = campaignJson.decodeFromString<EncounterStrikeResult>(receipt.outcomeJson)
+                val encounter = genesisValidateEncounterReceipt(requireNotNull(receipts[result.encounterCommand]),receipts::get).after
+                val next = receipts[genesisChild(receipt.commandId,"next")]?.let { genesisValidateEncounterReceipt(it,receipts::get) }
+                validateStrike(receipt,encounter,next,playableHistory[genesisChild(receipt.commandId,"attacker")],
+                    playableHistory[genesisChild(receipt.commandId,"target")])
             }
             GENESIS_ENCOUNTER_COMMAND -> genesisValidateEncounterReceipt(receipt, receipts::get)
             else -> error("Unsupported authority receipt kind.")

@@ -10,13 +10,18 @@ internal object PlayableActionSync {
     const val REST = "complete_rest"
     const val PREPARE = "prepare_spell"
     const val AUDIT = "PLAYABLE_ACTION_V1"
-    val types = setOf(CAST, REST, PREPARE)
+    const val STRIKE = "resolve_encounter_attack"
+    val types = setOf(CAST, REST, PREPARE, STRIKE)
 
     fun writeScopes(op: CampaignSyncOperation): Set<String> = buildSet {
         require(op.type in types)
         add("character")
         add("resources")
         if (op.type != PREPARE) add("combat")
+        if (op.type == STRIKE) {
+            add("hp")
+            if (op.fields["targetRole"]?.jsonPrimitive?.content == "COMPANION") add("companions")
+        }
         if (op.type == REST) { add("hp"); add("inventory") }
         if (role(op.fields) == GenesisActorRole.COMPANION) add("companions")
     }
@@ -67,6 +72,21 @@ internal object PlayableActionSync {
         return row(c, role, previous?.let { campaignJson.parseToJsonElement(it).jsonObject.getValue("action") } ?: JsonNull)
     }
 
+    internal fun strikeRequest(op: CampaignSyncOperation): EncounterStrikeRequest {
+        val f = op.fields
+        require(f.keys == setOf("actorRole","targetRole","targetId","targetRevision","attackId","encounterId",
+            "encounterRevision","naturalD20","rolledDamage","finishTurn"))
+        fun string(k: String) = f.getValue(k).jsonPrimitive.let { require(it.isString); it.content.also(::checkId) }
+        fun number(k: String) = f.getValue(k).jsonPrimitive.let { require(!it.isString); it.long }
+        require(string("targetRole") in setOf("PLAYER","COMPANION"))
+        val rolls = f.getValue("rolledDamage").jsonObject
+        require(rolls.size <= 512)
+        return EncounterStrikeRequest(string("encounterId"),number("encounterRevision"),op.recordId,op.expectedRevision,
+            string("targetId"),number("targetRevision"),string("attackId"),Math.toIntExact(number("naturalD20")),
+            rolls.mapValues { (id,n) -> checkId(id); n.jsonPrimitive.let { require(!it.isString); it.int } },
+            f.getValue("finishTurn").jsonPrimitive.let { require(!it.isString); it.boolean })
+    }
+
     suspend fun apply(db: CampaignLedgerDb, campaign: String, op: CampaignSyncOperation, child: String, source: String) {
         require(op.kind == KIND && op.expectedRevision > 0L)
         val actor = requireNotNull(db.genesisAuthorityDao().actor(op.recordId))
@@ -75,8 +95,16 @@ internal object PlayableActionSync {
         val before = requireNotNull(repo.get(op.recordId)).character
         require(!before.archived && before.revision == op.expectedRevision)
         val beforeRow = current(db, before, actor.role)
-        val next = resolve(before, op.type, op.fields)
-        val result = repo.save(before.id, before.revision, next, "Resolved " + op.type, child + "-playable")
+        val result = if (op.type == STRIKE) {
+            val request = strikeRequest(op)
+            val target = requireNotNull(db.genesisAuthorityDao().actor(request.targetId))
+            require(target.campaignId == campaign && target.role.name == op.fields.getValue("targetRole").jsonPrimitive.content)
+            EncounterStrikeRepository(db).commit(request,child + "-strike")
+            requireNotNull(repo.get(before.id))
+        } else {
+            val next = resolve(before, op.type, op.fields)
+            repo.save(before.id, before.revision, next, "Resolved " + op.type, child + "-playable")
+        }
         val action = buildJsonObject { put("type", op.type); put("fields", op.fields) }
         val afterRow = row(result.character, actor.role, action)
         val now = System.currentTimeMillis()
@@ -86,8 +114,8 @@ internal object PlayableActionSync {
             AUDIT, before.id, result.revision, now, outcomeJson = afterRow.fields.toString()))
     }
 
-    fun verifyAudit(audit: CampaignAudit, change: ReforgeChange, receipt: CommandReceipt, previous: CampaignAudit?) {
-        require(audit.kind == AUDIT && receipt.kind == AUDIT && change.commandId == audit.commandId + "-playable")
+    fun verifyAudit(audit: CampaignAudit, change: ReforgeChange, receipt: CommandReceipt, previous: CampaignAudit?, strike: GenesisAuthorityReceipt?) {
+        require(audit.kind == AUDIT && receipt.kind == AUDIT)
         val before = reforgeJson.decodeFromString<ReforgeSavedCharacter>(requireNotNull(change.beforeJson)).character
         val after = reforgeJson.decodeFromString<ReforgeSavedCharacter>(change.afterJson).character
         require(before.id == audit.recordId && before.revision == audit.priorRevision && after.revision == audit.resultingRevision)
@@ -101,7 +129,15 @@ internal object PlayableActionSync {
         require(receipt.fingerprint == campaignHash(OwnerSyncProtocol.canonical(campaignJson.encodeToJsonElement(op))))
         val priorAction = previous?.let { campaignJson.parseToJsonElement(requireNotNull(it.afterJson)).jsonObject.getValue("action") } ?: JsonNull
         require(row(before, actorRole, priorAction).fields == campaignJson.parseToJsonElement(requireNotNull(audit.beforeJson)))
-        require(row(after, actorRole, action).fields == saved && change.operation == "Resolved " + type)
-        require(resolve(before, type, fields).copy(revision = Math.addExact(before.revision, 1)) == after)
+        require(row(after, actorRole, action).fields == saved)
+        if (type == STRIKE) {
+            requireNotNull(strike)
+            require(strike.kind == ENCOUNTER_STRIKE && strike.commandId == audit.commandId + "-strike" &&
+                change.commandId == genesisChild(strike.commandId,"attacker") &&
+                campaignJson.decodeFromString<EncounterStrikeRequest>(strike.requestJson) == strikeRequest(op))
+        } else {
+            require(strike == null && change.commandId == audit.commandId + "-playable" && change.operation == "Resolved " + type)
+            require(resolve(before, type, fields).copy(revision = Math.addExact(before.revision, 1)) == after)
+        }
     }
 }

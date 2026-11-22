@@ -142,6 +142,8 @@ private fun encounterName(id: String, profiles: List<CharacterProfile>, loaded: 
                 if (!rows.first) LinearProgressIndicator(Modifier.fillMaxWidth())
                 else Text("This encounter is unavailable in the selected campaign. Close this view and review the campaign selection.")
             } else {
+                if (selected.record.status == GenesisEncounterStatus.ACTIVE)
+                    EncounterStrikeForm(selected, playable, environment.authority.encounterStrikes)
                 Text(when (selected.record.status) {
                     GenesisEncounterStatus.DRAFT -> "Setup · confirm the order before starting"
                     GenesisEncounterStatus.ACTIVE -> "Round ${selected.record.round}"

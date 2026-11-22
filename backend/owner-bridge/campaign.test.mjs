@@ -452,3 +452,30 @@ test('resolved actor actions bind the role, revision, declared rest and resource
  const observed=(await f.sync.read(connector,campaign,{kinds:[kind],profileId:profile})).records[0];
  assert.deepEqual(observed.fields.action,receipt.records[0].fields.action);
 });
+
+test('resolved encounter attacks require the current native encounter, both actor revisions and target permission', async t => {
+ const f=await setup(t);
+ const target='test-strike-target', encounter='test-strike-encounter';
+ const header=(id,role)=>({kind:'playable-action',recordId:id,revision:1,fields:{
+  id,profileId:id,actorRole:role,schemaVersion:1,revision:1,source:'Android Reforge action v1',action:null}});
+ const key='loadout-'+await sha256([profile,'ENCOUNTER',encounter+':PLAYER'].join('\u0000'));
+ const data={encounterId:encounter,encounterRevision:2,currentActorId:profile,round:1,participants:[profile,target]};
+ const roster={kind:'playable-loadout',recordId:key,revision:2,fields:{id:key,profileId:profile,actorRole:'PLAYER',schemaVersion:1,
+  revision:2,subject:'ENCOUNTER',source:'Android Reforge v1',part:'header',data,parts:0,
+  contentSha256:await sha256(canonical(data)),contentBytes:Buffer.byteLength(canonical(data))}};
+ const bodies=[header(profile,'PLAYER'),header(target,'COMPANION')];
+ await f.publish(bodies);
+ const fields={actorRole:'PLAYER',targetRole:'COMPANION',targetId:target,targetRevision:1,attackId:'fictional-attack',
+  encounterId:encounter,encounterRevision:2,naturalD20:15,rolledDamage:{fire:4},finishTurn:true};
+ const op={type:'resolve_encounter_attack',recordId:profile,kind:'playable-action',expectedRevision:1,fields};
+ await fails(f.submit([op]),'ENCOUNTER_CHANGED');
+ await f.publish([roster]);
+ await fails(f.submit([{...op,fields:{...fields,targetRevision:2}}]),'ENCOUNTER_CHANGED');
+ await fails(f.submit([{...op,fields:{...fields,targetRole:'PLAYER'}}]),'ENCOUNTER_CHANGED');
+ await fails(f.submit([{...op,fields:{...fields,naturalD20:21}}]),'INVALID_INTEGER');
+ await f.enable(['character','resources','hp','combat']);
+ assert.equal((await f.submit([op])).command.status,'PENDING_APPROVAL');
+ const restricted=await setup(t,{writeScopes:['character','resources','hp','combat']});
+ await restricted.publish([...bodies,roster]);
+ await fails(restricted.submit([op]),'WRITE_SCOPE_DENIED');
+});

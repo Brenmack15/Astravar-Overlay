@@ -102,6 +102,8 @@ class CampaignConnectionClient internal constructor(private val context: Context
     private fun supportsLoadout(value: CampaignConnectionSettings) =
         grant(value)["playableLoadoutVersion"]?.jsonPrimitive?.intOrNull == 1 &&
             activeRead(value).containsAll(PlayableLoadoutProjection.readScopes)
+    private fun supportsStrikes(value: CampaignConnectionSettings) =
+        grant(value)["encounterStrikeVersion"]?.jsonPrimitive?.intOrNull == 1 && supportsLoadout(value)
     private fun supportsActions(value: CampaignConnectionSettings) =
         grant(value)["playableActionVersion"]?.jsonPrimitive?.intOrNull == 1 &&
             activeRead(value).containsAll(PlayableLoadoutProjection.readScopes)
@@ -327,7 +329,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         val commands = dao.commands().filter { belongs(it, value) }
         var canonicalReviewProfileId: String? = null
         val current = try {
-            if (value.campaignId.isBlank()) emptyList() else { applicationStorage?.awaitReady(); domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value), loadout = supportsLoadout(value), actions = supportsActions(value)) }
+            if (value.campaignId.isBlank()) emptyList() else { applicationStorage?.awaitReady(); domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value), loadout = supportsLoadout(value), actions = supportsActions(value), strikes = supportsStrikes(value)) }
         } catch (review: CampaignCanonicalReviewRequired) {
             // Display the explicit repair action without treating blocked projections
             // as deleted records. Publication still calls the strict domain snapshot.
@@ -606,7 +608,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         val ops = operations(command)
         val required = ops.flatMap {
             if (it.kind == PlayableActionSync.KIND) {
-                require(supportsActions(value))
+                require(supportsActions(value) && (it.type != PlayableActionSync.STRIKE || supportsStrikes(value)))
                 PlayableActionSync.writeScopes(it)
             } else if (it.kind == PlayableMechanicsSync.EQUIPMENT) {
                 require(supportsMechanics(value))
@@ -671,7 +673,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         return records
     }
     private suspend fun verifyBaseline(value: CampaignConnectionSettings, command: CampaignConnectionCommand) {
-        val local = visible(value, domain.snapshot(value.campaignId, includeReadOnly = false, mechanics = supportsMechanics(value), actions = supportsActions(value))).associateBy { it.kind to it.recordId }
+        val local = visible(value, domain.snapshot(value.campaignId, includeReadOnly = false, mechanics = supportsMechanics(value), actions = supportsActions(value), strikes = supportsStrikes(value))).associateBy { it.kind to it.recordId }
         for (raw in parsed(command).getValue("operations").jsonArray) {
             val operation = raw.jsonObject
             val kind = operation.getValue("kind").jsonPrimitive.content
@@ -808,7 +810,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         for (publication in dao.publications().filter { it.origin == value.origin && it.campaignId == value.campaignId && it.deviceId == value.deviceId && it.state == "PENDING" }) flushPublication(value, publication)
         val mirrors = dao.mirrors(value.origin, value.campaignId, value.deviceId).associateBy { it.kind to it.recordId }
         syncDiagnostics.stage(value, CampaignSyncStage.LOCAL_SNAPSHOT)
-        val committed = visible(value, domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value), loadout = supportsLoadout(value), actions = supportsActions(value)))
+        val committed = visible(value, domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value), loadout = supportsLoadout(value), actions = supportsActions(value), strikes = supportsStrikes(value)))
         val identities = committed.map { it.kind to it.recordId }.toSet()
         val readScopes = activeRead(value)
         val removed = mirrors.values.filter { (it.kind to it.recordId) !in identities && canReadKind(it.kind, it.recordId, readScopes) }
@@ -848,7 +850,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
             val publication = CampaignConnectionPublication(id, value.origin, value.campaignId, value.deviceId, body)
             dao.insert(publication); flushPublication(value, publication)
         }
-        val current = visible(value, domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value), loadout = supportsLoadout(value), actions = supportsActions(value)))
+        val current = visible(value, domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value), loadout = supportsLoadout(value), actions = supportsActions(value), strikes = supportsStrikes(value)))
         // The backend refreshes the whole mirror only when every current local identity/revision/hash agrees.
         // A restore or missing row therefore becomes a visible conflict, never a falsely fresh historical value.
         syncDiagnostics.stage(value, CampaignSyncStage.SNAPSHOT_CONFIRMATION)
