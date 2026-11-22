@@ -65,7 +65,7 @@ internal fun reviewNotionSpells(c: ReforgeCharacter, facts: NotionCharacterFacts
     val added = mutableListOf<String>()
     val present = mutableListOf<String>()
     val deferred = mutableListOf<String>()
-    if (facts.className.isBlank() || c.rules.classVersion != book.classVersion || !c.className.equals(facts.className, true) ||
+    if (facts.className.isBlank() || classRulesId(c.rules.classVersion) != classRulesId(book.classVersion) || !c.className.equals(facts.className, true) ||
         !c.subclass.equals(facts.subclass, true)) {
         return NotionSpellReview(c, added, present, listOf("Resolve the class, subclass and pinned rules version before importing any spells.") + book.spells.map { it.name })
     }

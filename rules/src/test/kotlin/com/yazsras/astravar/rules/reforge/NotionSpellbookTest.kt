@@ -37,6 +37,22 @@ class NotionSpellbookTest {
         assertEquals(listOf(fact.name), repeated.presentSpells)
     }
 
+    @Test fun publishedLegacyClassLabelKeepsCoreAndSpentSlots() {
+        val pinned = RuleVersion(RuleFamily.REVISED_2024, "Tasha's Cauldron of Everything (Legacy Infusions)")
+        val saved = actor.copy(rules = pinned, spellcastingClassLevel = 9, baseAbilities = mapOf(Stat.INT to 18))
+        val plan = planNotionCharacterTransfer(saved, transfer(fact), choices)
+        assertEquals(listOf(fact.name), plan.addedSpells)
+        assertEquals(pinned, plan.character.rules)
+        assertEquals(saved.spellSlots, plan.character.spellSlots)
+        val calculated = CharacterCalculator.calculate(plan.character)
+        assertEquals(mapOf(1 to 4, 2 to 3, 3 to 2), calculated.slotMaxima)
+        assertEquals(8, calculated.preparationLimit)
+        assertFalse(planNotionCharacterTransfer(plan.character, transfer(fact), choices).changed)
+        val custom = saved.copy(rules = pinned.copy(classVersion = "Custom legacy infusions"))
+        assertTrue(CharacterCalculator.calculate(custom).slotMaxima.isEmpty())
+        assertEquals(custom, planNotionCharacterTransfer(custom, transfer(fact), choices).character)
+    }
+
     @Test fun collisionsProposalsAndConflictingRulesPreserveTheExistingRecord() {
         val existing = actor.copy(spellcastingClassLevel = 8, spells = listOf(fact.definition().copy(name = "Local revision")))
         val result = planNotionCharacterTransfer(existing, transfer(fact, fact.copy(spellKey = "dream", name = "Dream", evidence = "Proposed")), choices)

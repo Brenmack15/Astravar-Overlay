@@ -402,3 +402,21 @@ test('native spellbook publication respects actor filtering, all four read scope
   assert.throws(()=>projectCampaignRecord(row,reduced),error=>error.code==='READ_SCOPE_DENIED');
  }
 });
+
+test('loadout rows require the negotiated read scopes, the selected actor, and reject edits', async t => {
+ const f = await setup(t);
+ const data = { instance:{id:'fixture-item'}, effectStatuses:[{active:true}] };
+ const fields = {id:'loadout-example',profileId:profile,actorRole:'PLAYER',revision:2,schemaVersion:1,
+  subject:'ITEM',source:'Android Reforge v1',part:'header',data,contentSha256:await sha256(canonical(data)),
+  contentBytes:Buffer.byteLength(canonical(data)),parts:0};
+ const row = {kind:'playable-loadout',recordId:fields.id,revision:2,fields};
+ assert.equal((await f.sync.getGrant(f.principal,campaign)).grant.playableLoadoutVersion,1);
+ await f.publish([row]);
+ const query = {kinds:[row.kind],profileId:profile};
+ assert.deepEqual((await f.sync.read(connector,campaign,query)).records[0].fields,fields);
+ assert.equal((await f.sync.read(connector,campaign,{...query,profileId:'other-actor'})).records.length,0);
+ await fails(f.submit([{type:'set_record',kind:row.kind,recordId:row.recordId,expectedRevision:2,fields:{data}}]),'READ_ONLY_RECORD_KIND');
+ for (const missing of ['character','companions','combat','resources','inventory','hp']) {
+  assert.throws(()=>projectCampaignRecord(row,CAMPAIGN_SCOPES.filter(s=>s!==missing)),e=>e.code==='READ_SCOPE_DENIED');
+ }
+});
