@@ -759,6 +759,10 @@ private enum class SpellbookFilter(val label: String) {
                     Text(definition?.description?.takeIf(String::isNotBlank) ?: "No description recorded.", color = RebuildPalette.Silver)
                     definition?.equipmentSlot?.takeIf(String::isNotBlank)?.let { Text("Equipment slot · $it", color = RebuildPalette.Muted) }
                     definition?.weight?.let { Text("Weight · $it lb.", color = RebuildPalette.Muted) }
+                    definition?.let {
+                        Text(if (it.requiresAttunement) "This item requires attunement for its gated effects." else "This item has no attunement requirement.",
+                            color = RebuildPalette.Muted)
+                    }
                     val statuses = projection.effectStatuses.filter { it.itemInstanceId == item.id }
                     if (statuses.isNotEmpty()) {
                         RebirthSectionLabel("Equipment effects")

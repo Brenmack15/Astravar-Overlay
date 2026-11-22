@@ -36,6 +36,24 @@ class PlayableActionSyncTest {
             suspend fun commit(type:String,f:JsonObject,revision:Long,command:String): CommandReceipt =
                 domain.apply(campaign,command,"Resolved fictional action",listOf(CampaignSyncOperation(type,c.id,PlayableActionSync.KIND,revision,f)))
             val cast=fields { put("spellId",spell.id);put("slotLevel",1);put("ritual",false);put("replaceConcentration",false) }
+            val definition = fields {
+                put("mode", "CREATE"); put("spellId", "second-glint")
+                putJsonObject("definition") { put("name", "Second glint"); put("level", 1); put("sourceVersion", "Fixture notes") }
+            }
+            val beforeAuthoring = saved()
+            val receiptCreate = commit(PlayableActionSync.DEFINE_SPELL,definition,beforeAuthoring.revision,"create-definition")
+            assertEquals(receiptCreate,commit(PlayableActionSync.DEFINE_SPELL,definition,beforeAuthoring.revision,"create-definition"))
+            val afterCreate = saved()
+            assertEquals(beforeAuthoring.spellSlots,afterCreate.spellSlots)
+            assertTrue(runCatching { commit(PlayableActionSync.DEFINE_SPELL,definition,afterCreate.revision,"duplicate-definition") }.isFailure)
+            val update = fields {
+                put("mode","EDIT"); put("spellId","second-glint")
+                putJsonObject("definition") { put("range","30 feet") }
+            }
+            assertTrue(runCatching { commit(PlayableActionSync.DEFINE_SPELL,update,beforeAuthoring.revision,"stale-definition") }.isFailure)
+            assertEquals(afterCreate,saved())
+            commit(PlayableActionSync.DEFINE_SPELL,update,afterCreate.revision,"edit-definition")
+            assertEquals(afterCreate.spells.last().copy(range="30 feet"),saved().spells.last())
             val initial=saved().revision
             assertTrue(runCatching { commit(PlayableActionSync.CAST,cast,initial,"unprepared-fixture") }.isFailure)
             assertEquals(initial,saved().revision)

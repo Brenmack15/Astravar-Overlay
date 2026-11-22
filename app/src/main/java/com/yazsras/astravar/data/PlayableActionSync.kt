@@ -11,7 +11,8 @@ internal object PlayableActionSync {
     const val PREPARE = "prepare_spell"
     const val AUDIT = "PLAYABLE_ACTION_V1"
     const val STRIKE = "resolve_encounter_attack"
-    val types = setOf(CAST, REST, PREPARE, STRIKE)
+    const val DEFINE_SPELL = "define_spell"
+    val types = setOf(CAST, REST, PREPARE, STRIKE, DEFINE_SPELL)
 
     fun writeScopes(op: CampaignSyncOperation): Set<String> = buildSet {
         require(op.type in types)
@@ -38,6 +39,22 @@ internal object PlayableActionSync {
             require(it.isString && it.content.length in 1..200); it.content
         }
         return when (type) {
+            DEFINE_SPELL -> {
+                require(f.keys == setOf("actorRole", "mode", "spellId", "definition"))
+                val id = spell()
+                val mode = f.getValue("mode").jsonPrimitive.content
+                val previous = c.spells.singleOrNull { it.id == id }
+                require((mode == "CREATE" && previous == null) || (mode == "EDIT" && previous != null)) {
+                    "Spell identity does not match the reviewed create or edit."
+                }
+                val changes = f.getValue("definition").jsonObject
+                require(changes.isNotEmpty() && "id" !in changes)
+                if (previous == null) require(changes.keys.containsAll(setOf("name", "level", "sourceVersion")))
+                val original = previous?.let { campaignJson.encodeToJsonElement(it).jsonObject }.orEmpty()
+                val definition = campaignJson.decodeFromJsonElement<SpellDefinition>(JsonObject(original + changes + ("id" to JsonPrimitive(id))))
+                require(definition.sourceVersion.isNotBlank())
+                GameplayRules.saveSpellDefinition(c, definition)
+            }
             CAST -> {
                 require(f.keys == setOf("actorRole", "spellId", "slotLevel", "ritual", "replaceConcentration"))
                 val level = f.getValue("slotLevel").let { if (it == JsonNull) null else it.jsonPrimitive.let { n ->

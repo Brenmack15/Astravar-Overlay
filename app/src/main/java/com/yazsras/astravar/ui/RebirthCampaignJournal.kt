@@ -27,12 +27,14 @@ internal data class RebirthJournalSnapshot(val checkpoints: List<CampaignCheckpo
     val entities: List<ConnectionEntity>, val projects: List<InventionProject>)
 
 /** Null means not loaded; an emitted empty journal is a real saved state. */
-@Composable internal fun rememberRebirthJournalSnapshot(repository: CampaignLedgerRepository): State<RebirthJournalSnapshot?> =
-    remember(repository) {
-        combine(repository.party.checkpoints, repository.records.entities, repository.records.projects) { checkpoints, entities, projects ->
+@Composable internal fun rememberRebirthJournalSnapshot(repository: CampaignLedgerRepository): State<RebirthJournalSnapshot?> {
+    val campaignId = LocalGenesisConnectedEnvironment.current?.selectedCampaignId ?: "local-campaign"
+    return key(campaignId) { remember(repository, campaignId) {
+        combine(repository.party.checkpointsIn(campaignId), repository.records.entitiesIn(campaignId), repository.records.projectsIn(campaignId)) { checkpoints, entities, projects ->
             RebirthJournalSnapshot(checkpoints, entities, projects)
         }
-    }.collectAsState(initial = null)
+    }.collectAsState(initial = null) }
+}
 
 /** A read-only window onto the same saved journal records used by the editors. */
 @Composable fun RebirthCampaignJournal(repository: CampaignLedgerRepository, open: (String) -> Unit) {

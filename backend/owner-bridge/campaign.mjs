@@ -20,7 +20,7 @@ export function validateCampaignAccess(v){exact(v,['readScopes','writeScopes']);
 const mechanicsReadScopes = ['character','inventory','companions'];
 const equipmentOperations = ['edit_equipment_bonus','edit_equipment_defense','set_equipment_state'];
 
-const playableActions = ['cast_spell','prepare_spell','complete_rest','resolve_encounter_attack'];
+const playableActions = ['cast_spell','prepare_spell','define_spell','complete_rest','resolve_encounter_attack'];
 
 function proposedPlayableAction(before, op) {
  const f = op.fields;
@@ -38,6 +38,26 @@ function proposedPlayableAction(before, op) {
   if(f.targetId===op.recordId||!['PLAYER','COMPANION'].includes(f.targetRole)||typeof f.finishTurn!=='boolean'||
      !f.rolledDamage||typeof f.rolledDamage!=='object'||Array.isArray(f.rolledDamage)||Object.keys(f.rolledDamage).length>512)fail(400,'INVALID_STRIKE');
   for(const [key,amount] of Object.entries(f.rolledDamage)){text(key,160);integer(amount,-1000000,1000000);}
+ }else if(op.type==='define_spell'){
+  exact(f,['actorRole','mode','spellId','definition']);
+  id(f.spellId);
+  if(!['CREATE','EDIT'].includes(f.mode))fail(400,'INVALID_SPELL_MODE');
+  const required=f.mode==='CREATE'?['name','level','sourceVersion']:[];
+  const strings={name:200,sourceVersion:2000,castingTime:500,range:500,components:2000,duration:500,description:12000};
+  const booleans=['concentration','slotRequired','ritual'];
+  const d=f.definition;
+  exact(d,required,[...Object.keys(strings),'level','preparation','resourceId','resourceCost',...booleans]);
+  if(!Object.keys(d).length)fail(400,'EMPTY_SPELL_EDIT');
+  for(const [key,max] of Object.entries(strings)){
+   if(Object.hasOwn(d,key)&&(typeof d[key]!=='string'||d[key].length>max))fail(400,'INVALID_SPELL_TEXT');
+  }
+  if('name' in d)text(d.name,200);
+  if('sourceVersion' in d)text(d.sourceVersion,2000);
+  if('level' in d)integer(d.level,0,9);
+  if('resourceCost' in d)integer(d.resourceCost,0,1000);
+  if('resourceId' in d&&d.resourceId!==null)id(d.resourceId);
+  if('preparation' in d&&!['KNOWN','PREPARED','ALWAYS_PREPARED'].includes(d.preparation))fail(400,'INVALID_PREPARATION');
+  if(booleans.some(k=>k in d&&typeof d[k]!=='boolean'))fail(400,'INVALID_SPELL_FLAG');
  }else if(op.type==='prepare_spell'){
   exact(f,['actorRole','spellId','prepared']);text(f.spellId,200);
   if(typeof f.prepared!=='boolean')fail(400,'INVALID_PREPARATION');
@@ -197,7 +217,7 @@ export class CampaignBridge{
   const g=await this.s('SELECT g.*,c.device_name FROM bridge_campaign_grants g JOIN bridge_credentials c ON c.id=g.credential_id WHERE g.owner_id=? AND g.campaign_id=? AND c.revoked=0 AND c.expires_at>? AND g.expires_at>? AND g.revoked=0 ORDER BY g.created_at DESC,g.id DESC LIMIT 1',this.ownerId,campaign,this.now(),this.now()).first();
   if(!g)fail(403,'CAMPAIGN_NOT_AUTHORIZED');if(p.role==='device'&&(p.campaignId!==campaign||g.credential_id!==p.credentialId))fail(403,'DEVICE_SCOPE_DENIED');return g;
  }
- grantJson(g){return{playableMechanicsVersion:1,playableSpellbookVersion:1,playableLoadoutVersion:1,playableActionVersion:1,encounterStrikeVersion:1,grantId:g.id,revision:g.revision,readScopes:JSON.parse(g.read_scopes_json),writeScopes:JSON.parse(g.write_scopes_json),autoSyncScopes:JSON.parse(g.auto_scopes_json),expiresAt:g.expires_at,deviceName:g.device_name??null};}
+ grantJson(g){return{playableMechanicsVersion:1,playableSpellbookVersion:1,playableLoadoutVersion:1,playableActionVersion:1,spellDefinitionVersion:1,encounterStrikeVersion:1,grantId:g.id,revision:g.revision,readScopes:JSON.parse(g.read_scopes_json),writeScopes:JSON.parse(g.write_scopes_json),autoSyncScopes:JSON.parse(g.auto_scopes_json),expiresAt:g.expires_at,deviceName:g.device_name??null};}
  async getGrant(p,campaign){const g=await this.authorize(p,campaign);return this.envelope(campaign,{grant:this.grantJson(g)});}
  async configureGrant(p,campaign,b){exact(b,['commandId','expectedRevision','autoSyncScopes'],['readScopes','writeScopes']);commandId(b.commandId);integer(b.expectedRevision,1);const scopes=campaignScopeList(b.autoSyncScopes),g=await this.authorize(p,campaign,['device']);const fp=await sha256(canonical(b)),previous=await this.s('SELECT * FROM bridge_campaign_grant_events WHERE owner_id=? AND command_id=?',this.ownerId,b.commandId).first();if(previous){if(previous.fingerprint!==fp||previous.grant_id!==g.id)fail(409,'COMMAND_ID_REUSED');return this.getGrant(p,campaign);}const readScopes=b.readScopes===undefined?JSON.parse(g.read_scopes_json):campaignScopeList(b.readScopes),writeScopes=b.writeScopes===undefined?JSON.parse(g.write_scopes_json):campaignScopeList(b.writeScopes);if(readScopes.some(x=>!JSON.parse(g.read_scopes_json).includes(x))||writeScopes.some(x=>!JSON.parse(g.write_scopes_json).includes(x))||writeScopes.some(x=>!readScopes.includes(x)))fail(403,'GRANT_EXPANSION_REQUIRES_OWNER');if(scopes.some(s=>!writeScopes.includes(s)))fail(403,'AUTO_SYNC_SCOPE_DENIED');if(g.revision!==b.expectedRevision)fail(409,'GRANT_REVISION_CONFLICT');try{await this.s('INSERT INTO bridge_campaign_grant_events(owner_id,command_id,grant_id,expected_revision,auto_scopes_json,read_scopes_json,write_scopes_json,fingerprint,created_at) VALUES(?,?,?,?,?,?,?,?,?)',this.ownerId,b.commandId,g.id,b.expectedRevision,canonical(scopes),canonical(readScopes),canonical(writeScopes),fp,this.now()).run();}catch(e){if(String(e).includes('GRANT_REVISION_CONFLICT'))fail(409,'GRANT_REVISION_CONFLICT');throw e;}return this.getGrant(p,campaign);}
  async getConnection(p){
@@ -407,6 +427,17 @@ export class CampaignBridge{
     const state=JSON.parse(enc.fields_json).data,targetHeader=JSON.parse(target.fields_json);
     if(state?.encounterId!==f.encounterId||state.currentActorId!==op.recordId||!state.participants?.includes(f.targetId)||
       targetHeader.actorRole!==f.targetRole||targetHeader.profileId!==f.targetId)fail(409,'ENCOUNTER_CHANGED');
+    break;
+   }
+   case 'define_spell': {
+    after=proposedPlayableAction(before,op);
+    const key='loadout-'+await sha256([op.recordId,'SPELL_EDITING',''].join('\u0000'));
+    const capability=await this.getRecord(campaign,'playable-loadout',key);
+    if(!capability||capability.grant_id!==g.id||capability.revision!==op.expectedRevision||
+       this.now()-capability.last_device_sync_at>FRESHNESS)fail(409,'DEVICE_SPELL_EDITING_UNAVAILABLE');
+    const header=JSON.parse(capability.fields_json);
+    if(header.profileId!==op.recordId||header.actorRole!==op.fields.actorRole||header.subject!=='SPELL_EDITING'||
+        header.part!=='header'||header.data?.version!==1)fail(409,'DEVICE_SPELL_EDITING_UNAVAILABLE');
     break;
    }
    case 'cast_spell':

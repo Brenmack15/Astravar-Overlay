@@ -547,6 +547,21 @@ class CampaignNativeHttpsTest {
             .getValue("data").jsonObject
         fun available(state: JsonObject, level: Int) = state.getValue("slots").jsonArray.map { it.jsonObject }
             .single { it["level"] == JsonPrimitive(level) }.getValue("current")
+        val newSpellId = "ci-authored-light"
+        actorAction("define_spell", buildJsonObject {
+            put("mode","CREATE"); put("spellId",newSpellId)
+            putJsonObject("definition") { put("name","Fixture light"); put("level",0); put("sourceVersion","Fixture study") }
+        })
+        actorAction("define_spell", buildJsonObject {
+            put("mode","EDIT"); put("spellId",newSpellId)
+            putJsonObject("definition") { put("duration","One minute") }
+        })
+        val authored = requireNotNull(ReforgeRepository(db).get(actorId)).character.spells.single { it.id == newSpellId }
+        assertEquals("Fixture study",authored.sourceVersion)
+        val definitions = mcp("get_playable_spells",arguments).getValue("records").jsonArray.map { it.jsonObject.getValue("fields").jsonObject }
+        val authoredRow = definitions.single { it["subject"] == JsonPrimitive("SPELL") &&
+            it["data"]?.jsonObject?.get("id") == JsonPrimitive(newSpellId) }
+        assertEquals(campaignJson.encodeToJsonElement(authored),authoredRow["data"])
         actorAction("complete_rest", buildJsonObject {
             put("confirmed",true); put("elapsedSeconds",28800); put("kind","LONG_REST")
         })

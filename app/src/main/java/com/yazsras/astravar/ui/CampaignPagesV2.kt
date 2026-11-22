@@ -65,10 +65,15 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
 }
 
 @Composable fun InventionsPageV2(repository: CampaignLedgerRepository, initialProjectId: String? = null) {
+    val campaignId = LocalGenesisConnectedEnvironment.current?.selectedCampaignId ?: "local-campaign"
+    key(campaignId) { ScopedInventionsPageV2(repository, initialProjectId, campaignId) }
+}
+
+@Composable private fun ScopedInventionsPageV2(repository: CampaignLedgerRepository, initialProjectId: String?, campaignId: String) {
     val records = repository.records
     val connected = LocalGenesisConnectedEnvironment.current
     var connectedCraftOpen by rememberSaveable(initialProjectId) { mutableStateOf(false) }
-    val projects by records.projects.collectAsState(initial = emptyList())
+    val projects by remember(records, campaignId) { records.projectsIn(campaignId) }.collectAsState(initial = emptyList())
     val items by repository.items.collectAsState(initial = emptyList())
     val links by records.links.collectAsState(initial = emptyList())
     val audit by records.audit.collectAsState(initial = emptyList())
@@ -255,7 +260,9 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
                 "create", "edit" -> PlayerButton(onClick = {
                     val before = editorProject; val provenance = source.ifBlank { "Local invention edit in Astravar" }
                     val model = before?.copy(title = title, description = description, status = status) ?: InventionProject(title = title, description = description, status = status, id = projectDraftId)
-                    actions.run { val receipt = records.saveProject(model, before?.revision, provenance, projectCommandId); projectSnapshot = Json.encodeToString(model.copy(revision = receipt.resultingRevision, source = provenance, updatedAt = receipt.createdAt)); selectedId = model.id; mode = "detail"; "Invention saved · no resources consumed" }
+                    actions.run { val receipt = records.saveInCampaign(campaignId, "project", model.id, before?.revision, provenance, projectCommandId) {
+                        records.saveProject(model, before?.revision, provenance, projectCommandId)
+                    }; projectSnapshot = Json.encodeToString(model.copy(revision = receipt.resultingRevision, source = provenance, updatedAt = receipt.createdAt)); selectedId = model.id; mode = "detail"; "Invention saved · no resources consumed" }
                 }, enabled = !actions.busy && projectDraftValid && !stale && title.isNotBlank()) { Text(if (mode == "create") "Save invention" else "Save invention changes") }
                 "detail" -> PlayerButton(onClick = { selected?.let(::load); mode = "edit" }, enabled = !actions.busy) { Text("Edit invention") }
                 "stage" -> PlayerButton(onClick = {

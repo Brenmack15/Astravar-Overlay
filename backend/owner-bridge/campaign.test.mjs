@@ -453,6 +453,30 @@ test('resolved actor actions bind the role, revision, declared rest and resource
  assert.deepEqual(observed.fields.action,receipt.records[0].fields.action);
 });
 
+test('spell authoring requires a capable device, a current actor and the delegated write categories',async t=>{
+ const f=await setup(t);
+ const kind='playable-action';
+ const header={kind,recordId:profile,revision:1,fields:{id:profile,profileId:profile,actorRole:'PLAYER',schemaVersion:1,
+  revision:1,source:'Android Reforge action v1',action:null}};
+ const key='loadout-'+await sha256([profile,'SPELL_EDITING',''].join('\u0000'));
+ const data={version:1};
+ const capability={kind:'playable-loadout',recordId:key,revision:1,fields:{id:key,profileId:profile,actorRole:'PLAYER',
+  subject:'SPELL_EDITING',part:'header',parts:0,data,contentSha256:await sha256(canonical(data)),contentBytes:Buffer.byteLength(canonical(data)),
+  schemaVersion:1,revision:1,source:'Android Reforge v1'}};
+ const fields={mode:'CREATE',actorRole:'PLAYER',spellId:'test-light',definition:{name:'Test light',level:0,sourceVersion:'Fictional fixture'}};
+ const op={type:'define_spell',kind,recordId:profile,expectedRevision:1,fields};
+ await f.publish([header]);
+ await fails(f.submit([op]),'DEVICE_SPELL_EDITING_UNAVAILABLE');
+ await f.publish([capability]);
+ await fails(f.submit([{...op,fields:{...fields,definition:{...fields.definition,level:10}}}]),'INVALID_INTEGER');
+ await fails(f.submit([{...op,fields:{...fields,definition:{...fields.definition,id:'other'}}}]),'INVALID_REQUEST');
+ const limited=await setup(t,{writeScopes:['character','resources']});
+ await limited.publish([header,capability]);await fails(limited.submit([op]),'WRITE_SCOPE_DENIED');
+ await f.enable(['character','resources','combat']);
+ const result=await f.submit([op]);assert.equal(result.command.status,'PENDING_DELIVERY');
+ assert.deepEqual(result.command.operations[0].proposedFields.action,{type:op.type,fields});
+});
+
 test('resolved encounter attacks require the current native encounter, both actor revisions and target permission', async t => {
  const f=await setup(t);
  const target='test-strike-target', encounter='test-strike-encounter';

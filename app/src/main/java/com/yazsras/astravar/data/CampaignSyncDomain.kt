@@ -62,7 +62,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
 
     /** Membership is explicit: imported source IDs and current placements, never a blanket campaign reassignment. */
     suspend fun snapshot(campaignId: String, includeReadOnly: Boolean = true, mechanics: Boolean = false,
-        spellbook: Boolean = false, loadout: Boolean = false, actions: Boolean = false, strikes: Boolean = false): List<CampaignSyncRecord> = db.withTransaction {
+        spellbook: Boolean = false, loadout: Boolean = false, actions: Boolean = false, strikes: Boolean = false, spellEditing: Boolean = false): List<CampaignSyncRecord> = db.withTransaction {
         OwnerSyncProtocol.id(campaignId)
         val local = campaignId == "local-campaign"
         val diagnostics = setOf(OwnerConnectionProtocol.PROFILE, RemoteStatProtocol.PROFILE_ID)
@@ -91,6 +91,9 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             if (genesisReadbackProjectionErrors(db, actor.actorId, saved).isNotEmpty())
                 throw CampaignCanonicalReviewRequired(actor.actorId)
             val character = saved.character
+            if (spellEditing && actions && includeReadOnly && !character.archived && actor.role != GenesisActorRole.NPC)
+                playableRecords += playableReadEnvelope(PlayableLoadoutProjection.KIND, "loadout", character, actor.role,
+                    "SPELL_EDITING", "", buildJsonObject { put("version", 1) })
             if (actions && !character.archived && actor.role != GenesisActorRole.NPC)
                 playableRecords += PlayableActionSync.current(db, character, actor.role)
             if (loadout && includeReadOnly && !character.archived && actor.role != GenesisActorRole.NPC)
@@ -118,25 +121,27 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         }
         val sheets = allSheets.filter { effectiveCampaign(it.profileId, it.campaignId) == campaignId && it.profileId !in diagnostics }
             .map { it.copy(campaignId = campaignId) }
-        val scopedReferences = db.partyDao().allReferences().filter { it.campaignId == campaignId }
-        val otherReferences = db.partyDao().allReferences().filter { it.campaignId != campaignId }
+        val references = db.partyDao().allReferences()
+        val (scopedReferences, otherReferences) = references.partition { it.campaignId == campaignId }
+        val worldScope = CampaignWorldScope(campaignId, references, associations, db.archiveDao().worldMemberships())
         fun mapped(type: String) = scopedReferences.filter { it.recordType == type }.map { it.recordId }.toSet()
         fun unassigned(type: String,id: String) = otherReferences.none { it.recordType == type && it.recordId == id }
         val profileIds = (sheets.map { it.profileId }.toSet() + mapped("character-profile") + explicitProfiles + if (local) db.recordsDao().allCharacterProfiles()
-            .filter { p -> p.id !in diagnostics && allSheets.none { it.profileId == p.id && it.campaignId != campaignId } && unassigned("character-profile",p.id) }.map { it.id } else emptyList())
+            .filter { p -> p.id !in diagnostics && !fixtureOnlySource(p.source) && allSheets.none { it.profileId == p.id && it.campaignId != campaignId } && unassigned("character-profile",p.id) }.map { it.id } else emptyList())
             .filter(::actorInScope).toSet().minus(diagnostics)
         val placements = db.partyDao().allPlacements()
         val itemIds = (mapped("item") + placements.filter { it.holderProfileId in profileIds }.map { it.itemId } +
-            if (local) db.ledgerDao().allItems().filter { unassigned("item",it.id) && placements.none { p -> p.itemId==it.id && p.holderProfileId!=null && p.holderProfileId !in profileIds } }.map {it.id} else emptyList())
+            if (local) db.ledgerDao().allItems().filter { !fixtureOnlySource(it.source) && unassigned("item",it.id) && placements.none { p -> p.itemId==it.id && p.holderProfileId!=null && p.holderProfileId !in profileIds } }.map {it.id} else emptyList())
             .filter { itemId ->
                 val managedOwner = managedItems[itemId]?.ownerActorId
                 (managedOwner == null || managedOwner in profileIds) &&
                     placements.none { it.itemId == itemId && it.holderProfileId?.let { holder -> !actorInScope(holder) } == true }
             }.toSet()
-        val projectIds = mapped("project") + if(local) db.recordsDao().allProjects().filter {unassigned("project",it.id)}.map {it.id} else emptyList()
-        val entityIds = (mapped("connection") + explicitProfiles + if(local) db.recordsDao().allEntities().filter {unassigned("connection",it.id)}.map {it.id} else emptyList())
-            .filter(::actorInScope).toSet()
-        val companionIds = (profileIds + mapped("companion") + if(local) db.recordsDao().allCompanionStates().filter {unassigned("companion",it.companionId) && unassigned("character-profile",it.companionId) && allSheets.none {s -> s.profileId==it.companionId && s.campaignId!=campaignId}}.map {it.companionId} else emptyList())
+        val projects = db.recordsDao().allProjects().filter { worldScope.includes("project", it.id, it.source) }
+        val entities = db.recordsDao().allEntities().filter { worldScope.includes("connection", it.id, it.source) }
+        val projectIds = projects.mapTo(mutableSetOf()) { it.id }
+        val entityIds = entities.mapTo(mutableSetOf()) { it.id } + explicitProfiles
+        val companionIds = (profileIds + mapped("companion") + if(local) db.recordsDao().allCompanionStates().filter {!fixtureOnlySource(it.source) && unassigned("companion",it.companionId) && unassigned("character-profile",it.companionId) && allSheets.none {s -> s.profileId==it.companionId && s.campaignId!=campaignId}}.map {it.companionId} else emptyList())
             .filter(::actorInScope).toSet()
         val output = playableRecords
         db.recordsDao().allCharacterProfiles().filter { it.id in profileIds }.forEach { output += envelope("character-profile", it.id, it.revision, it) }
@@ -155,10 +160,10 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         db.recordsDao().allItemProperties().filter {it.itemId in itemIds}.forEach {output += envelope("item-property",it.id,it.revision,it)}
         db.recordsDao().allCompanionStates().filter {it.companionId in companionIds}.forEach {output += envelope("companion-state",it.companionId,it.revision,it)}
         db.recordsDao().allCompanionResources().filter {it.companionId in companionIds}.forEach {output += envelope("companion-resource",it.id,it.revision,it)}
-        db.recordsDao().allProjects().filter {it.id in projectIds}.forEach {output += envelope("project",it.id,it.revision,it)}
+        projects.forEach {output += envelope("project",it.id,it.revision,it)}
         db.recordsDao().allStages().filter {it.projectId in projectIds}.forEach {output += envelope("stage",it.id,it.revision,it)}
         db.recordsDao().allRequirements().filter {it.projectId in projectIds && (it.itemId==null || it.itemId in itemIds)}.forEach {output += envelope("requirement",it.id,it.revision,it)}
-        db.recordsDao().allEntities().filter {it.id in entityIds}.forEach {output += envelope("connection",it.id,it.revision,it.copy(imageBase64=null))}
+        entities.forEach {output += envelope("connection",it.id,it.revision,it.copy(imageBase64=null))}
         db.recordsDao().allFacts().filter {it.entityId in entityIds}.forEach {output += envelope("fact",it.id,it.revision,it)}
         db.recordsDao().allMilestones().filter {it.entityId in entityIds}.forEach {output += envelope("milestone",it.id,it.revision,it)}
         fun endpoint(type:String,id:String) = when(type){"item"->id in itemIds;"project"->id in projectIds;"connection"->id in entityIds;"companion"->id in companionIds;"character-profile"->id in profileIds;else->false}

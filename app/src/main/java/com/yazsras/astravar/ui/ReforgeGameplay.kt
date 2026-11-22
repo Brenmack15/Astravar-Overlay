@@ -506,7 +506,7 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
                 val spellLevel = optionalInt(level, "Spell level", 0, 9) ?: error("Enter a spell level")
                 val spell = SpellDefinition(draftId, name.trim(), spellLevel, preparation, concentration, castingTime = castingTime,
                     range = range, components = components, duration = duration, description = description, slotRequired = spellLevel > 0 && slotRequired, sourceVersion = sourceVersion, ritual = ritual, resourceId = resourceId, resourceCost = optionalInt(resourceCost, "Resource cost", 0, 1000) ?: 1)
-                onSave(character.copy(spells = character.spells.filterNot { it.id == spell.id } + spell))
+                onSave(GameplayRules.saveSpellDefinition(character, spell))
             } catch (e: Exception) { error = e.message ?: "Check spell" }
     }) { section, select ->
         ReforgeDraftRecovery(descriptionDraft)

@@ -66,7 +66,7 @@
     },
     "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": {
       "previous_pinned_sha256": "7e5b92d763929c131ddef1f8ee5f08bad520233939f51234feace666b45c77c3",
-      "reviewed_sha256": "0ac108019e142ebe437a2db8298258c3154f3ef996bde5093f3ecdba2c666ba7",
+      "reviewed_sha256": "e4399ad82c3fb34721bf8c50704a600f4c140ae9b4682ec02c3734ec3923b00c",
       "authorization": "Owner Astravar comprehensive overhaul directive, 2026-11-07",
       "reason": "Add a transactional, non-destructive companion creation path; original record IDs and source history remain immutable.",
       "exact_replacements": [
@@ -141,6 +141,26 @@
         {
           "before": "    @Query(\"SELECT * FROM campaign_audit ORDER BY id\") suspend fun allAudit(): List<CampaignAudit>\n",
           "after": "    @Query(\"SELECT afterJson FROM campaign_audit WHERE recordType='playable-action' AND recordId=:actorId AND resultingRevision=:revision\")\n    suspend fun playableActionAt(actorId: String, revision: Long): String?\n    @Query(\"SELECT * FROM campaign_audit ORDER BY id\") suspend fun allAudit(): List<CampaignAudit>\n"
+        },
+        {
+          "before": "import androidx.room.migration.Migration\nimport androidx.sqlite.db.SupportSQLiteDatabase\nimport kotlinx.coroutines.flow.Flow\nimport kotlinx.serialization.Serializable\n",
+          "after": "import androidx.room.migration.Migration\nimport androidx.sqlite.db.SupportSQLiteDatabase\nimport kotlinx.coroutines.flow.combine\nimport kotlinx.coroutines.flow.Flow\nimport kotlinx.serialization.Serializable\n"
+        },
+        {
+          "before": "    val projects = dao.projects()\n    val entities = dao.entities()\n    val facts = dao.facts()\n    val milestones = dao.milestones()\n",
+          "after": "    val projects = dao.projects()\n    val entities = dao.entities()\n    private fun worldScope(campaignId: String) = combine(db.partyDao().worldReferences(), db.genesisAuthorityDao().actors()) { refs, actors ->\n        CampaignWorldScope(campaignId, refs, actors.associateBy { it.actorId })\n    }\n    fun projectsIn(campaignId: String) = combine(projects, worldScope(campaignId)) { rows, scope ->\n        rows.filter { scope.includes(\"project\", it.id, it.source) }\n    }\n    fun entitiesIn(campaignId: String) = combine(entities, worldScope(campaignId)) { rows, scope ->\n        rows.filter { scope.includes(\"connection\", it.id, it.source) }\n    }\n\n    val facts = dao.facts()\n    val milestones = dao.milestones()\n"
+        },
+        {
+          "before": "            provenance, oldRevision ?: 0, revision, now, before, after))\n        return CommandReceipt(commandId, fp, kind, recordId, revision, now, outcomeJson = after).also { dao.insert(it) }\n    }\n\n",
+          "after": "            provenance, oldRevision ?: 0, revision, now, before, after))\n        return CommandReceipt(commandId, fp, kind, recordId, revision, now, outcomeJson = after).also { dao.insert(it) }\n    }\n\n    /** Keep a newly created directory record in the selected campaign on the same commit. */\n    internal suspend fun saveInCampaign(campaignId: String, kind: String, id: String, expected: Long?, source: String,\n        command: String, write: suspend () -> CommandReceipt): CommandReceipt = db.withTransaction {\n        val oldSource = when (kind) {\n            \"project\" -> dao.project(id)?.source\n            \"connection\" -> dao.entity(id)?.source\n            else -> error(\"Unsupported directory record.\")\n        }\n        val scope = CampaignWorldScope(campaignId, db.partyDao().allReferences(),\n            db.genesisAuthorityDao().allActors().associateBy { it.actorId })\n        if (oldSource != null) require(scope.includes(kind, id, oldSource)) { \"This record belongs to a different campaign.\" }\n        val result = write()\n        if (expected == null && campaignId != \"local-campaign\") {\n            val key = campaignHash(\"$kind:$id\")\n            PartyRecordsRepository(db).saveExternalReference(ExternalRecordReference(\n                \"sync-scope-\" + campaignHash(\"$campaignId:$kind:$id\").take(48), \"campaign-sync-membership\", key,\n                kind, id, campaignId = campaignId), source = source, commandId = command + \"-scope\")\n        }\n        result\n    }\n\n"
+        },
+        {
+          "before": "    private fun worldScope(campaignId: String) = combine(db.partyDao().worldReferences(), db.genesisAuthorityDao().actors()) { refs, actors ->\n        CampaignWorldScope(campaignId, refs, actors.associateBy { it.actorId })\n",
+          "after": "    private fun worldScope(campaignId: String) = combine(db.partyDao().worldReferences(), db.genesisAuthorityDao().actors(), db.archiveDao().receipts()) { refs, actors, receipts ->\n        CampaignWorldScope(campaignId, refs, actors.associateBy { it.actorId }, db.archiveDao().worldMemberships(receipts))\n"
+        },
+        {
+          "before": "            db.genesisAuthorityDao().allActors().associateBy { it.actorId })\n",
+          "after": "            db.genesisAuthorityDao().allActors().associateBy { it.actorId }, db.archiveDao().worldMemberships())\n"
         }
       ],
       "genesis_review": {

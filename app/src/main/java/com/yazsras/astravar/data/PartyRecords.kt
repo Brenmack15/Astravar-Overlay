@@ -154,9 +154,13 @@ internal fun exchangeChildId(commandId: String, kind: String, index: Int): Strin
     @Query("SELECT * FROM party_wallets ORDER BY id") fun wallets(): Flow<List<PartyWallet>>
     @Query("SELECT * FROM party_wallets ORDER BY id") suspend fun allWallets(): List<PartyWallet>
     @Query("SELECT * FROM party_wallets WHERE id=:id") suspend fun wallet(id: String): PartyWallet?
+    @Query("SELECT * FROM campaign_checkpoints WHERE campaignId=:campaignId ORDER BY updatedAt DESC,id")
+    fun checkpointsIn(campaignId: String): Flow<List<CampaignCheckpoint>>
     @Query("SELECT * FROM campaign_checkpoints ORDER BY updatedAt DESC,id") fun checkpoints(): Flow<List<CampaignCheckpoint>>
     @Query("SELECT * FROM campaign_checkpoints ORDER BY id") suspend fun allCheckpoints(): List<CampaignCheckpoint>
     @Query("SELECT * FROM campaign_checkpoints WHERE id=:id") suspend fun checkpoint(id: String): CampaignCheckpoint?
+    @Query("SELECT * FROM external_record_references WHERE recordType IN ('project', 'connection') ORDER BY id")
+    fun worldReferences(): kotlinx.coroutines.flow.Flow<List<ExternalRecordReference>>
     @Query("SELECT * FROM external_record_references ORDER BY id") suspend fun allReferences(): List<ExternalRecordReference>
     @Query("SELECT * FROM external_record_references WHERE id=:id") suspend fun reference(id: String): ExternalRecordReference?
     @Upsert suspend fun put(value: PartySheetRecord)
@@ -175,6 +179,7 @@ class PartyRecordsRepository(private val db: CampaignLedgerDb) {
     val placements = dao.placements()
     val wallets = dao.wallets()
     val checkpoints = dao.checkpoints()
+    fun checkpointsIn(campaignId: String) = dao.checkpointsIn(campaignId)
 
     private fun checkText(value: String, max: Int = 16000, required: Boolean = false) {
         require(value.length <= max && (!required || value.isNotBlank())) { "A required field is missing or too long." }
