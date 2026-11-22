@@ -66,7 +66,7 @@
     },
     "app/src/main/java/com/yazsras/astravar/data/CampaignRecords.kt": {
       "previous_pinned_sha256": "7e5b92d763929c131ddef1f8ee5f08bad520233939f51234feace666b45c77c3",
-      "reviewed_sha256": "c42133d1410ebb102ebe2dc06afeb0264ca031bc94ff9dcb7a6dea31ec42b295",
+      "reviewed_sha256": "0ac108019e142ebe437a2db8298258c3154f3ef996bde5093f3ecdba2c666ba7",
       "authorization": "Owner Astravar comprehensive overhaul directive, 2026-11-07",
       "reason": "Add a transactional, non-destructive companion creation path; original record IDs and source history remain immutable.",
       "exact_replacements": [
@@ -137,6 +137,10 @@
         {
           "before": "    @Query(\"SELECT * FROM craft_executions ORDER BY commandId\") suspend fun allCrafts(): List<CraftExecution>\n    @Query(\"SELECT * FROM craft_consumptions ORDER BY id\") suspend fun allConsumptions(): List<CraftConsumption>\n",
           "after": "    @Query(\"SELECT * FROM craft_executions ORDER BY commandId\") suspend fun allCrafts(): List<CraftExecution>\n    @Query(\"SELECT * FROM craft_executions WHERE commandId=:commandId\") suspend fun craft(commandId: String): CraftExecution?\n    @Query(\"SELECT * FROM craft_consumptions ORDER BY id\") suspend fun allConsumptions(): List<CraftConsumption>\n    @Query(\"SELECT * FROM craft_consumptions WHERE executionId=:executionId ORDER BY id\") suspend fun craftConsumptions(executionId: String): List<CraftConsumption>\n"
+        },
+        {
+          "before": "    @Query(\"SELECT * FROM campaign_audit ORDER BY id\") suspend fun allAudit(): List<CampaignAudit>\n",
+          "after": "    @Query(\"SELECT afterJson FROM campaign_audit WHERE recordType='playable-action' AND recordId=:actorId AND resultingRevision=:revision\")\n    suspend fun playableActionAt(actorId: String, revision: Long): String?\n    @Query(\"SELECT * FROM campaign_audit ORDER BY id\") suspend fun allAudit(): List<CampaignAudit>\n"
         }
       ],
       "genesis_review": {
@@ -245,7 +249,7 @@
     },
     "app/src/main/java/com/yazsras/astravar/data/CampaignBackup.kt": {
       "previous_pinned_sha256": "f7eefb74ebec642b318ab67053605ec5ede36dd02b38a2ae0c85819178821251",
-      "reviewed_sha256": "b8ce70bb0e4c2f2e5fe546b66e9ae20c5a35a5d08c786565a186911ac9dd3cd6",
+      "reviewed_sha256": "4d33ac1c83749f9aab5a8646128c34b189ff923275e6d3ce6a48dfea545d89a1",
       "exact_replacements": [
         {
           "before": "            (it.quantity != null && it.quantity !in 1..1_000_000) || it.revision < 1 }) errors += \"Invalid material requirement or reference.\"\n        if (r.entities.any { it.name.isBlank() || it.revision < 1 || (it.imageBase64?.length ?: 0) > 1_000_000 }) errors += \"Invalid connection values.\"\n        if (r.entities.any { !short(it.name, 120, true) || !short(it.notes) || !short(it.aliases, 2000) || !short(it.relationship, 3000) ||\n            !provenance(it.source) || it.kind !in setOf(\"Person\", \"Organization\", \"Faction\", \"Creature\", \"Other\") }) errors += \"Invalid connection fields.\"\n        if (r.facts.any { it.entityId !in entityIds || it.detail.isBlank() || it.revision < 1 }) errors += \"Invalid connection fact or reference.\"\n        if (r.facts.any { !short(it.detail, 6000, true) || !short(it.category, 120, true) || !provenance(it.source) || it.evidenceStatus !in evidenceValues }) errors += \"Invalid connection fact fields.\"\n        if (r.milestones.any { it.entityId !in entityIds || it.title.isBlank() || it.revision < 1 }) errors += \"Invalid milestone or reference.\"\n",
@@ -266,6 +270,10 @@
         {
           "before": "        val recordIds = mapOf(\n",
           "after": "        val recordIds = mapOf(\n            \"playable-equipment\" to itemIds,\n"
+        },
+        {
+          "before": "            \"playable-equipment\" to itemIds,\n",
+          "after": "            PlayableActionSync.KIND to characterProfileIds,\n            \"playable-equipment\" to itemIds,\n"
         }
       ]
     }
