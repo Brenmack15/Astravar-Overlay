@@ -225,7 +225,19 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
 }
 
 internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val payload = effect.payload) {
-    is EffectPayload.Number -> "${payload.target.name.lowercase().replace('_', ' ')} ${payload.key}: ${payload.operation.name.lowercase()} ${payload.amount}"
+    is EffectPayload.Number -> {
+        val target = when (payload.target) {
+            NumericTarget.SAVE -> if (payload.key.isEmpty()) "All saving throws" else "${payload.key} saves"
+            else -> listOf(payload.target.name.lowercase().replace('_', ' '), payload.key).filter { it.isNotBlank() }.joinToString(" ")
+        }
+        val conditions = effect.conditions.mapNotNull { when (it.kind) {
+            ConditionKind.WORN -> "while worn"
+            ConditionKind.HELD -> "while held"
+            ConditionKind.ATTUNED -> "while attuned"
+            else -> null
+        } }
+        (listOf("$target ${payload.operation.name.lowercase()} ${payload.amount}") + conditions).joinToString(" · ")
+    }
     is EffectPayload.DamageBonus -> "+${SecureDice.format(payload.component.formula)} ${payload.component.type.name.lowercase()} damage"
     is EffectPayload.Defense -> "${payload.type.name.lowercase()} ${payload.kind.name.lowercase()}"
     is EffectPayload.Edge -> "${payload.edge.name.lowercase()} on ${payload.kind.name.lowercase().replace('_', ' ')}"
@@ -253,6 +265,8 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
     var ability by rememberSaveable { mutableStateOf(Stat.STR) }
     val skillTargets = remember(character) { SkillRules.entries(character) }
     var selectedSkill by rememberSaveable { mutableStateOf("Investigation") }
+    var saveKey by rememberSaveable { mutableStateOf("") }
+    var equipmentCondition by rememberSaveable { mutableStateOf(ConditionKind.EQUIPPED) }
     var amount by rememberSaveable { mutableStateOf("") }
     var effectName by rememberSaveable { mutableStateOf("") }
     val effectsDraft = rememberReforgeDraft(originalDefinition?.effects ?: emptyList(), ListSerializer(EffectDefinition.serializer()))
@@ -319,7 +333,10 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
             Choices("Effect type", listOf("Statistic", "Damage dice", "Damage defense", "Advantage / Disadvantage"), effectType) { effectType = it }
             when (effectType) {
                 "Statistic" -> {
-                    Choices("Statistic", listOf(NumericTarget.ABILITY, NumericTarget.SKILL, NumericTarget.ARMOR_CLASS, NumericTarget.MAX_HP, NumericTarget.INITIATIVE, NumericTarget.SPEED, NumericTarget.SPELL_ATTACK, NumericTarget.SPELL_DC), target) { target = it }
+                    Choices("Statistic", listOf(NumericTarget.ABILITY, NumericTarget.SKILL, NumericTarget.SAVE, NumericTarget.ARMOR_CLASS, NumericTarget.MAX_HP, NumericTarget.INITIATIVE, NumericTarget.SPEED, NumericTarget.SPELL_ATTACK, NumericTarget.SPELL_DC), target) {
+                        target = it
+                        if (it == NumericTarget.SAVE) operation = NumberOperation.ADD
+                    }
                     if (target == NumericTarget.ABILITY) Choices("Ability", Stat.entries, ability) { ability = it }
                     if (target == NumericTarget.SKILL) {
                         Choices("Skill", skillTargets.map { it.id }, selectedSkill, display = { id ->
@@ -327,6 +344,16 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
                             if (entry.custom) "${entry.name} (custom · $id)" else entry.name
                         }) { selectedSkill = it }
                     }
+                    if (target == NumericTarget.SAVE) {
+                        Choices("Saving throw", listOf("") + Stat.entries.map { it.name }, saveKey,
+                            display = { it.ifEmpty { "All saving throws" } }) { saveKey = it }
+                    }
+                    Choices("Active while", listOf(ConditionKind.EQUIPPED, ConditionKind.WORN, ConditionKind.HELD),
+                        equipmentCondition, display = { when (it) {
+                            ConditionKind.WORN -> "Worn"
+                            ConditionKind.HELD -> "Held"
+                            else -> "Worn or held"
+                        } }) { equipmentCondition = it }
                     Choices("Operation", NumberOperation.entries, operation) { operation = it }
                     Field("Value", amount, { amount = it })
                 }
@@ -351,6 +378,7 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
                         "Statistic" -> EffectPayload.Number(target, operation, optionalInt(amount, "Effect value", -100, 10000) ?: error("Enter a value"), when (target) {
                             NumericTarget.ABILITY -> ability.name
                             NumericTarget.SKILL -> selectedSkill
+                            NumericTarget.SAVE -> saveKey
                             NumericTarget.SPEED -> "walk"
                             else -> ""
                         })
@@ -358,7 +386,14 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
                         "Damage defense" -> EffectPayload.Defense(damageKind, defense)
                         else -> EffectPayload.Edge(rollKind, edge)
                     }
-                    val conditions = if (effectType == "Damage dice") listOf(EffectCondition(ConditionKind.SUCCESSFUL_HIT)) + if (once) listOf(EffectCondition(ConditionKind.ONCE_PER_TURN)) else emptyList() else emptyList()
+                    val conditions = buildList {
+                        if (effectType == "Statistic" && equipmentCondition != ConditionKind.EQUIPPED)
+                            add(EffectCondition(equipmentCondition))
+                        if (effectType == "Damage dice") {
+                            add(EffectCondition(ConditionKind.SUCCESSFUL_HIT))
+                            if (once) add(EffectCondition(ConditionKind.ONCE_PER_TURN))
+                        }
+                    }
                     effects = effects + EffectDefinition(id, effectName.trim().ifBlank { effectType }, RuleSource("user:$id", name.ifBlank { "User-entered equipment" }, Acceptance.ACCEPTED_HOMEBREW),
                         payload, conditions, requiresAttunement = true,
                         chargeResourceId = if (effectType == "Damage dice") resourceId else null,
