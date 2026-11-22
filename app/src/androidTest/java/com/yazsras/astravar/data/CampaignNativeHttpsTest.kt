@@ -215,12 +215,16 @@ class CampaignNativeHttpsTest {
         client.sync()
         val receipt = mcp("get_campaign_command_receipt", buildJsonObject { put("campaignId", campaign); put("commandId", id) }).getValue("receipt").jsonObject
         assertEquals("APPLIED", receipt.getValue("status").jsonPrimitive.content)
-        val local = CampaignConnectionProjection.project(CampaignSyncDomain(db).snapshot(campaign, mechanics = true), allScopes)
+        val nativeRows = CampaignSyncDomain(db).snapshot(campaign, mechanics = true, spellbook = true,
+            loadout = true, actions = true)
+        val local = CampaignConnectionProjection.project(nativeRows, allScopes)
         for (raw in receipt.getValue("records").jsonArray) {
             val saved = raw.jsonObject
             val kind = saved.getValue("kind").jsonPrimitive.content; val recordId = saved.getValue("recordId").jsonPrimitive.content
             assertEquals("Independent backend readback equals immutable receipt", saved, record(kind, recordId))
-            val android = local.single { it.kind == kind && it.recordId == recordId }
+            val android = checkNotNull(local.singleOrNull { it.kind == kind && it.recordId == recordId }) {
+                "Missing independent Android readback for $kind/$recordId"
+            }
             assertEquals("Independent authorized Android Room projection equals backend", campaignJson.encodeToJsonElement(android), saved)
         }
         measurements += buildJsonObject {
