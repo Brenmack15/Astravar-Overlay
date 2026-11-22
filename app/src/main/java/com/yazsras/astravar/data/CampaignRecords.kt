@@ -269,8 +269,8 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
     private val dao = db.recordsDao()
     val projects = dao.projects()
     val entities = dao.entities()
-    private fun worldScope(campaignId: String) = combine(db.partyDao().worldReferences(), db.genesisAuthorityDao().actors()) { refs, actors ->
-        CampaignWorldScope(campaignId, refs, actors.associateBy { it.actorId })
+    private fun worldScope(campaignId: String) = combine(db.partyDao().worldReferences(), db.genesisAuthorityDao().actors(), db.archiveDao().receipts()) { refs, actors, receipts ->
+        CampaignWorldScope(campaignId, refs, actors.associateBy { it.actorId }, db.archiveDao().worldMemberships(receipts))
     }
     fun projectsIn(campaignId: String) = combine(projects, worldScope(campaignId)) { rows, scope ->
         rows.filter { scope.includes("project", it.id, it.source) }
@@ -377,7 +377,7 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
             else -> error("Unsupported directory record.")
         }
         val scope = CampaignWorldScope(campaignId, db.partyDao().allReferences(),
-            db.genesisAuthorityDao().allActors().associateBy { it.actorId })
+            db.genesisAuthorityDao().allActors().associateBy { it.actorId }, db.archiveDao().worldMemberships())
         if (oldSource != null) require(scope.includes(kind, id, oldSource)) { "This record belongs to a different campaign." }
         val result = write()
         if (expected == null && campaignId != "local-campaign") {

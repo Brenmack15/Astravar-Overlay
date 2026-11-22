@@ -4,7 +4,8 @@ package com.yazsras.astravar.data
 internal class CampaignWorldScope(
     private val campaignId: String,
     references: List<ExternalRecordReference>,
-    private val actors: Map<String, GenesisActorAuthority>
+    private val actors: Map<String, GenesisActorAuthority>,
+    private val archivedMemberships: Map<Pair<String, String>, Set<String>> = emptyMap()
 ) {
     private val memberships = references.groupBy { it.recordType to it.recordId }
 
@@ -14,7 +15,9 @@ internal class CampaignWorldScope(
         if (explicit.isNotEmpty()) return explicit.any { it.campaignId == campaignId }
         // Old Complete exports can hold QA and player data together. The reserved source
         // marker says this row needs explicit membership, without supplying its campaign ID.
-        return campaignId == "local-campaign" && !fixtureOnlySource(source)
+        if (fixtureOnlySource(source)) return false
+        archivedMemberships[kind to id]?.let { return it.singleOrNull() == campaignId }
+        return campaignId == "local-campaign"
     }
 }
 
