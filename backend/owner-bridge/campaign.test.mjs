@@ -420,3 +420,35 @@ test('loadout rows require the negotiated read scopes, the selected actor, and r
   assert.throws(()=>projectCampaignRecord(row,CAMPAIGN_SCOPES.filter(s=>s!==missing)),e=>e.code==='READ_SCOPE_DENIED');
  }
 });
+
+test('resolved actor actions bind the role, revision, declared rest and resource permissions', async t => {
+ const f=await setup(t);
+ const kind='playable-action';
+ const fields={id:profile,profileId:profile,actorRole:'COMPANION',schemaVersion:1,revision:1,source:'Android Reforge action v1',action:null};
+ const initial={recordId:profile,kind,revision:1,fields};
+ await f.publish([initial]);
+ const rest={type:'complete_rest',recordId:profile,kind,expectedRevision:1,
+  fields:{actorRole:'COMPANION',kind:'LONG_REST',elapsedSeconds:28800,confirmed:true}};
+ await fails(f.submit([{...rest,fields:{...rest.fields,actorRole:'PLAYER'}}]),'PLAYABLE_ACTOR_CONFLICT');
+ await fails(f.submit([{...rest,fields:{...rest.fields,confirmed:false}}]),'RESOLVED_REST_REQUIRED');
+ await fails(f.submit([{...rest,fields:{...rest.fields,elapsedSeconds:10}}]),'INVALID_INTEGER');
+ const limited=await setup(t,{writeScopes:['character','combat','resources','hp','companions']});
+ await limited.publish([initial]);
+ await fails(limited.submit([rest]),'WRITE_SCOPE_DENIED');
+ await f.enable(['character','combat','resources','hp','inventory']);
+ const manual=await f.submit([rest]);
+ assert.equal(manual.command.status,'PENDING_APPROVAL');
+ await f.sync.decide(f.principal,campaign,decision(manual.command,{status:'REJECTED'}));
+ await f.enable(['character','combat','resources','hp','inventory','companions']);
+ const cast={type:'cast_spell',recordId:profile,kind,expectedRevision:1,
+  fields:{actorRole:'COMPANION',spellId:'fixture-glint',slotLevel:1,ritual:false,replaceConcentration:false}};
+ const {command}=await f.submit([cast]);
+ assert.equal(command.status,'PENDING_DELIVERY');
+ assert.deepEqual(command.operations[0].proposedFields.action,{type:cast.type,fields:cast.fields});
+ const nativeRow={kind,recordId:profile,revision:2,fields:command.operations[0].proposedFields};
+ await f.sync.decide(f.principal,campaign,decision(command,{rows:[nativeRow]}));
+ const receipt=(await f.sync.getReceipt(connector,campaign,command.commandId)).receipt;
+ assert.equal(receipt.status,'APPLIED');
+ const observed=(await f.sync.read(connector,campaign,{kinds:[kind],profileId:profile})).records[0];
+ assert.deepEqual(observed.fields.action,receipt.records[0].fields.action);
+});

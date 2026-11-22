@@ -236,6 +236,8 @@ interface CampaignRecordsDao {
     @Query("SELECT * FROM campaign_links ORDER BY id") suspend fun allLinks(): List<CampaignLink>
     @Query("SELECT * FROM campaign_links WHERE id=:id") suspend fun link(id: String): CampaignLink?
     @Query("SELECT * FROM campaign_audit ORDER BY createdAt DESC,id") fun audit(): Flow<List<CampaignAudit>>
+    @Query("SELECT afterJson FROM campaign_audit WHERE recordType='playable-action' AND recordId=:actorId AND resultingRevision=:revision")
+    suspend fun playableActionAt(actorId: String, revision: Long): String?
     @Query("SELECT * FROM campaign_audit ORDER BY id") suspend fun allAudit(): List<CampaignAudit>
     @Query("SELECT * FROM command_receipts WHERE commandId=:id") suspend fun receipt(id: String): CommandReceipt?
     @Query("SELECT * FROM command_receipts ORDER BY commandId") suspend fun allReceipts(): List<CommandReceipt>

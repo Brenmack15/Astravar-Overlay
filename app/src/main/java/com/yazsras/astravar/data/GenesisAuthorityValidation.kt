@@ -27,6 +27,14 @@ internal fun genesisAuthorityBackupErrors(
     val campaignProofs = mutableMapOf<String, GenesisCampaignRecord>()
     val itemProofs = mutableMapOf<String, ReforgeSavedCharacter>()
     val playableHistory = playable.changes.associateBy { it.commandId }
+    val actionAudits = campaign.records.audit.filter { it.recordType == PlayableActionSync.KIND }
+    val actionsByRevision = actionAudits.associateBy { it.recordId to it.resultingRevision }
+    if (actionsByRevision.size != actionAudits.size) errors += "Duplicate action at one playable revision."
+    val actionReceipts = campaign.records.receipts.associateBy { it.commandId }
+    for (audit in actionAudits) verify("Resolved action ${audit.id}") {
+        PlayableActionSync.verifyAudit(audit, requireNotNull(playableHistory[audit.commandId + "-playable"]),
+            requireNotNull(actionReceipts[audit.commandId]), actionsByRevision[audit.recordId to audit.priorRevision])
+    }
     for (audit in campaign.records.audit.filter { it.recordType == PlayableMechanicsSync.EQUIPMENT }) {
         verify("Native equipment audit ${audit.id}") {
             require(audit.kind == "EQUIPMENT_EDIT_V1" && audit.resultingRevision == Math.addExact(audit.priorRevision, 1))
