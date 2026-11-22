@@ -137,8 +137,10 @@ jobs:
             # disposable re-signing. A corrupt cache fails closed; no owner key.
             python3 scripts/ci-baseline.py --version-code 49 --cache-dir "$RUNNER_TEMP/astravar-baseline-cache" --output-dir validation/upgrade-baseline --candidate app/build/outputs/apk/release/app-release.apk
             python3 scripts/ci-baseline.py --version-code 50 --cache-dir "$RUNNER_TEMP/astravar-baseline-cache" --output-dir validation/upgrade-baseline --candidate app/build/outputs/apk/release/app-release.apk
+            python3 scripts/ci-baseline.py --version-code 54 --cache-dir "$RUNNER_TEMP/astravar-baseline-cache" --output-dir validation/upgrade-baseline --candidate app/build/outputs/apk/release/app-release.apk
             echo 'ASTRAVAR_BASELINE_APK=validation/upgrade-baseline/code49-ci.apk' >> "$GITHUB_ENV"
             echo 'ASTRAVAR_GENESIS_BASELINE_APK=validation/upgrade-baseline/code50-ci.apk' >> "$GITHUB_ENV"
+            echo 'ASTRAVAR_CONVERGENCE_BASELINE_APK=validation/upgrade-baseline/code54-ci.apk' >> "$GITHUB_ENV"
             bash scripts/ci-bootstrap-baseline.sh
           fi
       - name: Save validated historical cache in its trusted branch or PR scope
