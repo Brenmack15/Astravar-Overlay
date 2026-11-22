@@ -103,7 +103,10 @@ class GenesisCampaignResponsiveTest {
                 val campaign = app.genesisStorage.authority.createCampaign(campaignName,
                     notes = "Synthetic responsive campaign fixture", commandId = "fictional-responsive-campaign")
                 ReforgePreferences.open(app).selectCampaign(campaign.id)
-                app.campaignLedger.party.saveCheckpoint(CampaignCheckpoint(id = "fictional-responsive-checkpoint",
+                app.campaignLedger.party.saveCheckpoint(CampaignCheckpoint(id = "other-campaign-checkpoint",
+                    campaignId = "local-campaign", title = "A different campaign journal"),
+                    source = "Synthetic default campaign")
+                app.campaignLedger.party.saveCheckpoint(CampaignCheckpoint(id = "fictional-responsive-checkpoint", campaignId = campaign.id,
                     title = "Fictional observatory pause", scene = "A fictional hilltop", lastConfirmedAction = "Read the map",
                     unresolvedChoice = "Choose the next path"), source = "Synthetic responsive campaign fixture")
             }
@@ -158,6 +161,7 @@ class GenesisCampaignResponsiveTest {
             }
             compose.onNodeWithText("Fictional observatory pause").performScrollTo()
             assertWholeText("Fictional observatory pause")
+            compose.onNodeWithText("A different campaign journal").assertDoesNotExist()
             compose.onNodeWithText("Choose campaign").assertIsNotDisplayed()
             val journalPosition = scrollPosition("Journal")
             assertTrue("The journal must actually have been scrolled", journalPosition > 0f)
