@@ -20,7 +20,7 @@ const read = (name, description, inputSchema) => ({ name, description, inputSche
 
 export const TOOLS = Object.freeze([
   ...CAMPAIGN_TOOLS,
-  read('get_character', 'Read a scoped device-published owner-authorized character and sheet with source revisions and freshness. The legacy synthetic campaign remains an isolated test.', object({ campaignId: scopedId, profileId: scopedId })),
+  read('get_character', 'Read a scoped device-published character and sheet with source revisions and freshness. When authorized, playableSummary contains native base, permanent and effective abilities and the published casting state. Empty or missing native rows are unknown. The legacy synthetic campaign remains an isolated test.', object({ campaignId: scopedId, profileId: scopedId })),
   read('get_character_abilities', 'Read only owner-authorized character ability scores, sources and revisions. Unknown values remain unknown; synthetic test records stay isolated.', object({ campaignId: scopedId, profileId: scopedId })),
   {
     name: 'propose_record_update',
@@ -144,7 +144,7 @@ export async function handleMcp(request, bridge, { ownerId, allowPublicDiscovery
       else if(tool.name==='get_campaign_record')value=await campaignSync.read(principal,campaignId,{kinds:[args.kind],recordId:args.recordId});
       else {const grant=await campaignSync.authorize(principal,campaignId);const scopes=JSON.parse(grant.read_scopes_json);const requested=CAMPAIGN_READ_KINDS[tool.name];const kinds=requested===null?[]:requested.filter(k=>canReadKind(k,scopes));if(requested!==null&&!kinds.length)throw Object.assign(new Error(),{code:'READ_SCOPE_DENIED'});value=await campaignSync.read(principal,campaignId,{kinds,profileId:args.profileId??null,recordId:tool.name==='get_item'?null:args.recordId??null,itemId:tool.name==='get_item'?args.recordId:null,metadataOnly:['get_campaign_history','get_research'].includes(tool.name),after:args.after??'',limit:args.limit??25});}
     }else switch (tool.name) {
-      case 'get_character': value = args.campaignId===CAMPAIGN?await bridge.getCharacter(principal,args.campaignId,args.profileId):await campaignSync.read(principal,args.campaignId,{kinds:['character-profile','party-sheet'],profileId:args.profileId});break;
+      case 'get_character': value = args.campaignId===CAMPAIGN?await bridge.getCharacter(principal,args.campaignId,args.profileId):await campaignSync.characterOverview(principal,args.campaignId,args.profileId);break;
       case 'get_character_abilities': value = args.campaignId===CAMPAIGN?await bridge.getCharacterAbilities(principal,args.campaignId,args.profileId):await campaignSync.read(principal,args.campaignId,{kinds:['character-ability'],profileId:args.profileId});break;
       case 'propose_record_update': {
         const { campaignId, ...proposal } = args;

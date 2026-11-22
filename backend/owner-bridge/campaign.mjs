@@ -222,7 +222,71 @@ export class CampaignBridge{
  async publish(p,campaign,b){exact(b,['commandId','records'],['removed','snapshotFingerprint']);commandId(b.commandId);if(!Array.isArray(b.records)||b.records.length>100)fail(400,'INVALID_RECORD_BATCH');const g=await this.authorize(p,campaign,['device']),allowed=JSON.parse(g.read_scopes_json);const removed=b.removed??[];if(!Array.isArray(removed)||removed.length>100)fail(400,'INVALID_REMOVAL_BATCH');for(const r of removed){exact(r,['kind','recordId','expectedRevision']);id(r.recordId);integer(r.expectedRevision,1);if(!Object.hasOwn(RECORD_SCOPES,r.kind)||!canReadKind(r.kind,allowed))fail(403,'READ_SCOPE_DENIED');}if(new Set(removed.map(x=>x.kind+'|'+x.recordId)).size!==removed.length||removed.some(x=>b.records.some(r=>r.kind===x.kind&&r.recordId===x.recordId)))fail(400,'DUPLICATE_RECORD');b.records.forEach(r=>{record(r);requireRecordCampaign(r,campaign);if(!canReadKind(r.kind,allowed))fail(403,'READ_SCOPE_DENIED');if(canonical(projectCampaignRecord(r,allowed))!==canonical(r))fail(403,'UNAUTHORIZED_RECORD_FIELDS');});for(const value of b.records){const current=await this.getRecord(campaign,value.kind,value.recordId);if(current&&current.grant_id===g.id&&current.revision===value.revision&&canonical(projectCampaignRecord({recordId:value.recordId,kind:value.kind,revision:value.revision,fields:JSON.parse(current.fields_json)},allowed).fields)!==canonical(value.fields))fail(409,'REVISION_CONFLICT');}if(new Set(b.records.map(r=>r.kind+'|'+r.recordId)).size!==b.records.length)fail(400,'DUPLICATE_RECORD');const fp=await sha256(canonical(b)),old=await this.s('SELECT * FROM bridge_campaign_publications WHERE owner_id=? AND campaign_id=? AND command_id=?',this.ownerId,campaign,b.commandId).first();if(old){if(old.fingerprint!==fp||old.grant_id!==g.id)fail(409,'COMMAND_ID_REUSED');return this.envelope(campaign,{published:b.records.map(({recordId,kind,revision})=>({recordId,kind,revision})),removed,publishedAt:old.created_at,replayed:true});}let generation=null;if(!b.records.length&&!removed.length){if(typeof b.snapshotFingerprint!=='string'||!/^[a-f0-9]{64}$/.test(b.snapshotFingerprint))fail(400,'SNAPSHOT_FINGERPRINT_REQUIRED');const snapshot=await this.mirrorSnapshot(g);if(snapshot.fingerprint!==b.snapshotFingerprint)fail(409,'MIRROR_SNAPSHOT_CONFLICT');generation=snapshot.generation;}else if(b.snapshotFingerprint!==undefined)fail(400,'HEARTBEAT_ONLY_FIELD');const publishedAt=this.now();try{await this.s('INSERT INTO bridge_campaign_publications(owner_id,campaign_id,command_id,grant_id,fingerprint,records_json,removed_json,expected_generation,created_at) VALUES(?,?,?,?,?,?,?,?,?)',this.ownerId,campaign,b.commandId,g.id,fp,canonical(b.records),canonical(removed),generation,publishedAt).run();}catch(e){if(String(e).includes('REVISION_CONFLICT'))fail(409,'REVISION_CONFLICT');if(String(e).includes('MIRROR_SNAPSHOT_CONFLICT'))fail(409,'MIRROR_SNAPSHOT_CONFLICT');if(String(e).includes('GRANT_EXPIRED'))fail(403,'CAMPAIGN_NOT_AUTHORIZED');throw e;}return this.envelope(campaign,{published:b.records.map(({recordId,kind,revision})=>({recordId,kind,revision})),removed,publishedAt});}
  async mirrorSnapshot(g){const current=await this.s('SELECT mirror_generation FROM bridge_campaign_grants WHERE id=?',g.id).first();const rows=await this.s('SELECT kind,record_id,revision,fields_json FROM bridge_campaign_records WHERE grant_id=? ORDER BY kind,record_id',g.id).all();const summary=[];for(const r of rows.results)if(canReadRecord({kind:r.kind,recordId:r.record_id,fields:JSON.parse(r.fields_json)},JSON.parse(g.read_scopes_json)))summary.push({kind:r.kind,recordId:r.record_id,revision:r.revision,fingerprint:await sha256(canonical(projectCampaignRecord({recordId:r.record_id,kind:r.kind,revision:r.revision,fields:JSON.parse(r.fields_json)},JSON.parse(g.read_scopes_json)).fields))});return{fingerprint:await sha256(canonical(summary)),generation:current.mirror_generation};}
  async publicationReadback(p,campaign,cid){commandId(cid);const g=await this.authorize(p,campaign,['device']),publication=await this.s('SELECT * FROM bridge_campaign_publications WHERE owner_id=? AND campaign_id=? AND command_id=? AND grant_id=?',this.ownerId,campaign,cid,g.id).first();if(!publication)fail(404,'PUBLICATION_NOT_FOUND');const records=[];for(const original of JSON.parse(publication.records_json)){const row=await this.getRecord(campaign,original.kind,original.recordId);if(!row||row.grant_id!==g.id)fail(409,'PUBLISHED_RECORD_MISSING');records.push(projectCampaignRecord({recordId:row.record_id,kind:row.kind,revision:row.revision,fields:JSON.parse(row.fields_json)},JSON.parse(g.read_scopes_json)));}const removed=JSON.parse(publication.removed_json);for(const r of removed)if(await this.getRecord(campaign,r.kind,r.recordId))fail(409,'REMOVED_RECORD_REAPPEARED');return this.envelope(campaign,{commandId:cid,source:'INDEPENDENT_CURRENT_ANDROID_MIRROR_READBACK',records,removed,verifiedAt:this.now()});}
- async read(p,campaign,{kinds=[],recordId=null,profileId=null,itemId=null,metadataOnly=false,after='',limit=25}={}){const g=await this.authorize(p,campaign);integer(limit,1,100);const [cursorKind,cursorRecord]=readCursor(after);if(recordId!==null)id(recordId);if(profileId!==null)id(profileId);if(itemId!==null)id(itemId);const scopes=JSON.parse(g.read_scopes_json);if(!Array.isArray(kinds)||kinds.some(k=>!Object.hasOwn(RECORD_SCOPES,k)))fail(400,'UNSUPPORTED_RECORD_KIND');if(kinds.some(k=>!canReadKind(k,scopes)))fail(403,'READ_SCOPE_DENIED');const selected=kinds.length?kinds:Object.keys(RECORD_SCOPES).filter(k=>canReadKind(k,scopes));const placeholders=selected.map(()=>'?').join(',');const rows=await this.s(`SELECT * FROM bridge_campaign_records WHERE owner_id=? AND campaign_id=? AND grant_id=? AND kind IN (${placeholders}) AND (? IS NULL OR record_id=?) AND (? IS NULL OR record_id=? OR json_extract(fields_json,'$.itemId')=?) AND (? IS NULL OR json_extract(fields_json,'$.profileId')=? OR json_extract(fields_json,'$.companionId')=? OR record_id=?) AND (?=1 OR kind<>'reference' OR record_id NOT LIKE 'archive:%' AND json_type(fields_json,'$.body') IS NULL AND json_type(fields_json,'$.bodyText') IS NULL AND json_type(fields_json,'$.content') IS NULL AND json_type(fields_json,'$.payloadJson') IS NULL AND json_type(fields_json,'$.markdown') IS NULL AND json_type(fields_json,'$.recordJson') IS NULL) AND (?=0 OR kind NOT IN ('audit','reference') OR kind='audit' AND json_type(fields_json,'$.index') IS NULL OR kind='reference' AND json_type(fields_json,'$.part') IS NULL) AND (kind>? OR kind=? AND record_id>?) ORDER BY kind,record_id LIMIT ?`,this.ownerId,campaign,g.id,...selected,recordId,recordId,itemId,itemId,itemId,profileId,profileId,profileId,profileId,CAMPAIGN_SCOPES.every(x=>scopes.includes(x))?1:0,metadataOnly?1:0,cursorKind,cursorKind,cursorRecord,limit+1).all();const hasMore=rows.results.length>limit,values=rows.results.slice(0,limit);return this.envelope(campaign,{source:'ANDROID_COMMITTED_RECORD_MIRROR',grantRevision:g.revision,cursor:after||null,records:values.map(r=>({recordId:r.record_id,kind:r.kind,revision:r.revision,fields:projectCampaignRecord({recordId:r.record_id,kind:r.kind,revision:r.revision,fields:JSON.parse(r.fields_json)},scopes).fields,source:JSON.parse(r.fields_json).source??null,publishedAt:r.published_at,lastDeviceSyncAt:r.last_device_sync_at,stale:this.now()-r.last_device_sync_at>FRESHNESS,unresolved:JSON.parse(r.fields_json).unknowns??[]})),nextCursor:hasMore?values.at(-1).kind+'|'+values.at(-1).record_id:null,verifiedAt:this.now()});}
+ async read(p,campaign,options={}){
+  const grant=await this.authorize(p,campaign);
+  return this.readGranted(grant,campaign,options);
+ }
+ async readGranted(g,campaign,{kinds=[],recordId=null,profileId=null,itemId=null,metadataOnly=false,after='',limit=25}={}){integer(limit,1,100);const [cursorKind,cursorRecord]=readCursor(after);if(recordId!==null)id(recordId);if(profileId!==null)id(profileId);if(itemId!==null)id(itemId);const scopes=JSON.parse(g.read_scopes_json);if(!Array.isArray(kinds)||kinds.some(k=>!Object.hasOwn(RECORD_SCOPES,k)))fail(400,'UNSUPPORTED_RECORD_KIND');if(kinds.some(k=>!canReadKind(k,scopes)))fail(403,'READ_SCOPE_DENIED');const selected=kinds.length?kinds:Object.keys(RECORD_SCOPES).filter(k=>canReadKind(k,scopes));const placeholders=selected.map(()=>'?').join(',');const rows=await this.s(`SELECT * FROM bridge_campaign_records WHERE owner_id=? AND campaign_id=? AND grant_id=? AND kind IN (${placeholders}) AND (? IS NULL OR record_id=?) AND (? IS NULL OR record_id=? OR json_extract(fields_json,'$.itemId')=?) AND (? IS NULL OR json_extract(fields_json,'$.profileId')=? OR json_extract(fields_json,'$.companionId')=? OR record_id=?) AND (?=1 OR kind<>'reference' OR record_id NOT LIKE 'archive:%' AND json_type(fields_json,'$.body') IS NULL AND json_type(fields_json,'$.bodyText') IS NULL AND json_type(fields_json,'$.content') IS NULL AND json_type(fields_json,'$.payloadJson') IS NULL AND json_type(fields_json,'$.markdown') IS NULL AND json_type(fields_json,'$.recordJson') IS NULL) AND (?=0 OR kind NOT IN ('audit','reference') OR kind='audit' AND json_type(fields_json,'$.index') IS NULL OR kind='reference' AND json_type(fields_json,'$.part') IS NULL) AND (kind>? OR kind=? AND record_id>?) ORDER BY kind,record_id LIMIT ?`,this.ownerId,campaign,g.id,...selected,recordId,recordId,itemId,itemId,itemId,profileId,profileId,profileId,profileId,CAMPAIGN_SCOPES.every(x=>scopes.includes(x))?1:0,metadataOnly?1:0,cursorKind,cursorKind,cursorRecord,limit+1).all();const hasMore=rows.results.length>limit,values=rows.results.slice(0,limit);return this.envelope(campaign,{source:'ANDROID_COMMITTED_RECORD_MIRROR',grantRevision:g.revision,cursor:after||null,records:values.map(r=>({recordId:r.record_id,kind:r.kind,revision:r.revision,fields:projectCampaignRecord({recordId:r.record_id,kind:r.kind,revision:r.revision,fields:JSON.parse(r.fields_json)},scopes).fields,source:JSON.parse(r.fields_json).source??null,publishedAt:r.published_at,lastDeviceSyncAt:r.last_device_sync_at,stale:this.now()-r.last_device_sync_at>FRESHNESS,unresolved:JSON.parse(r.fields_json).unknowns??[]})),nextCursor:hasMore?values.at(-1).kind+'|'+values.at(-1).record_id:null,verifiedAt:this.now()});}
+ /** The ordinary character read can expose the small native ability and casting headers to older clients. */
+ async characterOverview(principal,campaign,profileId){
+  const grant=await this.authorize(principal,campaign);
+  const sheet=await this.readGranted(grant,campaign,{kinds:['character-profile','party-sheet'],profileId});
+  if(!sheet.records.some(row=>row.kind==='character-profile'&&row.recordId===profileId))return sheet;
+  const scopes=JSON.parse(grant.read_scopes_json);
+  const abilities=['STR','DEX','CON','INT','WIS','CHA'];
+  const canSeeAbilities=canReadKind('playable-stat',scopes);
+  const canSeeCasting=canReadKind('playable-spell',scopes);
+  if(!canSeeAbilities&&!canSeeCasting)return sheet;
+  const queries=[],bindings=[],keys=new Map();
+  if(canSeeAbilities){
+   const ids=await Promise.all(abilities.map(async ability=>{
+    const recordId='stat-'+await sha256([profileId,'ABILITY',ability].join('\u0000'));
+    keys.set(recordId,ability);return recordId;
+   }));
+   queries.push("(kind='playable-stat' AND record_id IN (?,?,?,?,?,?))");bindings.push(...ids);
+  }
+  if(canSeeCasting){
+   queries.push("(kind='playable-spell' AND record_id=?)");
+   bindings.push('spell-'+await sha256([profileId,'CASTING',''].join('\u0000')));
+  }
+  const {results}=await this.s(`SELECT record_id,kind,revision,fields_json,last_device_sync_at
+   FROM bridge_campaign_records WHERE owner_id=? AND campaign_id=? AND grant_id=? AND (${queries.join(' OR ')})`,
+   this.ownerId,campaign,grant.id,...bindings).all();
+  const summary={source:sheet.source};
+  if(canSeeAbilities)summary.abilities=[];
+  if(canSeeCasting)summary.casting=null;
+  const now=this.now();
+  for(const row of results){
+   const fields=JSON.parse(row.fields_json);
+   if(fields.profileId!==profileId||fields.schemaVersion!==1)continue;
+   const origin={recordId:row.record_id,revision:row.revision,lastDeviceSyncAt:row.last_device_sync_at,
+    stale:now-row.last_device_sync_at>FRESHNESS};
+   if(row.kind==='playable-stat'&&fields.target==='ABILITY'&&keys.get(row.record_id)===fields.key){
+    const entry={...origin,key:fields.key};
+    for(const k of ['base','advancement','permanent','effective','modifier']){
+     if(fields[k]===null||Number.isSafeInteger(fields[k]))entry[k]=fields[k];
+    }
+    summary.abilities.push(entry);
+   }else if(row.kind==='playable-spell'&&fields.subject==='CASTING'&&fields.part==='header'){
+    const casting={...origin,contentSha256:fields.contentSha256,parts:fields.parts};
+    // Oversized or chunked native records retain a pointer to the full typed read.
+    if(fields.parts===0&&fields.data&&wireBytes(fields.data)<=4096){
+     const allowed=['castingClassLevel','classVersion','preparationLimit','concentrationSpellId','spellCount','slots'];
+     casting.data=Object.fromEntries(allowed.filter(k=>Object.hasOwn(fields.data,k)).map(k=>[k,fields.data[k]]));
+    }
+    summary.casting=casting;
+   }
+  }
+  if(canSeeAbilities){
+   summary.abilities.sort((a,b)=>abilities.indexOf(a.key)-abilities.indexOf(b.key));
+   const revisions=new Set(summary.abilities.map(a=>a.revision));
+   summary.abilityPublication=summary.abilities.length===0?'NOT_PUBLISHED':
+    summary.abilities.length===abilities.length&&revisions.size===1?'COMPLETE_AT_REVISION':'PARTIAL_OR_MIXED';
+  }
+  if(canSeeCasting)summary.castingPublication=summary.casting===null?'NOT_PUBLISHED':
+   summary.casting.data?'INLINE':'REFER_TO_NATIVE_HEADER';
+  return {...sheet,playableSummary:summary};
+ }
  /** Inventory ownership comes only from the explicit saved placement relation. */
  async inventoryByHolder(p,campaign,{holderProfileId,equipmentOnly=false,after='',limit=25}={}){
   id(holderProfileId);integer(limit,1,100);const [cursorKind,cursorRecord]=readCursor(after);
