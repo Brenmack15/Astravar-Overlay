@@ -27,6 +27,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
     companion object {
         fun receiptId(commandId: String) = "campaign-sync-${campaignHash(commandId).take(48)}"
         fun category(kind: String): String = when (kind) {
+            PlayableActionSync.KIND -> "resources"
             PlayableLoadoutProjection.KIND -> "inventory"
             PlayableSpellbookProjection.KIND -> "resources"
             PlayableMechanicsSync.STATS -> "character"
@@ -41,7 +42,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             else -> error("Unsupported campaign record kind.")
         }
         fun requiredReadScopes(record: CampaignSyncRecord): Set<String> = when (record.kind) {
-            PlayableLoadoutProjection.KIND -> PlayableLoadoutProjection.readScopes
+            PlayableLoadoutProjection.KIND, PlayableActionSync.KIND -> PlayableLoadoutProjection.readScopes
             PlayableSpellbookProjection.KIND -> PlayableSpellbookProjection.readScopes
             PlayableMechanicsSync.STATS, PlayableMechanicsSync.EQUIPMENT -> PlayableMechanicsSync.readScopes
             "character-profile" -> setOf("character", "hp")
@@ -61,7 +62,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
 
     /** Membership is explicit: imported source IDs and current placements, never a blanket campaign reassignment. */
     suspend fun snapshot(campaignId: String, includeReadOnly: Boolean = true, mechanics: Boolean = false,
-        spellbook: Boolean = false, loadout: Boolean = false): List<CampaignSyncRecord> = db.withTransaction {
+        spellbook: Boolean = false, loadout: Boolean = false, actions: Boolean = false): List<CampaignSyncRecord> = db.withTransaction {
         OwnerSyncProtocol.id(campaignId)
         val local = campaignId == "local-campaign"
         val diagnostics = setOf(OwnerConnectionProtocol.PROFILE, RemoteStatProtocol.PROFILE_ID)
@@ -86,6 +87,8 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             if (genesisReadbackProjectionErrors(db, actor.actorId, saved).isNotEmpty())
                 throw CampaignCanonicalReviewRequired(actor.actorId)
             val character = saved.character
+            if (actions && !character.archived && actor.role != GenesisActorRole.NPC)
+                playableRecords += PlayableActionSync.current(db, character, actor.role)
             if (loadout && includeReadOnly && !character.archived && actor.role != GenesisActorRole.NPC)
                 playableRecords += PlayableLoadoutProjection.records(character, actor.role)
             if (spellbook && includeReadOnly && !character.archived && actor.role != GenesisActorRole.NPC)
@@ -229,11 +232,14 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         val parentId = receiptId(commandId)
         db.recordsDao().receipt(parentId)?.let { require(it.fingerprint == fingerprint) { "Command ID collision." }; return@withTransaction it }
         genesisRejectAuthorityCommandReuse(db, parentId)
+        val action = operations.any { it.kind == PlayableActionSync.KIND || it.type in PlayableActionSync.types }
+        if (action) require(operations.size == 1 && operations.single().kind == PlayableActionSync.KIND &&
+            operations.single().type in PlayableActionSync.types) { "Resolve one action for one playable actor." }
         val native = operations.any { it.kind == PlayableMechanicsSync.EQUIPMENT }
         if (native) require(operations.size == 1 && operations.single().type in
             setOf(PlayableMechanicsSync.BONUS, PlayableMechanicsSync.STATE, PlayableMechanicsSync.DEFENSE)) { "Equipment v1 accepts one native edit per transaction." }
         require(operations.none { it.kind in setOf(PlayableMechanicsSync.STATS, PlayableSpellbookProjection.KIND, PlayableLoadoutProjection.KIND) })
-        val before = snapshot(campaignId, includeReadOnly = false, mechanics = native).associateBy { key(it.kind,it.recordId) }
+        val before = snapshot(campaignId, includeReadOnly = false, mechanics = native, actions = action).associateBy { key(it.kind,it.recordId) }
         // An active item can also change both actors' calculated statistics. Reforge
         // audits and republishes those projections under its own immutable commands.
         val singleMove = operations.singleOrNull()?.takeIf { it.type == "move_item" && it.kind == "item" }
@@ -306,7 +312,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
                 }
             }
         }
-        val after = snapshot(campaignId, includeReadOnly = false, mechanics = native)
+        val after = snapshot(campaignId, includeReadOnly = false, mechanics = native, actions = action)
         operations.forEach { operation ->
             val committed = after.singleOrNull { it.kind == operation.kind && it.recordId == operation.recordId }
             check(committed != null && committed.revision == operation.expectedRevision + 1) { "Committed record escaped campaign scope or revision contract." }
@@ -315,6 +321,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         // Reforge commits and audits derived projections in this transaction; sync publishes them independently.
         val differences = after.filter { before[key(it.kind,it.recordId)] != it && it.kind !in setOf("audit", "configuration", "roll-history") }
         val changed = when {
+            action -> after.filter { it.kind == PlayableActionSync.KIND && it.recordId == operations.single().recordId }
             native -> after.filter { it.kind == PlayableMechanicsSync.EQUIPMENT && it.recordId == operations.single().recordId }
             managedMove != null -> {
                 val direct = differences.filter { it.recordId == managedMove.recordId && it.kind in setOf("item", "item-placement") }
@@ -356,6 +363,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         val f = op.fields
         val expected = expected(op.expectedRevision)
         when (op.type) {
+            in PlayableActionSync.types -> PlayableActionSync.apply(db, campaignId, op, child, source)
             PlayableMechanicsSync.DEFENSE, PlayableMechanicsSync.STATE, PlayableMechanicsSync.BONUS -> PlayableMechanicsSync.edit(db, campaignId, op, child, source)
             "acquire_item" -> {
                 require(op.kind == "item" && current == null && op.expectedRevision == 0L)

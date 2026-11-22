@@ -55,6 +55,7 @@ ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 // Robolectric retains framework/font caches per test classloader. Measured two-worker,
 // four-class batches bound reuse; full debug/release validation includes screenshots.
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
     maxHeapSize = "1536m"
     // Adopt the fastest repeatedly measured setting after complete debug/release
     // validation. Use 1/1 for per-class isolation diagnostics; never unbounded reuse.

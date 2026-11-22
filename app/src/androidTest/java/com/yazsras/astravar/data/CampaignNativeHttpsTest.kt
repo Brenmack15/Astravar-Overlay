@@ -215,12 +215,16 @@ class CampaignNativeHttpsTest {
         client.sync()
         val receipt = mcp("get_campaign_command_receipt", buildJsonObject { put("campaignId", campaign); put("commandId", id) }).getValue("receipt").jsonObject
         assertEquals("APPLIED", receipt.getValue("status").jsonPrimitive.content)
-        val local = CampaignConnectionProjection.project(CampaignSyncDomain(db).snapshot(campaign, mechanics = true), allScopes)
+        val nativeRows = CampaignSyncDomain(db).snapshot(campaign, mechanics = true, spellbook = true,
+            loadout = true, actions = true)
+        val local = CampaignConnectionProjection.project(nativeRows, allScopes)
         for (raw in receipt.getValue("records").jsonArray) {
             val saved = raw.jsonObject
             val kind = saved.getValue("kind").jsonPrimitive.content; val recordId = saved.getValue("recordId").jsonPrimitive.content
             assertEquals("Independent backend readback equals immutable receipt", saved, record(kind, recordId))
-            val android = local.single { it.kind == kind && it.recordId == recordId }
+            val android = checkNotNull(local.singleOrNull { it.kind == kind && it.recordId == recordId }) {
+                "Missing independent Android readback for $kind/$recordId"
+            }
             assertEquals("Independent authorized Android Room projection equals backend", campaignJson.encodeToJsonElement(android), saved)
         }
         measurements += buildJsonObject {
@@ -528,6 +532,32 @@ class CampaignNativeHttpsTest {
         assertEquals(0, owl.resources.single().current)
         assertTrue(owl.items.isEmpty())
         verifyInt(21)
+
+        suspend fun actorAction(type: String, input: JsonObject) {
+            val actorRevision = record("playable-action", actorId).getValue("revision").jsonPrimitive.long
+            submitAndVerify(operation(type, "playable-action", actorId, actorRevision,
+                JsonObject(input + ("actorRole" to JsonPrimitive("PLAYER")))))
+            val committed = record("playable-action", actorId).getValue("fields").jsonObject
+            assertEquals(JsonPrimitive(type), committed.getValue("action").jsonObject["type"])
+        }
+        fun castingState() = mcp("get_playable_spells", arguments).getValue("records").jsonArray
+            .map { it.jsonObject.getValue("fields").jsonObject }.single { it["subject"] == JsonPrimitive("CASTING") }
+            .getValue("data").jsonObject
+        fun available(state: JsonObject, level: Int) = state.getValue("slots").jsonArray.map { it.jsonObject }
+            .single { it["level"] == JsonPrimitive(level) }.getValue("current")
+        actorAction("complete_rest", buildJsonObject {
+            put("confirmed",true); put("elapsedSeconds",28800); put("kind","LONG_REST")
+        })
+        val rested = castingState()
+        val restoredSlots = available(rested,1).jsonPrimitive.int
+        assertTrue(restoredSlots > 0)
+        assertEquals(JsonNull,available(rested,2))
+        actorAction("cast_spell", buildJsonObject {
+            put("spellId",spell.nativeId); put("slotLevel",1); put("ritual",false); put("replaceConcentration",false)
+        })
+        val cast = castingState()
+        assertEquals(JsonPrimitive(restoredSlots - 1),available(cast,1))
+        assertEquals(JsonPrimitive(spell.nativeId),cast["concentrationSpellId"])
     }
 
     @Test fun authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts() = runBlocking {

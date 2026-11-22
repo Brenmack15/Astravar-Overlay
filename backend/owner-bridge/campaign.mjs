@@ -4,7 +4,7 @@
 import {BridgeError,canonical,sha256,CAMPAIGN} from './core.mjs';
 export const CAMPAIGN_MODE='ASTRAVAR_CAMPAIGN_V2';
 export const CAMPAIGN_SCOPES=Object.freeze(['hp','resources','inventory','currency','character','companions','engineering','continuity','combat']);
-export const RECORD_SCOPES=Object.freeze({'playable-loadout':'inventory','playable-spell':'resources','playable-stat':'character','playable-equipment':'inventory','character-profile':'character','character-ability':'character','party-sheet':'character','companion-state':'companions','companion-resource':'companions',item:'inventory','item-details':'inventory','item-property':'inventory','item-placement':'inventory',wallet:'currency',project:'engineering',stage:'engineering',requirement:'engineering',connection:'continuity',fact:'continuity',milestone:'continuity',link:'continuity',checkpoint:'continuity',reference:'continuity',audit:'continuity',configuration:'combat','roll-history':'combat'});
+export const RECORD_SCOPES=Object.freeze({'playable-action':'resources','playable-loadout':'inventory','playable-spell':'resources','playable-stat':'character','playable-equipment':'inventory','character-profile':'character','character-ability':'character','party-sheet':'character','companion-state':'companions','companion-resource':'companions',item:'inventory','item-details':'inventory','item-property':'inventory','item-placement':'inventory',wallet:'currency',project:'engineering',stage:'engineering',requirement:'engineering',connection:'continuity',fact:'continuity',milestone:'continuity',link:'continuity',checkpoint:'continuity',reference:'continuity',audit:'continuity',configuration:'combat','roll-history':'combat'});
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const FRESHNESS=300_000;
@@ -19,6 +19,29 @@ export function campaignScopeList(v){if(!Array.isArray(v)||v.length>CAMPAIGN_SCO
 export function validateCampaignAccess(v){exact(v,['readScopes','writeScopes']);const readScopes=campaignScopeList(v.readScopes),writeScopes=campaignScopeList(v.writeScopes);if(!readScopes.length||writeScopes.some(s=>!readScopes.includes(s)))fail(400,'INVALID_CAMPAIGN_SCOPES');return{readScopes,writeScopes};}
 const mechanicsReadScopes = ['character','inventory','companions'];
 const equipmentOperations = ['edit_equipment_bonus','edit_equipment_defense','set_equipment_state'];
+
+const playableActions = ['cast_spell','prepare_spell','complete_rest'];
+
+function proposedPlayableAction(before, op) {
+ const f = op.fields;
+ if(op.kind!=='playable-action'||before?.schemaVersion!==1||before.id!==op.recordId||
+     before.profileId!==op.recordId||before.actorRole!==f.actorRole||!['PLAYER','COMPANION'].includes(f.actorRole))
+  fail(409,'PLAYABLE_ACTOR_CONFLICT');
+ if(op.type==='cast_spell'){
+  exact(f,['actorRole','spellId','slotLevel','ritual','replaceConcentration']);
+  text(f.spellId,200);
+  if(f.slotLevel!==null)integer(f.slotLevel,1,9);
+  if(typeof f.ritual!=='boolean'||typeof f.replaceConcentration!=='boolean'||(f.ritual&&f.slotLevel!==null))fail(400,'INVALID_CAST');
+ }else if(op.type==='prepare_spell'){
+  exact(f,['actorRole','spellId','prepared']);text(f.spellId,200);
+  if(typeof f.prepared!=='boolean')fail(400,'INVALID_PREPARATION');
+ }else{
+  exact(f,['actorRole','kind','elapsedSeconds','confirmed']);
+  if(f.confirmed!==true||!['SHORT_REST','LONG_REST','DAWN'].includes(f.kind))fail(400,'RESOLVED_REST_REQUIRED');
+  integer(f.elapsedSeconds,f.kind==='SHORT_REST'?3600:f.kind==='LONG_REST'?28800:0,31536000);
+ }
+ return {...before,action:{type:op.type,fields:f}};
+}
 
 function proposedEquipment(before, op) {
  if (op.kind !== 'playable-equipment' || before?.schemaVersion !== 1) fail(409,'PLAYABLE_EQUIPMENT_REQUIRED');
@@ -76,6 +99,7 @@ function proposedEquipment(before, op) {
 
 const playableEnvelopeFields = 'id profileId actorRole schemaVersion revision subject source part data contentSha256 contentBytes parts partPrefix headerId index text partSha256';
 const FIELD_KEYS={
+ 'playable-action':'id profileId actorRole revision schemaVersion source action',
  'playable-loadout':playableEnvelopeFields,
  'playable-spell':playableEnvelopeFields,
  'playable-stat':'id schemaVersion revision profileId actorRole target key label effective base advancement permanent modifier source sourceId sourceRevision sourceAcceptance',
@@ -98,7 +122,7 @@ const FIELD_KEYS={
 };
 function record(v){exact(v,['recordId','kind','revision','fields']);id(v.recordId);if(!Object.hasOwn(RECORD_SCOPES,v.kind))fail(400,'UNSUPPORTED_RECORD_KIND');integer(v.revision,1);if(!v.fields||typeof v.fields!=='object'||Array.isArray(v.fields)||wireBytes(v)>48000)fail(400,'INVALID_RECORD_FIELDS');const f=v.fields,allowed=FIELD_KEYS[v.kind]?.split(' ');if(allowed&&Object.keys(f).some(k=>!allowed.includes(k)))fail(400,'UNKNOWN_RECORD_FIELD');if(f.revision!==undefined&&f.revision!==v.revision)fail(400,'REVISION_CONFLICT');const identity=v.kind==='character-ability'?f.profileId+':'+f.key:v.kind==='party-sheet'?f.profileId:v.kind==='companion-state'?f.companionId:['item-placement','item-details'].includes(v.kind)?f.itemId:f.id;if(identity!==undefined&&identity!==v.recordId&&!(v.kind==='reference'&&v.recordId==='archive:'+identity))fail(400,'RECORD_IDENTITY_MISMATCH');for(const k of ['currentHp','maximumHp','temporaryHp','armorClass','level','current','maximum','quantity','weightGrams','copper','silver','electrum','gold','platinum'])if(f[k]!=null)integer(f[k]);if(f.currentHp!=null&&f.maximumHp!=null&&f.currentHp>f.maximumHp)fail(400,'INVALID_HP_RANGE');if(f.current!=null&&f.maximum!=null&&f.current>f.maximum)fail(400,'INVALID_RESOURCE_RANGE');if(v.kind==='character-ability'){if(f.score!=null)integer(f.score,1,30);if(f.magicModifier!==undefined)integer(f.magicModifier,-100,100);if(!['STR','DEX','CON','INT','WIS','CHA'].includes(f.key))fail(400,'INVALID_ABILITY');}if(v.kind==='party-sheet'){let data;try{data=JSON.parse(f.contentJson);}catch{fail(400,'INVALID_SAVED_SHEET');}if(!data||typeof data!=='object'||Array.isArray(data))fail(400,'INVALID_SAVED_SHEET');if(data.resources!==undefined){if(!Array.isArray(data.resources))fail(400,'INVALID_RESOURCE');for(const resource of data.resources){if(!resource||typeof resource.name!=='string'||resource.name.length>200)fail(400,'INVALID_RESOURCE');for(const k of ['current','maximum'])if(resource[k]!=null)integer(resource[k]);if(resource.current!=null&&resource.maximum!=null&&resource.current>resource.maximum)fail(400,'INVALID_RESOURCE_RANGE');}}}for(const forbidden of ['token','credential','privateKey','secret','dmSecret','unrevealed'])if(Object.hasOwn(f,forbidden))fail(400,'PRIVATE_FIELD_DENIED');return v;}
 export function canReadKind(kind,scopes){
- if(kind==='playable-loadout')return ['character','companions','inventory','resources','combat','hp'].every(s=>scopes.includes(s));
+ if(kind==='playable-loadout'||kind==='playable-action')return ['character','companions','inventory','resources','combat','hp'].every(s=>scopes.includes(s));
  if(kind==='playable-spell')return ['character','companions','resources','combat'].every(s=>scopes.includes(s));
  if(kind==='playable-stat'||kind==='playable-equipment')return mechanicsReadScopes.every(s=>scopes.includes(s));
  if(kind==='character-profile')return scopes.includes('character')||scopes.includes('hp');
@@ -167,7 +191,7 @@ export class CampaignBridge{
   const g=await this.s('SELECT g.*,c.device_name FROM bridge_campaign_grants g JOIN bridge_credentials c ON c.id=g.credential_id WHERE g.owner_id=? AND g.campaign_id=? AND c.revoked=0 AND c.expires_at>? AND g.expires_at>? AND g.revoked=0 ORDER BY g.created_at DESC,g.id DESC LIMIT 1',this.ownerId,campaign,this.now(),this.now()).first();
   if(!g)fail(403,'CAMPAIGN_NOT_AUTHORIZED');if(p.role==='device'&&(p.campaignId!==campaign||g.credential_id!==p.credentialId))fail(403,'DEVICE_SCOPE_DENIED');return g;
  }
- grantJson(g){return{playableMechanicsVersion:1,playableSpellbookVersion:1,playableLoadoutVersion:1,grantId:g.id,revision:g.revision,readScopes:JSON.parse(g.read_scopes_json),writeScopes:JSON.parse(g.write_scopes_json),autoSyncScopes:JSON.parse(g.auto_scopes_json),expiresAt:g.expires_at,deviceName:g.device_name??null};}
+ grantJson(g){return{playableMechanicsVersion:1,playableSpellbookVersion:1,playableLoadoutVersion:1,playableActionVersion:1,grantId:g.id,revision:g.revision,readScopes:JSON.parse(g.read_scopes_json),writeScopes:JSON.parse(g.write_scopes_json),autoSyncScopes:JSON.parse(g.auto_scopes_json),expiresAt:g.expires_at,deviceName:g.device_name??null};}
  async getGrant(p,campaign){const g=await this.authorize(p,campaign);return this.envelope(campaign,{grant:this.grantJson(g)});}
  async configureGrant(p,campaign,b){exact(b,['commandId','expectedRevision','autoSyncScopes'],['readScopes','writeScopes']);commandId(b.commandId);integer(b.expectedRevision,1);const scopes=campaignScopeList(b.autoSyncScopes),g=await this.authorize(p,campaign,['device']);const fp=await sha256(canonical(b)),previous=await this.s('SELECT * FROM bridge_campaign_grant_events WHERE owner_id=? AND command_id=?',this.ownerId,b.commandId).first();if(previous){if(previous.fingerprint!==fp||previous.grant_id!==g.id)fail(409,'COMMAND_ID_REUSED');return this.getGrant(p,campaign);}const readScopes=b.readScopes===undefined?JSON.parse(g.read_scopes_json):campaignScopeList(b.readScopes),writeScopes=b.writeScopes===undefined?JSON.parse(g.write_scopes_json):campaignScopeList(b.writeScopes);if(readScopes.some(x=>!JSON.parse(g.read_scopes_json).includes(x))||writeScopes.some(x=>!JSON.parse(g.write_scopes_json).includes(x))||writeScopes.some(x=>!readScopes.includes(x)))fail(403,'GRANT_EXPANSION_REQUIRES_OWNER');if(scopes.some(s=>!writeScopes.includes(s)))fail(403,'AUTO_SYNC_SCOPE_DENIED');if(g.revision!==b.expectedRevision)fail(409,'GRANT_REVISION_CONFLICT');try{await this.s('INSERT INTO bridge_campaign_grant_events(owner_id,command_id,grant_id,expected_revision,auto_scopes_json,read_scopes_json,write_scopes_json,fingerprint,created_at) VALUES(?,?,?,?,?,?,?,?,?)',this.ownerId,b.commandId,g.id,b.expectedRevision,canonical(scopes),canonical(readScopes),canonical(writeScopes),fp,this.now()).run();}catch(e){if(String(e).includes('GRANT_REVISION_CONFLICT'))fail(409,'GRANT_REVISION_CONFLICT');throw e;}return this.getGrant(p,campaign);}
  async getConnection(p){
@@ -274,7 +298,13 @@ export class CampaignBridge{
 
  async getRecord(campaign,kind,rid){return this.s('SELECT * FROM bridge_campaign_records WHERE owner_id=? AND campaign_id=? AND kind=? AND record_id=?',this.ownerId,campaign,kind,rid).first();}
  async submit(p,campaign,b){exact(b,['commandId','expectedGrantRevision','operations','source']);commandId(b.commandId);integer(b.expectedGrantRevision,1);text(b.source,1900);if(!Array.isArray(b.operations)||!b.operations.length||b.operations.length>25)fail(400,'INVALID_TRANSACTION');const g=await this.authorize(p,campaign,['connector']),requestFingerprint=await sha256(canonical({campaignId:campaign,...b})),old=await this.s('SELECT * FROM bridge_campaign_commands WHERE owner_id=? AND campaign_id=? AND command_id=?',this.ownerId,campaign,b.commandId).first();if(old){if(old.request_fingerprint!==requestFingerprint||old.grant_id!==g.id)fail(409,'COMMAND_ID_REUSED');if(old.grant_revision!==g.revision)fail(409,'GRANT_REVISION_CONFLICT');return this.envelope(campaign,{command:JSON.parse(old.command_json)});}if(g.revision!==b.expectedGrantRevision)fail(409,'GRANT_REVISION_CONFLICT');const prepared=[],scopes=[];for(const op of b.operations){const value=await this.prepareOperation(campaign,g,op);prepared.push(value);scopes.push(value.scope);
- if(equipmentOperations.includes(op.type)){
+ if(playableActions.includes(op.type)){
+  if(b.operations.length!==1)fail(400,'SINGLE_PLAYABLE_ACTION_REQUIRED');
+  scopes.push('character');
+  if(op.type!=='prepare_spell')scopes.push('combat');
+  if(op.type==='complete_rest')scopes.push('hp','inventory');
+  if(op.fields.actorRole==='COMPANION')scopes.push('companions');
+ }else if(equipmentOperations.includes(op.type)){
   if(b.operations.length !== 1)fail(400,'SINGLE_EQUIPMENT_EDIT_REQUIRED');
   scopes.push('character');
   if(op.type==='edit_equipment_defense')scopes.push('combat');
@@ -293,6 +323,11 @@ export class CampaignBridge{
   const placement=async()=>{const row=await this.getRecord(campaign,'item-placement',op.recordId);if(row&&row.grant_id!==g.id)fail(409,'DEVICE_SYNC_STALE');return row?{row,fields:JSON.parse(row.fields_json)}:null;};
   const location=v=>v.containerItemId?'Item:'+v.containerItemId:v.installedProjectId?'Project:'+v.installedProjectId:v.holderProfileId?'Actor:'+v.holderProfileId:'Unknown';
   switch(op.type){
+   case 'cast_spell':
+   case 'prepare_spell':
+   case 'complete_rest':
+    after=proposedPlayableAction(before,op);
+    break;
    case 'edit_equipment_bonus':
    case 'edit_equipment_defense':
    case 'set_equipment_state':
@@ -375,7 +410,7 @@ export class CampaignBridge{
    }
    case 'save_checkpoint':if(op.kind!=='checkpoint')fail(400,'INVALID_OPERATION_KIND');after=normalizeDto(op.kind,{...after,...op.fields},{recordId:op.recordId,campaignId:campaign,creating:before===null});if(after.id!==op.recordId||after.campaignId!==campaign)fail(400,'RECORD_IDENTITY_MISMATCH');break;
    case 'set_record':
-    if(['playable-loadout','playable-spell','playable-stat','playable-equipment','audit','roll-history','configuration','item-placement','item'].includes(op.kind))fail(403,'READ_ONLY_RECORD_KIND');after=normalizeDto(op.kind,{...after,...op.fields},{recordId:op.recordId,campaignId:campaign,creating:before===null});if(op.kind==='party-sheet'&&before&&Object.hasOwn(op.fields,'contentJson')){let oldContent,newContent;try{oldContent=JSON.parse(before.contentJson);newContent=JSON.parse(op.fields.contentJson);}catch{fail(400,'INVALID_SAVED_SHEET');}after.contentJson=canonical({...oldContent,...newContent});}
+    if(['playable-action','playable-loadout','playable-spell','playable-stat','playable-equipment','audit','roll-history','configuration','item-placement','item'].includes(op.kind))fail(403,'READ_ONLY_RECORD_KIND');after=normalizeDto(op.kind,{...after,...op.fields},{recordId:op.recordId,campaignId:campaign,creating:before===null});if(op.kind==='party-sheet'&&before&&Object.hasOwn(op.fields,'contentJson')){let oldContent,newContent;try{oldContent=JSON.parse(before.contentJson);newContent=JSON.parse(op.fields.contentJson);}catch{fail(400,'INVALID_SAVED_SHEET');}after.contentJson=canonical({...oldContent,...newContent});}
     if(op.kind==='party-sheet'){if(!before&&campaign!=='local-campaign')fail(403,'LOCAL_CHARACTER_ENROLLMENT_REQUIRED');after.contentJson=normalizeSheetJson(after.contentJson);}
     if(op.kind==='character-profile'&&!before)fail(403,'LOCAL_CHARACTER_ENROLLMENT_REQUIRED');if(op.kind==='wallet'&&before)fail(403,'CURRENCY_OPERATION_REQUIRED');
     if(op.kind==='character-profile'&&['currentHp','maximumHp','temporaryHp'].some(k=>canonical(before?.[k]??null)!==canonical(after[k]??null)))fail(403,'HP_OPERATION_REQUIRED');
