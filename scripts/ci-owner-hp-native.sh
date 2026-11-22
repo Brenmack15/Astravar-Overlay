@@ -282,7 +282,7 @@ if [[ "$astravar_bootstrap_gate" == true ]]; then
 import json,os,pathlib,sys
 pathlib.Path(sys.argv[1]).write_text(json.dumps({
  'fictionalOnly':True,'emulatorApi':37,'nativeAndroidKeyStore':True,
- 'webCryptoEncryptedBootstrap':True,'sameDebugKeyUpdate':'52 to '+os.environ['ASTRAVAR_VERSION_CODE'],
+ 'webCryptoEncryptedBootstrap':True,'sameDebugKeyUpdate':'53 to '+os.environ['ASTRAVAR_VERSION_CODE'],
  'legacyAliasAndVaultPreserved':True,'nativePublicNotionImport':True,
  'nativeCampaignHttpsAndIndependentReadback':True,
  'actualOwnerSigningIdentityTestedInCi':False,'realChatGptHostInvocation':False,

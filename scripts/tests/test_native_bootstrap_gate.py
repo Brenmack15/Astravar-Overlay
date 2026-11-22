@@ -25,7 +25,7 @@ class NativeBootstrapGateTest(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         root = Path(directory.name)
-        env = dict(os.environ, ASTRAVAR_VERSION_CODE='53', TEST_OUTPUT=str(root), TEST_FAILURE=failure,
+        env = dict(os.environ, ASTRAVAR_VERSION_CODE='54', TEST_OUTPUT=str(root), TEST_FAILURE=failure,
                    TEST_ENABLED='true' if enabled else 'false')
         shell = '''set -euo pipefail
 astravar_output=$TEST_OUTPUT

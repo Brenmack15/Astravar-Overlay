@@ -8,17 +8,15 @@ GitHub Actions uses disposable verification keys and never receives that key.
 
 ## Current recovered baseline
 
-The previous delivered owner build is `4.0.0-unification1`, code52, source
-`f90371c58baed7379862883b2a966ff1113b0cee`. Its recorded owner APK SHA-256 is
-`89867ca4ebf0025296aaadd11069e8a3043e7e68b56d3a77af05a74c2a8ea9be`.
-The owner reports installing it. Reinspect the actual pinned APK and full
-certificate before signing its successor; this report does not establish a
-physical phone update to code53.
+The previous owner build is `4.0.0-unification2`, code 53, source
+`718a9e24bf856cf7e8dee32673ab75270bdd90c4`. The inspected APK SHA-256 is
+`f5150b768be0ccbfe2d784cb6fc459503ecec5acefba37ee092cc18f5516a9af`.
+Its package, single owner certificate, v2/v3 signatures and 16 KiB alignment
+were verified directly from the original APK.
 
-`scripts/owner_release_sign.py` pins that complete baseline digest and requires
-the candidate version code to exceed52. For each subsequent delivered release,
-advance the pinned baseline and minimum code in a reviewed change after verifying
-the actual previous owner APK. Never lower the minimum to bypass an update failure.
+`scripts/owner_release_sign.py` pins this baseline digest and requires the
+candidate version code to exceed 53. For each subsequent owner release, verify
+the previous APK bytes before advancing the baseline and minimum code.
 
 ## Release inputs and gates
 

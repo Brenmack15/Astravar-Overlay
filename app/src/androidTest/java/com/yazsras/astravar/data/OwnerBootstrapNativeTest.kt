@@ -37,7 +37,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManagerFactory
 
-/** Compiled only against APIs present in code52; run before install -r of the candidate. */
+/** Compiled only against APIs present in code53; run before install -r of the candidate. */
 @RunWith(AndroidJUnit4::class)
 class OwnerBootstrapBaselineSeedTest {
     @Test fun seedLegacyAliasOnBaseline(): Unit = runBlocking {
@@ -45,7 +45,7 @@ class OwnerBootstrapBaselineSeedTest {
         assertEquals("com.yazsras.astravar.v2uidebug", context.packageName)
         assertEquals("1", UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
             .executeShellCommand("getprop ro.kernel.qemu").trim())
-        assertEquals(52L, context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode)
+        assertEquals(53L, context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode)
         val alias = "astravar-owner-bootstrap-rsa-v1"
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         assertFalse("Only a fresh isolated emulator can seed the historical alias", keyStore.containsAlias(alias))
@@ -84,7 +84,7 @@ class OwnerBootstrapNativeTest {
         assertEquals("com.yazsras.astravar.v2uidebug", context.packageName)
         assertEquals("1", UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
             .executeShellCommand("getprop ro.kernel.qemu").trim())
-        assertTrue(context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode >= 53L)
+        assertTrue(context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode >= 54L)
         config = Json.parseToJsonElement(File(context.filesDir, "ci-https-config.json").readText()).jsonObject
         assertEquals(origin, config.getValue("origin").jsonPrimitive.content)
         originalSsl = HttpsURLConnection.getDefaultSSLSocketFactory()
