@@ -771,6 +771,12 @@ class CampaignImportInstrumentationTest {
         observations.put(JSONObject().put("route", "inventory-source-entry").put("primaryTab", "Campaign")
             .put("visibleMarker", "1 of 1 references"))
 
+        ui.campaignJournal(product)
+        tap("Choose campaign")
+        tap(payload.getString("title"))
+        assertTrue("The selected imported campaign must close the picker",
+            device.wait(Until.gone(By.text("Imported campaign · fictional-native-typed").pkg(product)), 10_000))
+        find(payload.getString("title"))
         campaignEntry("Inventions")
         tap("Fictional Proposed Device")
         captureMapped("invention", "Campaign", "Concept & Blueprint", "Fictional proposal only; no equipment was constructed.", dialogTitle = "Fictional Proposed Device")

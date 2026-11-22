@@ -41,6 +41,29 @@ class CampaignArchiveTest {
         repo.archive.exportPreImportBackup(preview.fingerprint)
         return repo.archive.commit(preview, confirmed = true)
     }
+    @Test fun retainedArchiveScopesUnboundProjectsAndContactsAcrossDirectoryAndSync() = runBlocking {
+        val importedProject = InventionProject("Imported lens", id = "archive-world-project", source = "Fictional source")
+        val importedContact = ConnectionEntity("Imported contact", id = "archive-world-contact", source = "Fictional source")
+        val fixture = mapped()
+        val applied = import(payload(mapped = fixture.copy(records = fixture.records.copy(
+            projects = listOf(importedProject), entities = listOf(importedContact)))))
+        val id = applied.campaignId
+        assertEquals(listOf(id), activeImportedCampaigns(db.archiveDao().allReceipts()).map { it.campaignId })
+        assertEquals(listOf(importedProject.id), repo.records.projectsIn(id).first().map { it.id })
+        assertEquals(listOf(importedContact.id), repo.records.entitiesIn(id).first().map { it.id })
+        assertTrue(repo.records.projectsIn("local-campaign").first().none { it.id == importedProject.id })
+        assertTrue(db.craftScope(id).permitsProject(importedProject))
+        assertFalse(db.craftScope("local-campaign").permitsProject(importedProject))
+        val domain = CampaignSyncDomain(db)
+        val roots = setOf(importedProject.id, importedContact.id)
+        assertEquals(roots, domain.snapshot(id).map { it.recordId }.filter { it in roots }.toSet())
+        assertTrue(domain.snapshot("local-campaign").none { it.recordId in roots })
+        repo.archive.rollback(applied.packageHash, true)
+        assertTrue(activeImportedCampaigns(db.archiveDao().allReceipts()).isEmpty())
+        assertTrue(repo.records.projectsIn(id).first().isEmpty())
+        assertTrue(domain.snapshot(id).none { it.recordId in roots })
+    }
+
     private fun mapped(): LedgerExport {
         val item = LedgerItem("fictional-lens", "Fictional unknown quantity lens", source = "Fictional source", notionPageId = "11111111111111111111111111111111", createdAt = 1, updatedAt = 1)
         val profile = CharacterProfile("Fictional actor", currentHp = null, maximumHp = 30, level = 6, id = "fictional-actor", source = "Fictional source", updatedAt = 1)

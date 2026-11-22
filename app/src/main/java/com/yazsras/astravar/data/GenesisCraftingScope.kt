@@ -8,6 +8,7 @@ internal class GenesisCraftingScope(
     sheets: List<PartySheetRecord>,
     placements: List<ItemPlacement>,
     managed: List<GenesisItemMembership>,
+    archiveMemberships: Map<Pair<String, String>, Set<String>>,
     private val showDefaultLocal: Boolean
 ) {
     private val actorsById = actors.associateBy { it.actorId }
@@ -15,7 +16,7 @@ internal class GenesisCraftingScope(
     private val placementsById = placements.associateBy { it.itemId }
     private val managedById = managed.associateBy { it.itemId }
     private val explicit = references.groupBy { it.recordType to it.recordId }
-    private val world = CampaignWorldScope(campaignId ?: "local-campaign", references, actorsById)
+    private val world = CampaignWorldScope(campaignId ?: "local-campaign", references, actorsById, archiveMemberships)
 
     private fun matches(stored: String?) = stored == campaignId || (showDefaultLocal && stored == "local-campaign")
 
@@ -41,5 +42,5 @@ internal class GenesisCraftingScope(
 
 internal suspend fun CampaignLedgerDb.craftScope(campaignId: String?, showDefaultLocal: Boolean = false) = GenesisCraftingScope(
     campaignId, partyDao().allReferences(), genesisAuthorityDao().allActors(), partyDao().allSheets(),
-    partyDao().allPlacements(), genesisAuthorityDao().itemMembership(), showDefaultLocal
+    partyDao().allPlacements(), genesisAuthorityDao().itemMembership(), archiveDao().worldMemberships(), showDefaultLocal
 )

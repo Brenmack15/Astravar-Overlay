@@ -13,7 +13,8 @@ class GenesisCraftingRepository(private val db: CampaignLedgerDb, private val re
     private suspend fun <T> transaction(block: suspend () -> T): T { ready(); return db.withTransaction { block() } }
 
     internal fun observeScope(campaignId: String?) = db.invalidationTracker.createFlow(
-        "external_record_references", "genesis_actor_authority", "party_sheets", "item_placements", "genesis_item_authority"
+        "external_record_references", "genesis_actor_authority", "party_sheets", "item_placements", "genesis_item_authority",
+        "campaign_import_receipts", "campaign_archive_sources"
     ).map { transaction { db.craftScope(campaignId, showDefaultLocal = campaignId == null) } }
 
     suspend fun review(projectId: String, materials: List<MaterialConsumption>, output: LedgerDraft,
