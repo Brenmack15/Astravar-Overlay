@@ -1,6 +1,7 @@
 package com.yazsras.astravar.data
 
 import androidx.room.withTransaction
+import kotlinx.coroutines.flow.map
 import com.yazsras.astravar.rules.reforge.*
 import kotlinx.serialization.encodeToString
 import java.util.UUID
@@ -10,6 +11,10 @@ class GenesisCraftingRepository(private val db: CampaignLedgerDb, private val re
     private val campaign get() = CampaignLedgerRepository(db)
     private val playable get() = ReforgeRepository(db)
     private suspend fun <T> transaction(block: suspend () -> T): T { ready(); return db.withTransaction { block() } }
+
+    internal fun observeScope(campaignId: String?) = db.invalidationTracker.createFlow(
+        "external_record_references", "genesis_actor_authority", "party_sheets", "item_placements", "genesis_item_authority"
+    ).map { transaction { db.craftScope(campaignId, showDefaultLocal = campaignId == null) } }
 
     suspend fun review(projectId: String, materials: List<MaterialConsumption>, output: LedgerDraft,
         outputOwnerActorId: String, outputContainerItemId: String? = null, source: String): GenesisCraftingReview = transaction {
@@ -58,6 +63,11 @@ class GenesisCraftingRepository(private val db: CampaignLedgerDb, private val re
             GenesisCraftActorReview(authority, saved, requireNotNull(db.recordsDao().characterProfile(id)))
         }
         val recipient = actors.single { it.authority.actorId == outputOwnerActorId }
+        val scope = db.craftScope(recipient.authority.campaignId)
+        require(scope.permitsProject(project)) { "Select a project in the output owner's campaign." }
+        require(selected.all { scope.permitsMaterial(it.item) }) {
+            "Each material must belong to the same campaign as the output owner."
+        }
         outputContainerItemId?.let { containerId ->
             checkId(containerId)
             require(selected.none { it.item.id == containerId }) { "The output container cannot also be consumed." }

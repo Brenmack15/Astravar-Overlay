@@ -98,6 +98,27 @@ class GenesisCraftingUiTest {
         awaitText("Fictional Craft Keeper")
         contentAction("Fictional Craft Keeper")
     }
+    @Test fun connectedCraftHidesOtherCampaignOwnersAndMaterialQuantities() = fixture { f ->
+        runBlocking {
+            val other = f.env.authority.createCampaign("Other workshop", commandId = "other-workshop").id
+            val owner = f.env.authority.createActor("Other maker", GenesisActorRole.PLAYER, other,
+                playable = ReforgeCharacter("other-maker", "Other maker"), commandId = "other-maker-create").playable!!
+            f.env.authority.createItem(owner.character.id, owner.revision, ItemDefinition("other-alloy-def", "Other alloy"),
+                ItemInstance("other-alloy", "other-alloy-def", quantity = 97), "other-alloy-create")
+            f.env.campaign.records.saveRequirement(MaterialRequirement(f.project.id, "Unresolved alloy", "other-alloy", 1),
+                source = f.project.source, commandId = "foreign-alloy-requirement")
+        }
+        show({ GenesisCraftingEditor(f.env, f.project, {}, {}) }) {
+            awaitText("Consume Brass pieces")
+            compose.onNode(hasText("Consume Unresolved alloy") and hasClickAction()).assertIsNotEnabled()
+            compose.onAllNodes(hasText("97 available", substring = true)).assertCountEquals(0)
+            contentAction("Consume Brass pieces")
+            action("Choose output")
+            awaitText("Fictional Craft Keeper")
+            compose.onAllNodesWithText("Other maker").assertCountEquals(0)
+        }
+    }
+
     private fun confirm() {
         compose.onNodeWithTag("genesis-confirm-craft").assertIsNotEnabled()
         contentAction("I confirm this craft is resolved and these quantities are correct")
