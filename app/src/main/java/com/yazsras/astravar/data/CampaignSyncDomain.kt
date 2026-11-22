@@ -62,7 +62,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
 
     /** Membership is explicit: imported source IDs and current placements, never a blanket campaign reassignment. */
     suspend fun snapshot(campaignId: String, includeReadOnly: Boolean = true, mechanics: Boolean = false,
-        spellbook: Boolean = false, loadout: Boolean = false, actions: Boolean = false, strikes: Boolean = false): List<CampaignSyncRecord> = db.withTransaction {
+        spellbook: Boolean = false, loadout: Boolean = false, actions: Boolean = false, strikes: Boolean = false, spellEditing: Boolean = false): List<CampaignSyncRecord> = db.withTransaction {
         OwnerSyncProtocol.id(campaignId)
         val local = campaignId == "local-campaign"
         val diagnostics = setOf(OwnerConnectionProtocol.PROFILE, RemoteStatProtocol.PROFILE_ID)
@@ -91,6 +91,9 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             if (genesisReadbackProjectionErrors(db, actor.actorId, saved).isNotEmpty())
                 throw CampaignCanonicalReviewRequired(actor.actorId)
             val character = saved.character
+            if (spellEditing && actions && includeReadOnly && !character.archived && actor.role != GenesisActorRole.NPC)
+                playableRecords += playableReadEnvelope(PlayableLoadoutProjection.KIND, "loadout", character, actor.role,
+                    "SPELL_EDITING", "", buildJsonObject { put("version", 1) })
             if (actions && !character.archived && actor.role != GenesisActorRole.NPC)
                 playableRecords += PlayableActionSync.current(db, character, actor.role)
             if (loadout && includeReadOnly && !character.archived && actor.role != GenesisActorRole.NPC)

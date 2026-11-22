@@ -61,13 +61,17 @@ internal fun connectionHistoryLinkIds(links: List<CampaignLink>, audit: List<Cam
 /** A directory first. All record inspection and editing stays in one focused sheet. */
 @Composable
 fun ConnectionsPageV2(repository: CampaignLedgerRepository, initialEntityId: String? = null) {
+    val campaignId = LocalGenesisConnectedEnvironment.current?.selectedCampaignId ?: "local-campaign"
+    key(campaignId) { ScopedConnectionsPageV2(repository, initialEntityId, campaignId) }
+}
+
+@Composable private fun ScopedConnectionsPageV2(repository: CampaignLedgerRepository, initialEntityId: String?, campaignId: String) {
     val records = repository.records
     val context = LocalContext.current
 
     val facts by records.facts.collectAsState(initial = emptyList())
     val milestones by records.milestones.collectAsState(initial = emptyList())
     val links by records.links.collectAsState(initial = emptyList())
-    val campaignId = LocalGenesisConnectedEnvironment.current?.selectedCampaignId ?: "local-campaign"
     val entities by remember(records, campaignId) { records.entitiesIn(campaignId) }.collectAsState(initial = emptyList())
     val projects by remember(records, campaignId) { records.projectsIn(campaignId) }.collectAsState(initial = emptyList())
     val companionStates by records.companionStates.collectAsState(initial = emptyList())

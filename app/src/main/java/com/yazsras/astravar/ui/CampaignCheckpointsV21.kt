@@ -12,9 +12,14 @@ import kotlinx.serialization.json.Json
 import java.util.UUID
 
 /** Local player-known checkpoints. Creating one does not import or replace the Notion authority. */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable fun CampaignCheckpointPanel(repository: CampaignLedgerRepository) {
-    val checkpoints by repository.party.checkpoints.collectAsState(initial = emptyList())
+    val campaignId = LocalGenesisConnectedEnvironment.current?.selectedCampaignId ?: "local-campaign"
+    key(campaignId) { ScopedCheckpointPanel(repository, campaignId) }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable private fun ScopedCheckpointPanel(repository: CampaignLedgerRepository, campaignId: String) {
+    val checkpoints by remember(repository, campaignId) { repository.party.checkpointsIn(campaignId) }.collectAsState(initial = emptyList())
     val audit by repository.records.audit.collectAsState(initial = emptyList())
     var editor by rememberSaveable { mutableStateOf(false) }
     val snapshotState = rememberUiDraftText()
@@ -46,7 +51,7 @@ import java.util.UUID
     }
     if (editor) {
         val snapshot = snapshotJson?.let { runCatching { json.decodeFromString<CampaignCheckpoint>(it) }.getOrNull() }
-        if (snapshotState.canSave) CampaignCheckpointEditorV21(repository, snapshot, checkpoints.firstOrNull { it.id == snapshot?.id }?.revision,
+        if (snapshotState.canSave) CampaignCheckpointEditorV21(repository, campaignId, snapshot, checkpoints.firstOrNull { it.id == snapshot?.id }?.revision,
             onDismiss = { editor = false })
         else PlayerSheet("Checkpoint draft unavailable", onDismiss = { editor = false }) {
             Text(snapshotState.error.orEmpty(), color = MaterialTheme.colorScheme.error)
@@ -64,7 +69,7 @@ import java.util.UUID
     } }
 }
 
-@Composable private fun CampaignCheckpointEditorV21(repository: CampaignLedgerRepository, snapshot: CampaignCheckpoint?,
+@Composable private fun CampaignCheckpointEditorV21(repository: CampaignLedgerRepository, campaignId: String, snapshot: CampaignCheckpoint?,
     latestRevision: Long?, onDismiss: () -> Unit) {
     var title by rememberSaveable { mutableStateOf(snapshot?.title.orEmpty()) }
     var scene by rememberSaveable { mutableStateOf(snapshot?.scene.orEmpty()) }
@@ -89,7 +94,7 @@ import java.util.UUID
         unknowns != snapshot?.unknowns?.joinToString("\n").orEmpty() || source.isNotBlank()
     PlayerSheet("Record local checkpoint", onDismiss, dirty = dirty, actions = {
         PlayerButton(onClick = { actions.run {
-            val checkpoint = (snapshot ?: CampaignCheckpoint(id = id, title = title.trim())).copy(
+            val checkpoint = (snapshot ?: CampaignCheckpoint(id = id, title = title.trim(), campaignId = campaignId)).copy(
                 title = title.trim(), scene = scene, lastConfirmedAction = lastAction, unresolvedChoice = unresolved,
                 objective = objective, gameTime = gameTime, recordReferences = lines(references.orEmpty()), unknowns = lines(unknowns.orEmpty()))
             repository.party.saveCheckpoint(checkpoint, snapshot?.revision, source.trim(), commandId)

@@ -139,6 +139,25 @@ object GameplayRules {
             turn=(if(preview.ritual) character.turn else spendAction(character,spell.castingTime)).let { if(preview.slotLevel!=null) it.copy(spellSlotSpent=true) else it }
         )
     }
+    fun saveSpellDefinition(character: ReforgeCharacter, spell: SpellDefinition): ReforgeCharacter {
+        require(spell.id.isNotBlank() && spell.name.isNotBlank() && spell.level in 0..9 && spell.resourceCost >= 0)
+        val previous = character.spells.singleOrNull { it.id == spell.id }
+        if (spell.resourceId != previous?.resourceId)
+            require(spell.resourceId == null || character.resources.any { it.id == spell.resourceId }) { "Unknown spell resource." }
+        if (character.concentrationSpellId == spell.id)
+            require(spell.concentration) { "End concentration before removing this spell's concentration requirement." }
+        if (spell.level > 0 && spell.preparation == SpellPreparation.PREPARED &&
+            (previous?.preparation != SpellPreparation.PREPARED || previous.level == 0)) {
+            CharacterCalculator.calculate(character).preparationLimit?.let { limit ->
+                require(character.spells.count { it.id != spell.id && it.level > 0 && it.preparation == SpellPreparation.PREPARED } < limit) {
+                    "Prepared-spell limit reached."
+                }
+            }
+        }
+        val spells = if (previous == null) character.spells + spell else character.spells.map { if (it.id == spell.id) spell else it }
+        return character.copy(spells = spells)
+    }
+
     fun prepareSpell(character:ReforgeCharacter,spellId:String,prepared:Boolean):ReforgeCharacter {
         val spell=character.spells.singleOrNull { it.id==spellId } ?: error("Spell not found.")
         require(spell.preparation!=SpellPreparation.ALWAYS_PREPARED && spell.level>0) { "Always-prepared spells and cantrips do not use preparation slots." }

@@ -65,10 +65,14 @@ internal class LocalRecordActions(private val scope: CoroutineScope) {
 }
 
 @Composable fun InventionsPageV2(repository: CampaignLedgerRepository, initialProjectId: String? = null) {
+    val campaignId = LocalGenesisConnectedEnvironment.current?.selectedCampaignId ?: "local-campaign"
+    key(campaignId) { ScopedInventionsPageV2(repository, initialProjectId, campaignId) }
+}
+
+@Composable private fun ScopedInventionsPageV2(repository: CampaignLedgerRepository, initialProjectId: String?, campaignId: String) {
     val records = repository.records
     val connected = LocalGenesisConnectedEnvironment.current
     var connectedCraftOpen by rememberSaveable(initialProjectId) { mutableStateOf(false) }
-    val campaignId = LocalGenesisConnectedEnvironment.current?.selectedCampaignId ?: "local-campaign"
     val projects by remember(records, campaignId) { records.projectsIn(campaignId) }.collectAsState(initial = emptyList())
     val items by repository.items.collectAsState(initial = emptyList())
     val links by records.links.collectAsState(initial = emptyList())

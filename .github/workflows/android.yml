@@ -32,8 +32,8 @@ jobs:
       # regression batch before the first touch on every 3.1 candidate.
       REFORGE_FULL_GATE: 'true'
       GENESIS_GATE: 'true'
-      EXPECTED_VERSION_NAME: '4.0.0-convergence1'
-      EXPECTED_VERSION_CODE: '54'
+      EXPECTED_VERSION_NAME: '4.0.0-convergence2'
+      EXPECTED_VERSION_CODE: '55'
       INVENTORY_BETA: 'false'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
