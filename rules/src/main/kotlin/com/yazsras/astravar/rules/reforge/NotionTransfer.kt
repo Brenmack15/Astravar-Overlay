@@ -179,10 +179,10 @@ fun planNotionCharacterTransfer(
         if (facts.armoredAc != null) warnings +=
             "Notion AC ${facts.armoredAc} is a worn-armor total, not a permanent base AC; it applies only if a matching equipped item has an accepted AC effect."
         if (next.rules.classVersion == "unconfigured" && facts.className.equals("Artificer", true) &&
-            (transfer.reviewedSpellbook == null || transfer.reviewedSpellbook.classVersion == "legacy-artificer-infusions-2020" &&
+            (transfer.reviewedSpellbook == null || classRulesId(transfer.reviewedSpellbook.classVersion) == LEGACY_ARTIFICER_VERSION &&
                 next.className.equals(facts.className, true))) {
             next = next.copy(rules = next.rules.copy(core = RuleFamily.LEGACY_2014,
-                classVersion = "legacy-artificer-infusions-2020"))
+                classVersion = LEGACY_ARTIFICER_VERSION))
         }
         if (transfer.reviewedSpellbook == null && next.spellcastingClassLevel == null && facts.className.equals("Artificer", true)) {
             next = next.copy(spellcastingClassLevel = next.level)

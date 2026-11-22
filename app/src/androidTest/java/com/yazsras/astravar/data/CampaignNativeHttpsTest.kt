@@ -454,6 +454,13 @@ class CampaignNativeHttpsTest {
         verifyInt(21)
         edit("set_equipment_state", buildJsonObject { put("state", "HELD") })
         verifyInt(22)
+        val loadout = mcp("get_playable_loadout", arguments).getValue("records").jsonArray
+        val held = loadout.map { it.jsonObject.getValue("fields").jsonObject }
+            .single { it["subject"] == JsonPrimitive("ITEM") }
+        val itemData = record("playable-loadout", held.getValue("id").jsonPrimitive.content)
+            .getValue("fields").jsonObject.getValue("data").jsonObject
+        assertEquals(stone.id, itemData.getValue("instance").jsonObject.getValue("id").jsonPrimitive.content)
+        assertEquals(JsonPrimitive(true), itemData.getValue("effectStatuses").jsonArray.single().jsonObject["active"])
         edit("edit_equipment_defense", buildJsonObject {
             putJsonObject("defense") {
                 put("id", "edf27ed3-d934-4b12-ad26-ad5fcfe84537"); put("label", "Synthetic cold ward")

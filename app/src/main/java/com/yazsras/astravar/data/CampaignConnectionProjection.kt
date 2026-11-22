@@ -13,6 +13,10 @@ object CampaignConnectionProjection {
             val record = if (original.kind == "audit") CampaignLocalFormBoundary.audit(original) else original
             val f = record.fields
             val projected: JsonObject = when (record.kind) {
+                PlayableLoadoutProjection.KIND -> {
+                    if (!scopes.containsAll(PlayableLoadoutProjection.readScopes)) return@mapNotNull null
+                    f
+                }
                 PlayableSpellbookProjection.KIND -> {
                     if (!scopes.containsAll(PlayableSpellbookProjection.readScopes)) return@mapNotNull null
                     f

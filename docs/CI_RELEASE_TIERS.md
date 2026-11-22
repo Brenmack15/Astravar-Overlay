@@ -100,6 +100,6 @@ The 5–15minute Tier A objective is a target for warm caches, not a measured gu
 
 ## Owner-compatible release boundary
 
-The owner certificate is `4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847`; package is `com.yazsras.astravar`. Current candidate defaults are version53 / `4.0.0-unification2`. Keep the original private key in the established owner environment. A CI disposable certificate is never an update workaround.
+The owner certificate is `4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847`; package is `com.yazsras.astravar`. Current candidate defaults are version54 / `4.0.0-convergence1`. Keep the original private key in the established owner environment. A CI disposable certificate is never an update workaround.
 
 Use `docs/BUILD_AND_SIGNING.md` and current release evidence to privately sign or re-sign the exact tested optimized payload, prove every non-signature entry is unchanged, inspect metadata/signature/alignment, verify monotonically appropriate version against the owner's installed app, and record final SHA256/source/certificate. Validate upgrade and persistence on isolated fixtures; physical installation/consent remains separately evidenced. Never uninstall or clear data to bypass signing incompatibility. Publishing a production release is a separate authorized action.

@@ -12,6 +12,14 @@ import kotlinx.serialization.ExperimentalSerializationApi
     val classVersion: String = "unconfigured",
     val exceptions: List<String> = emptyList()
 )
+internal const val LEGACY_ARTIFICER_VERSION = "legacy-artificer-infusions-2020"
+
+// Both exact persisted labels select the same published class. Keep the saved core and label intact.
+internal fun classRulesId(label: String): String = when (label) {
+    "Tasha's Cauldron of Everything (Legacy Infusions)" -> LEGACY_ARTIFICER_VERSION
+    else -> label
+}
+
 @Serializable enum class Acceptance { OFFICIAL, ACCEPTED_HOMEBREW, PROPOSED, UNVERIFIED, RETIRED }
 @Serializable data class RuleSource(val id: String, val name: String, val acceptance: Acceptance = Acceptance.UNVERIFIED, val revision: Long = 0)
 /** An explicitly reviewed creature or homebrew proficiency, independent of class tier. */

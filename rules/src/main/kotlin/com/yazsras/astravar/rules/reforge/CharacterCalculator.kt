@@ -60,12 +60,13 @@ object CharacterCalculator {
         val rawHp=number(hpBase,NumericTarget.MAX_HP,"",active,"Baseline HP${if(character.baselineConstitutionModifier!=null && con!=null) " + Constitution adjustment ${character.level*(con-character.baselineConstitutionModifier)}" else ""}")
         val hp=(if(character.rules.core==RuleFamily.LEGACY_2014 && character.exhaustionLevel>=4) rawHp.copy(value=rawHp.value?.div(2),explanation=rawHp.explanation+CalculationLine("legacy-exhaustion","Legacy Exhaustion level 4",reason="Maximum HP halved")) else rawHp).let { it.copy(value=it.value?.coerceAtLeast(0)) }
         val casting=abilities.getValue(character.spellcastingAbility).modifier
-        val maxSlots = character.slotMaximaOverride ?: if(character.rules.classVersion == "legacy-artificer-infusions-2020" && character.spellcastingClassLevel != null)
+        val legacyArtificer = classRulesId(character.rules.classVersion) == LEGACY_ARTIFICER_VERSION
+        val maxSlots = character.slotMaximaOverride ?: if(legacyArtificer && character.spellcastingClassLevel != null)
             legacyArtificerSlotMaxima(character.spellcastingClassLevel) else emptyMap()
         val resources=character.resources.associate { pool -> pool.id to number(pool.maximum,NumericTarget.RESOURCE_CAPACITY,pool.id,active,pool.name).value }
         val warnings=buildList {
             if(character.baseMaxHp != null && character.baselineConstitutionModifier == null) add("HP baseline Constitution is unknown; Constitution-dependent HP changes require reviewed configuration.")
-            if(character.spellcastingClassLevel!=null && character.rules.classVersion != "legacy-artificer-infusions-2020" && character.slotMaximaOverride == null) add("This class version needs explicit spell-slot capacities; legacy Artificer slots were not substituted.")
+            if(character.spellcastingClassLevel!=null && !legacyArtificer && character.slotMaximaOverride == null) add("This class version needs explicit spell-slot capacities; legacy Artificer slots were not substituted.")
             if(character.items.any { i->character.itemDefinitions.none { it.id==i.definitionId } }) add("Some inventory definitions are missing; their effects are inactive.")
         }
         return CharacterProjection(abilities,pb,saves,skills,
@@ -76,7 +77,7 @@ object CharacterCalculator {
             number(casting?.plus(pb),NumericTarget.SPELL_ATTACK,"",active,"Spellcasting modifier + proficiency $pb"),
             number(casting?.plus(pb+8),NumericTarget.SPELL_DC,"",active,"8 + spellcasting modifier + proficiency $pb"),
             maxSlots,
-            if(character.rules.classVersion=="legacy-artificer-infusions-2020" && character.spellcastingClassLevel!=null) casting?.let { maxOf(1,it+character.spellcastingClassLevel/2) } else null,
+            if(legacyArtificer && character.spellcastingClassLevel!=null) casting?.let { maxOf(1,it+character.spellcastingClassLevel/2) } else null,
             skills.filterKeys { it in setOf("Perception","Investigation","Insight") }.mapValues { (key,value)->value.value?.let { 10+it+when(rollMode(character,RollKind.SKILL,key,context)) { DiceMode.ADVANTAGE->5;DiceMode.DISADVANTAGE->-5;else->0 } } }, effects.statuses,
             active.mapNotNull { it.effect.payload as? EffectPayload.Defense },
             active.mapNotNull { (it.effect.payload as? EffectPayload.ConditionImmunity)?.condition }.toSet(),resources,warnings,

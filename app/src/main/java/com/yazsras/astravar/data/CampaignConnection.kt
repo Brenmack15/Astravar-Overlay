@@ -99,6 +99,9 @@ class CampaignConnectionClient internal constructor(private val context: Context
     private fun supportsSpellbook(value: CampaignConnectionSettings) =
         grant(value)["playableSpellbookVersion"]?.jsonPrimitive?.intOrNull == 1 &&
             activeRead(value).containsAll(PlayableSpellbookProjection.readScopes)
+    private fun supportsLoadout(value: CampaignConnectionSettings) =
+        grant(value)["playableLoadoutVersion"]?.jsonPrimitive?.intOrNull == 1 &&
+            activeRead(value).containsAll(PlayableLoadoutProjection.readScopes)
     private val dao = db.connection()
     private val domain = CampaignSyncDomain(campaignDb, weaponDb)
     private val pushStore = CampaignPushStore(context)
@@ -321,7 +324,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         val commands = dao.commands().filter { belongs(it, value) }
         var canonicalReviewProfileId: String? = null
         val current = try {
-            if (value.campaignId.isBlank()) emptyList() else { applicationStorage?.awaitReady(); domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value)) }
+            if (value.campaignId.isBlank()) emptyList() else { applicationStorage?.awaitReady(); domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value), loadout = supportsLoadout(value)) }
         } catch (review: CampaignCanonicalReviewRequired) {
             // Display the explicit repair action without treating blocked projections
             // as deleted records. Publication still calls the strict domain snapshot.
@@ -799,7 +802,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         for (publication in dao.publications().filter { it.origin == value.origin && it.campaignId == value.campaignId && it.deviceId == value.deviceId && it.state == "PENDING" }) flushPublication(value, publication)
         val mirrors = dao.mirrors(value.origin, value.campaignId, value.deviceId).associateBy { it.kind to it.recordId }
         syncDiagnostics.stage(value, CampaignSyncStage.LOCAL_SNAPSHOT)
-        val committed = visible(value, domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value)))
+        val committed = visible(value, domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value), loadout = supportsLoadout(value)))
         val identities = committed.map { it.kind to it.recordId }.toSet()
         val readScopes = activeRead(value)
         val removed = mirrors.values.filter { (it.kind to it.recordId) !in identities && canReadKind(it.kind, it.recordId, readScopes) }
@@ -839,7 +842,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
             val publication = CampaignConnectionPublication(id, value.origin, value.campaignId, value.deviceId, body)
             dao.insert(publication); flushPublication(value, publication)
         }
-        val current = visible(value, domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value)))
+        val current = visible(value, domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value), loadout = supportsLoadout(value)))
         // The backend refreshes the whole mirror only when every current local identity/revision/hash agrees.
         // A restore or missing row therefore becomes a visible conflict, never a falsely fresh historical value.
         syncDiagnostics.stage(value, CampaignSyncStage.SNAPSHOT_CONFIRMATION)
@@ -864,6 +867,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         it in setOf("recordId", "kind", "revision", "fields")
     }))
     private fun canReadKind(kind: String, id: String, scopes: Set<String>): Boolean = when (kind) {
+        PlayableLoadoutProjection.KIND -> scopes.containsAll(PlayableLoadoutProjection.readScopes)
         PlayableSpellbookProjection.KIND -> scopes.containsAll(PlayableSpellbookProjection.readScopes)
         PlayableMechanicsSync.STATS, PlayableMechanicsSync.EQUIPMENT -> scopes.containsAll(PlayableMechanicsSync.readScopes)
         "character-profile" -> "hp" in scopes || "character" in scopes

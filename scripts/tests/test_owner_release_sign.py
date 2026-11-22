@@ -349,7 +349,7 @@ class SyntheticPipelineTests(unittest.TestCase):
         self.args = argparse.Namespace(repo=self.source_repo, source_commit=COMMIT, artifact=self.artifact,
             artifact_sha256=sign.digest(self.artifact), ci_evidence=self.ci, baseline_apk=self.baseline,
             sdk=sdk, java_home=java, output_dir=self.root / "new-output", apk_entry="app.apk",
-            source_entry="SOURCE_COMMIT.txt", version_code=53, version_name="4.0.0-synthetic",
+            source_entry="SOURCE_COMMIT.txt", version_code=sign.BASELINE_CODE + 1, version_name="4.0.0-synthetic",
             private_config=self.config, keystore=self.key, authorize_signing=True, preflight_only=False)
         self.mutation = None
         self.calls = []
@@ -391,7 +391,7 @@ class SyntheticPipelineTests(unittest.TestCase):
         self.assertEqual(sign.digest(self.artifact), report["source_artifact_sha256"])
 
     def test_same_or_older_version_cannot_be_signed(self):
-        for code in (0, 49, 50, 51, 52):
+        for code in range(sign.BASELINE_CODE + 1):
             self.args.version_code = code
             with self.assertRaisesRegex(sign.GateError, "candidate_version_must_advance"):
                 sign.sign_release(self.args)

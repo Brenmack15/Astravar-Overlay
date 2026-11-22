@@ -20,8 +20,8 @@ import tempfile
 import zipfile
 
 OWNER_CERT = "4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847"
-BASELINE_SHA = "89867ca4ebf0025296aaadd11069e8a3043e7e68b56d3a77af05a74c2a8ea9be"
-BASELINE_CODE = 52
+BASELINE_SHA = "f5150b768be0ccbfe2d784cb6fc459503ecec5acefba37ee092cc18f5516a9af"
+BASELINE_CODE = 53
 PACKAGE = "com.yazsras.astravar"
 REPOSITORY = "Brenmack15/Astravar-Overlay"
 PROVENANCE = "META-INF/version-control-info.textproto"

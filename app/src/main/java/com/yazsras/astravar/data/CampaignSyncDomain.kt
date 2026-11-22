@@ -27,6 +27,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
     companion object {
         fun receiptId(commandId: String) = "campaign-sync-${campaignHash(commandId).take(48)}"
         fun category(kind: String): String = when (kind) {
+            PlayableLoadoutProjection.KIND -> "inventory"
             PlayableSpellbookProjection.KIND -> "resources"
             PlayableMechanicsSync.STATS -> "character"
             PlayableMechanicsSync.EQUIPMENT -> "inventory"
@@ -40,6 +41,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             else -> error("Unsupported campaign record kind.")
         }
         fun requiredReadScopes(record: CampaignSyncRecord): Set<String> = when (record.kind) {
+            PlayableLoadoutProjection.KIND -> PlayableLoadoutProjection.readScopes
             PlayableSpellbookProjection.KIND -> PlayableSpellbookProjection.readScopes
             PlayableMechanicsSync.STATS, PlayableMechanicsSync.EQUIPMENT -> PlayableMechanicsSync.readScopes
             "character-profile" -> setOf("character", "hp")
@@ -59,7 +61,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
 
     /** Membership is explicit: imported source IDs and current placements, never a blanket campaign reassignment. */
     suspend fun snapshot(campaignId: String, includeReadOnly: Boolean = true, mechanics: Boolean = false,
-        spellbook: Boolean = false): List<CampaignSyncRecord> = db.withTransaction {
+        spellbook: Boolean = false, loadout: Boolean = false): List<CampaignSyncRecord> = db.withTransaction {
         OwnerSyncProtocol.id(campaignId)
         val local = campaignId == "local-campaign"
         val diagnostics = setOf(OwnerConnectionProtocol.PROFILE, RemoteStatProtocol.PROFILE_ID)
@@ -84,6 +86,8 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             if (genesisReadbackProjectionErrors(db, actor.actorId, saved).isNotEmpty())
                 throw CampaignCanonicalReviewRequired(actor.actorId)
             val character = saved.character
+            if (loadout && includeReadOnly && !character.archived && actor.role != GenesisActorRole.NPC)
+                playableRecords += PlayableLoadoutProjection.records(character, actor.role)
             if (spellbook && includeReadOnly && !character.archived && actor.role != GenesisActorRole.NPC)
                 playableRecords += PlayableSpellbookProjection.records(character, actor.role)
             if (mechanics && !character.archived && actor.role != GenesisActorRole.NPC) {
@@ -228,7 +232,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         val native = operations.any { it.kind == PlayableMechanicsSync.EQUIPMENT }
         if (native) require(operations.size == 1 && operations.single().type in
             setOf(PlayableMechanicsSync.BONUS, PlayableMechanicsSync.STATE, PlayableMechanicsSync.DEFENSE)) { "Equipment v1 accepts one native edit per transaction." }
-        require(operations.none { it.kind == PlayableMechanicsSync.STATS || it.kind == PlayableSpellbookProjection.KIND })
+        require(operations.none { it.kind in setOf(PlayableMechanicsSync.STATS, PlayableSpellbookProjection.KIND, PlayableLoadoutProjection.KIND) })
         val before = snapshot(campaignId, includeReadOnly = false, mechanics = native).associateBy { key(it.kind,it.recordId) }
         // An active item can also change both actors' calculated statistics. Reforge
         // audits and republishes those projections under its own immutable commands.
