@@ -12,6 +12,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import org.junit.Assert.*
 import org.junit.Rule
@@ -43,6 +44,21 @@ class GenesisConsolidationInstrumentationTest {
     private fun enter(label: String, value: String) {
         tap(label); ui.setFocusedField(value, product, label)
         device.pressBack(); ui.assertFocusedField(value, product, label)
+    }
+    private fun enterPayloadField(label: String, value: String) {
+        find(label)
+        val selector = By.text(label).pkg(product)
+        fun editor(node: UiObject2): UiObject2? = generateSequence(node) { it.parent }.firstOrNull {
+            it.className == "android.widget.EditText" && it.isEnabled && !it.visibleBounds.isEmpty
+        }
+        // Payload acceptance exercises public field edits, saved components and restart.
+        // The inline armor test in this same journey exercises native IME input and geometry.
+        val field = ui.snapshot(selector, "payload editor for $label", refreshCache = true) { editor(it) }
+        field.text = value
+        assertEquals("Exact payload input for $label", value,
+            ui.snapshot(selector, "committed payload value for $label", refreshCache = true) {
+                editor(it)?.text?.takeIf { actual -> actual == value }
+            })
     }
     private fun restart() {
         device.executeShellCommand("am force-stop $product")
@@ -178,12 +194,12 @@ class GenesisConsolidationInstrumentationTest {
         find("Spell reservoir"); find("0 / 1 stored spells")
         tap("Payload library · 0 templates")
         tap("Create payload template")
-        enter("Payload name", "CI Native Stored Bolt")
-        enter("Base spell level", "1")
-        enter("Casting level", "1")
-        enter("Dice count", "2"); enter("Die sides", "6")
+        enterPayloadField("Payload name", "CI Native Stored Bolt")
+        enterPayloadField("Base spell level", "1")
+        enterPayloadField("Casting level", "1")
+        enterPayloadField("Dice count", "2"); enterPayloadField("Die sides", "6")
         tap("Add damage component")
-        enter("Accepted source and eligibility notes", "Fictional instantaneous damage payload for native acceptance")
+        enterPayloadField("Accepted source and eligibility notes", "Fictional instantaneous damage payload for native acceptance")
         tap("Instantaneous damage and source eligibility approved")
         tap("Save template")
         find("Payload library · 1 templates")

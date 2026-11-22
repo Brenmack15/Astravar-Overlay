@@ -479,3 +479,43 @@ test('resolved encounter attacks require the current native encounter, both acto
  await restricted.publish([...bodies,roster]);
  await fails(restricted.submit([op]),'WRITE_SCOPE_DENIED');
 });
+
+test('ordinary character lookup retains its sheet and reads only that actor’s authorized native headers',async t=>{
+ const fx=await setup(t);
+ await fx.publish([profileRecord()]);
+ const lookup=async()=>{
+  const response=await handleWorker(new Request('https://fixture.invalid/mcp',{method:'POST',
+   headers:{'content-type':'application/json','oai-authenticated-user-id':ownerId},
+   body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'get_character',arguments:{campaignId:campaign,profileId:profile}}})
+  }),{DB:fx.db,OWNER_SITE_USER_ID:ownerId});
+  const result=(await response.json()).result;assert.equal(result.isError,false);return result.structuredContent;
+ };
+ const original=await lookup();
+ assert.equal(original.records[0].fields.currentHp,24);assert.deepEqual(original.playableSummary.abilities,[]);
+ assert.equal(original.playableSummary.casting,null);assert.equal(original.playableSummary.castingPublication,'NOT_PUBLISHED');
+ const ability=async(actor,score)=>{
+  const recordId='stat-'+await sha256([actor,'ABILITY','INT'].join('\u0000'));
+  return {kind:'playable-stat',recordId,revision:3,fields:{id:recordId,revision:3,schemaVersion:1,profileId:actor,actorRole:'PLAYER',
+   target:'ABILITY',key:'INT',label:'Intelligence',base:score,advancement:1,permanent:score+1,effective:score+2,modifier:4,source:'Synthetic native calculator'}};
+ };
+ const data={classVersion:'fixture-version',castingClassLevel:3,preparationLimit:2,spellCount:1,concentrationSpellId:null,
+  slots:[{level:1,maximum:3,current:1},{level:2,maximum:null,current:null}]};
+ const recordId='spell-'+await sha256([profile,'CASTING',''].join('\u0000'));
+ const casting={kind:'playable-spell',recordId,revision:3,fields:{id:recordId,revision:3,schemaVersion:1,profileId:profile,
+  actorRole:'PLAYER',subject:'CASTING',part:'header',parts:0,contentSha256:await sha256(canonical(data)),
+  contentBytes:Buffer.byteLength(canonical(data)),source:'Synthetic native spellbook',data}};
+ await fx.publish([await ability(profile,16),await ability('other-fictional-actor',8),casting]);
+ const result=await lookup();assert.deepEqual(result.records.map(r=>r.fields),original.records.map(r=>r.fields));
+ const summary=result.playableSummary;assert.equal(summary.abilities.length,1);
+ const int=summary.abilities[0];assert.deepEqual([int.key,int.base,int.permanent,int.effective,int.revision],['INT',16,17,18,3]);
+ assert.deepEqual(summary.casting.data,data);assert.equal(summary.casting.revision,3);
+ assert.equal(summary.abilityPublication,'PARTIAL_OR_MIXED');assert.equal(summary.castingPublication,'INLINE');
+ fx.setTime(fx.now()+24*60*60*1000);assert.equal((await fx.sync.characterOverview(connector,campaign,profile)).playableSummary.casting.stale,true);
+ const mechanicsOnly=await setup(t,{readScopes:['character','inventory','companions'],writeScopes:[]});
+ await mechanicsOnly.publish([profileRecord(),await ability(profile,16)]);
+ const limited=(await mechanicsOnly.sync.characterOverview(connector,campaign,profile)).playableSummary;
+ assert.equal(limited.abilities.length,1);assert.equal(Object.hasOwn(limited,'casting'),false);
+ const narrow=await setup(t,{readScopes:['character'],writeScopes:[]});await narrow.publish([profileRecord()]);
+ assert.equal(Object.hasOwn(await narrow.sync.characterOverview(connector,campaign,profile),'playableSummary'),false);
+ assert.equal(Object.hasOwn(await fx.sync.characterOverview(connector,campaign,'missing-profile'),'playableSummary'),false);
+});
