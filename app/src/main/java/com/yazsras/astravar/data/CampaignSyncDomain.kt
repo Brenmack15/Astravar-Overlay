@@ -123,7 +123,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             .map { it.copy(campaignId = campaignId) }
         val references = db.partyDao().allReferences()
         val (scopedReferences, otherReferences) = references.partition { it.campaignId == campaignId }
-        val worldScope = CampaignWorldScope(campaignId, references, associations)
+        val worldScope = CampaignWorldScope(campaignId, references, associations, db.archiveDao().worldMemberships())
         fun mapped(type: String) = scopedReferences.filter { it.recordType == type }.map { it.recordId }.toSet()
         fun unassigned(type: String,id: String) = otherReferences.none { it.recordType == type && it.recordId == id }
         val profileIds = (sheets.map { it.profileId }.toSet() + mapped("character-profile") + explicitProfiles + if (local) db.recordsDao().allCharacterProfiles()

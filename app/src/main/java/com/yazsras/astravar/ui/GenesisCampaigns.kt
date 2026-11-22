@@ -27,6 +27,7 @@ import java.util.UUID
     openActor: (String, Boolean) -> Unit) {
     val campaignState by remember(environment.authority) { environment.authority.campaigns.map { true to it } }
         .collectAsState(initial = false to emptyList<GenesisCampaignRecord>())
+    val imports by environment.campaign.archive.receipts.collectAsState(initial = emptyList())
     val associationState by remember(environment.authority) { environment.authority.actorAssociations.map { true to it } }
         .collectAsState(initial = false to emptyList<GenesisActorAuthority>())
     val profileState by remember(environment.campaign) { environment.campaign.records.characterProfiles.map { true to it } }
@@ -40,6 +41,8 @@ import java.util.UUID
     val profiles = profileState.second
     val playable = playableState.second
     val campaigns = campaignState.second
+    val archiveChoices = activeImportedCampaigns(imports).distinctBy { it.campaignId }
+        .filter { receipt -> campaigns.none { it.id == receipt.campaignId } }
     val actors = associationState.second
     val selected = campaigns.firstOrNull { it.id == environment.selectedCampaignId && !it.archived }
     var section by rememberSaveable { mutableStateOf("People") }
@@ -87,7 +90,7 @@ import java.util.UUID
                         } else PlayerHeading("Campaign") {
                             PlayerTextButton(onClick = { dialog = "Campaigns" }) { Text("Choose campaign") }
                         }
-                        val campaignName = selected?.name ?: if (environment.selectedCampaignId == null) "Unassigned campaign" else "Selected campaign unavailable"
+                        val campaignName = selected?.name ?: archiveChoices.firstOrNull { it.campaignId == environment.selectedCampaignId }?.title ?: if (environment.selectedCampaignId == null) "Unassigned campaign" else "Selected campaign unavailable"
                         if (expandedText) {
                             Text(campaignName, style = MaterialTheme.typography.titleLarge)
                             PlayerTextButton(onClick = { open("Encounters") }) { Text("Encounters") }
@@ -132,6 +135,10 @@ import java.util.UUID
             PlayerEntry("Unassigned campaign", "Browse explicitly unassigned records", "Journal", { selectCampaign(null) }, trailing = if (environment.selectedCampaignId == null) "Selected" else null)
             campaigns.filterNot { it.archived }.forEach { campaign ->
                 PlayerEntry(campaign.name, campaign.notes.ifBlank { "Saved campaign" }, "Journal", { selectCampaign(campaign.id) }, trailing = if (selected?.id == campaign.id) "Selected" else null)
+            }
+            archiveChoices.forEach { receipt ->
+                PlayerEntry(receipt.title, "Imported campaign · ${receipt.campaignId}", "Journal", { selectCampaign(receipt.campaignId) },
+                    trailing = if (environment.selectedCampaignId == receipt.campaignId) "Selected" else null)
             }
             PlayerButton(onClick = { dialog = "CreateCampaign" }) { Text("Create campaign") }
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
