@@ -63,11 +63,13 @@ internal fun connectionHistoryLinkIds(links: List<CampaignLink>, audit: List<Cam
 fun ConnectionsPageV2(repository: CampaignLedgerRepository, initialEntityId: String? = null) {
     val records = repository.records
     val context = LocalContext.current
-    val entities by records.entities.collectAsState(initial = emptyList())
+
     val facts by records.facts.collectAsState(initial = emptyList())
     val milestones by records.milestones.collectAsState(initial = emptyList())
     val links by records.links.collectAsState(initial = emptyList())
-    val projects by records.projects.collectAsState(initial = emptyList())
+    val campaignId = LocalGenesisConnectedEnvironment.current?.selectedCampaignId ?: "local-campaign"
+    val entities by remember(records, campaignId) { records.entitiesIn(campaignId) }.collectAsState(initial = emptyList())
+    val projects by remember(records, campaignId) { records.projectsIn(campaignId) }.collectAsState(initial = emptyList())
     val companionStates by records.companionStates.collectAsState(initial = emptyList())
     val characterProfiles by records.characterProfiles.collectAsState(initial = emptyList())
     val items by repository.items.collectAsState(initial = emptyList())
@@ -231,7 +233,10 @@ fun ConnectionsPageV2(repository: CampaignLedgerRepository, initialEntityId: Str
                     val src = source.trim().ifBlank { "Local connection edit in Astravar" }
                     val draft = (before ?: ConnectionEntity(name = name.trim(), id = draftId)).copy(name = name.trim(), kind = connectionStoredKind(kind), notes = notes, aliases = aliases, relationship = relationship, imageBase64 = image)
                     actions.run {
-                        val receipt = records.saveEntity(draft, before?.revision, src)
+                        val command = UUID.randomUUID().toString()
+                        val receipt = records.saveInCampaign(campaignId, "connection", draft.id, before?.revision, src, command) {
+                            records.saveEntity(draft, before?.revision, src, command)
+                        }
                         baseJson = Json.encodeToString(draft.copy(revision = receipt.resultingRevision, source = src, updatedAt = receipt.createdAt))
                         selectedId = draft.id; source = src; name = draft.name; mode = "detail"
                         "Connection saved locally."

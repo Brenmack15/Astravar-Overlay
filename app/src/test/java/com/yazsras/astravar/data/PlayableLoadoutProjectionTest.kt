@@ -6,6 +6,28 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PlayableLoadoutProjectionTest {
+    @Test fun itemGateAndExplicitAttunedConditionAgreeWithPublishedCalculation() {
+        val source = RuleSource("fixture-source", "Reviewed calibration", Acceptance.ACCEPTED_HOMEBREW)
+        val bonus = EffectDefinition("focus-effect", "Focus", source, EffectPayload.Number(NumericTarget.ABILITY, NumberOperation.ADD, 1, "INT"))
+        for (itemGate in listOf(false, true)) for (effectGate in listOf(false, true)) {
+            for (explicit in listOf(false, true)) for (attuned in listOf(false, true)) {
+                val effect = bonus.copy(requiresAttunement = effectGate,
+                    conditions = if (explicit) listOf(EffectCondition(ConditionKind.ATTUNED)) else emptyList())
+                val def = ItemDefinition("focus", "Practice focus", listOf(effect), requiresAttunement = itemGate)
+                val actor = ReforgeCharacter("student", "Student", revision = 4, baseAbilities = mapOf(Stat.INT to 14),
+                    itemDefinitions = listOf(def), items = listOf(ItemInstance("focus-one", def.id, ItemState.WORN, attuned = attuned)))
+                val expected = attuned || (!explicit && !(itemGate && effectGate))
+                val projection = CharacterCalculator.calculate(actor)
+                assertEquals(if (expected) 15 else 14, projection.abilities.getValue(Stat.INT).effective.value)
+                val item = PlayableLoadoutProjection.records(actor, GenesisActorRole.PLAYER)
+                    .single { it.fields["subject"] == JsonPrimitive("ITEM") }.fields.getValue("data").jsonObject
+                val status = campaignJson.decodeFromJsonElement<List<EffectStatus>>(item.getValue("effectStatuses")).single()
+                assertEquals(projection.effectStatuses.single(), status)
+                assertEquals(expected, status.active)
+            }
+        }
+    }
+
     @Test fun nativeAuthoredEffectsHaveSourceActivationAndScopeOnEachPhysicalInstance() {
         val effect = EffectDefinition("workshop-effect", "Calibration", RuleSource("workshop", "Original", Acceptance.ACCEPTED_HOMEBREW),
             EffectPayload.Number(NumericTarget.ABILITY, NumberOperation.ADD, 1, "INT"))

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.rules.reforge.*
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
@@ -51,6 +52,32 @@ class GenesisAuthorityGuardsTest {
             id, type, id, campaignId = campaignId), source = source)
     }
     private suspend fun snapshot(campaign: String) = CampaignSyncDomain(db).snapshot(campaign, includeReadOnly = false)
+
+    @Test fun unboundFixtureRootsAndChildrenStayOutOfTheLocalDirectoryAndPublication() = runBlocking {
+        val qa = "SYNTHETIC_QA_ONLY: fictional regression"
+        val project = InventionProject("Sample study", id = "sample-study")
+        val entity = ConnectionEntity("Sample guild", id = "sample-guild")
+        ledger.records.saveProject(project, source = qa)
+        ledger.records.saveEntity(entity, source = qa)
+        ledger.records.saveStage(ProjectStage(project.id, "Sample stage", id = "sample-stage"), source = qa)
+        ledger.records.saveFact(ConnectionFact(entity.id, "Sample fact", id = "sample-fact"), source = qa)
+        ledger.records.saveProject(InventionProject("Ordinary study", id = "ordinary-study"), source = source)
+        val local = "local-campaign"
+        val localRows = CampaignSyncDomain(db).snapshot(local)
+        assertTrue(localRows.none { it.recordId.startsWith("sample-") || it.fields.toString().contains(qa) })
+        assertEquals(listOf("ordinary-study"), ledger.records.projectsIn(local).first().map { it.id })
+        assertTrue(ledger.records.entitiesIn(local).first().isEmpty())
+
+        val other = "fictional-campaign"
+        oldReference(project.id, "project", other)
+        oldReference(entity.id, "connection", other)
+        val otherRows = snapshot(other).map { it.recordId }
+        assertTrue(otherRows.containsAll(listOf(project.id, entity.id, "sample-stage", "sample-fact")))
+        assertEquals(project.id, ledger.records.projectsIn(other).first().single().id)
+        assertEquals(entity.id, ledger.records.entitiesIn(other).first().single().id)
+        assertTrue(snapshot(local).none { it.recordId in otherRows })
+        assertEquals(2, db.recordsDao().allProjects().size)
+    }
 
     @Test fun explicitUnassignedMembershipOverridesOldSheetAndSourceReferencesWithoutDeletingThem() = runBlocking {
         val actor = "guard-unassigned"

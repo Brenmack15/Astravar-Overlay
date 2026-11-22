@@ -3,6 +3,7 @@ package com.yazsras.astravar.data
 import androidx.room.*
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -268,6 +269,16 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
     private val dao = db.recordsDao()
     val projects = dao.projects()
     val entities = dao.entities()
+    private fun worldScope(campaignId: String) = combine(db.partyDao().worldReferences(), db.genesisAuthorityDao().actors()) { refs, actors ->
+        CampaignWorldScope(campaignId, refs, actors.associateBy { it.actorId })
+    }
+    fun projectsIn(campaignId: String) = combine(projects, worldScope(campaignId)) { rows, scope ->
+        rows.filter { scope.includes("project", it.id, it.source) }
+    }
+    fun entitiesIn(campaignId: String) = combine(entities, worldScope(campaignId)) { rows, scope ->
+        rows.filter { scope.includes("connection", it.id, it.source) }
+    }
+
     val facts = dao.facts()
     val milestones = dao.milestones()
     val companionStates = dao.companionStates()
@@ -355,6 +366,27 @@ class CampaignRecordsRepository(private val db: CampaignLedgerDb) {
         dao.insert(CampaignAudit(commandId, commandId, kind, recordId, if (oldRevision == null) "CREATE" else "UPDATE",
             provenance, oldRevision ?: 0, revision, now, before, after))
         return CommandReceipt(commandId, fp, kind, recordId, revision, now, outcomeJson = after).also { dao.insert(it) }
+    }
+
+    /** Keep a newly created directory record in the selected campaign on the same commit. */
+    internal suspend fun saveInCampaign(campaignId: String, kind: String, id: String, expected: Long?, source: String,
+        command: String, write: suspend () -> CommandReceipt): CommandReceipt = db.withTransaction {
+        val oldSource = when (kind) {
+            "project" -> dao.project(id)?.source
+            "connection" -> dao.entity(id)?.source
+            else -> error("Unsupported directory record.")
+        }
+        val scope = CampaignWorldScope(campaignId, db.partyDao().allReferences(),
+            db.genesisAuthorityDao().allActors().associateBy { it.actorId })
+        if (oldSource != null) require(scope.includes(kind, id, oldSource)) { "This record belongs to a different campaign." }
+        val result = write()
+        if (expected == null && campaignId != "local-campaign") {
+            val key = campaignHash("$kind:$id")
+            PartyRecordsRepository(db).saveExternalReference(ExternalRecordReference(
+                "sync-scope-" + campaignHash("$campaignId:$kind:$id").take(48), "campaign-sync-membership", key,
+                kind, id, campaignId = campaignId), source = source, commandId = command + "-scope")
+        }
+        result
     }
 
     suspend fun saveProject(value: InventionProject, expectedRevision: Long? = null, source: String,
