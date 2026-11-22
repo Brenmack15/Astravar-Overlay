@@ -18,6 +18,8 @@ import com.yazsras.astravar.data.*
 import com.yazsras.astravar.rules.reforge.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -143,6 +145,56 @@ class GenesisCreationUiTest {
             compose.onNodeWithText("Edit Ability scores").performScrollTo().performClick()
             compose.onNodeWithText("INT").assertTextContains("18")
         }
+    }
+
+    @Test fun reviewedWornAndHeldSaveBonusesMatchThePublishedSixSavingThrows() {
+        val owner = ReforgeCharacter("fictional-save-owner", "Fictional owner", baseAbilities = Stat.entries.associateWith { 10 })
+        var saved: ReforgeCharacter? = null
+        editor({ ReforgeItemEditor(owner, {}, { saved = it }) }) {
+            fun tap(text: String) = compose.onNodeWithText(text).performScrollTo().performClick()
+            fun choose(current: String, next: String) {
+                tap(current)
+                compose.onNodeWithText(next).performClick()
+            }
+            compose.onNodeWithText("Item name").performTextInput("Fictional ward")
+            section("Equipment")
+            tap("Requires attunement")
+            section("Effects")
+            tap("Add a structured effect")
+            choose("ABILITY", "SAVE")
+            choose("Worn or held", "Worn")
+            compose.onNodeWithText("Value").performScrollTo().performTextInput("1")
+            tap("Add effect to review")
+            choose("All saving throws", "DEX")
+            choose("Worn", "Held")
+            compose.onNodeWithText("Value").performScrollTo().performTextInput("2")
+            tap("Add effect to review")
+            compose.onNodeWithText("Review & save").performClick()
+            compose.onNodeWithText("Save reviewed item").assertIsNotEnabled()
+            compose.onNodeWithText("All saving throws add 1 · while worn", substring = true).assertExists()
+            compose.onNodeWithText("DEX saves add 2 · while held", substring = true).assertExists()
+            tap("I reviewed these mechanics")
+            compose.onNodeWithText("Save reviewed item").performClick()
+        }
+        val character = requireNotNull(saved)
+        val item = character.items.single()
+        fun verify(state: ItemState, attuned: Boolean, expected: (Stat) -> Int) {
+            val equipped = GameplayRules.equip(character, item.id, state)
+            val current = if (attuned) GameplayRules.attune(equipped, item.id, true) else equipped
+            val calculated = CharacterCalculator.calculate(current)
+            val published = PlayableMechanicsSync.statistics(current, GenesisActorRole.PLAYER)
+                .filter { it.fields.getValue("target").jsonPrimitive.content == "SAVE" }
+                .associate { it.fields.getValue("key").jsonPrimitive.content to it.fields.getValue("effective").jsonPrimitive.int }
+            assertEquals(6, published.size)
+            Stat.entries.forEach { stat ->
+                assertEquals(expected(stat), calculated.saves.getValue(stat).value)
+                assertEquals(expected(stat), published.getValue(stat.name))
+            }
+        }
+        verify(ItemState.CARRIED, false) { 0 }
+        verify(ItemState.WORN, false) { 0 }
+        verify(ItemState.WORN, true) { 1 }
+        verify(ItemState.HELD, true) { if (it == Stat.DEX) 2 else 0 }
     }
 
     @Test fun itemReviewRetainsOwnerAndRequiresMechanicalApproval() {
