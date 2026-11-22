@@ -776,30 +776,15 @@ internal class ObservedUi(private val device: UiDevice) {
             window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD &&
                 !Rect().also { window.getBoundsInScreen(it) }.isEmpty
         }
-        // A Compose field can gain focus while the previous field's IME is
-        // still dismissed. Never press Back on that state: it would close the dialog.
-        var hiddenBounds: Rect? = null
-        var hiddenSince = 0L
-        val dismissKeyboard = snapshot(selector, "keyboard state before fixture edit: $description",
-            timeoutMs = 10_000, refreshCache = true) { node ->
-            val bounds = Rect(node.visibleBounds)
-            if (!node.isFocused || !node.isEnabled || bounds.isEmpty) {
-                hiddenBounds = null
-                null
-            } else if (keyboardShown()) {
-                true
-            } else if (node.hasObject(By.text(description))) {
-                // Only accept a hidden keyboard on the exact labeled editor
-                // after its geometry settles. Other targets still require a visible IME.
-                val now = SystemClock.uptimeMillis()
-                if (hiddenBounds != bounds) { hiddenBounds = bounds; hiddenSince = now }
-                false.takeIf { now - hiddenSince >= 400 }
-            } else {
-                hiddenBounds = null
-                null
-            }
+        // Observe the real IME before Back so a late keyboard cannot turn this
+        // into navigation. This does not change any Gboard settings or app data.
+        snapshot(selector, "visible native keyboard before fixture edit: $description", timeoutMs = 10_000, refreshCache = true) { node ->
+            true.takeIf { node.isFocused && node.isEnabled && !node.visibleBounds.isEmpty && keyboardShown() }
         }
-        if (dismissKeyboard) device.pressBack()
+        // UiDevice can report false after the native IME already handled Back.
+        // Dispatch once; the following strict window/focus observation is the
+        // acceptance criterion, never a second key or an assumed success.
+        device.pressBack()
         var stable: Pair<Rect, String>? = null
         var stableSince = 0L
         val settled = snapshot(selector, "stable focused field after keyboard dismissal: $description", timeoutMs = 10_000, refreshCache = true) {
