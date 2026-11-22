@@ -45,7 +45,7 @@ internal fun classRulesId(label: String): String = when (label) {
 @Serializable enum class DefenseKind { RESISTANCE, IMMUNITY, VULNERABILITY }
 @Serializable enum class RollEdge { ADVANTAGE, DISADVANTAGE }
 @Serializable enum class RollKind { ABILITY_CHECK, SAVE, SKILL, INITIATIVE, ATTACK, SPELL_ATTACK, CUSTOM }
-@Serializable enum class ConditionKind { EQUIPPED, ATTUNED, HELD, STANCE, CREATURE_TYPE, DAMAGE_TYPE, SUCCESSFUL_HIT, CHARGE_AVAILABLE, ONCE_PER_TURN, CONTEXT_TAG }
+@Serializable enum class ConditionKind { EQUIPPED, ATTUNED, HELD, STANCE, CREATURE_TYPE, DAMAGE_TYPE, SUCCESSFUL_HIT, CHARGE_AVAILABLE, ONCE_PER_TURN, CONTEXT_TAG, WORN }
 /** Conditions are data, never executable expressions. Unknown context fails closed. */
 @Serializable data class EffectCondition(val kind: ConditionKind, val key: String = "", val minimum: Int = 1)
 @Serializable data class DiceTerm(val count: Int, val sides: Int, val sign: Int = 1)

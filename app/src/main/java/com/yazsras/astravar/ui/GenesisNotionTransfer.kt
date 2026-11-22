@@ -197,6 +197,24 @@ import java.util.Locale
                 Text("Proposed level ${plan.character.level} · AC ${projection.armorClass.value ?: "unknown"} · " +
                     "max HP ${projection.maximumHp.value ?: "unknown"} · current HP ${projection.currentHp ?: "unknown"}. Stored HP and recorded damage are retained.", color = RebuildPalette.Ice)
                 PlayerDisclosure("Items to add (${plan.added.size})") { plan.added.forEach { Text(it) } }
+                val newDefinitions = plan.character.itemDefinitions.map { it.id }.toSet() - saved.character.itemDefinitions.map { it.id }.toSet()
+                val bonusesToAdd = transfer.inventory.filter { it.reviewedBonuses.isNotEmpty() && "notion-definition-${it.sourceId}" in newDefinitions }
+                if (bonusesToAdd.isNotEmpty()) PlayerDisclosure("Conditional equipment bonuses") {
+                    bonusesToAdd.forEach { item ->
+                        Text(item.name)
+                        item.reviewedBonuses.forEach { bonus ->
+                            val requirement = if (item.requiresAttunement) " and attuned" else ""
+                            val amount = if (bonus.amount > 0) "+${bonus.amount}" else bonus.amount.toString()
+                            val target = when (bonus.target) {
+                                NumericTarget.ARMOR_CLASS -> "Armor Class"
+                                NumericTarget.SAVE -> bonus.save?.let { "${it.name} saves" } ?: "all saving throws"
+                                else -> bonus.target.name
+                            }
+                            Text("$amount $target while ${bonus.condition.name.lowercase()}$requirement")
+                            Text(bonus.referenceUrl, color = RebuildPalette.Muted)
+                        }
+                    }
+                }
                 if (plan.alreadyPresent.isNotEmpty()) PlayerDisclosure("Existing items (${plan.alreadyPresent.size})") {
                     plan.alreadyPresent.forEach { Text(it) }
                 }

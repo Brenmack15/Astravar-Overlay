@@ -148,6 +148,7 @@ object CharacterCalculator {
         val okay=when(condition.kind) {
             ConditionKind.EQUIPPED -> item?.state in setOf(ItemState.WORN,ItemState.HELD)
             ConditionKind.ATTUNED -> item?.attuned==true
+            ConditionKind.WORN -> item?.state == ItemState.WORN
             ConditionKind.HELD -> item?.state==ItemState.HELD
             ConditionKind.STANCE -> condition.key in c.activeStances
             ConditionKind.CREATURE_TYPE -> condition.key.equals(context.targetCreatureType,true)
