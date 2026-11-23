@@ -858,9 +858,12 @@ class CampaignConnectionClient internal constructor(private val context: Context
         // A restore or missing row therefore becomes a visible conflict, never a falsely fresh historical value.
         syncDiagnostics.stage(value, CampaignSyncStage.SNAPSHOT_CONFIRMATION)
         syncDiagnostics.time(value, "lastUploadAttemptAt", now())
+        val deviceBuild = if (grant(value)["deviceBuildReportVersion"]?.jsonPrimitive?.intOrNull == 1)
+            CampaignDeviceBuild.report(context) else null
         val heartbeat = request(value, base(value) + "/records", OwnerSyncProtocol.canonical(buildJsonObject {
             put("commandId", UUID.randomUUID().toString()); put("records", JsonArray(emptyList()))
             put("snapshotFingerprint", snapshotFingerprint(current))
+            deviceBuild?.let { put("deviceBuild", it) }
         }))
         val verifiedAt = heartbeat["publishedAt"]?.jsonPrimitive?.long ?: error("Missing verified synchronization timestamp.")
         require(verifiedAt > 0 && verifiedAt <= now() + 60_000)

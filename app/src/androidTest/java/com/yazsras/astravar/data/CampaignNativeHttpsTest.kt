@@ -606,6 +606,23 @@ class CampaignNativeHttpsTest {
         owner("/v1/owner/pairings/approve", buildJsonObject { put("userCode", pairing.getValue("pairing").jsonObject.getValue("userCode")) })
         assertTrue(client.finishPairing().getValue("connected").jsonPrimitive.boolean)
         client.setAutoSync(allScopes); client.sync()
+        val publication = mcp("get_owner_connection", buildJsonObject {}).getValue("campaignSync").jsonObject
+            .getValue("connections").jsonArray.single { it.jsonObject.getValue("campaignId").jsonPrimitive.content == campaign }.jsonObject
+        val build = publication.getValue("deviceBuild").jsonObject
+        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+        val installedDigest = java.security.MessageDigest.getInstance("SHA-256")
+        java.io.File(context.applicationInfo.sourceDir).inputStream().use { input ->
+            java.security.DigestInputStream(input, installedDigest).use { stream ->
+                val buffer = ByteArray(65536)
+                while (stream.read(buffer) != -1) { /* hash the independently installed package */ }
+            }
+        }
+        assertEquals(installedDigest.digest().joinToString("") { "%02x".format(it) }, build.getValue("baseApkSha256").jsonPrimitive.content)
+        assertEquals(context.packageName, build.getValue("packageName").jsonPrimitive.content)
+        assertEquals(info.versionName, build.getValue("versionName").jsonPrimitive.content)
+        assertEquals(androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(info), build.getValue("versionCode").jsonPrimitive.long)
+        assertEquals(android.os.Build.VERSION.SDK_INT, build.getValue("androidApi").jsonPrimitive.int)
+        assertEquals(context.applicationInfo.splitSourceDirs?.size ?: 0, build.getValue("splitApkCount").jsonPrimitive.int)
         assertEquals(12, record("character-profile", player).getValue("fields").jsonObject.getValue("currentHp").jsonPrimitive.int)
 
         submitAndVerify(operation("adjust_hp", "character-profile", player, 1, fields("delta" to JsonPrimitive(-3))), offlineBeforeDelivery = true)
