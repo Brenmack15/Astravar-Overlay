@@ -318,6 +318,7 @@ run_independent_test() {
 # Production campaign HTTPS transport, explicit grant, Auto-Sync and immutable readback.
 run_independent_test 'com.yazsras.astravar.data.CampaignNativeHttpsTest#authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts' native-campaign-https.txt 360
 # Real native Room/domain transactions in a separately named synthetic database.
+run_independent_test 'com.yazsras.astravar.data.CampaignSyncNativeTest#reviewedWearableCommitsToPlayableCompanionAndSurvivesReopen' native-reviewed-companion-item.txt
 run_independent_test 'com.yazsras.astravar.data.CampaignSyncNativeTest#nativeCommittedHpSlotAndCheckpointSurviveDatabaseReopen' native-campaign-hp-slot-checkpoint.txt
 run_independent_test 'com.yazsras.astravar.data.CampaignSyncNativeTest#nativeAtomicPurchaseRollbackAndRetryPreserveSinglePhysicalIdentity' native-campaign-purchase-move.txt
 run_independent_test 'com.yazsras.astravar.data.CampaignSyncNativeTest#nativeCompanionAndStageChangesKeepIndependentResourcesAndLaterWork' native-campaign-companion-stage.txt
