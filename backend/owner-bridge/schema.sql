@@ -246,3 +246,7 @@ CREATE INDEX bridge_campaign_property_item ON bridge_campaign_records(owner_id,c
 
 --> statement-breakpoint
 CREATE INDEX bridge_campaign_companion_resource ON bridge_campaign_records(owner_id,campaign_id,grant_id,kind,json_extract(fields_json,'$.companionId'),record_id);
+
+ALTER TABLE bridge_campaign_publications ADD COLUMN device_build_json TEXT;
+--> statement-breakpoint
+CREATE INDEX bridge_campaign_verified_publication ON bridge_campaign_publications(grant_id,created_at DESC) WHERE expected_generation IS NOT NULL;

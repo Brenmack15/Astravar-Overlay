@@ -543,3 +543,34 @@ test('ordinary character lookup retains its sheet and reads only that actor’s 
  assert.equal(Object.hasOwn(await narrow.sync.characterOverview(connector,campaign,profile),'playableSummary'),false);
  assert.equal(Object.hasOwn(await fx.sync.characterOverview(connector,campaign,'missing-profile'),'playableSummary'),false);
 });
+
+test('owner sees the reported APK only after that grant verifies a complete snapshot',async t=>{
+ const f=await setup(t);
+ const report={packageName:'com.example.fixture',versionName:'fixture-2',versionCode:55,androidApi:37,baseApkSha256:'ab'.repeat(32),splitApkCount:0};
+ const connection=async()=>(await f.sync.getConnection(connector)).connections[0];
+ assert.equal((await connection()).deviceBuild,null);
+ await fails(f.sync.publish(f.principal,campaign,{commandId:uuid(),records:[profileRecord()],deviceBuild:report}),'HEARTBEAT_ONLY_FIELD');
+ await f.publish([profileRecord()]);
+ const grant=await f.sync.authorize(f.principal,campaign,['device']);
+ const fingerprint=(await f.sync.mirrorSnapshot(grant)).fingerprint;
+ const heartbeat={commandId:uuid(),records:[],snapshotFingerprint:fingerprint,deviceBuild:report};
+ await fails(f.sync.publish(f.principal,campaign,{...heartbeat,snapshotFingerprint:'00'.repeat(32)}),'MIRROR_SNAPSHOT_CONFLICT');
+ await fails(f.sync.publish(f.principal,campaign,{...heartbeat,deviceBuild:{...report,baseApkSha256:'invalid'}}),'INVALID_DEVICE_BUILD');
+ assert.equal((await connection()).deviceBuild,null);
+ const accepted=await f.sync.publish(f.principal,campaign,heartbeat);
+ assert.deepEqual((await connection()).deviceBuild,{...report,publicationCommandId:heartbeat.commandId,reportedAt:accepted.publishedAt});
+ const response=await handleWorker(new Request('https://fixture.invalid/mcp',{method:'POST',
+  headers:{'content-type':'application/json','oai-authenticated-user-id':ownerId},
+  body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'get_owner_connection',arguments:{}}})
+ }),{DB:f.db,OWNER_SITE_USER_ID:ownerId});
+ const lookup=(await response.json()).result;
+ assert.equal(lookup.isError,false);
+ assert.deepEqual(lookup.structuredContent.campaignSync.connections[0].deviceBuild,(await connection()).deviceBuild);
+ const replay=await f.sync.publish(f.principal,campaign,heartbeat);assert.equal(replay.replayed,true);
+ await fails(f.sync.publish(f.principal,campaign,{...heartbeat,deviceBuild:{...report,versionCode:56}}),'COMMAND_ID_REUSED');
+ assert.equal((await connection()).publishedRecordCount,1);
+ await f.sync.publish(f.principal,campaign,{commandId:uuid(),records:[],snapshotFingerprint:fingerprint});
+ assert.equal((await connection()).deviceBuild,null);
+ // Replaying a historic tagged heartbeat cannot replace a newer untagged confirmation.
+ await f.sync.publish(f.principal,campaign,heartbeat);assert.equal((await connection()).deviceBuild,null);
+});
