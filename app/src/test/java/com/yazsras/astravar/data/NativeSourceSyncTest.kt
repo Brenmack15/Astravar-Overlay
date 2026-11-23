@@ -71,6 +71,9 @@ class NativeSourceSyncTest {
                 assertEquals(7,stats.currentHp);assertNull(sheet.resources.single().current)
                 assertEquals("owl",database.partyDao().placement("garment-1")?.holderProfileId)
                 assertEquals(receipt,database.recordsDao().receipt(receipt.commandId))
+                val uncertain=sheet.copy(items=sheet.items.map { it.copy(formKnown=false) })
+                assertNull(CharacterCalculator.calculate(uncertain).movement["walk"])
+                assertTrue(GameplayRules.changeWearableForm(uncertain,"garment-1",null).items.single().formKnown)
                 val hybrid=GameplayRules.changeWearableForm(sheet.copy(turn=TurnEconomy(tracking=true)),"garment-1","hybrid")
                 assertEquals(40,CharacterCalculator.calculate(hybrid).movement["fly"])
                 assertFalse(hybrid.turn.actionAvailable)
@@ -122,9 +125,10 @@ class NativeSourceSyncTest {
             assertEquals(receipt,domain.apply(campaign,id,"Private reviewed source rehearsal",ops))
             val outcomes=domain.snapshot(campaign,mechanics=true,loadout=true)
             val after=backup.exportWithProof()
+            assertTrue(backup.previewRestore(after.text).valid)
             File(dir,"result.json").writeText(buildJsonObject {
                 put("fingerprint",after.currentFingerprint)
-                put("rows",campaignJson.encodeToJsonElement(outcomes.filter { it.kind in setOf("character-profile","playable-stat","playable-equipment","companion-resource") }))
+                put("rows",campaignJson.encodeToJsonElement(outcomes.filter { it.kind in setOf("character-profile","playable-stat","playable-equipment","companion-resource","playable-loadout","playable-spell","wallet","item-placement","checkpoint") }))
             }.toString())
         } finally { db.close() }
     }

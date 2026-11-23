@@ -31,7 +31,7 @@ object GameplayRules {
             require(definition.minimumAbilities.all { (stat,min)->(abilities[stat]?.effective?.value ?: -1)>=min }) { "An ability requirement is unmet or unknown." }
             require(definition.equipmentSlot==null || character.items.none { other->other.id!=itemId && other.state in setOf(ItemState.WORN,ItemState.HELD) && character.itemDefinitions.find { it.id==other.definitionId }?.equipmentSlot==definition.equipmentSlot }) { "That equipment slot is occupied. Unequip its item first." }
         }
-        return preserveCapacities(character,character.copy(items=character.items.map { if(it.id==itemId) it.copy(state=state, formId=it.formId.takeIf { state == ItemState.WORN }, modesUntil=if(state in setOf(ItemState.WORN,ItemState.HELD)) it.modesUntil else emptyMap()) else it }))
+        return preserveCapacities(character,character.copy(items=character.items.map { if(it.id==itemId) it.copy(state=state, formKnown=it.formKnown || state != ItemState.WORN, formId=it.formId.takeIf { state == ItemState.WORN }, modesUntil=if(state in setOf(ItemState.WORN,ItemState.HELD)) it.modesUntil else emptyMap()) else it }))
     }
     fun attune(character:ReforgeCharacter,itemId:String,attuned:Boolean):ReforgeCharacter {
         CharacterCalculator.validate(character)
@@ -44,7 +44,7 @@ object GameplayRules {
             val used=character.items.filter { it.id!=itemId && it.attuned }.sumOf { i->character.itemDefinitions.find { it.id==i.definitionId }?.attunementCost ?: character.attunementLimit+1 }
             require(used+definition.attunementCost<=character.attunementLimit) { "Attunement capacity would be exceeded." }
         }
-        return preserveCapacities(character,character.copy(items=character.items.map { if(it.id==itemId) it.copy(attuned=attuned, formId=it.formId.takeUnless { definition.requiresAttunement && !attuned }, modesUntil=if(definition.requiresAttunement && !attuned) emptyMap() else it.modesUntil) else it }))
+        return preserveCapacities(character,character.copy(items=character.items.map { if(it.id==itemId) it.copy(attuned=attuned, formKnown=it.formKnown || (definition.requiresAttunement && !attuned), formId=it.formId.takeUnless { definition.requiresAttunement && !attuned }, modesUntil=if(definition.requiresAttunement && !attuned) emptyMap() else it.modesUntil) else it }))
     }
 
     fun changeWearableForm(character: ReforgeCharacter, itemId: String, formId: String?): ReforgeCharacter {
@@ -52,9 +52,9 @@ object GameplayRules {
         val definition = character.itemDefinitions.single { it.id == item.definitionId }
         require(item.state == ItemState.WORN && item.operating && (!definition.requiresAttunement || item.attuned))
         require(definition.forms.isNotEmpty() && (formId == null || definition.forms.any { it.id == formId && (it.wearerId == null || it.wearerId == character.id) }))
-        require(item.formId != formId && character.items.none { it.id != itemId && it.formId != null })
+        require((!item.formKnown || item.formId != formId) && character.items.none { it.id != itemId && (it.formId != null || !it.formKnown) })
         val turn = spendAction(character,"Action")
-        return character.copy(items = character.items.map { if (it.id == itemId) it.copy(formId = formId) else it },
+        return character.copy(items = character.items.map { if (it.id == itemId) it.copy(formId = formId, formKnown = true) else it },
             turn = turn).also(CharacterCalculator::validate)
     }
 

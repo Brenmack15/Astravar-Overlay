@@ -35,11 +35,12 @@ export function nativeSourcePlan(op, campaign, prior) {
  let manual = f.purpose === 'MIGRATION' || f.mode === 'EDIT' || !item;
  if (item) {
   shape(f.definition,['id','name'],['effects','requiresAttunement','attunementCost','equipmentSlot','minimumLevel','minimumAbilities','weight','description','forms','activations']);
-  shape(f.instance,['id','definitionId'],['state','attuned','quantity','operating','favorite','formId','pools','donorInstanceIds']);
+  shape(f.instance,['id','definitionId'],['state','attuned','quantity','operating','favorite','formId','formKnown','pools','donorInstanceIds']);
   identifier(f.definition.id); identifier(f.instance.id);
   if (f.instance.definitionId !== f.definition.id || !f.definition.name?.trim() ||
       !['STORED','CARRIED','WORN','HELD'].includes(f.instance.state ?? 'CARRIED')) reject();
-  if (f.instance.formId != null && (f.mode !== 'CREATE' || f.purpose !== 'MIGRATION')) reject();
+  if (Object.hasOwn(f.instance,'formKnown') && typeof f.instance.formKnown !== 'boolean') reject();
+  if ((f.instance.formId != null || f.instance.formKnown === false) && f.purpose !== 'MIGRATION') reject();
   if (f.instance.donorInstanceIds != null && (!Array.isArray(f.instance.donorInstanceIds) || (f.instance.donorInstanceIds.length && (f.purpose !== 'MIGRATION' || f.mode !== 'CREATE')))) reject();
   if ((f.instance.pools ?? []).length || (f.definition.activations ?? []).length) for (const key of ['resources','combat','hp']) scopes.add(key);
   target = f.instance.id;

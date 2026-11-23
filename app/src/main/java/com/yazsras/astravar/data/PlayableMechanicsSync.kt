@@ -166,7 +166,7 @@ internal object PlayableMechanicsSync {
                     "state" in op.fields -> GameplayRules.equip(c, item.id, ItemState.valueOf(op.fields.getValue("state").jsonPrimitive.content))
                     "attuned" in op.fields -> GameplayRules.attune(c, item.id, op.fields.getValue("attuned").jsonPrimitive.boolean)
                     "operating" in op.fields -> c.copy(items = c.items.map {
-                        if (it.id == item.id) it.copy(modesUntil=if (op.fields.getValue("operating").jsonPrimitive.boolean) it.modesUntil else emptyMap(), operating = op.fields.getValue("operating").jsonPrimitive.boolean, formId = it.formId.takeIf { op.fields.getValue("operating").jsonPrimitive.boolean }) else it
+                        if (it.id == item.id) it.copy(formKnown=it.formKnown || !op.fields.getValue("operating").jsonPrimitive.boolean, modesUntil=if (op.fields.getValue("operating").jsonPrimitive.boolean) it.modesUntil else emptyMap(), operating = op.fields.getValue("operating").jsonPrimitive.boolean, formId = it.formId.takeIf { op.fields.getValue("operating").jsonPrimitive.boolean }) else it
                     })
                     else -> error("Unsupported equipment state field.")
                 }

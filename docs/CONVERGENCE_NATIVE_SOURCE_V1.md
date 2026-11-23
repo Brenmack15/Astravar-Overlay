@@ -77,3 +77,10 @@ Effects conditional on ITEM_MODE use that instance's clock. Qualifying MagicalAt
 effects make native damage components magical while active. Documented compound modes
 may spend more than one pool in a single action. A reviewed migration may bind explicitly
 identified, unequipped, same-actor donor items into a composite without duplicating them.
+
+For a worn transformative item with no verified current form, use formKnown=false
+and omit formId in a historical review. Android publishes unknown movement until a
+form is confirmed. To reconcile an independently verified charge balance, send a
+reviewed MIGRATION edit naming the physical instance and its full pools. Omitting
+pools preserves every existing balance. Routine use and recovery follow their own
+resolved actions.

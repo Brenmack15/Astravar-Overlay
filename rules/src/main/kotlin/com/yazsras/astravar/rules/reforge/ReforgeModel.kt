@@ -99,6 +99,7 @@ internal fun classRulesId(label: String): String = when (label) {
     val containerId: String? = null, val donorInstanceIds: Set<String> = emptySet(),
     val favorite: Boolean = false,
     @EncodeDefault(EncodeDefault.Mode.NEVER) val formId: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val formKnown: Boolean = true,
     @EncodeDefault(EncodeDefault.Mode.NEVER) val pools: List<ResourcePool> = emptyList(),
     @EncodeDefault(EncodeDefault.Mode.NEVER) val modesUntil: Map<String,Long> = emptyMap()
 )

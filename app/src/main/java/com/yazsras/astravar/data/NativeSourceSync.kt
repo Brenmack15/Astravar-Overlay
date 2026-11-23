@@ -48,7 +48,7 @@ internal object NativeSourceSync {
         } else {
             val item = requireNotNull(r.instance)
             require(r.definition?.id == item.definitionId && r.profile == null && r.actorRevision > 0 && r.ownerId == null)
-            require(item.containerId == null && item.modesUntil.isEmpty() && (item.donorInstanceIds.isEmpty() || r.purpose == "MIGRATION" && r.mode == "CREATE") && (item.formId == null || r.purpose == "MIGRATION" && r.mode == "CREATE"))
+            require(item.containerId == null && item.modesUntil.isEmpty() && (item.donorInstanceIds.isEmpty() || r.purpose == "MIGRATION" && r.mode == "CREATE") && ((item.formId == null && item.formKnown) || r.purpose == "MIGRATION"))
         }
         return r
     }
@@ -142,13 +142,24 @@ internal object NativeSourceSync {
                     genesis.createItems(r.actorId,r.actorRevision,definition,listOf(instance),operationId).character
                 } else {
                     val existing = sheet.items.single { it.id == instance.id }
-                    require(instance.pools == existing.pools) { "Change current item charges only through resolved use, recovery or a reviewed balance reconciliation." }
+                    val supplied = op.fields.getValue("instance").jsonObject
+                    val changePools = "pools" in supplied && instance.pools != existing.pools
+                    require(!changePools || r.purpose == "MIGRATION") { "Changed charge balances require a reviewed migration and source evidence." }
+                    val changeForm = "formId" in supplied || "formKnown" in supplied
+                    require(!changeForm || r.purpose == "MIGRATION") { "Use a resolved form action during play." }
                     require(existing.definitionId == definition.id && existing.quantity == instance.quantity &&
                         sheet.items.count { it.definitionId == definition.id } == 1)
-                    var changed = sheet.copy(itemDefinitions = sheet.itemDefinitions.map { if (it.id == definition.id) definition else it })
+                    var changed = sheet.copy(itemDefinitions = sheet.itemDefinitions.map { if (it.id == definition.id) definition else it },
+                        items = sheet.items.map { if (it.id == instance.id && changePools) it.copy(pools=instance.pools) else it })
                     changed = GameplayRules.equip(changed, existing.id, instance.state)
                     changed = GameplayRules.attune(changed, existing.id, instance.attuned)
-                    changed.copy(items = changed.items.map { if (it.id == instance.id) it.copy(modesUntil=if(instance.operating) it.modesUntil else emptyMap(), operating = instance.operating, formId = it.formId.takeIf { instance.operating }) else it })
+                    changed.copy(items = changed.items.map { item ->
+                        if (item.id != instance.id) item else item.copy(
+                            operating=instance.operating, modesUntil=if(instance.operating) item.modesUntil else emptyMap(),
+                            pools=if(changePools) instance.pools else item.pools,
+                            formId=(if(changeForm) instance.formId else item.formId).takeIf { instance.operating },
+                            formKnown=!instance.operating || if(changeForm) instance.formKnown else item.formKnown)
+                    })
                 }
             } else {
                 val fields = requireNotNull(r.profile)

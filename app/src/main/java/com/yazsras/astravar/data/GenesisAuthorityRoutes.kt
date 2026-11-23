@@ -318,7 +318,7 @@ private suspend fun assignRetainedItem(db: CampaignLedgerDb, authority: GenesisI
         "Choose a container in the receiving actor's playable inventory."
     }
     val instance = retained.copy(state = if (command.state == "Stored") ItemState.STORED else ItemState.CARRIED,
-        attuned = false, formId = null, modesUntil = emptyMap(), containerId = command.containerItemId)
+        attuned = false, formId = null, formKnown = true, modesUntil = emptyMap(), containerId = command.containerItemId)
     val next = GameplayRules.preserveCapacities(receiver.character, receiver.character.copy(
         itemDefinitions = if (priorDefinition == null) receiver.character.itemDefinitions + definition else receiver.character.itemDefinitions,
         items = receiver.character.items + instance))

@@ -35,7 +35,7 @@ object InventoryRules {
         }) { "This item has sheet-specific attacks or charge resources. Review those dependencies before transfer." }
         val nextTo = to.copy(
             itemDefinitions = if (existing == null) to.itemDefinitions + definition else to.itemDefinitions,
-            items = to.items + item.copy(state = ItemState.CARRIED, attuned = false, formId = null, modesUntil = emptyMap(), containerId = null))
+            items = to.items + item.copy(state = ItemState.CARRIED, attuned = false, formId = null, formKnown = true, modesUntil = emptyMap(), containerId = null))
         return remove(from, itemId) to GameplayRules.preserveCapacities(to, nextTo)
     }
 

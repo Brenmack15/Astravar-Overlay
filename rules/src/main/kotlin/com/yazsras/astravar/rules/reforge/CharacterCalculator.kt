@@ -14,7 +14,9 @@ object CharacterCalculator {
         val selectedForm = character.items.firstNotNullOfOrNull { item ->
             if (item.formId == null) null else character.itemDefinitions.single { it.id == item.definitionId }.forms.single { it.id == item.formId }
         }
-        val baseMovement = selectedForm?.movement ?: (character.movement + ("walk" to character.speed))
+        val unresolvedForm = character.items.any { !it.formKnown && it.state == ItemState.WORN && it.operating }
+        val baseMovement = if (unresolvedForm) mapOf("walk" to null)
+            else selectedForm?.movement ?: (character.movement + ("walk" to character.speed))
         val effects = evaluateEffects(character, context)
         val active = effects.active
         val grantedModes = active.mapNotNull { (it.effect.payload as? EffectPayload.Number)?.takeIf { n ->
@@ -232,6 +234,13 @@ object CharacterCalculator {
                 require(activation.ends.all { it in modes })
                 activation.temporaryHp?.let { SecureDice.validate(it); require(it.flat >= 0 && it.dice.all { d -> d.sign == 1 }) }
             }
+        }
+        val uncertainForms = c.items.filter { !it.formKnown }
+        require(uncertainForms.size + c.items.count { it.formId != null } <= 1)
+        for (item in uncertainForms) {
+            val definition = c.itemDefinitions.single { it.id == item.definitionId }
+            require(item.formId == null && item.operating && item.state == ItemState.WORN &&
+                (!definition.requiresAttunement || item.attuned) && definition.forms.isNotEmpty())
         }
         val formItems = c.items.filter { it.formId != null }
         require(formItems.size <= 1)

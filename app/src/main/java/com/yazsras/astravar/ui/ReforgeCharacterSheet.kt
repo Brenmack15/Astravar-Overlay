@@ -460,8 +460,9 @@ private enum class SpellbookFilter(val label: String) {
                                         val definition = character.itemDefinitions.firstOrNull { it.id == item.definitionId }
                                         if (definition != null && definition.forms.isNotEmpty() && item.state == ItemState.WORN && item.operating &&
                                             (!definition.requiresAttunement || item.attuned)) {
+                                            if (!item.formKnown) Text("Current form unconfirmed")
                                             val choices = listOf(null to "Original form") + definition.forms.filter { it.wearerId == null || it.wearerId == character.id }.map { it.id to it.name }
-                                            for ((id, label) in choices) if (item.formId != id) PlayerOutlinedButton(onClick = {
+                                            for ((id, label) in choices) if (!item.formKnown || item.formId != id) PlayerOutlinedButton(onClick = {
                                                 try { proposedChange = "Change form to $label (Action)" to GameplayRules.changeWearableForm(character, item.id, id) }
                                                 catch (e: IllegalArgumentException) { error = e.message ?: "Form change is unavailable" }
                                             }, enabled = !busy) { Text(label) }
