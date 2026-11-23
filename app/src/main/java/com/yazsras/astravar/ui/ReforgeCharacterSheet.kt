@@ -460,11 +460,16 @@ private enum class SpellbookFilter(val label: String) {
                                         val definition = character.itemDefinitions.firstOrNull { it.id == item.definitionId }
                                         if (definition != null && definition.forms.isNotEmpty() && item.state == ItemState.WORN && item.operating &&
                                             (!definition.requiresAttunement || item.attuned)) {
-                                            val choices = listOf(null to "Original form") + definition.forms.map { it.id to it.name }
+                                            val choices = listOf(null to "Original form") + definition.forms.filter { it.wearerId == null || it.wearerId == character.id }.map { it.id to it.name }
                                             for ((id, label) in choices) if (item.formId != id) PlayerOutlinedButton(onClick = {
                                                 try { proposedChange = "Change form to $label (Action)" to GameplayRules.changeWearableForm(character, item.id, id) }
                                                 catch (e: IllegalArgumentException) { error = e.message ?: "Form change is unavailable" }
                                             }, enabled = !busy) { Text(label) }
+                                        }
+                                        if (definition != null && definition.activations.isNotEmpty() && item.operating &&
+                                            item.state in setOf(ItemState.WORN,ItemState.HELD) && (!definition.requiresAttunement || item.attuned)) {
+                                            NativeItemActions(character,item,definition,busy,
+                                                onReview={ title,next -> proposedChange=title to next }, onError={ error=it })
                                         }
                                         RebirthItemRow(item, definition, busy, onInspect = { dialog = "InspectItem:${item.id}" }, onEquip = {
                                             try {

@@ -29,8 +29,8 @@ export function validateCampaignAccess(v){exact(v,['readScopes','writeScopes']);
 const mechanicsReadScopes = ['character','inventory','companions'];
 const equipmentOperations = ['edit_equipment_bonus','edit_equipment_defense','set_equipment_state'];
 
-const nativeActions = ['resolve_native_hp','use_native_feature','change_wearable_form'];
-const nativeActionScope = {resolve_native_hp:'hp',use_native_feature:'resources',change_wearable_form:'inventory'};
+const nativeActions = ['activate_native_item','resolve_native_recharge','resolve_native_hp','use_native_feature','change_wearable_form'];
+const nativeActionScope = {activate_native_item:'resources',resolve_native_recharge:'resources',resolve_native_hp:'hp',use_native_feature:'resources',change_wearable_form:'inventory'};
 const playableActions = [...nativeActions,'cast_spell','prepare_spell','define_spell','complete_rest','resolve_encounter_attack'];
 
 function proposedPlayableAction(before, op) {
@@ -40,6 +40,10 @@ function proposedPlayableAction(before, op) {
   fail(409,'PLAYABLE_ACTOR_CONFLICT');
  if(op.type==='resolve_native_hp'){
   exact(f,['actorRole','kind','amount']);if(!['DAMAGE','HEAL'].includes(f.kind))fail(400,'INVALID_HP_OPERATION');integer(f.amount,1,1000000);
+ }else if(op.type==='activate_native_item'){
+  exact(f,['actorRole','itemId','activationId','rolledTemporaryHp']);id(f.itemId);id(f.activationId);if(f.rolledTemporaryHp!==null)integer(f.rolledTemporaryHp,0,1000000);
+ }else if(op.type==='resolve_native_recharge'){
+  exact(f,['actorRole','poolId','face']);id(f.poolId);integer(f.face,1,100);
  }else if(op.type==='use_native_feature'){
   exact(f,['actorRole','featureId']);id(f.featureId);
  }else if(op.type==='change_wearable_form'){
@@ -423,6 +427,7 @@ export class CampaignBridge{
  }else if(playableActions.includes(op.type)){
   if(b.operations.length!==1)fail(400,'SINGLE_PLAYABLE_ACTION_REQUIRED');
   scopes.push('character');
+  if(op.type==='activate_native_item')scopes.push('inventory','hp','combat');
   if(nativeActions.includes(op.type))scopes.push(nativeActionScope[op.type]);
   else if(op.type!=='prepare_spell')scopes.push('combat');
   if(op.type==='resolve_encounter_attack'){
@@ -496,6 +501,8 @@ export class CampaignBridge{
     break;
    }
    case 'resolve_native_hp':
+   case 'activate_native_item':
+   case 'resolve_native_recharge':
    case 'use_native_feature':
    case 'change_wearable_form':
    case 'define_spell': {

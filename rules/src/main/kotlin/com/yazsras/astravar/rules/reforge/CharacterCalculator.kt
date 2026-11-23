@@ -14,9 +14,13 @@ object CharacterCalculator {
         val selectedForm = character.items.firstNotNullOfOrNull { item ->
             if (item.formId == null) null else character.itemDefinitions.single { it.id == item.definitionId }.forms.single { it.id == item.formId }
         }
-        val movement = selectedForm?.movement ?: (character.movement + ("walk" to character.speed))
+        val baseMovement = selectedForm?.movement ?: (character.movement + ("walk" to character.speed))
         val effects = evaluateEffects(character, context)
         val active = effects.active
+        val grantedModes = active.mapNotNull { (it.effect.payload as? EffectPayload.Number)?.takeIf { n ->
+            n.target == NumericTarget.SPEED && n.operation == NumberOperation.SET && n.key in setOf("fly","swim","climb","burrow")
+        }?.key }.associateWith { null }
+        val movement = grantedModes + baseMovement
         val abilities = Stat.entries.associateWith { stat ->
             val permanent = character.baseAbilities[stat]?.plus(character.permanentAdvancements[stat] ?: 0)
             val cap = number(null, NumericTarget.ABILITY_CAP, stat.name, active, "Ability maximum")
@@ -154,6 +158,7 @@ object CharacterCalculator {
             ConditionKind.ATTUNED -> item?.attuned==true
             ConditionKind.WORN -> item?.state == ItemState.WORN
             ConditionKind.HELD -> item?.state==ItemState.HELD
+            ConditionKind.ITEM_MODE -> (item?.modesUntil?.get(condition.key) ?: 0L) > c.gameSeconds
             ConditionKind.STANCE -> condition.key in c.activeStances
             ConditionKind.CREATURE_TYPE -> condition.key.equals(context.targetCreatureType,true)
             ConditionKind.DAMAGE_TYPE -> condition.key.equals(context.damageType?.name,true)
@@ -205,12 +210,35 @@ object CharacterCalculator {
         require(c.items.size<=10_000 && c.itemDefinitions.size<=10_000 && c.resources.size<=10_000 && c.attacks.size<=10_000 && c.spells.size<=10_000) { "Character record exceeds the supported collection size." }
         require(c.resources.map { it.id }.distinct().size==c.resources.size && c.attacks.map { it.id }.distinct().size==c.attacks.size && c.spells.map { it.id }.distinct().size==c.spells.size)
         require(c.items.all { it.id.isNotBlank() && it.quantity in 0..1_000_000 && it.id !in it.donorInstanceIds })
+        val actionDefinitions = c.itemDefinitions.filter { it.activations.isNotEmpty() }.associateBy { it.id }
+        c.items.forEach { item ->
+            val definition = actionDefinitions[item.definitionId]
+            if (definition == null) {
+                require(item.pools.isEmpty() && item.modesUntil.isEmpty())
+                return@forEach
+            }
+            val poolIds = item.pools.map { it.id }
+            require(poolIds.size <= 64 && poolIds.distinct().size == poolIds.size)
+            require(item.pools.all { pool -> pool.id.isNotBlank() && pool.maximum != null && pool.maximum in 0..1_000_000 &&
+                (pool.current == null || pool.current in 0..pool.maximum) && pool.rechargeRoll == null && pool.dieSides == null &&
+                (pool.recoveryAmount == null || pool.recoveryAmount in 0..1_000_000) })
+            require(definition.activations.size <= 64 && definition.activations.distinctBy { it.id }.size == definition.activations.size)
+            val modes = definition.activations.flatMap { it.durations.keys }.toSet()
+            require(item.modesUntil.keys.all { it in modes } && item.modesUntil.values.all { it >= 0 })
+            for (activation in definition.activations) {
+                require(activation.id.isNotBlank() && activation.name.isNotBlank() && activation.actionType in setOf("Action","Bonus Action","Reaction","Free"))
+                require(activation.costs.all { (id,n) -> id in poolIds && n in 1..1_000_000 })
+                require(activation.durations.size <= 32 && activation.durations.all { (id,seconds) -> id.isNotBlank() && seconds in 1..31_536_000 })
+                require(activation.ends.all { it in modes })
+                activation.temporaryHp?.let { SecureDice.validate(it); require(it.flat >= 0 && it.dice.all { d -> d.sign == 1 }) }
+            }
+        }
         val formItems = c.items.filter { it.formId != null }
         require(formItems.size <= 1)
         formItems.forEach { item ->
             val definition = c.itemDefinitions.single { it.id == item.definitionId }
             require(item.operating && item.state == ItemState.WORN && (!definition.requiresAttunement || item.attuned))
-            require(definition.forms.any { it.id == item.formId })
+            require(definition.forms.any { it.id == item.formId && (it.wearerId == null || it.wearerId == c.id) })
         }
         c.itemDefinitions.forEach { definition ->
             require(definition.forms.size <= 12 && definition.forms.distinctBy { it.id }.size == definition.forms.size)
@@ -220,6 +248,7 @@ object CharacterCalculator {
         }
         require(c.itemDefinitions.all { it.id.isNotBlank() && it.attunementCost in 0..100 && it.minimumLevel in 1..20 })
         require(c.resources.all { (it.maximum==null || it.maximum in 0..1_000_000) && (it.current==null || it.current in 0..1_000_000) && (it.recoveryAmount==null || it.recoveryAmount in 0..1_000_000) && (it.dieSides==null || it.dieSides in 2..1000) })
+        require(c.resources.all { pool -> pool.rechargeRoll?.let { it.sides in 2..100 && it.minimum in 1..it.sides && pool.maximum == 1 && pool.recharge == Recharge.NONE } != false })
         require(c.spells.all { it.level in 0..9 && it.resourceCost>=0 })
         require(c.attacks.all { it.fixedAttackBonus==null || it.fixedAttackBonus in -1000..1000 })
         c.attacks.forEach { attack -> attack.recordedSource?.let { source ->

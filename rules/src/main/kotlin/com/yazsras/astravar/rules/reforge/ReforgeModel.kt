@@ -26,10 +26,13 @@ internal fun classRulesId(label: String): String = when (label) {
 @Serializable data class ReviewedProficiency(val bonus: Int, val source: RuleSource)
 @Serializable enum class ItemState { STORED, CARRIED, WORN, HELD }
 @Serializable enum class Recharge { NONE, SHORT_REST, LONG_REST, DAWN }
+@Serializable data class RechargeRoll(val sides: Int, val minimum: Int)
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class ResourcePool(
     val id: String, val name: String, val maximum: Int?, val current: Int?,
     val recharge: Recharge = Recharge.NONE, val recoveryAmount: Int? = null,
-    val restoreUnknownOnRest: Boolean = false, val dieSides: Int? = null
+    val restoreUnknownOnRest: Boolean = false, val dieSides: Int? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val rechargeRoll: RechargeRoll? = null
 )
 @Serializable data class SkillTraining(val ability: Stat, val proficient: Boolean = false, val expertise: Boolean = false, val halfProficiency: Boolean = false)
 /** An independent identity prevents a user skill with an official name from replacing it. */
@@ -45,7 +48,7 @@ internal fun classRulesId(label: String): String = when (label) {
 @Serializable enum class DefenseKind { RESISTANCE, IMMUNITY, VULNERABILITY }
 @Serializable enum class RollEdge { ADVANTAGE, DISADVANTAGE }
 @Serializable enum class RollKind { ABILITY_CHECK, SAVE, SKILL, INITIATIVE, ATTACK, SPELL_ATTACK, CUSTOM }
-@Serializable enum class ConditionKind { EQUIPPED, ATTUNED, HELD, STANCE, CREATURE_TYPE, DAMAGE_TYPE, SUCCESSFUL_HIT, CHARGE_AVAILABLE, ONCE_PER_TURN, CONTEXT_TAG, WORN }
+@Serializable enum class ConditionKind { EQUIPPED, ATTUNED, HELD, STANCE, CREATURE_TYPE, DAMAGE_TYPE, SUCCESSFUL_HIT, CHARGE_AVAILABLE, ONCE_PER_TURN, CONTEXT_TAG, WORN, ITEM_MODE }
 /** Conditions are data, never executable expressions. Unknown context fails closed. */
 @Serializable data class EffectCondition(val kind: ConditionKind, val key: String = "", val minimum: Int = 1)
 @Serializable data class DiceTerm(val count: Int, val sides: Int, val sign: Int = 1)
@@ -59,6 +62,7 @@ internal fun classRulesId(label: String): String = when (label) {
     @Serializable data class Number(val target: NumericTarget, val operation: NumberOperation, val amount: Int, val key: String = "") : EffectPayload()
     @Serializable data class Proficiency(val skill: String? = null, val save: Stat? = null, val expertise: Boolean = false) : EffectPayload()
     @Serializable data class DamageBonus(val component: DamageComponent, val qualifier: AttackQualifier = AttackQualifier()) : EffectPayload()
+    @Serializable data class MagicalAttack(val qualifier: AttackQualifier = AttackQualifier()) : EffectPayload()
     @Serializable data class DamageConversion(val from: DamageKind, val to: DamageKind, val qualifier: AttackQualifier = AttackQualifier()) : EffectPayload()
     @Serializable data class Defense(@SerialName("damageType") val type: DamageKind, val kind: DefenseKind, val nonmagicalOnly: Boolean = false) : EffectPayload()
     @Serializable data class ConditionImmunity(val condition: String) : EffectPayload()
@@ -72,7 +76,12 @@ internal fun classRulesId(label: String): String = when (label) {
     val expiresOn: Recharge = Recharge.NONE, val chargeResourceId: String? = null,
     val chargeCost: Int = 0
 )
-@Serializable data class WearableForm(val id: String, val name: String, val movement: Map<String, Int?>)
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable data class WearableForm(val id: String, val name: String, val movement: Map<String, Int?>,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val wearerId: String? = null)
+@Serializable data class ItemActivation(val id: String, val name: String, val actionType: String,
+    val costs: Map<String,Int> = emptyMap(), val durations: Map<String,Int> = emptyMap(),
+    val ends: Set<String> = emptySet(), val temporaryHp: DiceFormula? = null)
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable data class ItemDefinition(
     val id: String, val name: String, val effects: List<EffectDefinition> = emptyList(),
@@ -80,7 +89,8 @@ internal fun classRulesId(label: String): String = when (label) {
     val equipmentSlot: String? = null, val minimumLevel: Int = 1,
     val minimumAbilities: Map<Stat, Int> = emptyMap(), val weight: Double? = null,
     val description: String = "",
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val forms: List<WearableForm> = emptyList()
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val forms: List<WearableForm> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val activations: List<ItemActivation> = emptyList()
 )
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable data class ItemInstance(
@@ -88,7 +98,9 @@ internal fun classRulesId(label: String): String = when (label) {
     val attuned: Boolean = false, val quantity: Int = 1, val operating: Boolean = true,
     val containerId: String? = null, val donorInstanceIds: Set<String> = emptySet(),
     val favorite: Boolean = false,
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val formId: String? = null
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val formId: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val pools: List<ResourcePool> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val modesUntil: Map<String,Long> = emptyMap()
 )
 /** Original descriptive evidence remains immutable when a reviewed attack is later edited. */
 @Serializable data class RecordedAttackSource(

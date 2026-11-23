@@ -21,7 +21,7 @@ Reforge and writes the reference in the same Room transaction.
 | evidence | namespace, externalId, HTTPS url and reviewed revision |
 | anchorId, anchorRevision | Existing playable actor and revision as of the beginning of the transaction |
 | actorId, actorRole, actorRevision | Target identity, PLAYER or COMPANION and expected playable revision at this step. Zero is valid only for actor creation. |
-| profile, ownerId | For actors, explicitly reviewed fields of ReforgeCharacter. A new companion requires its owner's same-campaign actor ID. |
+| profile, ownerId | For actors, explicitly reviewed fields of ReforgeCharacter. A creation can specify attacksPerAction without changing spent actions. A new companion requires its owner's same-campaign actor ID. |
 | definition, instance | For items, ItemDefinition and ItemInstance. The instance references the definition and belongs to the target actor. |
 
 Use one operation per source object. Operations execute in order, so the creation of
@@ -49,6 +49,8 @@ requires local review. Adding attacks or defenses can require combat write scope
 - Use `use_native_feature` with an actor role and featureId. A feature bound to a
   pool spends one available use and applies its specified action cost. Several
   features can refer to one pool. Unknown availability fails closed.
+- A reviewed historical worn item may supply its currently observed formId. This preserves an existing form without spending an action.
+- Use `resolve_native_recharge` with poolId and the reported die face for an expended shared pool with a configured rechargeRoll. Android checks the die, threshold, and tracked turn. A missed roll also consumes the check for that turn.
 - Use `resolve_native_hp` with actor role, kind DAMAGE or HEAL and a positive
   resolved amount. Android applies damage or healing with its rules for temporary
   HP, damage and maximum HP.
@@ -62,3 +64,16 @@ definition, equipment state, calculated statistics, affected wallets and project
 records. A source-reference receipt identifies the operation. Its presence alone
 does not establish that a particular bonus is active. A queued command remains
 pending until Android reports its decision. Retries use the original command ID.
+
+## Item uses and timed effects
+
+A reviewed item may carry named activations, instance-owned resource pools and conditional effects.
+An activation declares its action cost, quantities consumed, mode durations in game seconds,
+modes ended and optional temporary-HP dice. The AI sends the resolved activation ID,
+item ID, actor role and actual temporary-HP result (null if absent) to `activate_native_item`.
+Android rejects unknown or insufficient charges, invalid rolls, unavailable actions and
+inactive equipment. Local play exposes the same activations on the equipment sheet.
+Effects conditional on ITEM_MODE use that instance's clock. Qualifying MagicalAttack
+effects make native damage components magical while active. Documented compound modes
+may spend more than one pool in a single action. A reviewed migration may bind explicitly
+identified, unequipped, same-actor donor items into a composite without duplicating them.

@@ -308,7 +308,8 @@ private suspend fun assignRetainedItem(db: CampaignLedgerDb, authority: GenesisI
     }
     require(definition.effects.all { effect -> effect.chargeResourceId == null && when (val payload = effect.payload) {
         is EffectPayload.DamageBonus -> payload.qualifier.attackIds.isEmpty()
-        is EffectPayload.DamageConversion -> payload.qualifier.attackIds.isEmpty()
+        is EffectPayload.MagicalAttack -> payload.qualifier.attackIds.isEmpty()
+                is EffectPayload.DamageConversion -> payload.qualifier.attackIds.isEmpty()
         else -> true
     } }) { "This item has actor-specific attacks or charge resources. Review those mechanical dependencies before reassignment." }
     val priorDefinition = receiver.character.itemDefinitions.singleOrNull { it.id == definition.id }
@@ -317,7 +318,7 @@ private suspend fun assignRetainedItem(db: CampaignLedgerDb, authority: GenesisI
         "Choose a container in the receiving actor's playable inventory."
     }
     val instance = retained.copy(state = if (command.state == "Stored") ItemState.STORED else ItemState.CARRIED,
-        attuned = false, containerId = command.containerItemId)
+        attuned = false, formId = null, modesUntil = emptyMap(), containerId = command.containerItemId)
     val next = GameplayRules.preserveCapacities(receiver.character, receiver.character.copy(
         itemDefinitions = if (priorDefinition == null) receiver.character.itemDefinitions + definition else receiver.character.itemDefinitions,
         items = receiver.character.items + instance))

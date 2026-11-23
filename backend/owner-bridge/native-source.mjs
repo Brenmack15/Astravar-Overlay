@@ -18,7 +18,7 @@ export function nativeSourcePlan(op, campaign, prior) {
  const item = op.type === 'define_native_item';
  if (!nativeSourceTypes.includes(op.type) || op.kind !== 'reference') reject();
  shape(f,['version','mode','purpose','evidence','anchorId','anchorRevision','actorId','actorRole','actorRevision'],
-       item ? ['definition','instance'] : ['profile','ownerId']);
+       item ? ['definition','instance'] : ['profile','ownerId','attacksPerAction']);
  if (f.version !== 1 || !['GAMEPLAY','MIGRATION'].includes(f.purpose) || !['CREATE','EDIT'].includes(f.mode) ||
      !['PLAYER','COMPANION'].includes(f.actorRole)) reject();
  identifier(f.anchorId); identifier(f.actorId); identifier(op.recordId);
@@ -34,11 +34,14 @@ export function nativeSourcePlan(op, campaign, prior) {
  let target = f.actorId;
  let manual = f.purpose === 'MIGRATION' || f.mode === 'EDIT' || !item;
  if (item) {
-  shape(f.definition,['id','name'],['effects','requiresAttunement','attunementCost','equipmentSlot','minimumLevel','minimumAbilities','weight','description','forms']);
-  shape(f.instance,['id','definitionId'],['state','attuned','quantity','operating','favorite']);
+  shape(f.definition,['id','name'],['effects','requiresAttunement','attunementCost','equipmentSlot','minimumLevel','minimumAbilities','weight','description','forms','activations']);
+  shape(f.instance,['id','definitionId'],['state','attuned','quantity','operating','favorite','formId','pools','donorInstanceIds']);
   identifier(f.definition.id); identifier(f.instance.id);
   if (f.instance.definitionId !== f.definition.id || !f.definition.name?.trim() ||
       !['STORED','CARRIED','WORN','HELD'].includes(f.instance.state ?? 'CARRIED')) reject();
+  if (f.instance.formId != null && (f.mode !== 'CREATE' || f.purpose !== 'MIGRATION')) reject();
+  if (f.instance.donorInstanceIds != null && (!Array.isArray(f.instance.donorInstanceIds) || (f.instance.donorInstanceIds.length && (f.purpose !== 'MIGRATION' || f.mode !== 'CREATE')))) reject();
+  if ((f.instance.pools ?? []).length || (f.definition.activations ?? []).length) for (const key of ['resources','combat','hp']) scopes.add(key);
   target = f.instance.id;
   manual ||= (f.instance.state ?? 'CARRIED') !== 'CARRIED' || f.instance.attuned === true;
   scopes.add('inventory');
@@ -65,7 +68,7 @@ export function nativeSourcePlan(op, campaign, prior) {
      break;
     }
     case 'Proficiency': break;
-    case 'Defense': case 'DamageBonus': case 'DamageConversion': case 'ConditionImmunity': case 'Edge': scopes.add('combat'); break;
+    case 'Defense': case 'DamageBonus': case 'DamageConversion': case 'MagicalAttack': case 'ConditionImmunity': case 'Edge': scopes.add('combat'); break;
     default: reject();
    }
    if (effect.chargeResourceId != null) scopes.add('resources');
@@ -77,6 +80,7 @@ export function nativeSourcePlan(op, campaign, prior) {
       ((f.actorRole === 'COMPANION') !== (f.ownerId != null)))) reject();
   if (f.mode === 'EDIT' && f.ownerId != null) reject();
   if (f.ownerId != null) identifier(f.ownerId);
+  if(f.attacksPerAction != null){ if(f.mode !== 'CREATE' || !Number.isInteger(f.attacksPerAction) || f.attacksPerAction < 1 || f.attacksPerAction > 100) reject(); scopes.add('combat'); }
   const has = names => names.some(k => Object.hasOwn(p,k));
   if (has(['baseMaxHp','currentHp','temporaryHp','baselineConstitutionModifier','baseAbilities','level','conditions','effects'])) scopes.add('hp');
   if (has(['resources','spellSlots','slotMaximaOverride','spells','level','effects','features','spellcastingClassLevel'])) scopes.add('resources');

@@ -36,7 +36,7 @@ class NativeSourceSyncTest {
                 put("resources",reforgeJson.encodeToJsonElement(listOf(ResourcePool("blink","Blink",3,null))))
             }
             val create = NativeSourceSync.Request(1,"MIGRATION","CREATE",origin,owner.actor.actorId,
-                requireNotNull(owner.playable).revision,"owl",GenesisActorRole.COMPANION,0,owner.actor.actorId,profile)
+                requireNotNull(owner.playable).revision,"owl",GenesisActorRole.COMPANION,0,owner.actor.actorId,profile=profile)
             fun op(type:String,id:String,request:NativeSourceSync.Request) =
                 CampaignSyncOperation(type,id,"reference",0,campaignJson.encodeToJsonElement(request).jsonObject)
             val actor = op(NativeSourceSync.ACTOR,"owl-reference",create)
@@ -74,9 +74,33 @@ class NativeSourceSyncTest {
                 val hybrid=GameplayRules.changeWearableForm(sheet.copy(turn=TurnEconomy(tracking=true)),"garment-1","hybrid")
                 assertEquals(40,CharacterCalculator.calculate(hybrid).movement["fly"])
                 assertFalse(hybrid.turn.actionAvailable)
+                assertTrue(runCatching { GameplayRules.changeWearableForm(sheet.copy(turn=TurnEconomy(tracking=true,attacksPerAction=2,attacksUsed=1)),"garment-1","hybrid") }.isFailure)
+                val shared=sheet.copy(turn=TurnEconomy(tracking=true),resources=listOf(ResourcePool("breath","Breath",1,0,rechargeRoll=RechargeRoll(6,5))))
+                val missed=GameplayRules.resolveRecharge(shared,"breath",4)
+                assertEquals(0,missed.resources.single().current)
+                assertTrue(runCatching { GameplayRules.resolveRecharge(missed,"breath",6) }.isFailure)
+                assertEquals(1,GameplayRules.resolveRecharge(GameplayRules.nextTurn(missed),"breath",5).resources.single().current)
                 assertNull(GameplayRules.equip(hybrid,"garment-1",ItemState.CARRIED).items.single().formId)
             }
         } finally { db.close();restored.close();context.deleteDatabase(filename) }
+    }
+
+    @Test fun itemModesConsumeOnlyTheirOwnChargesAndExpireOnTheCampaignClock() {
+        val source=RuleSource("fixture","Fixture",Acceptance.ACCEPTED_HOMEBREW)
+        val defense=EffectDefinition("warding","Protection",source,EffectPayload.Defense(DamageKind.COLD,DefenseKind.IMMUNITY),
+            listOf(EffectCondition(ConditionKind.ITEM_MODE,"ward")))
+        val ability=ItemActivation("guard","Guard","Action",mapOf("use" to 1),mapOf("ward" to 60),
+            temporaryHp=DiceFormula(listOf(DiceTerm(3,6))))
+        val garment=ItemDefinition("suit","Suit",listOf(defense),true,activations=listOf(ability))
+        val item=ItemInstance("suit-1","suit",ItemState.WORN,true,pools=listOf(ResourcePool("use","Guard",1,1,Recharge.LONG_REST)))
+        val initial=ReforgeCharacter("synthetic","Traveler",temporaryHp=9,itemDefinitions=listOf(garment),items=listOf(item),turn=TurnEconomy(tracking=true))
+        assertTrue(runCatching { GameplayRules.activateItem(initial,item.id,ability.id,19) }.isFailure)
+        val active=GameplayRules.activateItem(initial,item.id,ability.id,7)
+        assertEquals(9,active.temporaryHp);assertEquals(0,active.items.single().pools.single().current)
+        assertFalse(active.turn.actionAvailable);assertTrue(CharacterCalculator.calculate(active).defenses.isNotEmpty())
+        assertTrue(CharacterCalculator.calculate(active.copy(gameSeconds=60)).defenses.isEmpty())
+        assertTrue(GameplayRules.equip(active,item.id,ItemState.CARRIED).items.single().modesUntil.isEmpty())
+        assertEquals(1,GameplayRules.rest(active,Recharge.LONG_REST,true,28800).items.single().pools.single().current)
     }
 
     @Test fun rehearsesSuppliedPrivateCommandsOnlyOnDisposableRestore() = runBlocking {

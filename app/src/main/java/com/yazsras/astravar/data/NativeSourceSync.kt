@@ -20,7 +20,7 @@ internal object NativeSourceSync {
         val version: Int, val purpose: String, val mode: String, val evidence: Evidence,
         val anchorId: String, val anchorRevision: Long, val actorId: String, val actorRole: GenesisActorRole,
         val actorRevision: Long, val ownerId: String? = null,
-        val profile: JsonObject? = null, val definition: ItemDefinition? = null, val instance: ItemInstance? = null
+        val attacksPerAction: Int? = null, val profile: JsonObject? = null, val definition: ItemDefinition? = null, val instance: ItemInstance? = null
     )
 
     private val profileKeys = setOf("name", "species", "className", "subclass", "rules", "level", "baseAbilities",
@@ -39,6 +39,7 @@ internal object NativeSourceSync {
         require(r.evidence.externalId.isNotBlank() && r.evidence.externalId.length <= 180)
         require(r.evidence.revision.isNotBlank() && r.evidence.revision.length <= 90)
         require(r.evidence.url.startsWith("https://") && r.evidence.url.length <= 2000)
+        require(r.attacksPerAction == null || op.type == ACTOR && r.mode == "CREATE" && r.attacksPerAction in 1..100)
         if (op.type == ACTOR) {
             val profile = requireNotNull(r.profile)
             require(profile.isNotEmpty() && profile.keys.all(profileKeys::contains) && r.definition == null && r.instance == null)
@@ -47,7 +48,7 @@ internal object NativeSourceSync {
         } else {
             val item = requireNotNull(r.instance)
             require(r.definition?.id == item.definitionId && r.profile == null && r.actorRevision > 0 && r.ownerId == null)
-            require(item.containerId == null && item.donorInstanceIds.isEmpty() && item.formId == null)
+            require(item.containerId == null && item.modesUntil.isEmpty() && (item.donorInstanceIds.isEmpty() || r.purpose == "MIGRATION" && r.mode == "CREATE") && (item.formId == null || r.purpose == "MIGRATION" && r.mode == "CREATE"))
         }
         return r
     }
@@ -65,6 +66,7 @@ internal object NativeSourceSync {
             if (r.actorRole == GenesisActorRole.COMPANION) add("companions")
             if (op.type == ITEM) {
                 add("inventory")
+                if (r.instance?.pools?.isNotEmpty() == true || r.definition?.activations?.isNotEmpty() == true) addAll(setOf("resources","combat","hp"))
                 if (r.mode == "EDIT") addAll(setOf("hp","resources","combat"))
                 for (e in requireNotNull(r.definition).effects) {
                     require(e.source.acceptance in setOf(Acceptance.OFFICIAL,Acceptance.ACCEPTED_HOMEBREW))
@@ -85,7 +87,7 @@ internal object NativeSourceSync {
                 val keys = requireNotNull(r.profile).keys
                 if (keys.any { it in setOf("baseMaxHp","currentHp","temporaryHp","baselineConstitutionModifier","baseAbilities","level","conditions","effects") }) add("hp")
                 if (keys.any { it in setOf("resources","spellSlots","slotMaximaOverride","spells","level","effects","features","spellcastingClassLevel") }) add("resources")
-                if (keys.any { it in setOf("attacks","effects") }) add("combat")
+                if (r.attacksPerAction != null || keys.any { it in setOf("attacks","effects") }) add("combat")
             }
         }
     }
@@ -122,7 +124,8 @@ internal object NativeSourceSync {
             r.ownerId?.let { require(authority.actor(it)?.campaignId == campaign) }
             require((r.actorRole == GenesisActorRole.COMPANION) == (r.ownerId != null))
             val fields = requireNotNull(r.profile)
-            val sheet = reforgeJson.decodeFromJsonElement<ReforgeCharacter>(JsonObject(fields + ("id" to JsonPrimitive(r.actorId))))
+            val configured = reforgeJson.decodeFromJsonElement<ReforgeCharacter>(JsonObject(fields + ("id" to JsonPrimitive(r.actorId))))
+            val sheet = r.attacksPerAction?.let { configured.copy(turn = configured.turn.copy(attacksPerAction = it)) } ?: configured
             genesis.createActor(sheet.name, r.actorRole, campaign, r.ownerId, sheet, operationId)
         } else {
             require(association != null && association.campaignId == campaign && association.playable && association.role == r.actorRole)
@@ -134,15 +137,18 @@ internal object NativeSourceSync {
                 val instance = requireNotNull(r.instance)
                 if (r.mode == "CREATE") {
                     require(prior == null)
+                    require(instance.donorInstanceIds.all { donor -> sheet.items.any { it.id == donor && !it.attuned && it.state in setOf(ItemState.STORED,ItemState.CARRIED) } &&
+                        sheet.items.none { donor in it.donorInstanceIds } }) { "Review and release each physical donor before integration." }
                     genesis.createItems(r.actorId,r.actorRevision,definition,listOf(instance),operationId).character
                 } else {
                     val existing = sheet.items.single { it.id == instance.id }
+                    require(instance.pools == existing.pools) { "Change current item charges only through resolved use, recovery or a reviewed balance reconciliation." }
                     require(existing.definitionId == definition.id && existing.quantity == instance.quantity &&
                         sheet.items.count { it.definitionId == definition.id } == 1)
                     var changed = sheet.copy(itemDefinitions = sheet.itemDefinitions.map { if (it.id == definition.id) definition else it })
                     changed = GameplayRules.equip(changed, existing.id, instance.state)
                     changed = GameplayRules.attune(changed, existing.id, instance.attuned)
-                    changed.copy(items = changed.items.map { if (it.id == instance.id) it.copy(operating = instance.operating, formId = it.formId.takeIf { instance.operating }) else it })
+                    changed.copy(items = changed.items.map { if (it.id == instance.id) it.copy(modesUntil=if(instance.operating) it.modesUntil else emptyMap(), operating = instance.operating, formId = it.formId.takeIf { instance.operating }) else it })
                 }
             } else {
                 val fields = requireNotNull(r.profile)
@@ -157,7 +163,8 @@ internal object NativeSourceSync {
                 val wanted = if (keepHp) hp else next.currentHp
                 val cap = CharacterCalculator.calculate(next).maximumHp.value
                 require(wanted == null || cap == null || wanted <= cap) { "Current HP exceeds reviewed capacity." }
-                next.copy(currentHp = wanted, hpDamage = if (wanted != null && cap != null) cap - wanted else null)
+                if (keepHp && CharacterCalculator.calculate(next).currentHp == wanted) next
+                else next.copy(currentHp = wanted, hpDamage = if (wanted != null && cap != null) cap - wanted else null)
             } else next
             if (corrected != baseline) playable.save(r.actorId,baseline.revision,corrected,"Reviewed native source: " + r.evidence.revision,genesisChild(child,"sheet"))
         }

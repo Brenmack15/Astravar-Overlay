@@ -1,5 +1,6 @@
 package com.yazsras.astravar.data
 
+import com.yazsras.astravar.rules.reforge.*
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -49,6 +50,35 @@ class CampaignSyncNativeTest {
     @After fun deleteOnlyFixtureDatabase() { if (::db.isInitialized) db.close(); if (::context.isInitialized) context.deleteDatabase(databaseName) }
     private suspend fun apply(id: String,vararg operations: CampaignSyncOperation) = domain.apply(campaign,id,source,operations.toList())
     private suspend fun rejects(action: suspend () -> Unit) { var failed = false; try { action() } catch (_: Exception) { failed = true }; assertTrue("Invalid operation must fail",failed) }
+
+    @Test fun reviewedWearableCommitsToPlayableCompanionAndSurvivesReopen() = runBlocking {
+        val authority = GenesisAuthorityRepository(db)
+        val scope = authority.createCampaign("Fixture atelier",commandId="atelier").id
+        val owner = authority.createActor("Traveler",GenesisActorRole.PLAYER,scope,
+            playable=ReforgeCharacter("traveler","Traveler"),commandId="traveler-create")
+        val anchor = requireNotNull(owner.playable).revision
+        val sourceRef = NativeSourceSync.Evidence("fixture","owl","https://example.invalid/owl","1")
+        val create = NativeSourceSync.Request(1,"MIGRATION","CREATE",sourceRef,"traveler",anchor,"owl",
+            GenesisActorRole.COMPANION,0,ownerId="traveler",profile=buildJsonObject {
+                put("name","Owl");put("level",4);put("baseAc",13);put("currentHp",7);put("baseMaxHp",18)
+                put("rules",campaignJson.encodeToJsonElement(RuleVersion(classVersion="independent creature")))
+            })
+        fun op(type:String,ref:String,request:NativeSourceSync.Request)=CampaignSyncOperation(type,ref,"reference",0,
+            campaignJson.encodeToJsonElement(request).jsonObject)
+        val definition = ItemDefinition("ward","Ward",requiresAttunement=true,effects=listOf(
+            EffectDefinition("protection","Armor protection",RuleSource("fixture","Fixture",Acceptance.ACCEPTED_HOMEBREW),
+                EffectPayload.Number(NumericTarget.ARMOR_CLASS,NumberOperation.ADD,1))))
+        val item = create.copy(evidence=sourceRef.copy(externalId="ward"),ownerId=null,profile=null,actorRevision=1,
+            definition=definition,instance=ItemInstance("ward-instance",definition.id,ItemState.WORN,true))
+        val commands = listOf(op(NativeSourceSync.ACTOR,"owl-origin",create),op(NativeSourceSync.ITEM,"ward-origin",item))
+        val receipt = domain.apply(scope,"native-reviewed",source,commands)
+        assertEquals(receipt,domain.apply(scope,"native-reviewed",source,commands))
+        db.close();reopen()
+        val stats = CharacterCalculator.calculate(requireNotNull(ReforgeRepository(db).get("owl")).character)
+        assertEquals(14,stats.armorClass.value);assertEquals(7,stats.currentHp)
+        assertEquals("owl",db.partyDao().placement("ward-instance")?.holderProfileId)
+        assertEquals(receipt,db.recordsDao().receipt(receipt.commandId))
+    }
 
     @Test fun nativeCommittedHpSlotAndCheckpointSurviveDatabaseReopen() = runBlocking {
         val hp = CampaignSyncOperation("adjust_hp",player,"character-profile",1,fields("delta" to JsonPrimitive(-3)))
