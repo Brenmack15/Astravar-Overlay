@@ -7,6 +7,7 @@ import java.util.Locale
 
 /** A private, user-selected document. It is never built into Astravar or sent to a server. */
 const val NOTION_CHARACTER_TRANSFER_FORMAT = "astravar-notion-character-transfer-v1"
+const val NOTION_CONDITIONAL_ITEM_FORMAT = "astravar-notion-character-transfer-v2"
 
 @Serializable data class NotionCharacterFacts(
     val name: String, val ownerLabel: String, val sourceUrl: String,
@@ -19,6 +20,23 @@ const val NOTION_CHARACTER_TRANSFER_FORMAT = "astravar-notion-character-transfer
     val targetProfileId: String? = null
 )
 
+/** A reviewed additive bonus on an existing physical item. The rule identity controls stacking across copies. */
+@Serializable data class NotionConditionalItemBonus(
+    val ruleKey: String, val label: String, val referenceUrl: String, val acceptance: Acceptance,
+    val target: NumericTarget, val amount: Int, val condition: ConditionKind, val save: Stat? = null
+) {
+    fun nativeEffect(item: NotionInventoryFact): EffectDefinition {
+        val targetKey = save?.name.orEmpty()
+        val identity = "$ruleKey-${target.name}-$targetKey"
+        return EffectDefinition(id = "notion-bonus-${notionSourceKey(item.sourceId)}-$identity", name = label,
+            source = RuleSource(referenceUrl, label, acceptance),
+            payload = EffectPayload.Number(target, NumberOperation.ADD, amount, targetKey),
+            conditions = listOf(EffectCondition(condition)), requiresAttunement = item.requiresAttunement,
+            stackingKey = "item-rule:$identity")
+    }
+}
+
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class NotionInventoryFact(
     val sourceId: String, val sourceUrl: String, val name: String,
     val category: String, val holder: String, val state: String,
@@ -26,7 +44,8 @@ const val NOTION_CHARACTER_TRANSFER_FORMAT = "astravar-notion-character-transfer
     val knownProperties: String = "", val rulesLimits: String = "",
     /** Only explicitly reviewed, accepted numeric mechanics go here. */
     val acceptedNumericEffects: Map<String, Int> = emptyMap(),
-    val requiresAttunement: Boolean = false, val confirmedAttuned: Boolean = false
+    val requiresAttunement: Boolean = false, val confirmedAttuned: Boolean = false,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val reviewedBonuses: List<NotionConditionalItemBonus> = emptyList()
 )
 
 @Serializable data class NotionCurrencyFact(
@@ -83,7 +102,7 @@ private fun notionActiveItem(fact: NotionInventoryFact, ownerLabel: String): Boo
 
 /** Validate the entire file even when only one of its categories will be applied. */
 fun validateNotionCharacterTransfer(value: NotionCharacterTransfer) {
-    require(value.format == NOTION_CHARACTER_TRANSFER_FORMAT && value.transferId.matches(Regex("[a-zA-Z0-9:_-]{8,120}"))) {
+    require(value.format in setOf(NOTION_CHARACTER_TRANSFER_FORMAT, NOTION_CONDITIONAL_ITEM_FORMAT) && value.transferId.matches(Regex("[a-zA-Z0-9:_-]{8,120}"))) {
         "This is not an Astravar Notion character-transfer document."
     }
     val c = value.character
@@ -112,6 +131,23 @@ fun validateNotionCharacterTransfer(value: NotionCharacterTransfer) {
         require(item.acceptedNumericEffects.values.all { it in -1000..1000 })
         require(item.acceptedNumericEffects.isEmpty() || item.evidence == "Confirmed")
         require(!item.confirmedAttuned || item.requiresAttunement)
+        if (item.reviewedBonuses.isNotEmpty()) {
+            require(value.format == NOTION_CONDITIONAL_ITEM_FORMAT && item.evidence == "Confirmed")
+            require(item.acceptedNumericEffects.isEmpty() && item.reviewedBonuses.size <= 32)
+            for (bonus in item.reviewedBonuses) {
+                require(bonus.ruleKey.matches(Regex("[a-zA-Z0-9_-]{1,64}")))
+                require(bonus.label.isNotBlank() && bonus.label.length <= 160)
+                require(bonus.referenceUrl.length <= 1000)
+                val reference = java.net.URI(bonus.referenceUrl)
+                require(reference.scheme == "https" && !reference.host.isNullOrBlank() && reference.userInfo == null)
+                require(bonus.acceptance in setOf(Acceptance.OFFICIAL, Acceptance.ACCEPTED_HOMEBREW))
+                require(bonus.target in setOf(NumericTarget.ARMOR_CLASS, NumericTarget.SAVE))
+                require(bonus.save == null || bonus.target == NumericTarget.SAVE)
+                require(bonus.amount in -1000..1000 && bonus.amount != 0)
+                require(bonus.condition in setOf(ConditionKind.WORN, ConditionKind.HELD, ConditionKind.EQUIPPED))
+            }
+            require(item.reviewedBonuses.map { it.nativeEffect(item).id }.distinct().size == item.reviewedBonuses.size)
+        }
     }
     value.currency.forEach { row ->
         require(row.eventId.length in 8..120 && row.name.length in 1..200 && urlOk(row.sourceUrl))
@@ -206,7 +242,15 @@ fun planNotionCharacterTransfer(
                 notionSourceKey(it.id.removePrefix("notion-instance-")) == sourceKey }
             require(matched.size <= 1) { "Several saved physical items claim this Notion source. Reconcile their identities first." }
             if (matched.isNotEmpty()) {
-                present += item.name
+                val saved = definitions.singleOrNull { it.id == matched.single().definitionId }
+                val expected = item.reviewedBonuses.map { it.nativeEffect(item) }
+                if (expected.isNotEmpty() && (saved == null || saved.requiresAttunement != item.requiresAttunement ||
+                        !saved.effects.containsAll(expected))) {
+                    deferred += "${item.name} (saved physical item has different mechanics)"
+                    warnings += "${item.name}: review the existing definition before changing its effects. Its physical identity is preserved."
+                } else {
+                    present += item.name
+                }
                 continue
             }
             if (definitions.any { it.id == definitionId || notionSameItem(it.name, item.name) }) {
@@ -230,6 +274,7 @@ fun planNotionCharacterTransfer(
                     requiresAttunement = item.requiresAttunement
                 )
             }
+            val reviewedBonuses = item.reviewedBonuses.map { it.nativeEffect(item) }
             val attunementCost = instances.filter { it.attuned }.sumOf { held ->
                 definitions.firstOrNull { it.id == held.definitionId }?.attunementCost ?: 0
             }
@@ -240,7 +285,7 @@ fun planNotionCharacterTransfer(
                 "Stored" -> ItemState.STORED
                 else -> ItemState.CARRIED
             }
-            definitions += ItemDefinition(definitionId, item.name, effects, requiresAttunement = item.requiresAttunement,
+            definitions += ItemDefinition(definitionId, item.name, effects + reviewedBonuses, requiresAttunement = item.requiresAttunement,
                 description = description)
             instances += ItemInstance(instanceId, definitionId, state, attuned, requireNotNull(item.quantity))
             added += item.name

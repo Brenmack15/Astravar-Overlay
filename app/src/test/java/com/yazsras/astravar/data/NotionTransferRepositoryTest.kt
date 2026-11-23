@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.rules.reforge.*
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.*
 import kotlinx.serialization.encodeToString
 import org.junit.After
 import org.junit.Assert.*
@@ -44,15 +45,53 @@ class NotionTransferRepositoryTest {
         listOf(NotionCurrencyFact("fictional-currency", "Reviewed estimate", 20, "Confirmed", url)), 20
     )
 
-    private suspend fun actor(campaignId: String? = null, hpDamage: Int? = 13): ReforgeSavedCharacter = requireNotNull(
+    private suspend fun actor(campaignId: String? = null, hpDamage: Int? = 13, baseAc: Int? = null): ReforgeSavedCharacter = requireNotNull(
         authority.createActor("Fictional maker", GenesisActorRole.PLAYER, campaignId,
-            playable = ReforgeCharacter("fictional-maker", "Fictional maker", currentHp = 7, baseMaxHp = 20,
+            playable = ReforgeCharacter("fictional-maker", "Fictional maker", currentHp = 7, baseMaxHp = 20, baseAc = baseAc,
                 baseAbilities = Stat.entries.associateWith { 14 }, baselineConstitutionModifier = 2,
                 temporaryHp = 3, hpDamage = hpDamage, spellSlots = mapOf(1 to 1)), commandId = "fictional-actor-create").playable)
 
     private suspend fun proof() = backup.exportWithProof().currentFingerprint
     private suspend fun rejected(block: suspend () -> Unit) {
         assertNotNull(runCatching { block() }.exceptionOrNull())
+    }
+
+    @Test fun conditionalImportUsesNativeEffectsInScopedReadbackAndBackup() = runBlocking {
+        val campaign = authority.createCampaign("Conditional fixture", commandId = "conditional-campaign").id
+        val original = actor(campaign, baseAc = 12)
+        val ac = NotionConditionalItemBonus("synthetic-ward", "Fictional ward", url, Acceptance.ACCEPTED_HOMEBREW,
+            NumericTarget.ARMOR_CLASS, 1, ConditionKind.WORN)
+        val item = transfer().inventory.single().copy(state = "Equipped", requiresAttunement = true,
+            confirmedAttuned = true, reviewedBonuses = listOf(ac, ac.copy(target = NumericTarget.SAVE)))
+        val source = transfer().copy(format = NOTION_CONDITIONAL_ITEM_FORMAT, inventory = listOf(item))
+        val baseline = CharacterCalculator.calculate(original.character)
+        val initialProof = proof()
+        val applied = importer.commit(original, source, choices, false, initialProof, "conditional-import")
+        assertEquals(applied, importer.commit(original, source, choices, false, initialProof, "conditional-import"))
+        val repeated = importer.commit(applied.profile, source, choices, false, proof(), "conditional-repeat")
+        assertEquals(0, repeated.itemsAdded)
+        val rows = CampaignSyncDomain(db).snapshot(campaign, mechanics = true, loadout = true)
+        fun calculated(target: String, key: String) = rows.single {
+            it.kind == "playable-stat" && it.fields["target"]?.jsonPrimitive?.content == target &&
+                it.fields["key"]?.jsonPrimitive?.content == key
+        }.fields.getValue("effective").jsonPrimitive.int
+        val stats = CharacterCalculator.calculate(repeated.profile.character)
+        assertEquals(baseline.armorClass.value!! + 1, stats.armorClass.value)
+        for (ability in Stat.entries) assertEquals(baseline.saves.getValue(ability).value!! + 1, calculated("SAVE", ability.name))
+        val data = rows.single { it.kind == "playable-loadout" && it.fields["subject"]?.jsonPrimitive?.content == "ITEM" }
+            .fields.getValue("data").jsonObject
+        assertTrue(data.getValue("effectStatuses").jsonArray.all { it.jsonObject.getValue("active").jsonPrimitive.boolean })
+        val exported = backup.exportWithProof()
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val restored = Room.inMemoryDatabaseBuilder(context, CampaignLedgerDb::class.java).allowMainThreadQueries().build()
+        try {
+            val reader = GenesisAuthorityBackupRepository(restored)
+            val plan = reader.previewRestore(exported.text)
+            assertTrue(plan.conflicts.toString(), plan.valid)
+            reader.restore(plan, "conditional-restore")
+            assertEquals(repeated.profile.character, ReforgeRepository(restored).get(original.character.id)?.character)
+            assertEquals(db.partyDao().allReferences(), restored.partyDao().allReferences())
+        } finally { restored.close() }
     }
 
     @Test fun managedImportCreatesOneAuditedPhysicalIdentityAndRestorableProjection() = runBlocking {

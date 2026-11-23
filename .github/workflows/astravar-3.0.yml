@@ -13,8 +13,8 @@ jobs:
     timeout-minutes: 100
     env:
       GENESIS_GATE: 'true'
-      EXPECTED_VERSION_NAME: '4.0.0-convergence2'
-      EXPECTED_VERSION_CODE: '55'
+      EXPECTED_VERSION_NAME: '4.0.0-convergence3'
+      EXPECTED_VERSION_CODE: '56'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -31,6 +31,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
         with:
           cache-read-only: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) && github.ref_name != github.event.repository.default_branch && github.event_name != 'workflow_dispatch' }}
+      - uses: ./.github/actions/robolectric-runtime
       - name: Use installed Android packages
         timeout-minutes: 9
         run: bash scripts/ci-android-sdk.sh
@@ -74,7 +75,10 @@ jobs:
         if: success()
         timeout-minutes: 45
         run: |
-          bash gradlew --console=plain --build-cache --profile --continue :app:testReleaseUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug -PastravarScreenshots="$GITHUB_WORKSPACE/validation/reforge-screenshots"
+          bash gradlew --console=plain --build-cache --profile --continue :app:testReleaseUnitTest :app:assembleDebug -PastravarScreenshots="$GITHUB_WORKSPACE/validation/reforge-screenshots"
+          # The Kotlin/Compose compiler retains metadata in the test daemon. Give lint a fresh heap.
+          bash gradlew --stop
+          bash gradlew --no-daemon --console=plain --build-cache --profile --max-workers=1 '-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8' :app:lintDebug :app:lintRelease
       - name: Inspect actual QA package
         run: |
           mkdir -p validation

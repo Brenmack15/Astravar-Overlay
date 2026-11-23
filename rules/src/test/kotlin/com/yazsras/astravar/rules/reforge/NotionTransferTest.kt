@@ -24,6 +24,35 @@ class NotionTransferTest {
         80, walletVerified = false
     )
 
+    @Test fun reviewedBonusesRequireTheRightEquipmentStateAndAttunement() {
+        val ac = NotionConditionalItemBonus("test-ward", "Test ward", notionUrl, Acceptance.ACCEPTED_HOMEBREW,
+            NumericTarget.ARMOR_CLASS, 1, ConditionKind.WORN)
+        val fact = item(state = "Carried").copy(acceptedNumericEffects = emptyMap(), requiresAttunement = true,
+            confirmedAttuned = false, reviewedBonuses = listOf(ac, ac.copy(target = NumericTarget.SAVE)))
+        val input = transfer(listOf(fact)).copy(format = NOTION_CONDITIONAL_ITEM_FORMAT)
+        val original = character().copy(baseAc = 12, armorUsesDexterity = false, baseAbilities = Stat.entries.associateWith { 10 })
+        val choices = NotionTransferChoices(stats = false)
+        val sheet = planNotionCharacterTransfer(original, input, choices).character
+        val base = CharacterCalculator.calculate(original)
+        for (state in listOf(ItemState.CARRIED, ItemState.HELD, ItemState.WORN)) {
+            for (attuned in listOf(false, true)) {
+                val calculated = CharacterCalculator.calculate(sheet.copy(items = listOf(sheet.items.single().copy(state = state, attuned = attuned))))
+                val expected = if (state == ItemState.WORN && attuned) 1 else 0
+                assertEquals(base.armorClass.value!! + expected, calculated.armorClass.value)
+                for (ability in Stat.entries) assertEquals(base.saves.getValue(ability).value!! + expected, calculated.saves.getValue(ability).value)
+                assertEquals(base.spellAttack, calculated.spellAttack)
+            }
+        }
+        assertEquals(listOf(fact.name), planNotionCharacterTransfer(sheet, input, choices).alreadyPresent)
+        val earlier = sheet.copy(itemDefinitions = sheet.itemDefinitions.map { it.copy(effects = emptyList()) })
+        val conflict = planNotionCharacterTransfer(earlier, input, choices)
+        assertEquals(earlier, conflict.character)
+        assertTrue(conflict.deferred.single().contains("different mechanics"))
+        assertFailsWith<IllegalArgumentException> { validateNotionCharacterTransfer(input.copy(format = NOTION_CHARACTER_TRANSFER_FORMAT)) }
+        assertFailsWith<IllegalArgumentException> { validateNotionCharacterTransfer(input.copy(inventory = listOf(fact.copy(
+            reviewedBonuses = listOf(ac.copy(acceptance = Acceptance.PROPOSED)))))) }
+    }
+
     @Test fun equippedApprovedCompositeChangesTemporaryStatsAndHpWithoutChangingPermanentTotals() {
         val result = planNotionCharacterTransfer(character(), transfer(),
             NotionTransferChoices(replaceConflictingStats = true))

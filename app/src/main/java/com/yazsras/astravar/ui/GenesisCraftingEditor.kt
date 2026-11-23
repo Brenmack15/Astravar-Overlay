@@ -36,13 +36,16 @@ private fun genesisCraftContainerLabel(character: ReforgeCharacter, instance: It
         .collectAsState(initial = false to emptyList<GenesisActorAuthority>())
     val playableState by remember(environment.local) { environment.local.observeAll().map { true to it } }
         .collectAsState(initial = false to emptyList<ReforgeSavedCharacter>())
+    val craftScope by remember(environment.authority, environment.selectedCampaignId) {
+        environment.authority.crafting.observeScope(environment.selectedCampaignId)
+    }.collectAsState(initial = null)
     val requirements = requirementsState.second
-    val items = itemState.second
+    val items = itemState.second.filter { craftScope?.permitsMaterial(it) == true }
     val actors = actorsState.second
     val campaigns by environment.authority.campaigns.collectAsState(initial = emptyList())
-    val playable = playableState.second.filterNot { it.character.archived }
+    val playable = playableState.second.filter { !it.character.archived && craftScope?.permitsActor(it.character.id) == true }
     val ownerProfiles = playable.map { CharacterProfile(it.character.name, id = it.character.id, level = it.character.level) }
-    val loaded = requirementsState.first && itemState.first && actorsState.first && playableState.first
+    val loaded = craftScope != null && requirementsState.first && itemState.first && actorsState.first && playableState.first
     var step by rememberSaveable(project.id) { mutableIntStateOf(0) }
     var title by rememberSaveable(project.id) { mutableStateOf("") }
     var quantity by rememberSaveable(project.id) { mutableStateOf("1") }
@@ -254,7 +257,7 @@ private fun genesisCraftContainerLabel(character: ReforgeCharacter, instance: It
                     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(requirement.label, style = MaterialTheme.typography.titleMedium)
                         Text("${requirement.quantity?.toString() ?: "Unknown"} proposed · ${item?.quantity?.toString() ?: "Unknown"} available", color = RebuildPalette.Muted)
-                        Toggle("Consume ${requirement.label}", requirement.id in selections, enabled = !busy && loaded) { checked ->
+                        Toggle("Consume ${requirement.label}", requirement.id in selections, enabled = !busy && loaded && item != null) { checked ->
                             selections = if (checked) selections + (requirement.id to requirement.quantity?.toString().orEmpty()) else selections - requirement.id
                         }
                         if (requirement.id in selections) Field("Actual quantity: ${requirement.label}", selections[requirement.id].orEmpty(),

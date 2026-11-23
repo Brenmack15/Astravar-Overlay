@@ -52,6 +52,8 @@ class CampaignArchiveTest {
         assertEquals(listOf(importedProject.id), repo.records.projectsIn(id).first().map { it.id })
         assertEquals(listOf(importedContact.id), repo.records.entitiesIn(id).first().map { it.id })
         assertTrue(repo.records.projectsIn("local-campaign").first().none { it.id == importedProject.id })
+        assertTrue(db.craftScope(id).permitsProject(importedProject))
+        assertFalse(db.craftScope("local-campaign").permitsProject(importedProject))
         val domain = CampaignSyncDomain(db)
         val roots = setOf(importedProject.id, importedContact.id)
         assertEquals(roots, domain.snapshot(id).map { it.recordId }.filter { it in roots }.toSet())
