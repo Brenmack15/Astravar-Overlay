@@ -1,0 +1,19 @@
+name: Prepare verified Robolectric runtimes
+description: Restore and verify the Android runtimes used by the host test suite
+runs:
+  using: composite
+  steps:
+    - id: runtime-cache
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: ~/.m2/repository/org/robolectric/android-all-instrumented
+        key: robolectric-runtimes-${{ hashFiles('scripts/ci-robolectric-runtime.py') }}
+    - name: Verify or fetch the pinned Android runtime artifacts
+      shell: bash
+      run: python3 scripts/ci-robolectric-runtime.py
+    - name: Share verified public runtime artifacts
+      if: steps.runtime-cache.outputs.cache-hit != 'true' && (github.event_name == 'workflow_dispatch' || github.ref_name == github.event.repository.default_branch || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: ~/.m2/repository/org/robolectric/android-all-instrumented
+        key: robolectric-runtimes-${{ hashFiles('scripts/ci-robolectric-runtime.py') }}
