@@ -270,6 +270,21 @@ class CampaignConnectionClient internal constructor(private val context: Context
         try { syncUnlocked() } catch (e: CancellationException) { throw e } catch (e: Exception) { failure(e) }
         snapshotUnlocked()
     }
+    suspend fun startCombatWriteReview(): String = lock.withLock {
+        val value = setting()
+        credential(value)
+        val saved = checkedGrant(value, grant(value))
+        require(!value.revokePending && value.grantBody == null && "combat" in activeRead(value) && "combat" !in activeWrite(value))
+        val requested = scopes(value.requestedWriteJson) + "combat"
+        // Only the authenticated owner's browser can change the grant. Until then activeWrite still intersects the old server grant.
+        dao.settings(value.copy(requestedWriteJson = CampaignConnectionProtocol.scopeArray(requested).toString(),
+            localWriteJson = CampaignConnectionProtocol.scopeArray(activeWrite(value) + "combat").toString()))
+        val grantId = OwnerSyncProtocol.id(saved.getValue("grantId").jsonPrimitive.content)
+        val revision = saved.getValue("revision").jsonPrimitive.long
+        val campaign = OwnerSyncProtocol.id(value.campaignId)
+        "${value.origin}/owner#access=combat&campaign=$campaign&grant=$grantId&revision=$revision&command=${UUID.randomUUID()}"
+    }
+
     suspend fun setAutoSync(scopes: Set<String>): JsonObject = lock.withLock {
         CampaignConnectionProtocol.scopes(scopes)
         val value = setting(); credential(value); val g = checkedGrant(value, grant(value))

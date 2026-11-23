@@ -84,3 +84,7 @@ form is confirmed. To reconcile an independently verified charge balance, send a
 reviewed MIGRATION edit naming the physical instance and its full pools. Omitting
 pools preserves every existing balance. Routine use and recovery follow their own
 resolved actions.
+
+## Existing read-only combat grants
+
+On the Owner connection screen choose **Review combat update permission**, then confirm **Approve combat updates** on the signed-in private owner page. Return to Astravar and choose **Sync now**. The authenticated owner can add combat write to an existing combat-read grant at its expected revision. The device, prior receipts and automatic-save selections retain their identities. Finish pending transactions before confirming an access change. Combat automatic saving is a separate choice. Roll history remains read-only.

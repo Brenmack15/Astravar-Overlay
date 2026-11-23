@@ -602,3 +602,32 @@ test('source-native batches require device capability and grant; historical impo
  await fails(limited.submit([item]),'WRITE_SCOPE_DENIED');
  await fails(f.submit([{...item,fields:{...fields,instance:{...fields.instance,ownerId:'other'}}}]),'INVALID_NATIVE_SOURCE');
 });
+
+test('owner browser adds combat write to the same grant without changing receipts, queued work or automatic permissions',async t=>{
+ const f=await setup(t,{writeScopes:['hp']});
+ const prior=(await f.enable(['hp'])).grant;
+ const body={campaignId:campaign,grantId:prior.grantId,expectedRevision:prior.revision,commandId:uuid()};
+ const origin='https://owner.example';
+ const call=(action,headers={})=>handleWorker(new Request(origin+'/v1/owner/combat-access/'+action,{method:'POST',headers:{'Content-Type':'application/json',Origin:origin,...headers},body:JSON.stringify(body)}),{OWNER_SITE_USER_ID:ownerId,DB:f.db});
+ assert.equal((await call('approve')).status,401);
+ assert.equal((await call('approve',{'oai-authenticated-user-id':ownerId,Origin:'https://another.example'})).status,403);
+ await fails(f.sync.reviewCombatWrite(connector,body,true),'ROLE_DENIED');
+ await fails(f.sync.reviewCombatWrite(f.principal,body,true),'ROLE_DENIED');
+ await fails(f.sync.reviewCombatWrite(owner,{...body,grantId:uuid()},true),'GRANT_REVISION_CONFLICT');
+ const auth={'oai-authenticated-user-id':ownerId};
+ assert.deepEqual((await (await call('review',auth)).json()).grant,prior);
+ await f.publish([profileRecord()]);
+ const {command}=await f.submit([op('adjust_hp','character-profile',profile,{delta:-3})]);
+ assert.equal((await (await call('approve',auth)).json()).error.code,'FINISH_PENDING_COMMANDS_FIRST');
+ const {receipt}=await f.sync.decide(f.principal,campaign,decision(command));
+ const approved=await (await call('approve',auth)).json();
+ assert.equal(approved.approved,true);
+ assert.equal(approved.grant.grantId,prior.grantId);
+ assert.equal(approved.grant.revision,prior.revision+1);
+ assert.deepEqual(approved.grant.readScopes,prior.readScopes);
+ assert.deepEqual(approved.grant.writeScopes,['combat','hp']);
+ assert.deepEqual(approved.grant.autoSyncScopes,['hp']);
+ assert.deepEqual(await (await call('approve',auth)).json(),approved);
+ assert.deepEqual((await f.sync.getReceipt(connector,campaign,command.commandId)).receipt,receipt);
+ await fails(f.sync.reviewCombatWrite(owner,{...body,commandId:uuid()},true),'GRANT_REVISION_CONFLICT');
+});

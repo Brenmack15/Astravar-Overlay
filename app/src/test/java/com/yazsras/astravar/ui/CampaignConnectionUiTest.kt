@@ -22,11 +22,11 @@ class CampaignConnectionUiTest {
     @get:Rule val compose = createAstravarComposeRule()
     private fun show(view: CampaignConnectionView, auto: (Set<String>) -> Unit = {}, decision: (String, Boolean) -> Unit = { _, _ -> },
         restrict: (Set<String>,Set<String>) -> Unit = { _, _ -> }, pause: (Boolean) -> Unit = {}, sync: () -> Unit = {},
-        prepare: () -> Unit = {}, review: () -> Unit = {}): AutoCloseable {
+        prepare: () -> Unit = {}, review: () -> Unit = {}, combatReview: () -> Unit = {}): AutoCloseable {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         activity.get().setContent { AstravarTheme {
             CampaignConnectionContent(view, { _, _, _, _, _ -> }, {}, sync, {}, auto, decision, {}, { _, _ -> }, {}, {}, restrict, pause,
-                onPrepareCampaign = prepare, onReviewMembership = review)
+                onPrepareCampaign = prepare, onReviewMembership = review, onReviewCombatAccess = combatReview)
         } }
         return AutoCloseable { activity.pause().stop().destroy() }
     }
@@ -301,13 +301,22 @@ class CampaignConnectionUiTest {
         }
     }
 
-    @Test fun combat_records_are_read_only_and_never_offer_automatic_engine_mutations() {
-        show(CampaignConnectionView(connected = true, readScopes = setOf("combat"), writeScopes = setOf("combat"))).use {
-            compose.onNodeWithText("Astravar configuration and roll history · read only").performScrollTo().assertExists()
+    @Test fun readOnlyCombatOffersAnOwnerReviewWithoutEnablingAutomaticSaves() {
+        var requested = 0
+        show(CampaignConnectionView(connected = true, readScopes = setOf("combat")), combatReview = { requested++ }).use {
+            compose.onNodeWithText("Combat mechanics and roll history · read only").performScrollTo().assertExists()
             compose.onNodeWithTag("trusted-dm-toggle").performScrollTo().assertIsNotEnabled()
-            compose.onAllNodesWithContentDescription("Automatically save Astravar configuration and roll history").assertCountEquals(0)
-            compose.onNodeWithText("Manage record permissions").performScrollTo().performClick()
-            compose.onNodeWithContentDescription("Keep update access to Astravar configuration and roll history").performScrollTo().assertIsNotEnabled()
+            compose.onNodeWithText("Review combat update permission").performScrollTo().performClick()
+            assertEquals(1, requested)
+        }
+    }
+
+    @Test fun grantedCombatIsWritableAndAutomaticSavingNeedsASeparateChoice() {
+        show(CampaignConnectionView(connected = true, readScopes = setOf("combat"), writeScopes = setOf("combat"))).use {
+            compose.onNodeWithText("Combat mechanics and roll history · read and update").performScrollTo().assertExists()
+            compose.onNodeWithTag("trusted-dm-toggle").performScrollTo().assertIsOff().performClick()
+            compose.onNodeWithContentDescription("Automatically save Combat mechanics and roll history").performScrollTo().assertIsOff()
+            compose.onAllNodesWithText("Review combat update permission").assertCountEquals(0)
         }
     }
 }

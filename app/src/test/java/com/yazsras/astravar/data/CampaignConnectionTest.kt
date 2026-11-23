@@ -63,6 +63,24 @@ class CampaignConnectionTest {
             requestedReadJson=scopes,requestedWriteJson=scopes,grantJson=remote.grant.toString()))
         return client(remote).also { if (syncNow) it.sync() }
     }
+    @Test fun combatReviewKeepsExistingGrantUntilTheOwnerConfirmsOnTheService() = runBlocking {
+        val remote = Remote()
+        val initial = CampaignConnectionProtocol.scopeArray(setOf("hp"))
+        remote.grant = JsonObject(remote.grant + ("writeScopes" to initial))
+        val session = paired(remote, syncNow = false)
+        val old = requireNotNull(journal.connection().settings())
+        journal.connection().settings(old.copy(requestedWriteJson = initial.toString(), localWriteJson = initial.toString()))
+        val uri = java.net.URI(session.startCombatWriteReview())
+        assertEquals(origin + "/owner", uri.toString().substringBefore('#'))
+        assertTrue(uri.fragment.startsWith("access=combat&campaign=$campaignId&grant=fixture-grant&revision=1&command="))
+        assertEquals(initial, session.snapshot().getValue("localWriteScopes"))
+        assertTrue(remote.grantRequests.isEmpty())
+        remote.grant = JsonObject(remote.grant + mapOf("writeScopes" to CampaignConnectionProtocol.scopeArray(setOf("combat","hp")), "revision" to JsonPrimitive(2)))
+        val after = session.sync()
+        assertEquals(setOf("hp","combat"), CampaignConnectionProtocol.parseScopes(after.getValue("localWriteScopes")))
+        assertEquals("fixture-grant", after.getValue("grant").jsonObject.getValue("grantId").jsonPrimitive.content)
+        assertTrue(after.getValue("localAutoSyncScopes").jsonArray.isEmpty())
+    }
     @Test fun connectedHeartbeatWithoutExplicitMembershipPublishesNoCharacterUntilReviewedEnrollment() = runBlocking {
         val authority = GenesisAuthorityRepository(campaign)
         authority.registerActorAssociation(profileId, current().revision, GenesisActorRole.PLAYER,

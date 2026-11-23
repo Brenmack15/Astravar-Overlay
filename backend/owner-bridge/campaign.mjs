@@ -240,6 +240,35 @@ export class CampaignBridge{
  }
  grantJson(g){return{nativeEditingVersion:1,playableMechanicsVersion:1,playableSpellbookVersion:1,playableLoadoutVersion:1,playableActionVersion:1,spellDefinitionVersion:1,encounterStrikeVersion:1,deviceBuildReportVersion:1,grantId:g.id,revision:g.revision,readScopes:JSON.parse(g.read_scopes_json),writeScopes:JSON.parse(g.write_scopes_json),autoSyncScopes:JSON.parse(g.auto_scopes_json),expiresAt:g.expires_at,deviceName:g.device_name??null};}
  async getGrant(p,campaign){const g=await this.authorize(p,campaign);return this.envelope(campaign,{grant:this.grantJson(g)});}
+ async reviewCombatWrite(principal, request, approve) {
+  exact(request,['campaignId','grantId','expectedRevision','commandId']);
+  const {campaignId,grantId,expectedRevision,commandId:command}=request;
+  id(campaignId);id(grantId);integer(expectedRevision,1);commandId(command);
+  const grant=await this.authorize(principal,campaignId,['owner']);
+  if(grant.id!==grantId)fail(409,'GRANT_REVISION_CONFLICT');
+  const fingerprint=await sha256(canonical({action:'OWNER_COMBAT_WRITE',...request}));
+  const previous=await this.s('SELECT grant_id,fingerprint FROM bridge_campaign_grant_events WHERE owner_id=? AND command_id=?',this.ownerId,command).first();
+  if(previous){
+   if(previous.grant_id!==grantId||previous.fingerprint!==fingerprint)fail(409,'COMMAND_ID_REUSED');
+   return this.envelope(campaignId,{grant:this.grantJson(grant),approved:true});
+  }
+  const reads=JSON.parse(grant.read_scopes_json),writes=JSON.parse(grant.write_scopes_json);
+  if(grant.revision!==expectedRevision)fail(409,'GRANT_REVISION_CONFLICT');
+  if(!reads.includes('combat')||writes.includes('combat'))fail(409,'COMBAT_PERMISSION_REVIEW_UNAVAILABLE');
+  if(!approve)return this.envelope(campaignId,{grant:this.grantJson(grant),approved:false});
+  try {
+   const added=await this.s(`INSERT INTO bridge_campaign_grant_events(owner_id,command_id,grant_id,expected_revision,auto_scopes_json,read_scopes_json,write_scopes_json,fingerprint,created_at)
+    SELECT ?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (
+      SELECT 1 FROM bridge_campaign_commands c WHERE c.grant_id=? AND c.grant_revision=?
+      AND NOT EXISTS (SELECT 1 FROM bridge_campaign_receipts r WHERE r.owner_id=c.owner_id AND r.campaign_id=c.campaign_id AND r.command_id=c.command_id))`,
+    this.ownerId,command,grantId,expectedRevision,grant.auto_scopes_json,grant.read_scopes_json,canonical([...writes,'combat'].sort()),fingerprint,this.now(),grantId,expectedRevision).run();
+   if(!added.meta.changes)fail(409,'FINISH_PENDING_COMMANDS_FIRST');
+  } catch(error){
+   if(String(error).includes('GRANT_REVISION_CONFLICT'))fail(409,'GRANT_REVISION_CONFLICT');
+   throw error;
+  }
+  return this.envelope(campaignId,{grant:this.grantJson(await this.authorize(principal,campaignId,['owner'])),approved:true});
+ }
  async configureGrant(p,campaign,b){exact(b,['commandId','expectedRevision','autoSyncScopes'],['readScopes','writeScopes']);commandId(b.commandId);integer(b.expectedRevision,1);const scopes=campaignScopeList(b.autoSyncScopes),g=await this.authorize(p,campaign,['device']);const fp=await sha256(canonical(b)),previous=await this.s('SELECT * FROM bridge_campaign_grant_events WHERE owner_id=? AND command_id=?',this.ownerId,b.commandId).first();if(previous){if(previous.fingerprint!==fp||previous.grant_id!==g.id)fail(409,'COMMAND_ID_REUSED');return this.getGrant(p,campaign);}const readScopes=b.readScopes===undefined?JSON.parse(g.read_scopes_json):campaignScopeList(b.readScopes),writeScopes=b.writeScopes===undefined?JSON.parse(g.write_scopes_json):campaignScopeList(b.writeScopes);if(readScopes.some(x=>!JSON.parse(g.read_scopes_json).includes(x))||writeScopes.some(x=>!JSON.parse(g.write_scopes_json).includes(x))||writeScopes.some(x=>!readScopes.includes(x)))fail(403,'GRANT_EXPANSION_REQUIRES_OWNER');if(scopes.some(s=>!writeScopes.includes(s)))fail(403,'AUTO_SYNC_SCOPE_DENIED');if(g.revision!==b.expectedRevision)fail(409,'GRANT_REVISION_CONFLICT');try{await this.s('INSERT INTO bridge_campaign_grant_events(owner_id,command_id,grant_id,expected_revision,auto_scopes_json,read_scopes_json,write_scopes_json,fingerprint,created_at) VALUES(?,?,?,?,?,?,?,?,?)',this.ownerId,b.commandId,g.id,b.expectedRevision,canonical(scopes),canonical(readScopes),canonical(writeScopes),fp,this.now()).run();}catch(e){if(String(e).includes('GRANT_REVISION_CONFLICT'))fail(409,'GRANT_REVISION_CONFLICT');throw e;}return this.getGrant(p,campaign);}
  async getConnection(p){
   if(!p||p.ownerId!==this.ownerId||p.role!=='connector')fail(403,'OWNER_SCOPE_DENIED');
