@@ -190,6 +190,11 @@ import java.io.IOException
                     error = true; message = "Open the character's campaign membership before sharing any values."
                 } else membershipReviewProfileId = view.canonicalReviewProfileId.ifBlank { view.selectedProfileId }
             },
+            onReviewCombatAccess = { operate {
+                val url = client.startCombatWriteReview()
+                openOwner(url, view.origin)
+                client.snapshot()
+            } },
             onRestrictPermissions = { readScopes, writeScopes -> operate { client.restrictPermissions(readScopes, writeScopes) } },
             onPauseSync = { paused ->
                 try {

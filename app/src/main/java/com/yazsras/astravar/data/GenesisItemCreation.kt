@@ -17,11 +17,15 @@ internal fun genesisCreatedItemsCharacter(before: ReforgeCharacter, definition: 
         "This item identity already exists. Edit or split the existing item instead."
     }
     var next = before.copy(itemDefinitions = before.itemDefinitions + definition,
-        items = before.items + instances.map { it.copy(state = ItemState.CARRIED, attuned = false) })
+        items = before.items + instances.map { it.copy(state = ItemState.CARRIED, attuned = false, formId = null, formKnown = true) })
     validateCharacter(next)
     instances.forEach { item ->
         next = GameplayRules.equip(next, item.id, item.state)
         if (item.attuned) next = GameplayRules.attune(next, item.id, true)
     }
+    val reviewed = instances.filter { it.formId != null || !it.formKnown }.associateBy { it.id }
+    if (reviewed.isNotEmpty()) next = next.copy(items = next.items.map { item ->
+        reviewed[item.id]?.let { item.copy(formId=it.formId,formKnown=it.formKnown) } ?: item
+    })
     return GameplayRules.preserveCapacities(before, next).also(::validateCharacter)
 }

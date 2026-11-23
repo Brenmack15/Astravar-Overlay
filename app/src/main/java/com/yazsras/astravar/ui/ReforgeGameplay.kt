@@ -243,6 +243,7 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
     is EffectPayload.Edge -> "${payload.edge.name.lowercase()} on ${payload.kind.name.lowercase().replace('_', ' ')}"
     is EffectPayload.Proficiency -> if (payload.expertise) "Expertise · ${payload.skill ?: payload.save}" else "Proficiency · ${payload.skill ?: payload.save}"
     is EffectPayload.ConditionImmunity -> "Immune to ${payload.condition}"
+    is EffectPayload.MagicalAttack -> "Qualifying attacks count as magical"
     is EffectPayload.DamageConversion -> "${payload.from} becomes ${payload.to}"
 }
 

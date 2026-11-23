@@ -12,11 +12,23 @@ internal object PlayableActionSync {
     const val AUDIT = "PLAYABLE_ACTION_V1"
     const val STRIKE = "resolve_encounter_attack"
     const val DEFINE_SPELL = "define_spell"
-    val types = setOf(CAST, REST, PREPARE, STRIKE, DEFINE_SPELL)
+    const val FORM = "change_wearable_form"
+    const val FEATURE = "use_native_feature"
+    const val HP = "resolve_native_hp"
+    const val RECHARGE = "resolve_native_recharge"
+    const val ACTIVATE_ITEM = "activate_native_item"
+    val nativeTypes = setOf(FORM, FEATURE, HP, RECHARGE, ACTIVATE_ITEM)
+    val types = setOf(ACTIVATE_ITEM, RECHARGE, HP, FEATURE, FORM, CAST, REST, PREPARE, STRIKE, DEFINE_SPELL)
 
     fun writeScopes(op: CampaignSyncOperation): Set<String> = buildSet {
         require(op.type in types)
         add("character")
+        if (op.type in nativeTypes) {
+            if (op.type == ACTIVATE_ITEM) addAll(setOf("inventory","combat","hp"))
+            add(when (op.type) { FORM -> "inventory"; HP -> "hp"; else -> "resources" })
+            if (role(op.fields) == GenesisActorRole.COMPANION) add("companions")
+            return@buildSet
+        }
         add("resources")
         if (op.type != PREPARE) add("combat")
         if (op.type == STRIKE) {
@@ -39,6 +51,35 @@ internal object PlayableActionSync {
             require(it.isString && it.content.length in 1..200); it.content
         }
         return when (type) {
+            HP -> {
+                require(f.keys == setOf("actorRole","kind","amount"))
+                val amount = f.getValue("amount").jsonPrimitive.let { require(!it.isString && it.int > 0); it.int }
+                when (f.getValue("kind").jsonPrimitive.content) {
+                    "DAMAGE" -> GameplayRules.damage(c,amount)
+                    "HEAL" -> GameplayRules.heal(c,amount)
+                    else -> error("Unsupported HP operation")
+                }
+            }
+            ACTIVATE_ITEM -> {
+                require(f.keys == setOf("actorRole","itemId","activationId","rolledTemporaryHp"))
+                val roll = f.getValue("rolledTemporaryHp").let { if (it == JsonNull) null else it.jsonPrimitive.let { n -> require(!n.isString); n.int } }
+                GameplayRules.activateItem(c,f.getValue("itemId").jsonPrimitive.content,f.getValue("activationId").jsonPrimitive.content,roll)
+            }
+            RECHARGE -> {
+                require(f.keys == setOf("actorRole","poolId","face"))
+                val face = f.getValue("face").jsonPrimitive.let { require(!it.isString); it.int }
+                GameplayRules.resolveRecharge(c,f.getValue("poolId").jsonPrimitive.content,face)
+            }
+            FEATURE -> {
+                require(f.keys == setOf("actorRole","featureId"))
+                GameplayRules.useFeature(c,f.getValue("featureId").jsonPrimitive.content)
+            }
+            FORM -> {
+                require(f.keys == setOf("actorRole","itemId","formId"))
+                val form = f.getValue("formId")
+                GameplayRules.changeWearableForm(c, f.getValue("itemId").jsonPrimitive.content,
+                    if (form == JsonNull) null else form.jsonPrimitive.content)
+            }
             DEFINE_SPELL -> {
                 require(f.keys == setOf("actorRole", "mode", "spellId", "definition"))
                 val id = spell()

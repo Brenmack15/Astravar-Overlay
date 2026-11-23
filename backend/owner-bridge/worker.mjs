@@ -17,6 +17,7 @@ function ownerPage() {
   return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Astravar Owner Connection</title>
 <style>body{color:#eee9df;background:#10151e;font:18px system-ui;max-width:32rem;margin:auto;padding:1.2rem}h1{color:#dbc081;font-size:1.7rem}label{display:block;margin:1rem 0 .35rem}input,button{box-sizing:border-box;min-height:52px;width:100%;font:inherit;border-radius:12px;padding:.7rem}input{color:inherit;background:#1e2734;border:1px solid #637085}button{background:#dbc081;border:0;color:#121820;margin:.7rem 0}a{color:#e6cb8e}pre{white-space:pre-wrap;overflow-wrap:anywhere}section{margin:1.5rem 0;padding:1rem;border:1px solid #4c5361;border-radius:16px}.muted{color:#bdc5cf}</style>
 <h1>Astravar Owner Connection</h1><p class="muted">Private campaign records and Trusted DM Auto-Sync. Each enrolled device is bound to its selected campaign and owner-approved categories.</p>
+<section id="combat-access" hidden><h2>Review combat update permission</h2><p>Allow typed attack and defense changes and resolved combat actions on this campaign. Roll history stays read-only. Combat automatic saving requires a separate choice in Astravar.</p><p id="combat-result" role="status" aria-live="polite"></p><button id="approve-combat" disabled>Approve combat updates</button></section>
 <section><h2>Pair this phone</h2><p>Start in Astravar → Config → Owner Connection. Open the encrypted bootstrap link on the same phone, then enter the pairing code shown in Astravar.</p>
 <form id="pair"><label for="code">Device pairing code</label><input id="code" name="userCode" autocomplete="off" spellcheck="false" maxlength="100" required><button id="copy-code" type="button" aria-label="Copy displayed pairing code">⧉ Copy pairing code</button><p id="copy-result" role="status" aria-live="polite"></p><button id="review-pair" type="button">Review requested access</button><button id="approve-pair" disabled>Approve this device</button></form><pre id="pair-result" role="status" aria-live="polite"></pre></section>
 <section><h2>Revoke a device</h2><p>Revocation stops future server access. A device may retain its existing local records.</p><button id="devices">Refresh enrolled devices</button><pre id="device-list" role="status"></pre>
@@ -24,6 +25,25 @@ function ownerPage() {
 <p>Campaign enrollment grants only the categories shown during review. Trusted DM Auto-Sync starts disabled. Enable selected approved write categories in Astravar to save resolved gameplay without a separate device approval for each command. Manual approval remains available.</p>
 <script nonce="${nonce}">
 const submit=async(path,value,target)=>{const output=document.getElementById(target);output.textContent='Contacting server…';try{const response=await fetch(path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(value),redirect:'error'});const result=await response.json();output.textContent=response.ok?JSON.stringify(result,null,2):'Request failed: '+(result.error?.code||response.status);}catch{output.textContent='Unable to reach the authenticated server. Retry when online.';}};
+const combatLink=new URLSearchParams(location.hash.slice(1));
+if(combatLink.get('access')==='combat'){
+ const panel=document.getElementById('combat-access'),output=document.getElementById('combat-result'),button=document.getElementById('approve-combat');
+ panel.hidden=false;
+ const body={campaignId:combatLink.get('campaign'),grantId:combatLink.get('grant'),expectedRevision:Number(combatLink.get('revision')),commandId:combatLink.get('command')};
+ const reviewAccess=async approve=>{
+  button.disabled=true;
+  try{
+   const response=await fetch('/v1/owner/combat-access/'+(approve?'approve':'review'),{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),redirect:'error'});
+   const value=await response.json();
+   if(!response.ok){output.textContent='Review unavailable. Return to Astravar, sync and reopen this request. '+(value.error?.code||response.status);return;}
+   if(value.approved){output.textContent='Approved. Return to Astravar and select Sync now.';return;}
+   output.textContent='Campaign '+value.campaignId+' on '+value.grant.deviceName+'. Existing automatic saves: '+(value.grant.autoSyncScopes.join(', ')||'none')+'.';
+   button.disabled=false;
+  }catch{output.textContent='Unable to verify the grant. Reopen the review when online.';}
+ };
+ button.addEventListener('click',()=>reviewAccess(true));
+ reviewAccess(false);
+}
 let reviewedCode=null;
 document.getElementById('copy-code').addEventListener('click',async()=>{const code=document.getElementById('code').value;const result=document.getElementById('copy-result');if(!code){result.textContent='Enter the displayed pairing code first.';return;}try{await navigator.clipboard.writeText(code);result.textContent='Copied to clipboard.';}catch{result.textContent='Clipboard unavailable. Select the displayed code to copy it.';}});
 document.getElementById('code').addEventListener('input',()=>{reviewedCode=null;document.getElementById('approve-pair').disabled=true;});

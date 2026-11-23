@@ -352,7 +352,12 @@ internal class CampaignBackup(private val db: CampaignLedgerDb) {
             val before = campaignJson.decodeFromString<List<CampaignSyncRecord>>(requireNotNull(event.beforeJson))
             require(after.size in 1..100 && after.map { it.kind to it.recordId }.distinct().size == after.size)
             val prefix = event.commandId.take("campaign-sync-".length + 40) + "-"
-            val children = allReceipts.keys.filter { it.startsWith(prefix) }.toSet()
+            val children = allReceipts.keys.filter { it.startsWith(prefix) }.toMutableSet()
+            // A native craft is one project operation. Its canonical material/actor transaction
+            // already binds the archive audit to this deterministic child under the Genesis parent.
+            val craftChild = genesisCraftCommandId(prefix + "0")
+            if (after.size == 1 && after.single().kind == "project" && allReceipts[craftChild]?.kind == "CRAFT" &&
+                audit[craftChild]?.kind == "CONFIRMED_CRAFT") children.add(craftChild)
             require(children.size in 1..100)
             val childrenAudit = audit.values.filter { it.commandId in children && it.source == event.source }
             fun localKind(kind: String) = when (kind) { "companion-state" -> "companion"; "companion-resource" -> "resource"; "reference" -> "external-reference"; else -> kind }

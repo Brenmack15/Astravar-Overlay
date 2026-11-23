@@ -156,16 +156,27 @@ if [ -n "${ASTRAVAR_BASELINE_APK:-}" ]; then
   python3 scripts/genesis-upgrade-readback.py validation/convergence-code54 --synthetic-emulator --expected-room-schema 9 --compare validation/genesis-upgrade-before.json --output validation/convergence-code54.json
   timeout 10s adb -s "$astravar_serial" shell dumpsys package "$astravar_product" >validation/convergence-code54-package.txt
   snapshot_stores validation/convergence-code54-files-before-candidate.sha256
+  timeout -k 5s 45s adb -s "$astravar_serial" install -r validation/upgrade-baseline/code56-ci.apk | tee validation/convergence-code56-install.txt
+  grep -q Success validation/convergence-code56-install.txt
+  snapshot_stores validation/convergence-code56-files-installed.sha256
+  diff -u validation/convergence-code54-files-before-candidate.sha256 validation/convergence-code56-files-installed.sha256
+  run_stage GenesisUpgradeInstrumentationTest#verifyAfterUpgrade 1 360 native-convergence-code56-readback.txt 56
+  stop_product
+  copy_upgrade_stores validation/convergence-code56
+  python3 scripts/genesis-upgrade-readback.py validation/convergence-code56 --synthetic-emulator --expected-room-schema 9 --compare validation/genesis-upgrade-before.json --output validation/convergence-code56.json
+  timeout 10s adb -s "$astravar_serial" shell dumpsys package "$astravar_product" >validation/convergence-code56-package.txt
+  snapshot_stores validation/convergence-code56-files-before-candidate.sha256
   timeout -k 5s 45s adb -s "$astravar_serial" install -r "$astravar_apk" | tee validation/genesis-upgrade-install.txt
   grep -q Success validation/genesis-upgrade-install.txt
   snapshot_stores validation/genesis-upgrade-files-after.sha256
-  diff -u validation/convergence-code54-files-before-candidate.sha256 validation/genesis-upgrade-files-after.sha256 >validation/genesis-upgrade-file-diff.txt
+  diff -u validation/convergence-code56-files-before-candidate.sha256 validation/genesis-upgrade-files-after.sha256 >validation/genesis-upgrade-file-diff.txt
   timeout 10s adb -s "$astravar_serial" shell dumpsys package "$astravar_product" >validation/genesis-upgrade-package-after.txt
   python3 scripts/genesis-package-readback.py \
     --before validation/genesis-code50-package.txt \
     --after validation/genesis-upgrade-package-after.txt --package "$astravar_product" \
     --old-version 50 --new-version "${EXPECTED_VERSION_CODE:-52}" --output validation/genesis-upgrade-package-result.json
   python3 scripts/genesis-package-readback.py --before validation/convergence-code54-package.txt --after validation/genesis-upgrade-package-after.txt --package "$astravar_product" --old-version 54 --new-version "$EXPECTED_VERSION_CODE" --output validation/convergence-code54-candidate-package.json
+  python3 scripts/genesis-package-readback.py --before validation/convergence-code56-package.txt --after validation/genesis-upgrade-package-after.txt --package "$astravar_product" --old-version 56 --new-version "$EXPECTED_VERSION_CODE" --output validation/convergence-code56-candidate-package.json
   run_stage GenesisUpgradeInstrumentationTest#verifyAfterUpgrade 1 360 native-genesis-upgrade-readback.txt
   stop_product
   copy_upgrade_stores validation/genesis-upgrade-after
@@ -175,6 +186,7 @@ if [ -n "${ASTRAVAR_BASELINE_APK:-}" ]; then
   python3 scripts/genesis-same-schema-readback.py --before validation/genesis-code50.json \
     --after validation/genesis-upgrade-after.json --output validation/genesis-code50-candidate-readback.json
   python3 scripts/genesis-same-schema-readback.py --before validation/convergence-code54.json --after validation/genesis-upgrade-after.json --output validation/convergence-code54-candidate-readback.json
+  python3 scripts/genesis-same-schema-readback.py --before validation/convergence-code56.json --after validation/genesis-upgrade-after.json --output validation/convergence-code56-candidate-readback.json
   # This write is deliberately separate from the unchanged-cutover comparison:
   # heal one point in the real UI, restart, and prove only canonical schema9 changed.
   run_stage GenesisUpgradeInstrumentationTest#canonicalWriteSurvivesRestart 1 240 native-genesis-canonical-write.txt

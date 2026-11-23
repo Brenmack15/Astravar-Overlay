@@ -220,6 +220,7 @@ internal fun genesisArmorUnmappedEffects(character: ReforgeCharacter, ability: A
         when (val payload = effect.payload) {
             is EffectPayload.Number -> payload.target in setOf(NumericTarget.ATTACK, NumericTarget.DAMAGE) && (payload.key.isBlank() || payload.key == key)
             is EffectPayload.DamageBonus -> (payload.qualifier.attackIds.isEmpty() || key in payload.qualifier.attackIds) && tags.containsAll(payload.qualifier.requiredTags)
+            is EffectPayload.MagicalAttack -> (payload.qualifier.attackIds.isEmpty() || key in payload.qualifier.attackIds) && tags.containsAll(payload.qualifier.requiredTags)
             is EffectPayload.DamageConversion -> (payload.qualifier.attackIds.isEmpty() || key in payload.qualifier.attackIds) && tags.containsAll(payload.qualifier.requiredTags)
             else -> false
         }

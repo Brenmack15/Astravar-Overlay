@@ -27,6 +27,11 @@ export async function handleOwnerApi(request,bridge,{ownerPrincipal=null,liveHp=
   if(method==='POST'&&path==='/v1/pairings/token') {
    const result=await bridge.pollPairing(await readBody(request)); return response(result.status==='PENDING'?202:200,result);
   }
+  if(method==='POST'&&['/v1/owner/combat-access/review','/v1/owner/combat-access/approve'].includes(path)) {
+   if(!ownerPrincipal||!campaignBridge) throw new BridgeError(401,'OWNER_AUTHENTICATION_REQUIRED');
+   if(origin!==url.origin) throw new BridgeError(403,'SAME_ORIGIN_REQUIRED');
+   return response(200,await campaignBridge.reviewCombatWrite(ownerPrincipal,await readBody(request),path.endsWith('/approve')));
+  }
   if(method==='POST'&&path==='/v1/owner/pairings/summary') {
    if(!ownerPrincipal) throw new BridgeError(401,'OWNER_AUTHENTICATION_REQUIRED');
    return response(200,await bridge.pairingSummary(ownerPrincipal,await readBody(request)));

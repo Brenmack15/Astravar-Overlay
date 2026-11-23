@@ -93,6 +93,9 @@ class CampaignConnectionClient internal constructor(private val context: Context
         applicationStorage = GenesisApplicationStorage.open(context.applicationContext)
     }
     private var applicationStorage: GenesisApplicationStorage? = null
+    private fun supportsNativeEditing(value: CampaignConnectionSettings) =
+        grant(value)["nativeEditingVersion"]?.jsonPrimitive?.intOrNull == 1 && supportsLoadout(value)
+
     private fun supportsMechanics(value: CampaignConnectionSettings) =
         grant(value)["playableMechanicsVersion"]?.jsonPrimitive?.intOrNull == 1 &&
             activeRead(value).containsAll(PlayableMechanicsSync.readScopes)
@@ -267,6 +270,21 @@ class CampaignConnectionClient internal constructor(private val context: Context
         try { syncUnlocked() } catch (e: CancellationException) { throw e } catch (e: Exception) { failure(e) }
         snapshotUnlocked()
     }
+    suspend fun startCombatWriteReview(): String = lock.withLock {
+        val value = setting()
+        credential(value)
+        val saved = checkedGrant(value, grant(value))
+        require(!value.revokePending && value.grantBody == null && "combat" in activeRead(value) && "combat" !in activeWrite(value))
+        val requested = scopes(value.requestedWriteJson) + "combat"
+        // Only the authenticated owner's browser can change the grant. Until then activeWrite still intersects the old server grant.
+        dao.settings(value.copy(requestedWriteJson = CampaignConnectionProtocol.scopeArray(requested).toString(),
+            localWriteJson = CampaignConnectionProtocol.scopeArray(activeWrite(value) + "combat").toString()))
+        val grantId = OwnerSyncProtocol.id(saved.getValue("grantId").jsonPrimitive.content)
+        val revision = saved.getValue("revision").jsonPrimitive.long
+        val campaign = OwnerSyncProtocol.id(value.campaignId)
+        "${value.origin}/owner#access=combat&campaign=$campaign&grant=$grantId&revision=$revision&command=${UUID.randomUUID()}"
+    }
+
     suspend fun setAutoSync(scopes: Set<String>): JsonObject = lock.withLock {
         CampaignConnectionProtocol.scopes(scopes)
         val value = setting(); credential(value); val g = checkedGrant(value, grant(value))
@@ -331,7 +349,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         val commands = dao.commands().filter { belongs(it, value) }
         var canonicalReviewProfileId: String? = null
         val current = try {
-            if (value.campaignId.isBlank()) emptyList() else { applicationStorage?.awaitReady(); domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value), loadout = supportsLoadout(value), actions = supportsActions(value), strikes = supportsStrikes(value), spellEditing = supportsSpellEditing(value)) }
+            if (value.campaignId.isBlank()) emptyList() else { applicationStorage?.awaitReady(); domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value), loadout = supportsLoadout(value), actions = supportsActions(value), strikes = supportsStrikes(value), spellEditing = supportsSpellEditing(value), nativeEditing = supportsNativeEditing(value)) }
         } catch (review: CampaignCanonicalReviewRequired) {
             // Display the explicit repair action without treating blocked projections
             // as deleted records. Publication still calls the strict domain snapshot.
@@ -407,11 +425,15 @@ class CampaignConnectionClient internal constructor(private val context: Context
             put("pairing", buildJsonObject { put("userCode", if (value.pairingExpiresAt > now()) value.userCode else ""); put("verificationUri", value.verificationUri); put("expiresAt", value.pairingExpiresAt) })
             put("pending", buildJsonArray { commands.filter { it.state in setOf("PENDING_APPROVAL", "PENDING_DELIVERY", "APPLYING", "APPLIED_PENDING", "REJECTED_PENDING", "CONFLICT_PENDING", "CONFLICT", "DECISION_CONFLICT") }.forEach { command ->
                 val data = Json.parseToJsonElement(command.body).jsonObject
+                val sourcePreview = if (connected && command.state in setOf("PENDING_APPROVAL","PENDING_DELIVERY") &&
+                    operations(command).any { it.type in NativeSourceSync.types }) previewNativeCommand(value,command) else null
                 add(buildJsonObject {
                     put("commandId", command.commandId); put("state", command.state); put("source", data.getValue("source")); put("message", command.message)
                     put("operations", buildJsonArray { data.getValue("operations").jsonArray.forEach { raw -> val op = raw.jsonObject
                         val existing = localById[op.getValue("kind").jsonPrimitive.content to op.getValue("recordId").jsonPrimitive.content]
-                        add(buildJsonObject { op.forEach { (k,v) -> put(k,v) }; put("current", existing?.fields ?: JsonNull); put("currentRevision", existing?.revision ?: 0) })
+                        add(buildJsonObject { op.forEach { (k,v) -> put(k,v) }
+                            sourcePreview?.let { put("nativePreview",it) }
+                            put("current", existing?.fields ?: JsonNull); put("currentRevision", existing?.revision ?: 0) })
                     } })
                 })
             } })
@@ -609,10 +631,17 @@ class CampaignConnectionClient internal constructor(private val context: Context
         require(data.getValue("grantRevision") == g.getValue("revision")) { "Campaign grant changed. Review this transaction again." }
         val ops = operations(command)
         val required = ops.flatMap {
-            if (it.kind == PlayableActionSync.KIND) {
+            if (it.type in NativeSourceSync.types) {
+                require(supportsNativeEditing(value))
+                NativeSourceSync.scopes(it)
+            } else if (it.kind == PlayableActionSync.KIND) {
                 require(supportsActions(value) && (it.type != PlayableActionSync.STRIKE || supportsStrikes(value)))
+                require(it.type !in PlayableActionSync.nativeTypes || supportsNativeEditing(value))
                 require(it.type != PlayableActionSync.DEFINE_SPELL || supportsSpellEditing(value))
                 PlayableActionSync.writeScopes(it)
+            } else if (it.type == NativeCraftSync.TYPE) {
+                require(supportsNativeEditing(value))
+                NativeCraftSync.scopes(it)
             } else if (it.kind == PlayableMechanicsSync.EQUIPMENT) {
                 require(supportsMechanics(value))
                 buildSet {
@@ -630,7 +659,8 @@ class CampaignConnectionClient internal constructor(private val context: Context
     }
     private fun authorized(value: CampaignConnectionSettings, command: CampaignConnectionCommand): Boolean = runCatching {
         val required = validateAuthorization(value, command); val g = grant(value)
-        value.grantBody == null && required.all(CampaignConnectionProtocol.parseScopes(g.getValue("autoSyncScopes"))::contains) && required.all(scopes(value.localAutoSyncJson)::contains)
+        operations(command).none { it.type in NativeSourceSync.types && NativeSourceSync.manual(it) } &&
+            value.grantBody == null && required.all(CampaignConnectionProtocol.parseScopes(g.getValue("autoSyncScopes"))::contains) && required.all(scopes(value.localAutoSyncJson)::contains)
     }.getOrDefault(false)
     private suspend fun ingest(value: CampaignConnectionSettings, data: JsonObject) {
         val id = CampaignConnectionProtocol.commandId(data.getValue("commandId").jsonPrimitive.content)
@@ -676,7 +706,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         return records
     }
     private suspend fun verifyBaseline(value: CampaignConnectionSettings, command: CampaignConnectionCommand) {
-        val local = visible(value, domain.snapshot(value.campaignId, includeReadOnly = false, mechanics = supportsMechanics(value), actions = supportsActions(value), strikes = supportsStrikes(value), spellEditing = supportsSpellEditing(value))).associateBy { it.kind to it.recordId }
+        val local = visible(value, domain.snapshot(value.campaignId, includeReadOnly = false, mechanics = supportsMechanics(value), actions = supportsActions(value), strikes = supportsStrikes(value), spellEditing = supportsSpellEditing(value), nativeEditing = supportsNativeEditing(value))).associateBy { it.kind to it.recordId }
         for (raw in parsed(command).getValue("operations").jsonArray) {
             val operation = raw.jsonObject
             val kind = operation.getValue("kind").jsonPrimitive.content
@@ -693,6 +723,37 @@ class CampaignConnectionClient internal constructor(private val context: Context
                     (old?.fields ?: JsonNull) == side.getValue("currentFields")) { "Affected local record differs from its baseline." }
             }
         }
+    }
+    private class PreviewRollback(val result: JsonObject) : RuntimeException()
+
+    /** Run the same guarded mutation inside a transaction that always rolls back, including audits. */
+    private suspend fun previewNativeCommand(value: CampaignConnectionSettings, command: CampaignConnectionCommand): JsonObject {
+        return try {
+            validateAuthorization(value,command)
+            campaignDb.withTransaction {
+                verifyBaseline(value,command)
+                val ops = operations(command)
+                val receipt = domain.apply(value.campaignId, CampaignConnectionProtocol.localCommand(value.origin,value.campaignId,command.commandId),
+                    parsed(command).getValue("source").jsonPrimitive.content,ops)
+                verifyProposedOutcome(value,command,visible(value,verifiedLocalOutcome(value,command,receipt)))
+                val actors = ops.filter { it.type in NativeSourceSync.types }.map { NativeSourceSync.parse(it).actorId }.distinct()
+                val results = buildJsonObject {
+                    put("valid",true)
+                    for (id in actors) {
+                        val c = requireNotNull(ReforgeRepository(campaignDb).get(id)).character
+                        val stats = com.yazsras.astravar.rules.reforge.CharacterCalculator.calculate(c)
+                        put(id,buildJsonObject {
+                            put("actor",c.name); put("revision",c.revision)
+                            put("armorClass",JsonPrimitive(stats.armorClass.value)); put("maximumHp",JsonPrimitive(stats.maximumHp.value))
+                            put("currentHp",JsonPrimitive(stats.currentHp)); put("itemCount",c.items.size)
+                        })
+                    }
+                }
+                throw PreviewRollback(results)
+            }
+        } catch (rollback: PreviewRollback) { rollback.result }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { buildJsonObject { put("valid",false); put("conflict",e.message ?: "Cannot apply against the current campaign") } }
     }
     private fun comparableFields(fields: JsonObject): JsonObject = buildJsonObject {
         fields.filterKeys { it !in setOf("source", "updatedAt", "createdAt") }.forEach { (key,value) ->
@@ -738,7 +799,12 @@ class CampaignConnectionClient internal constructor(private val context: Context
         }
         val receipt = try {
             applicationStorage?.awaitReady()
+            val needsBackup = existing == null && operations(command).any { it.type in NativeSourceSync.types && NativeSourceSync.manual(it) }
+            val backup = if (needsBackup) saveNativeReviewBackup(context, campaignDb) else null
             existing ?: campaignDb.withTransaction {
+                if (backup != null) check(genesisAuthorityBackupFingerprint(GenesisAuthorityBackupRepository(campaignDb).snapshot()) == backup) {
+                    "Campaign changed after the recovery copy was verified."
+                }
                 requireAutomaticAllowed()
                 verifyBaseline(value, command)
                 val candidate = domain.apply(value.campaignId, localId, parsed(command).getValue("source").jsonPrimitive.content, operations(command))
@@ -813,7 +879,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         for (publication in dao.publications().filter { it.origin == value.origin && it.campaignId == value.campaignId && it.deviceId == value.deviceId && it.state == "PENDING" }) flushPublication(value, publication)
         val mirrors = dao.mirrors(value.origin, value.campaignId, value.deviceId).associateBy { it.kind to it.recordId }
         syncDiagnostics.stage(value, CampaignSyncStage.LOCAL_SNAPSHOT)
-        val committed = visible(value, domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value), loadout = supportsLoadout(value), actions = supportsActions(value), strikes = supportsStrikes(value), spellEditing = supportsSpellEditing(value)))
+        val committed = visible(value, domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value), loadout = supportsLoadout(value), actions = supportsActions(value), strikes = supportsStrikes(value), spellEditing = supportsSpellEditing(value), nativeEditing = supportsNativeEditing(value)))
         val identities = committed.map { it.kind to it.recordId }.toSet()
         val readScopes = activeRead(value)
         val removed = mirrors.values.filter { (it.kind to it.recordId) !in identities && canReadKind(it.kind, it.recordId, readScopes) }
@@ -853,7 +919,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
             val publication = CampaignConnectionPublication(id, value.origin, value.campaignId, value.deviceId, body)
             dao.insert(publication); flushPublication(value, publication)
         }
-        val current = visible(value, domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value), loadout = supportsLoadout(value), actions = supportsActions(value), strikes = supportsStrikes(value), spellEditing = supportsSpellEditing(value)))
+        val current = visible(value, domain.snapshot(value.campaignId, mechanics = supportsMechanics(value), spellbook = supportsSpellbook(value), loadout = supportsLoadout(value), actions = supportsActions(value), strikes = supportsStrikes(value), spellEditing = supportsSpellEditing(value), nativeEditing = supportsNativeEditing(value)))
         // The backend refreshes the whole mirror only when every current local identity/revision/hash agrees.
         // A restore or missing row therefore becomes a visible conflict, never a falsely fresh historical value.
         syncDiagnostics.stage(value, CampaignSyncStage.SNAPSHOT_CONFIRMATION)

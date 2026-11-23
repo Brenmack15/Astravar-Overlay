@@ -31,7 +31,7 @@ object GameplayRules {
             require(definition.minimumAbilities.all { (stat,min)->(abilities[stat]?.effective?.value ?: -1)>=min }) { "An ability requirement is unmet or unknown." }
             require(definition.equipmentSlot==null || character.items.none { other->other.id!=itemId && other.state in setOf(ItemState.WORN,ItemState.HELD) && character.itemDefinitions.find { it.id==other.definitionId }?.equipmentSlot==definition.equipmentSlot }) { "That equipment slot is occupied. Unequip its item first." }
         }
-        return preserveCapacities(character,character.copy(items=character.items.map { if(it.id==itemId) it.copy(state=state) else it }))
+        return preserveCapacities(character,character.copy(items=character.items.map { if(it.id==itemId) it.copy(state=state, formKnown=it.formKnown || state != ItemState.WORN, formId=it.formId.takeIf { state == ItemState.WORN }, modesUntil=if(state in setOf(ItemState.WORN,ItemState.HELD)) it.modesUntil else emptyMap()) else it }))
     }
     fun attune(character:ReforgeCharacter,itemId:String,attuned:Boolean):ReforgeCharacter {
         CharacterCalculator.validate(character)
@@ -44,7 +44,18 @@ object GameplayRules {
             val used=character.items.filter { it.id!=itemId && it.attuned }.sumOf { i->character.itemDefinitions.find { it.id==i.definitionId }?.attunementCost ?: character.attunementLimit+1 }
             require(used+definition.attunementCost<=character.attunementLimit) { "Attunement capacity would be exceeded." }
         }
-        return preserveCapacities(character,character.copy(items=character.items.map { if(it.id==itemId) it.copy(attuned=attuned) else it }))
+        return preserveCapacities(character,character.copy(items=character.items.map { if(it.id==itemId) it.copy(attuned=attuned, formKnown=it.formKnown || (definition.requiresAttunement && !attuned), formId=it.formId.takeUnless { definition.requiresAttunement && !attuned }, modesUntil=if(definition.requiresAttunement && !attuned) emptyMap() else it.modesUntil) else it }))
+    }
+
+    fun changeWearableForm(character: ReforgeCharacter, itemId: String, formId: String?): ReforgeCharacter {
+        val item = character.items.single { it.id == itemId }
+        val definition = character.itemDefinitions.single { it.id == item.definitionId }
+        require(item.state == ItemState.WORN && item.operating && (!definition.requiresAttunement || item.attuned))
+        require(definition.forms.isNotEmpty() && (formId == null || definition.forms.any { it.id == formId && (it.wearerId == null || it.wearerId == character.id) }))
+        require((!item.formKnown || item.formId != formId) && character.items.none { it.id != itemId && (it.formId != null || !it.formKnown) })
+        val turn = spendAction(character,"Action")
+        return character.copy(items = character.items.map { if (it.id == itemId) it.copy(formId = formId, formKnown = true) else it },
+            turn = turn).also(CharacterCalculator::validate)
     }
 
     /** Preserve outstanding damage rather than treating a capacity change as healing or a rest. */
@@ -194,7 +205,11 @@ object GameplayRules {
                 pool.copy(current=current)
             }
         }
-        val next=character.copy(resources=recovered,
+        val next=character.copy(resources=recovered,items=character.items.map { item -> item.copy(pools=item.pools.map { pool ->
+            val maximum=pool.maximum
+            if (!eligible(pool.recharge) || maximum==null || (pool.current==null && !pool.restoreUnknownOnRest)) pool
+            else pool.copy(current=pool.recoveryAmount?.let { n -> pool.current?.let { minOf(maximum,it+n) } } ?: maximum)
+        }) },
             spellSlots=if(kind==Recharge.LONG_REST) character.spellSlots.mapValues { (level,current)->if(current==null) null else projection.slotMaxima[level] ?: current } else character.spellSlots,
             effects=character.effects.map { if(eligible(it.expiresOn)) it.copy(enabled=false) else it },
             itemDefinitions=character.itemDefinitions.map { it.copy(effects=it.effects.map { effect->if(eligible(effect.expiresOn)) effect.copy(enabled=false) else effect }) },
@@ -207,6 +222,58 @@ object GameplayRules {
         return if(kind==Recharge.LONG_REST && preserved.currentHp!=null && maximum!=null)
             preserved.copy(currentHp=maximum,hpDamage=0) else preserved
     }
+    fun activateItem(character: ReforgeCharacter, itemId: String, activationId: String, rolledTemporaryHp: Int?): ReforgeCharacter {
+        val item = character.items.single { it.id == itemId }
+        val definition = character.itemDefinitions.single { it.id == item.definitionId }
+        require(item.operating && item.quantity == 1 && item.state in setOf(ItemState.WORN,ItemState.HELD))
+        require(character.items.none { itemId in it.donorInstanceIds } && (!definition.requiresAttunement || item.attuned))
+        val action = definition.activations.single { it.id == activationId }
+        val turn = spendAction(character,action.actionType)
+        val pools = item.pools.map { pool ->
+            val cost = action.costs[pool.id]
+            if (cost == null) pool else {
+                val remaining = requireNotNull(pool.current) { "Current charges are unknown." }
+                require(remaining >= cost) { "Insufficient charges." }
+                pool.copy(current=remaining-cost)
+            }
+        }
+        require(action.ends.isEmpty() || action.ends.any { (item.modesUntil[it] ?: 0) > character.gameSeconds })
+        val modes = (item.modesUntil - action.ends) + action.durations.mapValues { Math.addExact(character.gameSeconds,it.value.toLong()) }
+        val temporary = action.temporaryHp?.let { formula ->
+            val rolled = requireNotNull(rolledTemporaryHp) { "Supply the player's actual temporary HP roll." }
+            require(rolled in (formula.flat+formula.dice.sumOf { it.count })..(formula.flat+formula.dice.sumOf { it.count*it.sides }))
+            maxOf(requireNotNull(character.temporaryHp) { "Current temporary HP is unknown." },rolled)
+        } ?: character.temporaryHp
+        require(action.temporaryHp != null || rolledTemporaryHp == null)
+        return character.copy(turn=turn,temporaryHp=temporary,items=character.items.map {
+            if (it.id==itemId) it.copy(pools=pools,modesUntil=modes) else it
+        }).also(CharacterCalculator::validate)
+    }
+
+    /** A recorded recharge check belongs to the actor's tracked turn, including a failed roll. */
+    fun resolveRecharge(character: ReforgeCharacter, poolId: String, face: Int): ReforgeCharacter {
+        val pool = character.resources.single { it.id == poolId }
+        val die = requireNotNull(pool.rechargeRoll)
+        require(character.turn.tracking && pool.current == 0 && face in 1..die.sides)
+        val key = "recharge:$poolId"
+        require(character.usedEffectTurns[key] != character.turnNumber) { "Recharge already checked this turn." }
+        return character.copy(usedEffectTurns = character.usedEffectTurns + (key to character.turnNumber),
+            resources = character.resources.map {
+                if (it.id == poolId && face >= die.minimum) it.copy(current = 1) else it
+            })
+    }
+
+    fun useFeature(character: ReforgeCharacter, featureId: String): ReforgeCharacter {
+        val feature = character.features.single { it.id == featureId }
+        val pool = feature.resourceId?.let { id -> character.resources.single { it.id == id } }
+        if (pool != null) require((pool.current ?: 0) > 0) { "Feature uses are unknown or exhausted." }
+        require(feature.actionType.lowercase() in setOf("action","bonus action","reaction","free"))
+        checkAction(character,feature.actionType)
+        return character.copy(turn = spendAction(character,feature.actionType), resources = character.resources.map {
+            if (pool != null && it.id == pool.id) it.copy(current = requireNotNull(it.current) - 1) else it
+        })
+    }
+
     internal fun checkAction(character:ReforgeCharacter,label:String) {
         if(!character.turn.tracking) return
         val lower=label.lowercase()

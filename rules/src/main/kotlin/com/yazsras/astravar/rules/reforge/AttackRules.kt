@@ -32,6 +32,7 @@ object AttackRules {
         val toHit=CharacterCalculator.number(attack.fixedAttackBonus ?: ability?.plus(attack.attackBonus+if(attack.proficient) projection.proficiencyBonus else 0),NumericTarget.ATTACK,attackId,attackEffects,if(attack.fixedAttackBonus!=null) "Reviewed independent attack bonus" else "${attack.ability.name} modifier + attack proficiency")
         val bonusEffects=all.filter { a->(a.effect.payload as? EffectPayload.DamageBonus)?.let { qualifies(attack,it.qualifier) }==true }
         val conversionEffects=all.filter { a->(a.effect.payload as? EffectPayload.DamageConversion)?.let { qualifies(attack,it.qualifier) }==true }
+        val magicEffects=all.filter { a -> (a.effect.payload as? EffectPayload.MagicalAttack)?.let { qualifies(attack,it.qualifier) } == true }
         val conversions=conversionEffects.map { it.effect.payload as EffectPayload.DamageConversion }
         val damageNumberEffects=all.filter { a->(a.effect.payload as? EffectPayload.Number)?.let { it.target==NumericTarget.DAMAGE && (it.key.isBlank() || it.key==attackId) }==true }
         var components=attack.damage+bonusEffects.map { (it.effect.payload as EffectPayload.DamageBonus).component.copy(id="effect:${it.effect.id}:${(it.effect.payload as EffectPayload.DamageBonus).component.id}") }
@@ -44,11 +45,11 @@ object AttackRules {
                 val flat=if(index==0) Math.addExact(Math.addExact(component.formula.flat,flatBonus),if(attack.addAbilityToDamage) ability!! else 0) else component.formula.flat
                 var type=component.type
                 conversions.forEach { if(type==it.from) type=it.to }
-                component.copy(type=type,formula=component.formula.copy(flat=flat).let { if(critical && component.criticalDice) SecureDice.critical(it) else it })
+                component.copy(type=type,magical=component.magical || magicEffects.isNotEmpty(),formula=component.formula.copy(flat=flat).let { if(critical && component.criticalDice) SecureDice.critical(it) else it })
             }
         }
         components.forEach { SecureDice.validate(it.formula) }
-        val hitEffects=bonusEffects+conversionEffects+damageNumberEffects
+        val hitEffects=bonusEffects+conversionEffects+damageNumberEffects+magicEffects
         val chargeEffects=hitEffects.filter { it.effect.chargeResourceId!=null && it.effect.chargeCost>0 }
         val costs=chargeEffects.groupBy { it.effect.chargeResourceId!! }.mapValues { (_,effects)->effects.fold(0) { sum,effect->Math.addExact(sum,effect.effect.chargeCost) } }
         val attemptEffects=attackEffects.filter { a->(a.effect.payload as? EffectPayload.Number)?.let { it.target==NumericTarget.ATTACK && (it.key.isBlank() || it.key==attackId) }==true }

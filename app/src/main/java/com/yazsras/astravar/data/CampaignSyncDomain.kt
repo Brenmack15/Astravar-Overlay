@@ -62,7 +62,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
 
     /** Membership is explicit: imported source IDs and current placements, never a blanket campaign reassignment. */
     suspend fun snapshot(campaignId: String, includeReadOnly: Boolean = true, mechanics: Boolean = false,
-        spellbook: Boolean = false, loadout: Boolean = false, actions: Boolean = false, strikes: Boolean = false, spellEditing: Boolean = false): List<CampaignSyncRecord> = db.withTransaction {
+        spellbook: Boolean = false, loadout: Boolean = false, actions: Boolean = false, strikes: Boolean = false, spellEditing: Boolean = false, nativeEditing: Boolean = false): List<CampaignSyncRecord> = db.withTransaction {
         OwnerSyncProtocol.id(campaignId)
         val local = campaignId == "local-campaign"
         val diagnostics = setOf(OwnerConnectionProtocol.PROFILE, RemoteStatProtocol.PROFILE_ID)
@@ -91,6 +91,9 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             if (genesisReadbackProjectionErrors(db, actor.actorId, saved).isNotEmpty())
                 throw CampaignCanonicalReviewRequired(actor.actorId)
             val character = saved.character
+            if (nativeEditing && loadout && includeReadOnly && !character.archived && actor.role != GenesisActorRole.NPC)
+                playableRecords += playableReadEnvelope(PlayableLoadoutProjection.KIND, "loadout", character, actor.role,
+                    "NATIVE_EDITING", "", buildJsonObject { put("version", 1) })
             if (spellEditing && actions && includeReadOnly && !character.archived && actor.role != GenesisActorRole.NPC)
                 playableRecords += playableReadEnvelope(PlayableLoadoutProjection.KIND, "loadout", character, actor.role,
                     "SPELL_EDITING", "", buildJsonObject { put("version", 1) })
@@ -250,6 +253,26 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         val parentId = receiptId(commandId)
         db.recordsDao().receipt(parentId)?.let { require(it.fingerprint == fingerprint) { "Command ID collision." }; return@withTransaction it }
         genesisRejectAuthorityCommandReuse(db, parentId)
+        val sourced = operations.filter { it.type in NativeSourceSync.types }
+        if (sourced.isNotEmpty()) {
+            require(operations.all { it.type in NativeSourceSync.types || it.type in setOf("adjust_currency","save_checkpoint") })
+            for (op in sourced) {
+                val request = NativeSourceSync.parse(op)
+                val anchor = db.genesisAuthorityDao().actor(request.anchorId)
+                require(anchor != null && anchor.playable && anchor.campaignId == campaignId)
+                val current = requireNotNull(ReforgeRepository(db).get(request.anchorId))
+                check(!current.character.archived && current.revision == request.anchorRevision) { "Source review anchor changed." }
+            }
+        }
+        val evidenceSource = if (sourced.isEmpty()) source else buildString {
+            append(source)
+            for (op in sourced) {
+                val ref = NativeSourceSync.parse(op).evidence
+                append(" · ").append(ref.namespace).append('/').append(ref.externalId).append('@').append(ref.revision)
+            }
+        }.also { require(it.length <= 2000) { "Split source batch to retain every attribution." } }
+        val craft = operations.singleOrNull()?.type == NativeCraftSync.TYPE
+        require(craft || operations.none { it.type == NativeCraftSync.TYPE })
         val action = operations.any { it.kind == PlayableActionSync.KIND || it.type in PlayableActionSync.types }
         if (action) require(operations.size == 1 && operations.single().kind == PlayableActionSync.KIND &&
             operations.single().type in PlayableActionSync.types) { "Resolve one action for one playable actor." }
@@ -275,7 +298,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             val current = before[key(operation.kind,operation.recordId)]
             check((current?.revision ?: 0) == operation.expectedRevision) { "Record changed or is outside selected campaign." }
             require(current != null || operation.expectedRevision == 0L)
-            require(current != null || operation.type in setOf("set_record", "save_checkpoint", "acquire_item")) { "Existing record required." }
+            require(current != null || operation.type in NativeSourceSync.types || operation.type in setOf("set_record", "save_checkpoint", "acquire_item")) { "Existing record required." }
             if (campaignId != "local-campaign" && current == null && operation.kind in setOf("character-ability", "party-sheet", "wallet")) {
                 val parentProfileId = if (operation.kind == "wallet") operation.fields.optional("holderProfileId") else operation.fields.optional("profileId")
                     ?: if (operation.kind == "party-sheet") operation.recordId else operation.recordId.substringBeforeLast(':', "").takeIf { it.isNotBlank() }
@@ -320,7 +343,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
                 }
                 require(scopedParent) {"New record has no scoped parent in this campaign."}
             }
-            applyOne(campaignId, operation, current, source, childIds[index])
+            applyOne(campaignId, operation, current, evidenceSource, childIds[index])
             if (current==null) {
                 created += key(operation.kind,operation.recordId)
                 if (campaignId!="local-campaign" && operation.kind in setOf("item","project","connection")) {
@@ -339,6 +362,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         // Reforge commits and audits derived projections in this transaction; sync publishes them independently.
         val differences = after.filter { before[key(it.kind,it.recordId)] != it && it.kind !in setOf("audit", "configuration", "roll-history") }
         val changed = when {
+            craft || sourced.isNotEmpty() -> operations.map { op -> after.single { it.kind == op.kind && it.recordId == op.recordId } }
             action -> after.filter { it.kind == PlayableActionSync.KIND && it.recordId == operations.single().recordId }
             native -> after.filter { it.kind == PlayableMechanicsSync.EQUIPMENT && it.recordId == operations.single().recordId }
             managedMove != null -> {
@@ -352,7 +376,7 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         val now = System.currentTimeMillis()
         val receipt = CommandReceipt(parentId, fingerprint, "CAMPAIGN_SYNC_V2", campaignId,
             1, now, outcomeJson = campaignJson.encodeToString(changed))
-        db.recordsDao().insert(CampaignAudit(parentId, parentId, "campaign-transaction", campaignId, "TRUSTED_DM_TRANSACTION", source,
+        db.recordsDao().insert(CampaignAudit(parentId, parentId, "campaign-transaction", campaignId, "TRUSTED_DM_TRANSACTION", evidenceSource,
             0, receipt.resultingRevision, now, campaignJson.encodeToString(operations.mapNotNull { before[key(it.kind,it.recordId)] }), receipt.outcomeJson))
         db.recordsDao().insert(receipt)
         receipt
@@ -381,6 +405,8 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         val f = op.fields
         val expected = expected(op.expectedRevision)
         when (op.type) {
+            NativeCraftSync.TYPE -> NativeCraftSync.apply(db,campaignId,op,source,child)
+            in NativeSourceSync.types -> NativeSourceSync.apply(db, campaignId, op, child, source)
             in PlayableActionSync.types -> PlayableActionSync.apply(db, campaignId, op, child, source)
             PlayableMechanicsSync.DEFENSE, PlayableMechanicsSync.STATE, PlayableMechanicsSync.BONUS -> PlayableMechanicsSync.edit(db, campaignId, op, child, source)
             "acquire_item" -> {

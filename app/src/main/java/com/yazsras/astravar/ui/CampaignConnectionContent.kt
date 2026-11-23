@@ -27,9 +27,9 @@ internal val campaignScopeLabels = linkedMapOf(
     "companions" to "Companion records and resources",
     "engineering" to "Inventions, research and crafting",
     "continuity" to "History, relationships and checkpoints",
-    "combat" to "Astravar configuration and roll history"
+    "combat" to "Combat mechanics and roll history"
 )
-private val writableCampaignCategories = campaignScopeLabels.keys - "combat"
+private val writableCampaignCategories = campaignScopeLabels.keys
 data class CampaignConnectionProfileView(val id: String, val name: String, val campaignId: String)
 data class CampaignOperationView(val type: String, val recordId: String, val expectedRevision: Long?,
     val currentRevision: Long?, val current: List<Pair<String, String>>, val proposed: List<Pair<String, String>>,
@@ -78,7 +78,7 @@ private fun connectionTime(value: Long?) = value?.let {
     onRestrictPermissions: (Set<String>, Set<String>) -> Unit = { _, _ -> },
     onPauseSync: (Boolean) -> Unit = {}, onSyncNotification: (Boolean) -> Unit = {},
     onPushy: (Boolean) -> Unit = {}, onPrepareCampaign: () -> Unit = {},
-    onReviewMembership: () -> Unit = {}
+    onReviewMembership: () -> Unit = {}, onReviewCombatAccess: () -> Unit = {}
 ) {
     var origin by rememberSaveable(view.origin) { mutableStateOf(view.origin) }
     var deviceName by rememberSaveable(view.deviceName) { mutableStateOf(view.deviceName) }
@@ -250,6 +250,12 @@ private fun connectionTime(value: Long?) = value?.let {
         if (view.connected) {
             PlayerCard {
                 Text("Available record access", style = MaterialTheme.typography.titleMedium)
+                if ("combat" in view.readScopes && "combat" !in view.writeScopes) {
+                    Text("Allow reviewed attacks, defenses and resolved combat actions for this campaign. Roll history stays read-only. The owner must confirm the change on the private service.",
+                        style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
+                    PlayerOutlinedButton(onClick = onReviewCombatAccess, enabled = !view.busy && !view.authorizationPending,
+                        modifier = Modifier.fillMaxWidth()) { Text("Review combat update permission") }
+                }
                 if (view.readScopes.isEmpty()) Text("All record access is revoked. Pair again with owner approval to grant new access.", color = RebuildPalette.Muted)
                 campaignScopeLabels.forEach { (key, label) -> if (key in view.readScopes || key in view.writeScopes) {
                     Text("$label · ${if (key in view.writeScopes && key in writableCampaignCategories) "read and update" else "read only"}", color = RebuildPalette.Muted,
@@ -302,7 +308,7 @@ private fun connectionTime(value: Long?) = value?.let {
                         }
                     } }
                 }
-                if (!hasWritableCategories) Text("This connection has read access only. Pair again to request supported update permissions. Combat configuration and roll history are read only.", color = RebuildPalette.Muted)
+                if (!hasWritableCategories) Text("This connection has read access only. Review additional access before enabling automatic saves. Roll history stays read-only.", color = RebuildPalette.Muted)
                 PlayerButton(onClick = { onAutoSync(if (trusted) automatic.intersect(view.writeScopes).intersect(writableCampaignCategories) else emptySet()) },
                     enabled = hasWritableCategories && !view.busy && !view.authorizationPending && (!trusted || automatic.intersect(view.writeScopes).intersect(writableCampaignCategories).isNotEmpty()) &&
                         (if (trusted) automatic.intersect(view.writeScopes).intersect(writableCampaignCategories) else emptySet()) != view.autoSyncScopes,
@@ -390,6 +396,18 @@ private fun displayFields(value: JsonElement?): List<Pair<String, String>> = (va
     key to when (field) { is JsonNull -> "Unknown"; is JsonPrimitive -> field.content; else -> field.toString() }
 }.orEmpty()
 
+private fun nativeSourceReview(fields: JsonElement?): List<Pair<String, String>> = buildList {
+    fun show(label: String, value: JsonElement) {
+        when (value) {
+            is JsonObject -> value.forEach { (key, child) -> show(if (label.isEmpty()) key else "$label · $key", child) }
+            is JsonArray -> if (value.isEmpty()) add(label to "None") else value.forEachIndexed { index, child -> show("$label ${index + 1}", child) }
+            JsonNull -> add(label to "Unknown")
+            is JsonPrimitive -> add(label to value.content)
+        }
+    }
+    if (fields is JsonObject) show("", fields)
+}
+
 /** Whitelisted connection metadata and typed transaction previews only. */
 internal fun campaignConnectionView(snapshot: JsonObject, now: Long = System.currentTimeMillis()): CampaignConnectionView {
     val grant = snapshot["grant"] as? JsonObject ?: buildJsonObject {}
@@ -443,8 +461,9 @@ internal fun campaignConnectionView(snapshot: JsonObject, now: Long = System.cur
         pushEnabled = (snapshot["pushEnabled"] as? JsonPrimitive)?.booleanOrNull == true,
         pending = snapshot.connectionRows("pending").map { row -> CampaignPendingView(row.connectionText("commandId"), row.connectionText("state"), row.connectionText("source"), row.connectionText("message"),
             row.connectionRows("operations").map { op -> CampaignOperationView(op.connectionText("type"), op.connectionText("recordId"), op.connectionLong("expectedRevision"),
-                op.connectionLong("currentRevision"), displayFields(op["current"] ?: op["currentFields"]), displayFields(op["proposedFields"] ?: op["fields"]),
-                op["proposedFields"] is JsonObject) }, row.connectionText("commandId") in terminalCommands) },
+                op.connectionLong("currentRevision"), displayFields(op["current"] ?: op["currentFields"]), if (op.connectionText("type") in setOf("define_native_item", "define_native_actor")) (nativeSourceReview(op["fields"]) + nativeSourceReview(op["nativePreview"])) else displayFields(op["proposedFields"] ?: op["fields"]),
+                op["proposedFields"] is JsonObject && (op.connectionText("type") !in setOf("define_native_actor","define_native_item") ||
+                    (op["nativePreview"] as? JsonObject)?.get("valid") == JsonPrimitive(true))) }, row.connectionText("commandId") in terminalCommands) },
         receipts = snapshot.connectionRows("history").map { row -> CampaignReceiptView(row.connectionText("commandId"), row.connectionText("state"), row.connectionText("message"),
             row["receiptJson"] != null && row["receiptJson"] !is JsonNull && row.connectionText("state") in setOf("COMMITTED", "VERIFIED", "REJECTED", "CONFLICT")) }
     )

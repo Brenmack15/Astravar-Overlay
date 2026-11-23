@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.rules.reforge.*
+import kotlinx.serialization.json.*
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
 import org.junit.After
@@ -76,6 +77,28 @@ class GenesisCraftingTest {
         assertEquals(before, authority.backup.snapshot())
         return requireNotNull(error)
     }
+    @Test fun remoteCraftValidatesEveryRevisionAndCommitsOnce() = runBlocking {
+        val id = authority.createCampaign("Remote workshop",commandId="make-workshop").id
+        authority.createActor("Maker",GenesisActorRole.PLAYER,id,
+            playable=ReforgeCharacter(firstId,"Maker"),commandId="make-actor")
+        val maker = gear(firstId,firstMaterial,3)
+        campaign.records.saveInCampaign(id,"project",projectId,null,source,"make-project") {
+            campaign.records.saveProject(InventionProject("Fixture",status="Construction",id=projectId),source=source,commandId="make-project")
+        }
+        val rev = requireNotNull(db.ledgerDao().getItem(firstMaterial)).revision
+        val command = NativeCraftSync.Request(1,firstId,listOf(MaterialConsumption(firstMaterial,rev,2)),
+            mapOf(firstId to maker.revision),emptySet(),"Calibrated fixture","Tool",1)
+        fun op(f:NativeCraftSync.Request) = CampaignSyncOperation(NativeCraftSync.TYPE,projectId,"project",1,
+            campaignJson.encodeToJsonElement(f).jsonObject)
+        val domain = CampaignSyncDomain(db)
+        rejectUnchanged { domain.apply(id,"remote-stale",source,listOf(op(command.copy(actorRevisions=mapOf(firstId to maker.revision+1))))) }
+        val receipt = domain.apply(id,"remote-craft",source,listOf(op(command)))
+        assertEquals(receipt,domain.apply(id,"remote-craft",source,listOf(op(command))))
+        assertEquals(1,db.ledgerDao().getItem(firstMaterial)?.quantity)
+        assertEquals(1,db.ledgerDao().allItems().count { it.title=="Calibrated fixture" })
+        assertEquals("Completed",db.recordsDao().project(projectId)?.status)
+    }
+
     @Test fun campaignBoundProjectAndPhysicalDonorsMustAgreeThroughFinalAcceptance() = runBlocking {
         val alpha = authority.createCampaign("North workshop", commandId = "north-campaign").id
         val beta = authority.createCampaign("South workshop", commandId = "south-campaign").id

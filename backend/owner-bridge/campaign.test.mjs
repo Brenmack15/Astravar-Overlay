@@ -574,3 +574,60 @@ test('owner sees the reported APK only after that grant verifies a complete snap
  // Replaying a historic tagged heartbeat cannot replace a newer untagged confirmation.
  await f.sync.publish(f.principal,campaign,heartbeat);assert.equal((await connection()).deviceBuild,null);
 });
+
+test('source-native batches require device capability and grant; historical imports stay in manual review', async t => {
+ const f=await setup(t);
+ const subject='NATIVE_EDITING', data={version:1};
+ const key='loadout-'+await sha256([profile,subject,''].join('\u0000'));
+ const cap={kind:'playable-loadout',recordId:key,revision:1,fields:{id:key,profileId:profile,actorRole:'PLAYER',
+  subject,part:'header',parts:0,data,contentSha256:await sha256(canonical(data)),contentBytes:Buffer.byteLength(canonical(data)),
+  schemaVersion:1,revision:1,source:'Android Reforge v1'}};
+ const fields={version:1,mode:'CREATE',purpose:'GAMEPLAY',anchorId:profile,anchorRevision:1,actorId:profile,
+  actorRole:'PLAYER',actorRevision:1,evidence:{namespace:'fixture',externalId:'order-1',url:'https://example.invalid/order-1',revision:'1'},
+  definition:{id:'travel-cloak',name:'Travel cloak',requiresAttunement:true,effects:['ARMOR_CLASS','SAVE'].map(target=>({
+   id:'cloak-'+target,name:target,source:{id:'fixture',name:'Fixture',acceptance:'OFFICIAL'},
+   payload:{type:'com.yazsras.astravar.rules.reforge.EffectPayload.Number',target,operation:'ADD',amount:1},
+   conditions:[{kind:'WORN'},{kind:'ATTUNED'}]}))},instance:{id:'owned-cloak',definitionId:'travel-cloak'}};
+ const item=op('define_native_item','reference','fixture-source-1',fields,0);
+ await fails(f.submit([item]),'DEVICE_NATIVE_EDITING_UNAVAILABLE');
+ await f.publish([cap,walletRecord()]);
+ await fails(f.submit([{...item,fields:{...fields,anchorRevision:2}}]),'DEVICE_NATIVE_EDITING_UNAVAILABLE');
+ await f.enable(['character','inventory','continuity','currency']);
+ const purchase=await f.submit([item,op('adjust_currency','wallet','fixture-wallet',{goldDelta:-4})]);
+ assert.equal(purchase.command.status,'PENDING_DELIVERY');
+ assert.equal(purchase.command.operations[0].proposedFields.recordId,'owned-cloak');
+ const historical=await f.submit([{...item,fields:{...fields,purpose:'MIGRATION'}}]);
+ assert.equal(historical.command.status,'PENDING_APPROVAL');
+ const limited=await setup(t,{writeScopes:['continuity','character']});await limited.publish([cap]);
+ await fails(limited.submit([item]),'WRITE_SCOPE_DENIED');
+ await fails(f.submit([{...item,fields:{...fields,instance:{...fields.instance,ownerId:'other'}}}]),'INVALID_NATIVE_SOURCE');
+});
+
+test('owner browser adds combat write to the same grant without changing receipts, queued work or automatic permissions',async t=>{
+ const f=await setup(t,{writeScopes:['hp']});
+ const prior=(await f.enable(['hp'])).grant;
+ const body={campaignId:campaign,grantId:prior.grantId,expectedRevision:prior.revision,commandId:uuid()};
+ const origin='https://owner.example';
+ const call=(action,headers={})=>handleWorker(new Request(origin+'/v1/owner/combat-access/'+action,{method:'POST',headers:{'Content-Type':'application/json',Origin:origin,...headers},body:JSON.stringify(body)}),{OWNER_SITE_USER_ID:ownerId,DB:f.db});
+ assert.equal((await call('approve')).status,401);
+ assert.equal((await call('approve',{'oai-authenticated-user-id':ownerId,Origin:'https://another.example'})).status,403);
+ await fails(f.sync.reviewCombatWrite(connector,body,true),'ROLE_DENIED');
+ await fails(f.sync.reviewCombatWrite(f.principal,body,true),'ROLE_DENIED');
+ await fails(f.sync.reviewCombatWrite(owner,{...body,grantId:uuid()},true),'GRANT_REVISION_CONFLICT');
+ const auth={'oai-authenticated-user-id':ownerId};
+ assert.deepEqual((await (await call('review',auth)).json()).grant,prior);
+ await f.publish([profileRecord()]);
+ const {command}=await f.submit([op('adjust_hp','character-profile',profile,{delta:-3})]);
+ assert.equal((await (await call('approve',auth)).json()).error.code,'FINISH_PENDING_COMMANDS_FIRST');
+ const {receipt}=await f.sync.decide(f.principal,campaign,decision(command));
+ const approved=await (await call('approve',auth)).json();
+ assert.equal(approved.approved,true);
+ assert.equal(approved.grant.grantId,prior.grantId);
+ assert.equal(approved.grant.revision,prior.revision+1);
+ assert.deepEqual(approved.grant.readScopes,prior.readScopes);
+ assert.deepEqual(approved.grant.writeScopes,['combat','hp']);
+ assert.deepEqual(approved.grant.autoSyncScopes,['hp']);
+ assert.deepEqual(await (await call('approve',auth)).json(),approved);
+ assert.deepEqual((await f.sync.getReceipt(connector,campaign,command.commandId)).receipt,receipt);
+ await fails(f.sync.reviewCombatWrite(owner,{...body,commandId:uuid()},true),'GRANT_REVISION_CONFLICT');
+});

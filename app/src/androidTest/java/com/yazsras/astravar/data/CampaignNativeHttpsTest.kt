@@ -592,7 +592,48 @@ class CampaignNativeHttpsTest {
         })
         assertEquals(JsonPrimitive(3),record("character-profile",owlId).getValue("fields").jsonObject["currentHp"])
         assertEquals(JsonPrimitive(owlId),activeEncounter()["currentActorId"])
+        verifyReviewedActorOverHttps(actorId)
 
+    }
+
+    private suspend fun verifyReviewedActorOverHttps(anchor: String) {
+        val anchorRevision = record("playable-action",anchor).getValue("revision").jsonPrimitive.long
+        val actorId="ci-reviewed-companion"
+        val evidence=NativeSourceSync.Evidence("fixture","reviewed-moth","https://example.invalid/moth","1")
+        val profile=buildJsonObject {
+            put("name","Fictional moth");put("level",1);put("baseAc",12);put("baseMaxHp",9);put("currentHp",4)
+            put("rules",campaignJson.encodeToJsonElement(RuleVersion(classVersion="Independent creature")))
+        }
+        val actor=NativeSourceSync.Request(1,"MIGRATION","CREATE",evidence,anchor,anchorRevision,actorId,
+            GenesisActorRole.COMPANION,0,ownerId=anchor,profile=profile)
+        val effect=EffectDefinition("fixture-ward-ac","Worn protection",RuleSource("fixture","Reviewed ward",Acceptance.ACCEPTED_HOMEBREW),
+            EffectPayload.Number(NumericTarget.ARMOR_CLASS,NumberOperation.ADD,1),listOf(EffectCondition(ConditionKind.WORN)))
+        val definition=ItemDefinition("ci-ward","Fictional ward",listOf(effect),true)
+        val item=actor.copy(evidence=evidence.copy(externalId="ward",url="https://example.invalid/ward"),actorRevision=1,
+            profile=null,ownerId=null,definition=definition,instance=ItemInstance("ci-ward-instance",definition.id,ItemState.WORN,true))
+        val ops=listOf(operation(NativeSourceSync.ACTOR,"reference","ci-moth-source",0,Json.encodeToJsonElement(actor).jsonObject),
+            operation(NativeSourceSync.ITEM,"reference","ci-ward-source",0,Json.encodeToJsonElement(item).jsonObject))
+        val id=UUID.randomUUID().toString()
+        val body=transactionBody(id,ops)
+        val queued=mcp("submit_campaign_transaction",body).getValue("command").jsonObject
+        assertEquals("PENDING_APPROVAL",queued.getValue("status").jsonPrimitive.content)
+        client.sync()
+        val pending=client.snapshot().getValue("pending").jsonArray.map { it.jsonObject }.single { it["commandId"]==JsonPrimitive(id) }
+        val preview=pending.getValue("operations").jsonArray.first().jsonObject.getValue("nativePreview").jsonObject
+        assertTrue("Android preview must be valid: $preview",preview.getValue("valid").jsonPrimitive.boolean)
+        assertEquals(JsonPrimitive(4),preview.getValue(actorId).jsonObject["currentHp"])
+        assertNull(db.genesisAuthorityDao().actor(actorId))
+        client.decide(id,true)
+        client.sync()
+        val args=buildJsonObject { put("campaignId",campaign);put("commandId",id) }
+        val receipt=mcp("get_campaign_command_receipt",args).getValue("receipt").jsonObject
+        assertEquals("APPLIED",receipt.getValue("status").jsonPrimitive.content)
+        val saved=record("character-profile",actorId).getValue("fields").jsonObject
+        assertEquals(JsonPrimitive(13),saved["armorClass"]);assertEquals(JsonPrimitive(4),saved["currentHp"])
+        assertEquals(JsonPrimitive(actorId),record("item-placement","ci-ward-instance").getValue("fields").jsonObject["holderProfileId"])
+        assertTrue(record("playable-equipment","ci-ward-instance").getValue("fields").jsonObject.getValue("attuned").jsonPrimitive.boolean)
+        mcp("submit_campaign_transaction",body)
+        assertEquals(receipt,mcp("get_campaign_command_receipt",args).getValue("receipt").jsonObject)
     }
 
     @Test fun authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts() = runBlocking {
