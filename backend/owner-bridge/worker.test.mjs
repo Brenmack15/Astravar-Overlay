@@ -95,7 +95,7 @@ test('Sites artifact migration layout initializes the hosted-style database befo
     const { stdout } = await execute(process.execPath, [fileURLToPath(new URL('./build-worker.mjs', import.meta.url)), directory]);
     assert.equal(JSON.parse(stdout).migration, join(directory, '.openai/drizzle/0000_owner_bridge.sql'));
     const migrationRoot = join(directory, '.openai/drizzle');
-    for (const file of ['0000_owner_bridge.sql', '0001_bootstrap_downloads.sql', 'meta/_journal.json', 'meta/0000_snapshot.json', 'meta/0001_snapshot.json', '0002_live_hp.sql', 'meta/0002_snapshot.json', '0003_campaign_sync.sql', 'meta/0003_snapshot.json', '0004_fast_push.sql', 'meta/0004_snapshot.json', '0005_atomic_acquisition.sql', 'meta/0005_snapshot.json', '0006_holder_reads.sql', 'meta/0006_snapshot.json']) {
+    for (const file of ['0000_owner_bridge.sql', '0001_bootstrap_downloads.sql', 'meta/_journal.json', 'meta/0000_snapshot.json', 'meta/0001_snapshot.json', '0002_live_hp.sql', 'meta/0002_snapshot.json', '0003_campaign_sync.sql', 'meta/0003_snapshot.json', '0004_fast_push.sql', 'meta/0004_snapshot.json', '0005_atomic_acquisition.sql', 'meta/0005_snapshot.json', '0006_holder_reads.sql', 'meta/0006_snapshot.json', '0007_device_publication_build.sql', 'meta/0007_snapshot.json']) {
       assert.equal(await readFile(join(migrationRoot, file), 'utf8'), await readFile(new URL('./drizzle/' + file, import.meta.url), 'utf8'));
     }
     await assert.rejects(readFile(join(directory, 'drizzle/0000_owner_bridge.sql')), { code: 'ENOENT' });

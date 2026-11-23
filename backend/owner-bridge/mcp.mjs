@@ -35,7 +35,7 @@ export const TOOLS = Object.freeze([
   },
   read('get_pending_updates', 'Read pending fictional changes and explicit current/proposed values. Pending is not approved or committed.', object({ campaignId: campaign })),
   read('get_command_receipt', 'Read the independent immutable receipt for a fictional command. No receipt means no confirmed outcome.', object({ campaignId: campaign, commandId: uuid })),
-  read('get_owner_connection', 'Read owner-approved HP and campaign grants, scoped read/write categories, Trusted DM Auto-Sync categories and synchronization freshness. Returns no credentials or database export.', object({})),
+  read('get_owner_connection', 'Read owner-approved HP and campaign grants, scoped read/write categories, Trusted DM Auto-Sync categories and synchronization freshness. When the phone included its build in a verified complete snapshot, deviceBuild reports its Android API, package, version, base APK digest, split count, publication ID and time. Compare the reported digest with the release.', object({})),
   read('get_character_hp', 'Read the latest device-published HP record and revision for one approved owner campaign/profile binding. Unknown HP remains unknown; this is not proof that an offline phone has synced.', object({ campaignId: scopedId, profileId: scopedId })),
   {
     name: 'propose_hp_adjustment',
