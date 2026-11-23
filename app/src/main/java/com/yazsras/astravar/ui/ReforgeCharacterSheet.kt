@@ -458,6 +458,14 @@ private enum class SpellbookFilter(val label: String) {
                                 Column {
                                     visibleItems.forEach { item -> key(item.id) {
                                         val definition = character.itemDefinitions.firstOrNull { it.id == item.definitionId }
+                                        if (definition != null && definition.forms.isNotEmpty() && item.state == ItemState.WORN && item.operating &&
+                                            (!definition.requiresAttunement || item.attuned)) {
+                                            val choices = listOf(null to "Original form") + definition.forms.map { it.id to it.name }
+                                            for ((id, label) in choices) if (item.formId != id) PlayerOutlinedButton(onClick = {
+                                                try { proposedChange = "Change form to $label (Action)" to GameplayRules.changeWearableForm(character, item.id, id) }
+                                                catch (e: IllegalArgumentException) { error = e.message ?: "Form change is unavailable" }
+                                            }, enabled = !busy) { Text(label) }
+                                        }
                                         RebirthItemRow(item, definition, busy, onInspect = { dialog = "InspectItem:${item.id}" }, onEquip = {
                                             try {
                                                 val next = GameplayRules.equip(character, item.id, if (item.state in setOf(ItemState.WORN, ItemState.HELD)) ItemState.CARRIED else ItemState.WORN)

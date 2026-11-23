@@ -12,11 +12,20 @@ internal object PlayableActionSync {
     const val AUDIT = "PLAYABLE_ACTION_V1"
     const val STRIKE = "resolve_encounter_attack"
     const val DEFINE_SPELL = "define_spell"
-    val types = setOf(CAST, REST, PREPARE, STRIKE, DEFINE_SPELL)
+    const val FORM = "change_wearable_form"
+    const val FEATURE = "use_native_feature"
+    const val HP = "resolve_native_hp"
+    val nativeTypes = setOf(FORM, FEATURE, HP)
+    val types = setOf(HP, FEATURE, FORM, CAST, REST, PREPARE, STRIKE, DEFINE_SPELL)
 
     fun writeScopes(op: CampaignSyncOperation): Set<String> = buildSet {
         require(op.type in types)
         add("character")
+        if (op.type in nativeTypes) {
+            add(when (op.type) { FORM -> "inventory"; HP -> "hp"; else -> "resources" })
+            if (role(op.fields) == GenesisActorRole.COMPANION) add("companions")
+            return@buildSet
+        }
         add("resources")
         if (op.type != PREPARE) add("combat")
         if (op.type == STRIKE) {
@@ -39,6 +48,25 @@ internal object PlayableActionSync {
             require(it.isString && it.content.length in 1..200); it.content
         }
         return when (type) {
+            HP -> {
+                require(f.keys == setOf("actorRole","kind","amount"))
+                val amount = f.getValue("amount").jsonPrimitive.let { require(!it.isString && it.int > 0); it.int }
+                when (f.getValue("kind").jsonPrimitive.content) {
+                    "DAMAGE" -> GameplayRules.damage(c,amount)
+                    "HEAL" -> GameplayRules.heal(c,amount)
+                    else -> error("Unsupported HP operation")
+                }
+            }
+            FEATURE -> {
+                require(f.keys == setOf("actorRole","featureId"))
+                GameplayRules.useFeature(c,f.getValue("featureId").jsonPrimitive.content)
+            }
+            FORM -> {
+                require(f.keys == setOf("actorRole","itemId","formId"))
+                val form = f.getValue("formId")
+                GameplayRules.changeWearableForm(c, f.getValue("itemId").jsonPrimitive.content,
+                    if (form == JsonNull) null else form.jsonPrimitive.content)
+            }
             DEFINE_SPELL -> {
                 require(f.keys == setOf("actorRole", "mode", "spellId", "definition"))
                 val id = spell()

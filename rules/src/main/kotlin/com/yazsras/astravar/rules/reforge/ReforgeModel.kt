@@ -72,18 +72,23 @@ internal fun classRulesId(label: String): String = when (label) {
     val expiresOn: Recharge = Recharge.NONE, val chargeResourceId: String? = null,
     val chargeCost: Int = 0
 )
+@Serializable data class WearableForm(val id: String, val name: String, val movement: Map<String, Int?>)
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class ItemDefinition(
     val id: String, val name: String, val effects: List<EffectDefinition> = emptyList(),
     val requiresAttunement: Boolean = false, val attunementCost: Int = 1,
     val equipmentSlot: String? = null, val minimumLevel: Int = 1,
     val minimumAbilities: Map<Stat, Int> = emptyMap(), val weight: Double? = null,
-    val description: String = ""
+    val description: String = "",
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val forms: List<WearableForm> = emptyList()
 )
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class ItemInstance(
     val id: String, val definitionId: String, val state: ItemState = ItemState.CARRIED,
     val attuned: Boolean = false, val quantity: Int = 1, val operating: Boolean = true,
     val containerId: String? = null, val donorInstanceIds: Set<String> = emptySet(),
-    val favorite: Boolean = false
+    val favorite: Boolean = false,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val formId: String? = null
 )
 /** Original descriptive evidence remains immutable when a reviewed attack is later edited. */
 @Serializable data class RecordedAttackSource(

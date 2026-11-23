@@ -31,7 +31,7 @@ object GameplayRules {
             require(definition.minimumAbilities.all { (stat,min)->(abilities[stat]?.effective?.value ?: -1)>=min }) { "An ability requirement is unmet or unknown." }
             require(definition.equipmentSlot==null || character.items.none { other->other.id!=itemId && other.state in setOf(ItemState.WORN,ItemState.HELD) && character.itemDefinitions.find { it.id==other.definitionId }?.equipmentSlot==definition.equipmentSlot }) { "That equipment slot is occupied. Unequip its item first." }
         }
-        return preserveCapacities(character,character.copy(items=character.items.map { if(it.id==itemId) it.copy(state=state) else it }))
+        return preserveCapacities(character,character.copy(items=character.items.map { if(it.id==itemId) it.copy(state=state, formId=it.formId.takeIf { state == ItemState.WORN }) else it }))
     }
     fun attune(character:ReforgeCharacter,itemId:String,attuned:Boolean):ReforgeCharacter {
         CharacterCalculator.validate(character)
@@ -44,7 +44,19 @@ object GameplayRules {
             val used=character.items.filter { it.id!=itemId && it.attuned }.sumOf { i->character.itemDefinitions.find { it.id==i.definitionId }?.attunementCost ?: character.attunementLimit+1 }
             require(used+definition.attunementCost<=character.attunementLimit) { "Attunement capacity would be exceeded." }
         }
-        return preserveCapacities(character,character.copy(items=character.items.map { if(it.id==itemId) it.copy(attuned=attuned) else it }))
+        return preserveCapacities(character,character.copy(items=character.items.map { if(it.id==itemId) it.copy(attuned=attuned, formId=it.formId.takeUnless { definition.requiresAttunement && !attuned }) else it }))
+    }
+
+    fun changeWearableForm(character: ReforgeCharacter, itemId: String, formId: String?): ReforgeCharacter {
+        val item = character.items.single { it.id == itemId }
+        val definition = character.itemDefinitions.single { it.id == item.definitionId }
+        require(item.state == ItemState.WORN && item.operating && (!definition.requiresAttunement || item.attuned))
+        require(definition.forms.isNotEmpty() && (formId == null || definition.forms.any { it.id == formId }))
+        require(item.formId != formId && character.items.none { it.id != itemId && it.formId != null })
+        val turn = character.turn
+        require(!turn.tracking || turn.actionAvailable) { "This form change requires an available action." }
+        return character.copy(items = character.items.map { if (it.id == itemId) it.copy(formId = formId) else it },
+            turn = if (turn.tracking) turn.copy(actionAvailable = false) else turn).also(CharacterCalculator::validate)
     }
 
     /** Preserve outstanding damage rather than treating a capacity change as healing or a rest. */
@@ -207,6 +219,17 @@ object GameplayRules {
         return if(kind==Recharge.LONG_REST && preserved.currentHp!=null && maximum!=null)
             preserved.copy(currentHp=maximum,hpDamage=0) else preserved
     }
+    fun useFeature(character: ReforgeCharacter, featureId: String): ReforgeCharacter {
+        val feature = character.features.single { it.id == featureId }
+        val pool = feature.resourceId?.let { id -> character.resources.single { it.id == id } }
+        if (pool != null) require((pool.current ?: 0) > 0) { "Feature uses are unknown or exhausted." }
+        require(feature.actionType.lowercase() in setOf("action","bonus action","reaction","free"))
+        checkAction(character,feature.actionType)
+        return character.copy(turn = spendAction(character,feature.actionType), resources = character.resources.map {
+            if (pool != null && it.id == pool.id) it.copy(current = requireNotNull(it.current) - 1) else it
+        })
+    }
+
     internal fun checkAction(character:ReforgeCharacter,label:String) {
         if(!character.turn.tracking) return
         val lower=label.lowercase()

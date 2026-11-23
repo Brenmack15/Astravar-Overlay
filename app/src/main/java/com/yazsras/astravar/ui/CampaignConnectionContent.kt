@@ -390,6 +390,18 @@ private fun displayFields(value: JsonElement?): List<Pair<String, String>> = (va
     key to when (field) { is JsonNull -> "Unknown"; is JsonPrimitive -> field.content; else -> field.toString() }
 }.orEmpty()
 
+private fun nativeSourceReview(fields: JsonElement?): List<Pair<String, String>> = buildList {
+    fun show(label: String, value: JsonElement) {
+        when (value) {
+            is JsonObject -> value.forEach { (key, child) -> show(if (label.isEmpty()) key else "$label · $key", child) }
+            is JsonArray -> if (value.isEmpty()) add(label to "None") else value.forEachIndexed { index, child -> show("$label ${index + 1}", child) }
+            JsonNull -> add(label to "Unknown")
+            is JsonPrimitive -> add(label to value.content)
+        }
+    }
+    if (fields is JsonObject) show("", fields)
+}
+
 /** Whitelisted connection metadata and typed transaction previews only. */
 internal fun campaignConnectionView(snapshot: JsonObject, now: Long = System.currentTimeMillis()): CampaignConnectionView {
     val grant = snapshot["grant"] as? JsonObject ?: buildJsonObject {}
@@ -443,8 +455,9 @@ internal fun campaignConnectionView(snapshot: JsonObject, now: Long = System.cur
         pushEnabled = (snapshot["pushEnabled"] as? JsonPrimitive)?.booleanOrNull == true,
         pending = snapshot.connectionRows("pending").map { row -> CampaignPendingView(row.connectionText("commandId"), row.connectionText("state"), row.connectionText("source"), row.connectionText("message"),
             row.connectionRows("operations").map { op -> CampaignOperationView(op.connectionText("type"), op.connectionText("recordId"), op.connectionLong("expectedRevision"),
-                op.connectionLong("currentRevision"), displayFields(op["current"] ?: op["currentFields"]), displayFields(op["proposedFields"] ?: op["fields"]),
-                op["proposedFields"] is JsonObject) }, row.connectionText("commandId") in terminalCommands) },
+                op.connectionLong("currentRevision"), displayFields(op["current"] ?: op["currentFields"]), if (op.connectionText("type") in setOf("define_native_item", "define_native_actor")) (nativeSourceReview(op["fields"]) + nativeSourceReview(op["nativePreview"])) else displayFields(op["proposedFields"] ?: op["fields"]),
+                op["proposedFields"] is JsonObject && (op.connectionText("type") !in setOf("define_native_actor","define_native_item") ||
+                    (op["nativePreview"] as? JsonObject)?.get("valid") == JsonPrimitive(true))) }, row.connectionText("commandId") in terminalCommands) },
         receipts = snapshot.connectionRows("history").map { row -> CampaignReceiptView(row.connectionText("commandId"), row.connectionText("state"), row.connectionText("message"),
             row["receiptJson"] != null && row["receiptJson"] !is JsonNull && row.connectionText("state") in setOf("COMMITTED", "VERIFIED", "REJECTED", "CONFLICT")) }
     )
