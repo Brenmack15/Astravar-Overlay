@@ -18,7 +18,7 @@ internal class CampaignConflict(
             if (error is CampaignConflict) return error
             val code = when (error.message) {
                 "Acquiring holder changed." -> "HOLDER_REVISION_CHANGED"
-                "Acquisition placement already exists." -> "OWNERSHIP_CONFLICT"
+                "Acquisition placement already exists.", "Physical item identity is unavailable." -> "OWNERSHIP_CONFLICT"
                 "Acquisition fields conflict with its placement." -> "PLACEMENT_MISMATCH"
                 "Managed equipment requires an explicit equipped definition." -> "EQUIPMENT_REVIEW_REQUIRED"
                 "Insufficient currency or balance exceeds the supported limit." -> "CURRENCY_BOUNDS"

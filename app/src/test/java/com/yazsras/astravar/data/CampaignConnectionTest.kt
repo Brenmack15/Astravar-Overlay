@@ -291,6 +291,10 @@ class CampaignConnectionTest {
             return
         }
         assertEquals("PLACEMENT_OUTCOME_MISMATCH",failure.getValue("failure").jsonObject.getValue("code").jsonPrimitive.content)
+        val failedSnapshot = c.snapshot()
+        assertTrue(failedSnapshot.getValue("pending").jsonArray.none { it.jsonObject.getValue("commandId") == JsonPrimitive(failed) })
+        assertTrue(failedSnapshot.getValue("history").jsonArray.any { it.jsonObject.getValue("commandId") == JsonPrimitive(failed) })
+        assertFalse(failedSnapshot.getValue("readiness").jsonPrimitive.content.contains("CONFLICT"))
         val replacement = UUID.randomUUID().toString()
         enqueue(replacement,ops,failed)
         remote.offline=true; c.sync()

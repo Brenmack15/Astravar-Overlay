@@ -717,3 +717,29 @@ test('safe rebase preserves price and holder, detects a separately applied purch
  const rows=(await f.sync.read(connector,campaign,{kinds:['wallet']})).records;
  assert.equal(rows[0].fields.gold,301);assert.equal(rows[0].fields.platinum,1004250);
 });
+
+test('existing owner receipt tool exposes the linked read-only conflict preview alongside the original receipt', async t=>{
+ const f=await conflictFixture(t);
+ const url='https://isolated-fixture.example/mcp';
+ const response=await handleWorker(new Request(url,{method:'POST',headers:{
+  'Content-Type':'application/json','oai-authenticated-user-id':ownerId},body:JSON.stringify({
+  jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'get_campaign_command_receipt',arguments:{campaignId:campaign,commandId:f.command.commandId}}
+ })}),{DB:f.db,OWNER_SITE_USER_ID:ownerId});
+ const body=(await response.json()).result.structuredContent;
+ assert.equal(body.receipt.status,'CONFLICT');assert.equal(body.conflict.committed,false);
+ assert.equal(body.resolution.status,'WAIT_FOR_DEVICE');assert.equal(body.conflict.affected.length,3);
+ assert.equal((await f.sync.pending(f.principal,campaign)).commands.length,0);
+});
+
+test('fixed HP recovery only changes an authorized untouched field; ambiguous HP edits require review',async t=>{
+ const f=await conflictFixture(t);const h=profileRecord();
+ await f.enable(['hp']);
+ const {command}=await f.submit([op('set_status','character-profile',profile,{currentHp:21})]);
+ await f.sync.decide(f.principal,campaign,{...decision(command,{status:'CONFLICT'}),failure:{code:'BASELINE_CHANGED',operation:0,observedRevision:2}});
+ h.revision=h.fields.revision=2;h.fields.level=10;await f.publish([h]);await f.confirm();
+ const plan=()=>f.sync.conflictPlan(connector,campaign,command.commandId);
+ const before=await plan();assert.equal(before.automatic,true);assert.equal(before.operations[0].expectedRevision,2);
+ h.revision=h.fields.revision=3;h.fields.currentHp=22;await f.publish([h]);assert.equal((await plan()).reason,'FIELD_CHANGED');
+ h.revision=h.fields.revision=4;h.fields.currentHp=21;await f.publish([h]);assert.equal((await plan()).status,'ALREADY_FULFILLED');
+ const denied=await conflictFixture(t);await fails(denied.submit([op('adjust_currency','wallet','fixture-wallet',{platinumDelta:-2000000})]),'INSUFFICIENT_CURRENCY');
+});

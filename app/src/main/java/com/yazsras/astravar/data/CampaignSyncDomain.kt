@@ -421,6 +421,9 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             PlayableMechanicsSync.DEFENSE, PlayableMechanicsSync.STATE, PlayableMechanicsSync.BONUS -> PlayableMechanicsSync.edit(db, campaignId, op, child, source)
             "acquire_item" -> {
                 require(op.kind == "item" && current == null && op.expectedRevision == 0L)
+                require(db.ledgerDao().getItem(op.recordId) == null && readGenesisAuthorityItem(db, op.recordId) == null) {
+                    "Physical item identity is unavailable."
+                }
                 val destination = f["placement"]?.jsonObject
                 val draft = campaignJson.decodeFromJsonElement<LedgerDraft>(JsonObject(f - "placement"))
                 require(draft.evidenceStatus == "Confirmed" && draft.itemState !in setOf("Consumed", "Sold", "Lost", "Installed")) { "Only a resolved acquisition may establish an item." }

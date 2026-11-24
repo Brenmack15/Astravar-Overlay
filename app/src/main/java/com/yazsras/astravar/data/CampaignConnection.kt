@@ -461,18 +461,25 @@ class CampaignConnectionClient internal constructor(private val context: Context
         }
         val purchase = ops.size == 2 && ops.any { it.type == "acquire_item" && "placement" in it.fields } &&
             ops.any { it.type == "adjust_currency" }
-        val notes = ops.all { it.type == "set_record" && it.fields.keys == when (it.kind) {
+        val assignments = ops.all { (it.type == "set_status" && it.kind == "character-profile" && it.fields.isNotEmpty() &&
+            it.fields.keys.all { k -> k in setOf("currentHp","temporaryHp") }) || it.type == "set_record" && it.fields.keys == when (it.kind) {
             "project" -> setOf("description"); "connection" -> setOf("notes"); else -> emptySet<String>()
         } }
-        val eligible = (purchase || notes) && (code in setOf("BASELINE_CHANGED","SIDE_EFFECT_BASELINE","HOLDER_REVISION_CHANGED") ||
+        val eligible = (purchase || assignments) && (code in setOf("BASELINE_CHANGED","SIDE_EFFECT_BASELINE","HOLDER_REVISION_CHANGED") ||
             (purchase && code == null))
         val next = when {
             !eligible -> "Owner or rules review required."
             !authorized(value,command) -> "Automatic resolution disabled. Owner review required."
             else -> "DM resolution preview permitted. Automatic saving requires fresh matching evidence."
         }
-        return listOfNotNull("Completed failure. No changes committed.", op?.let { "${it.type} · ${it.recordId}" },
-            cause, failure?.get("field")?.jsonPrimitive?.content, next).joinToString(" ")
+        val record = op?.let {
+            val kind = if (code == "PLACEMENT_OUTCOME_MISMATCH") "item-placement" else it.kind
+            "${it.type} · $kind ${it.recordId}."
+        }
+        val observed = failure?.get("observedRevision")?.jsonPrimitive?.longOrNull
+        val revisions = if (op != null && observed != null) "Expected baseline ${op.expectedRevision}. Observed revision $observed." else null
+        return listOfNotNull("Completed failure. No changes committed.", record, cause,
+            failure?.get("field")?.jsonPrimitive?.content?.let { "Field $it." }, revisions, next).joinToString(" ")
     }
     private fun belongs(command: CampaignConnectionCommand, value: CampaignConnectionSettings) =
         command.origin == value.origin && command.campaignId == value.campaignId && command.deviceId == value.deviceId

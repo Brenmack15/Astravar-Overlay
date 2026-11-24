@@ -498,7 +498,7 @@ export class CampaignBridge{
   const reads=JSON.parse(grant.read_scopes_json);
   // Raw commands can contain nested actor, source or resource fields. Only reveal them to their original audience.
   for(const op of command.operations){
-   const simple=['adjust_currency','acquire_item'].includes(op.type) || (op.type==='set_record'&&['project','connection'].includes(op.kind));
+   const simple=['adjust_currency','acquire_item'].includes(op.type) || (op.type==='set_status'&&op.kind==='character-profile') || (op.type==='set_record'&&['project','connection'].includes(op.kind));
    const needed=simple?[op.scope,...(op.fields.placement?['character']:[])]:CAMPAIGN_SCOPES;
    if(needed.some(scope=>!reads.includes(scope)))fail(403,'READ_SCOPE_DENIED');
   }
@@ -542,9 +542,15 @@ export class CampaignBridge{
    acquire.fields.evidenceStatus==='Confirmed' && acquire.fields.placement &&
    (acquire.fields.placement.state??'Carried')==='Carried' &&
    Object.values(debit.fields).some(v=>v<0) && Object.values(debit.fields).every(v=>Number.isSafeInteger(v)&&v<=0);
-  const notes=ops.every(o=>o.type==='set_record'&&o.expectedRevision>0 &&
-   ['project','connection'].includes(o.kind)&&Object.keys(o.fields).length===1&&typeof o.fields[o.kind==='project'?'description':'notes']==='string');
-  if(!purchase&&!notes)return state('OWNER_REVIEW','MATERIAL_INTENT_REQUIRES_REVIEW');
+  const assignments=ops.every(o=>{
+   const keys=Object.keys(o.fields);
+   if(o.expectedRevision<=0||!keys.length)return false;
+   if(o.type==='set_status'&&o.kind==='character-profile')
+    return keys.every(k=>['currentHp','temporaryHp'].includes(k)&&Number.isSafeInteger(o.fields[k])&&o.fields[k]>=0);
+   return o.type==='set_record'&&['project','connection'].includes(o.kind)&&keys.length===1&&
+    typeof o.fields[o.kind==='project'?'description':'notes']==='string';
+  });
+  if(!purchase&&!assignments)return state('OWNER_REVIEW','MATERIAL_INTENT_REQUIRES_REVIEW');
   const scopes=ops.map(o=>o.scope);
   if(scopes.some(s=>!JSON.parse(grant.write_scopes_json).includes(s)))fail(403,'WRITE_SCOPE_DENIED');
   const publication=await this.s(`SELECT device_build_json,created_at FROM bridge_campaign_publications
@@ -588,14 +594,16 @@ export class CampaignBridge{
     if(nowFields.holderProfileId!==op.currentFields.holderProfileId || nowFields.holderProfileId!==acquire.fields.placement.holderProfileId)
      return state('OWNER_REVIEW','WALLET_OWNERSHIP_CHANGED');
    }else {
-    const key=Object.keys(fields)[0];
-    if(nowFields[key]===fields[key])fulfilled++;
-    else if(nowFields[key]!==op.currentFields[key])return state('OWNER_REVIEW','FIELD_CHANGED');
+    const keys=Object.keys(fields);
+    if(keys.every(k=>nowFields[k]===fields[k]))fulfilled++;
+    else if(keys.some(k=>nowFields[k]!==op.currentFields[k] || nowFields[k]==null))
+     return state('OWNER_REVIEW','FIELD_CHANGED');
+    if(op.type==='set_status'&&nowFields.maximumHp!==op.currentFields.maximumHp)return state('OWNER_REVIEW','HP_CAPACITY_CHANGED');
    }
    operations.push({type:op.type,recordId:op.recordId,kind:op.kind,fields,expectedRevision:current?.revision??0});
   }
-  if(notes&&fulfilled===ops.length)return state('ALREADY_FULFILLED','PUBLISHED_FIELDS_MATCH');
-  if(notes&&fulfilled)return state('OWNER_REVIEW','PARTIALLY_FULFILLED');
+  if(assignments&&fulfilled===ops.length)return state('ALREADY_FULFILLED','PUBLISHED_FIELDS_MATCH');
+  if(assignments&&fulfilled)return state('OWNER_REVIEW','PARTIALLY_FULFILLED');
   if(debit){
    const balance=proof.find(([kind])=>kind==='wallet')[3];
    if(Object.keys(debit.fields).some(key=>balance[key.slice(0,-5)]!==debit.currentFields[key.slice(0,-5)]))
@@ -750,7 +758,7 @@ export class CampaignBridge{
     else if(op.kind==='party-sheet'){exact(op.fields,['resourceName','delta']);text(op.fields.resourceName,200);integer(op.fields.delta,-1000000,1000000);const data=sheet(),matches=data.resources.filter(x=>x.name===op.fields.resourceName);if(matches.length!==1||matches[0].current==null||(op.fields.delta>0&&matches[0].maximum==null))fail(409,'RESOURCE_UNKNOWN');matches[0].current=integer(matches[0].current+op.fields.delta,0,matches[0].maximum??Number.MAX_SAFE_INTEGER-1);after.contentJson=canonical(data);}
     else fail(400,'INVALID_OPERATION_KIND');break;
    case 'set_status':scope='hp';if(op.kind==='character-profile'){exact(op.fields,[],['currentHp','maximumHp','temporaryHp']);if(!Object.keys(op.fields).length)fail(400,'INVALID_OPERATION_FIELDS');for(const k of ['currentHp','maximumHp','temporaryHp'])if(Object.hasOwn(op.fields,k)){if(op.fields[k]!==null)integer(op.fields[k],0,1000000);after[k]=op.fields[k];}if(after.currentHp!=null&&after.maximumHp!=null&&after.currentHp>after.maximumHp)fail(400,'INVALID_HP_RANGE');}else if(op.kind==='party-sheet'){exact(op.fields,['conditions']);if(typeof op.fields.conditions!=='string'||op.fields.conditions.length>4000)fail(400,'INVALID_OPERATION_FIELDS');const data=sheet();data.conditions=op.fields.conditions;after.contentJson=canonical(data);}else fail(400,'INVALID_OPERATION_KIND');break;
-   case 'adjust_currency':exact(op.fields,[],['copperDelta','silverDelta','goldDelta','electrumDelta','platinumDelta']);if(op.kind!=='wallet'||!before||!Object.keys(op.fields).length)fail(400,'INVALID_OPERATION_KIND');for(const unit of ['copper','silver','gold','electrum','platinum'])if(Object.hasOwn(op.fields,unit+'Delta')){integer(op.fields[unit+'Delta'],-1000000000,1000000000);if(before[unit]==null)fail(409,'RESOURCE_UNKNOWN');const balance=before[unit]+op.fields[unit+'Delta'];if(balance>1000000000)fail(409,'CURRENCY_BOUNDS');after[unit]=integer(balance);}break;
+   case 'adjust_currency':exact(op.fields,[],['copperDelta','silverDelta','goldDelta','electrumDelta','platinumDelta']);if(op.kind!=='wallet'||!before||!Object.keys(op.fields).length)fail(400,'INVALID_OPERATION_KIND');for(const unit of ['copper','silver','gold','electrum','platinum'])if(Object.hasOwn(op.fields,unit+'Delta')){integer(op.fields[unit+'Delta'],-1000000000,1000000000);if(before[unit]==null)fail(409,'RESOURCE_UNKNOWN');const balance=before[unit]+op.fields[unit+'Delta'];if(balance<0)fail(409,'INSUFFICIENT_CURRENCY');if(balance>1000000000)fail(409,'CURRENCY_BOUNDS');after[unit]=integer(balance);}break;
    case 'consume_item':{exact(op.fields,['quantity']);if(op.kind!=='item'||!before)fail(400,'INVALID_OPERATION_KIND');integer(op.fields.quantity,1,1000000);if(before.quantity==null)fail(409,'RESOURCE_UNKNOWN');after.quantity=integer(before.quantity-op.fields.quantity);if(after.quantity===0){after.itemState='Consumed';const p=await placement();if(p){const fields={...p.fields,state:'Consumed',containerItemId:null,installedProjectId:null,revision:p.row.revision+1};sideEffects.push({recordId:op.recordId,kind:'item-placement',expectedRevision:p.row.revision,currentFields:p.fields,fields});after.location=location(fields);}}break;}
    case 'move_item':{
     exact(op.fields,['expectedPlacementRevision'],['holderProfileId','containerItemId','installedProjectId','state','playableTransfer']);if(op.kind!=='item'||!before)fail(400,'INVALID_OPERATION_KIND');
