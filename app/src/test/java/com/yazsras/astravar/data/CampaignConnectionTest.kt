@@ -238,7 +238,7 @@ class CampaignConnectionTest {
         assertNotNull(campaign.recordsDao().receipt(CampaignSyncDomain.receiptId(CampaignConnectionProtocol.localCommand(origin,campaignId,id))))
     }
     @Test fun bridgePurchaseWithExplicitCarriedPlacement() = runBlocking { purchaseContract(explicitState = true) }
-    @Test fun bridgePurchaseWithDefaultCarriedPlacement() = runBlocking { purchaseContract(explicitState = false) }
+    @Test fun bridgePurchaseWithPlacementDerivedItemState() = runBlocking { purchaseContract(explicitState = false) }
 
     private suspend fun purchaseContract(explicitState: Boolean) {
         val fixture = requireNotNull(javaClass.getResource("/campaign-purchase-proposal.json")).readText()
@@ -260,8 +260,14 @@ class CampaignConnectionTest {
         val item = prepared[1]
         val fields = item.getValue("fields").jsonObject
         val holderProof = fields.getValue("placement").jsonObject + ("expectedHolderRevision" to JsonPrimitive(buyer.profile.revision))
-        val placement = JsonObject(if (explicitState) holderProof else holderProof - "state")
-        val acquire = JsonObject(item + ("fields" to JsonObject(fields + ("placement" to placement))))
+        // Both stored proposals supplied a placement. Only one also set the top-level item state.
+        val descriptions = mapOf("category" to JsonPrimitive("Magic Item"), "description" to JsonPrimitive("Fixture purchase"),
+            "knownProperties" to JsonPrimitive("Unattuned armor"), "limitations" to JsonPrimitive("Carried"),
+            "possibleUses" to JsonPrimitive("Future study"))
+        val draft = fields + descriptions + ("placement" to JsonObject(holderProof)) +
+            if (explicitState) mapOf("itemState" to JsonPrimitive("Carried")) else mapOf("source" to JsonPrimitive("Fixture provenance"))
+        val acquire = JsonObject(item + mapOf("fields" to JsonObject(draft),
+            "proposedFields" to JsonObject(item.getValue("proposedFields").jsonObject + descriptions)))
         val ops = JsonArray(listOf(debit,acquire))
         fun enqueue(id: String, rows: JsonArray, parent: String? = null) {
             val body = buildJsonObject {
