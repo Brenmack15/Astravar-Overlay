@@ -297,9 +297,12 @@ class CampaignConnectionTest {
         assertFalse(failedSnapshot.getValue("readiness").jsonPrimitive.content.contains("CONFLICT"))
         val replacement = UUID.randomUUID().toString()
         enqueue(replacement,ops,failed)
-        remote.offline=true; c.sync()
+        remote.offline=true
+        assertTrue(runCatching { c.sync() }.exceptionOrNull() is IOException)
         assertNull(remote.decisions[replacement]); assertEquals(1011750L,campaign.partyDao().wallet(walletId)!!.platinum)
-        remote.offline=false; remote.loseDecision=true; c.sync()
+        remote.offline=false; remote.loseDecision=true
+        assertTrue(runCatching { c.sync() }.exceptionOrNull() is IOException)
+        assertEquals("APPLIED_PENDING",journal.connection().command(replacement)!!.state)
         client(remote).sync()
         val receipt = remote.decisions.getValue(replacement)
         assertEquals("APPLIED",receipt.getValue("status").jsonPrimitive.content)
