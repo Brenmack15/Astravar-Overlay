@@ -237,6 +237,76 @@ class CampaignConnectionTest {
         assertEquals(1,remote.decisions.size); assertTrue(remote.receiptReads >= 1); assertTrue(remote.recordReads >= 1)
         assertNotNull(campaign.recordsDao().receipt(CampaignSyncDomain.receiptId(CampaignConnectionProtocol.localCommand(origin,campaignId,id))))
     }
+    @Test fun bridgePurchaseWithExplicitCarriedPlacement() = runBlocking { purchaseContract(explicitState = true) }
+    @Test fun bridgePurchaseWithDefaultCarriedPlacement() = runBlocking { purchaseContract(explicitState = false) }
+
+    private suspend fun purchaseContract(explicitState: Boolean) {
+        val fixture = requireNotNull(javaClass.getResource("/campaign-purchase-proposal.json")).readText()
+        val prepared = Json.parseToJsonElement(fixture).jsonArray.map { it.jsonObject }
+        val holder = "fixture-player"
+        val itemId = prepared[1].getValue("recordId").jsonPrimitive.content
+        val authority = GenesisAuthorityRepository(campaign)
+        authority.prepareOwnerLocalCampaign()
+        val actor = com.yazsras.astravar.rules.reforge.ReforgeCharacter(holder, "Fictional Player")
+        val buyer = authority.createActor(actor.name, GenesisActorRole.PLAYER, campaignId, playable = actor)
+        val walletId = prepared[0].getValue("recordId").jsonPrimitive.content
+        PartyRecordsRepository(campaign).saveWallet(PartyWallet(walletId,holder,"Fictional wallet",gold=300,platinum=1011750), source="Fixture balance")
+        val remote = Remote()
+        val c = paired(remote)
+        c.setAutoSync(setOf("currency","inventory"))
+        val before = remote.records.getValue("wallet" to walletId).getValue("fields").jsonObject
+        val debit = JsonObject(prepared[0] + mapOf("currentFields" to before, "proposedFields" to JsonObject(
+            before + mapOf("revision" to JsonPrimitive(2),"platinum" to JsonPrimitive(1004250)))))
+        val item = prepared[1]
+        val fields = item.getValue("fields").jsonObject
+        val holderProof = fields.getValue("placement").jsonObject + ("expectedHolderRevision" to JsonPrimitive(buyer.profile.revision))
+        val placement = JsonObject(if (explicitState) holderProof else holderProof - "state")
+        val acquire = JsonObject(item + ("fields" to JsonObject(fields + ("placement" to placement))))
+        val ops = JsonArray(listOf(debit,acquire))
+        fun enqueue(id: String, rows: JsonArray, parent: String? = null) {
+            val body = buildJsonObject {
+                put("commandId",id);put("campaignId",campaignId);put("grantRevision",remote.grant.getValue("revision"))
+                put("source","Confirmed fixture purchase");put("operations",rows);put("status","PENDING_DELIVERY");put("createdAt",time)
+                parent?.let { put("resolutionOf",it) }
+            }
+            remote.commands[id] = JsonObject(body + ("fingerprint" to JsonPrimitive(CampaignConnectionProtocol.fingerprint(campaignId,body))))
+        }
+        val failed = UUID.randomUUID().toString()
+        val legacy = com.yazsras.astravar.BuildConfig.VERSION_CODE == 57
+        // On the fixed build inject a wrong proposed state to exercise rollback after native acquisition.
+        val side = acquire.getValue("sideEffects").jsonArray.single().jsonObject
+        val wrong = JsonObject(side + ("fields" to JsonObject(side.getValue("fields").jsonObject + ("state" to JsonPrimitive("Equipped")))))
+        enqueue(failed, if (legacy) ops else JsonArray(listOf(debit,JsonObject(acquire + ("sideEffects" to JsonArray(listOf(wrong)))))))
+        c.sync()
+        val failure = remote.decisions.getValue(failed)
+        assertEquals("CONFLICT",failure.getValue("status").jsonPrimitive.content)
+        assertEquals(1011750L,campaign.partyDao().wallet(walletId)!!.platinum)
+        assertNull(campaign.ledgerDao().getItem(itemId)); assertNull(campaign.partyDao().placement(itemId))
+        assertTrue(ReforgeRepository(campaign).get(holder)!!.character.items.isEmpty())
+        if (legacy) {
+            val rawOps = ops.map { raw -> campaignJson.decodeFromJsonElement<CampaignSyncOperation>(
+                JsonObject(raw.jsonObject.filterKeys { it in setOf("type","recordId","kind","fields","expectedRevision") })) }
+            val error = runCatching { CampaignSyncDomain(campaign).apply(campaignId,"baseline-guard", "Fixture proof",rawOps) }.exceptionOrNull()
+            assertTrue(error?.message.orEmpty(),error?.message?.contains("requires a reviewed playable item definition") == true)
+            return
+        }
+        assertEquals("PLACEMENT_OUTCOME_MISMATCH",failure.getValue("failure").jsonObject.getValue("code").jsonPrimitive.content)
+        val replacement = UUID.randomUUID().toString()
+        enqueue(replacement,ops,failed)
+        remote.offline=true; c.sync()
+        assertNull(remote.decisions[replacement]); assertEquals(1011750L,campaign.partyDao().wallet(walletId)!!.platinum)
+        remote.offline=false; remote.loseDecision=true; c.sync()
+        client(remote).sync()
+        val receipt = remote.decisions.getValue(replacement)
+        assertEquals("APPLIED",receipt.getValue("status").jsonPrimitive.content)
+        assertEquals("VERIFIED",journal.connection().command(replacement)!!.state)
+        assertEquals(3,receipt.getValue("records").jsonArray.size)
+        val balance = remote.records.getValue("wallet" to walletId).getValue("fields").jsonObject
+        assertEquals(1004250L,balance.getValue("platinum").jsonPrimitive.long);assertEquals(300,balance.getValue("gold").jsonPrimitive.int)
+        assertEquals(holder,remote.records.getValue("item-placement" to itemId).getValue("fields").jsonObject.getValue("holderProfileId").jsonPrimitive.content)
+        assertFalse(ReforgeRepository(campaign).get(holder)!!.character.items.single().attuned)
+        assertEquals(1004250L,campaign.partyDao().wallet(walletId)!!.platinum)
+    }
     @Test fun manual_mode_retains_pending_transaction_until_native_decision() = runBlocking {
         val remote = Remote(); val c = paired(remote); val id = remote.propose()
         c.sync(); assertEquals(17,current().currentHp); assertEquals("PENDING_APPROVAL",journal.connection().command(id)!!.state)
@@ -643,7 +713,7 @@ class CampaignConnectionTest {
                 path.endsWith("/decisions") -> {
                     lastDecision=body;val id=b!!.getValue("commandId").jsonPrimitive.content
                     val receipt=decisions.getOrPut(id) { b.getValue("records").jsonArray.forEach { val r=it.jsonObject;records[r.getValue("kind").jsonPrimitive.content to r.getValue("recordId").jsonPrimitive.content]=r }
-                        JsonObject(b+("deviceCredentialId" to JsonPrimitive(deviceId))+("recordedAt" to JsonPrimitive(time))+("eventId" to JsonPrimitive(UUID.randomUUID().toString()))) }
+                        JsonObject(b+commands.getValue(id).filterKeys { it == "resolutionOf" }+("deviceCredentialId" to JsonPrimitive(deviceId))+("recordedAt" to JsonPrimitive(time))+("eventId" to JsonPrimitive(UUID.randomUUID().toString()))) }
                     if(loseDecision){loseDecision=false;throw IOException("Lost fixture decision response")};answer("receipt" to receipt)
                 }
                 path.contains("/receipts/") -> {receiptReads++;answer("receipt" to decisions.getValue(path.substringAfterLast('/')))}

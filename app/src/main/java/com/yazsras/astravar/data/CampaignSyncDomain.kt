@@ -244,7 +244,10 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
     private fun key(kind: String, id: String) = "$kind\u0000$id"
 
     suspend fun apply(campaignId: String, commandId: String, source: String,
-        operations: List<CampaignSyncOperation>, diagnose: Boolean = false): CommandReceipt = db.withTransaction {
+        operations: List<CampaignSyncOperation>): CommandReceipt = apply(campaignId, commandId, source, operations, diagnose = false)
+
+    internal suspend fun apply(campaignId: String, commandId: String, source: String,
+        operations: List<CampaignSyncOperation>, diagnose: Boolean): CommandReceipt = db.withTransaction {
         OwnerSyncProtocol.id(campaignId); require(commandId.length in 1..120 && source.isNotBlank() && source.length <= 2000)
         require(operations.size in 1..50 && operations.map { key(it.kind,it.recordId) }.distinct().size == operations.size)
         val fingerprint = campaignHash("campaign-sync-v2:" + OwnerSyncProtocol.canonical(buildJsonObject {

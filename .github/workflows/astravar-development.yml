@@ -45,6 +45,33 @@ jobs:
         with:
           name: Astravar-verification-plan
           path: validation/ci-plan.json
+  purchase-baseline:
+    name: Reproduce purchase rollback on installed code 57
+    if: github.base_ref == 'convergence/reviewed-native-sync-code57'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Transfer only the isolated reproducer into the frozen source
+        run: |
+          test_path=app/src/test/java/com/yazsras/astravar/data/CampaignConnectionTest.kt
+          mkdir -p "$RUNNER_TEMP/purchase-fixture"
+          cp "$test_path" backend/owner-bridge/fixtures/campaign-purchase-proposal.json "$RUNNER_TEMP/purchase-fixture/"
+          git fetch --depth=1 origin 689dadcc050d26f686b93ca4357c8c5e907c58e2
+          git switch --detach FETCH_HEAD
+          cp "$RUNNER_TEMP/purchase-fixture/CampaignConnectionTest.kt" "$test_path"
+          mkdir -p app/src/test/resources
+          cp "$RUNNER_TEMP/purchase-fixture/campaign-purchase-proposal.json" app/src/test/resources/
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+      - uses: ./.github/actions/robolectric-runtime
+      - run: bash scripts/ci-android-sdk.sh
+      - run: bash gradlew --console=plain :app:testDebugUnitTest --tests '*CampaignConnectionTest.bridgePurchase*'
   fast:
     name: Fast development gate
     needs: plan

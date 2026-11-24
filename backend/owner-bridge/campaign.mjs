@@ -24,6 +24,34 @@ function validateDeviceBuild(value) {
 const text=(v,max=4000)=>{if(typeof v!=='string'||!v.trim()||v.length>max)fail(400,'INVALID_TEXT');return v;};
 const commandId=v=>{if(typeof v!=='string'||!UUID.test(v))fail(400,'INVALID_COMMAND_ID');return v;};
 const exact=(v,required,optional=[])=>{if(!v||typeof v!=='object'||Array.isArray(v)||required.some(k=>!Object.hasOwn(v,k))||Object.keys(v).some(k=>!required.includes(k)&&!optional.includes(k)))fail(400,'INVALID_REQUEST');};
+// Match the native LedgerDraft contract before predicting item and placement rows.
+function acquisitionDraft(fields){
+ const {placement,...draft}=fields;
+ exact(draft,['title','evidenceStatus'],['category','owner','itemState','location','quantity','description',
+  'knownProperties','possibleUses','limitations','source','notionPageId','imageBase64','archived']);
+ for(const key of ['title','category','owner','itemState','location','evidenceStatus']){
+  if(Object.hasOwn(draft,key)){
+   if(typeof draft[key]!=='string')fail(400,'INVALID_ITEM_'+key.toUpperCase());
+   draft[key]=draft[key].trim()||({category:'Other',owner:'Unknown',itemState:'Unknown',location:'Unknown'}[key]??'');
+  }
+ }
+ text(draft.title,120);
+ if(draft.quantity!=null)integer(draft.quantity,0,1000000);
+ for(const [key,max] of Object.entries({description:16000,knownProperties:16000,possibleUses:16000,
+  limitations:16000,source:2000,location:200,owner:120})){
+  if(Object.hasOwn(draft,key)&&(typeof draft[key]!=='string'||draft[key].length>max))fail(400,'INVALID_ITEM_'+key.toUpperCase());
+ }
+ if(draft.notionPageId!=null){
+  if(typeof draft.notionPageId!=='string')fail(400,'INVALID_ITEM_SOURCE');
+  draft.notionPageId=draft.notionPageId.trim()||null;
+  if(draft.notionPageId?.length>160)fail(400,'INVALID_ITEM_SOURCE');
+ }
+ if(draft.imageBase64!=null)fail(400,'IMAGE_NOT_SYNCABLE');
+ if(Object.hasOwn(draft,'archived')&&typeof draft.archived!=='boolean')fail(400,'INVALID_ITEM_ARCHIVED');
+ if(draft.itemState!==undefined&&!['Unknown','Carried','Equipped','Stored','Consumed','Lost','Sold','Installed'].includes(draft.itemState))
+  fail(400,'INVALID_PLACEMENT_STATE');
+ return draft;
+}
 function validateConflictFailure(body){
  const detail=body.failure;
  exact(detail,['code','operation'],['field','observedRevision']);
@@ -487,7 +515,12 @@ export class CampaignBridge{
      publishedRevision:current?.grant_id===grant.id?current.revision:null,proposedFields:row.fields});
    }
   }
-  return this.envelope(campaign,{command,affected,committed:false,terminal:true,grantRevision:grant.revision,
+  const publicCommand={...command,operations:command.operations.map(op=>{
+   if(op.type!=='acquire_item')return op;
+   const {imageBase64,...fields}=op.fields;
+   return {...op,fields};
+  })};
+  return this.envelope(campaign,{command:publicCommand,affected,committed:false,terminal:true,grantRevision:grant.revision,
    failure:receipt.failure??{code:'LEGACY_REASON_UNAVAILABLE'},receipt});
  }
 
@@ -537,10 +570,10 @@ export class CampaignBridge{
       WHERE json_extract(o.value,'$.type')='acquire_item' AND json_extract(o.value,'$.recordId')=?) LIMIT 1`,
       this.ownerId,campaign,grant.id,op.recordId).first();
      const paid=prior?JSON.parse(prior.command_json).operations:[],placement=await this.getRecord(campaign,'item-placement',op.recordId);
-     if(current&&placement?.grant_id===grant.id&&this.now()-placement.last_device_sync_at<=FRESHNESS&&
+     if(current&&nowFields.title===fields.title&&nowFields.quantity===1&&!nowFields.archived&&placement?.grant_id===grant.id&&this.now()-placement.last_device_sync_at<=FRESHNESS&&
       JSON.parse(placement.fields_json).holderProfileId===fields.placement.holderProfileId&&
       paid.length===2&&paid.some(o=>o.type==='adjust_currency'&&o.recordId===debit.recordId&&canonical(o.fields)===canonical(debit.fields))&&
-      paid.some(o=>o.type==='acquire_item'&&o.recordId===op.recordId&&o.fields.placement?.holderProfileId===fields.placement.holderProfileId))
+      paid.some(o=>o.type==='acquire_item'&&o.recordId===op.recordId&&o.fields.title===fields.title&&o.fields.quantity===fields.quantity&&o.fields.placement?.holderProfileId===fields.placement.holderProfileId))
       return state('ALREADY_FULFILLED','APPLIED_PURCHASE_EXISTS',{commandId:JSON.parse(prior.command_json).commandId});
      return state('OWNER_REVIEW','DISPUTED_ITEM_IDENTITY');
     }
@@ -717,7 +750,7 @@ export class CampaignBridge{
     else if(op.kind==='party-sheet'){exact(op.fields,['resourceName','delta']);text(op.fields.resourceName,200);integer(op.fields.delta,-1000000,1000000);const data=sheet(),matches=data.resources.filter(x=>x.name===op.fields.resourceName);if(matches.length!==1||matches[0].current==null||(op.fields.delta>0&&matches[0].maximum==null))fail(409,'RESOURCE_UNKNOWN');matches[0].current=integer(matches[0].current+op.fields.delta,0,matches[0].maximum??Number.MAX_SAFE_INTEGER-1);after.contentJson=canonical(data);}
     else fail(400,'INVALID_OPERATION_KIND');break;
    case 'set_status':scope='hp';if(op.kind==='character-profile'){exact(op.fields,[],['currentHp','maximumHp','temporaryHp']);if(!Object.keys(op.fields).length)fail(400,'INVALID_OPERATION_FIELDS');for(const k of ['currentHp','maximumHp','temporaryHp'])if(Object.hasOwn(op.fields,k)){if(op.fields[k]!==null)integer(op.fields[k],0,1000000);after[k]=op.fields[k];}if(after.currentHp!=null&&after.maximumHp!=null&&after.currentHp>after.maximumHp)fail(400,'INVALID_HP_RANGE');}else if(op.kind==='party-sheet'){exact(op.fields,['conditions']);if(typeof op.fields.conditions!=='string'||op.fields.conditions.length>4000)fail(400,'INVALID_OPERATION_FIELDS');const data=sheet();data.conditions=op.fields.conditions;after.contentJson=canonical(data);}else fail(400,'INVALID_OPERATION_KIND');break;
-   case 'adjust_currency':exact(op.fields,[],['copperDelta','silverDelta','goldDelta','electrumDelta','platinumDelta']);if(op.kind!=='wallet'||!before||!Object.keys(op.fields).length)fail(400,'INVALID_OPERATION_KIND');for(const unit of ['copper','silver','gold','electrum','platinum'])if(Object.hasOwn(op.fields,unit+'Delta')){integer(op.fields[unit+'Delta'],-1000000000,1000000000);if(before[unit]==null)fail(409,'RESOURCE_UNKNOWN');after[unit]=integer(before[unit]+op.fields[unit+'Delta']);}break;
+   case 'adjust_currency':exact(op.fields,[],['copperDelta','silverDelta','goldDelta','electrumDelta','platinumDelta']);if(op.kind!=='wallet'||!before||!Object.keys(op.fields).length)fail(400,'INVALID_OPERATION_KIND');for(const unit of ['copper','silver','gold','electrum','platinum'])if(Object.hasOwn(op.fields,unit+'Delta')){integer(op.fields[unit+'Delta'],-1000000000,1000000000);if(before[unit]==null)fail(409,'RESOURCE_UNKNOWN');const balance=before[unit]+op.fields[unit+'Delta'];if(balance>1000000000)fail(409,'CURRENCY_BOUNDS');after[unit]=integer(balance);}break;
    case 'consume_item':{exact(op.fields,['quantity']);if(op.kind!=='item'||!before)fail(400,'INVALID_OPERATION_KIND');integer(op.fields.quantity,1,1000000);if(before.quantity==null)fail(409,'RESOURCE_UNKNOWN');after.quantity=integer(before.quantity-op.fields.quantity);if(after.quantity===0){after.itemState='Consumed';const p=await placement();if(p){const fields={...p.fields,state:'Consumed',containerItemId:null,installedProjectId:null,revision:p.row.revision+1};sideEffects.push({recordId:op.recordId,kind:'item-placement',expectedRevision:p.row.revision,currentFields:p.fields,fields});after.location=location(fields);}}break;}
    case 'move_item':{
     exact(op.fields,['expectedPlacementRevision'],['holderProfileId','containerItemId','installedProjectId','state','playableTransfer']);if(op.kind!=='item'||!before)fail(400,'INVALID_OPERATION_KIND');
@@ -757,7 +790,8 @@ export class CampaignBridge{
    case 'set_ability':exact(op.fields,['score']);if(op.kind!=='character-ability'||!before)fail(400,'INVALID_OPERATION_KIND');if(op.fields.score!==null)integer(op.fields.score,1,30);after.score=op.fields.score;break;
    case 'acquire_item':{
     if(op.kind!=='item'||before||op.expectedRevision!==0)fail(400,'INVALID_OPERATION_KIND');
-    const {placement:destination,...draft}=op.fields;
+    const destination=op.fields.placement,draft=acquisitionDraft(op.fields);
+    if(op.recordId.length>120)fail(400,'INVALID_ITEM_ID');
     after={title:'',category:'Other',owner:'Unknown',itemState:'Unknown',location:'Unknown',evidenceStatus:'Unverified',quantity:null,description:'',knownProperties:'',possibleUses:'',limitations:'',source:'',notionPageId:null,imageBase64:null,archived:false,...draft,id:op.recordId,createdAt:this.now(),updatedAt:this.now(),revision:1};
     if(after.evidenceStatus!=='Confirmed'||['Consumed','Sold','Lost','Installed'].includes(after.itemState))fail(400,'ACQUISITION_NOT_CONFIRMED');
     if(destination!==undefined){

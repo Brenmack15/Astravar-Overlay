@@ -889,7 +889,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         }
         require(result.getValue("commandId").jsonPrimitive.content == command.commandId && result.getValue("fingerprint").jsonPrimitive.content == command.fingerprint)
         require(result.getValue("status") == decision.getValue("status") && result.getValue("localReceiptId") == decision.getValue("localReceiptId"))
-        require(result["failure"] == decision["failure"])
+        require(result["failure"] == decision["failure"] && result["resolutionOf"] == parsed(command)["resolutionOf"])
         require(result.getValue("deviceCredentialId").jsonPrimitive.content == value.deviceId)
         syncDiagnostics.stage(value, CampaignSyncStage.RECEIPT_READBACK)
         require(request(value, base(value) + "/receipts/${command.commandId}").getValue("receipt") == result)

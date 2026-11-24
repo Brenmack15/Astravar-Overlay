@@ -691,3 +691,29 @@ test('recovery honors material conflicts, scope changes, Android diagnostics and
  const collision=itemRecord();collision.recordId=collision.fields.id='fixture-bronze-mail';await i.publish([collision]);
  assert.equal((await i.plan()).reason,'DISPUTED_ITEM_IDENTITY');
 });
+
+test('Android rollback and purchase fixture matches the actual bridge proposal including placement fields',async t=>{
+ const f=await conflictFixture(t);
+ const fixture=JSON.parse(await readFile(new URL('./fixtures/campaign-purchase-proposal.json',import.meta.url),'utf8'));
+ const normalize=rows=>JSON.parse(JSON.stringify(rows,(key,value)=>['updatedAt','createdAt'].includes(key)?0:value));
+ assert.deepEqual(normalize(f.command.operations),normalize(fixture));
+ const acq=f.ops[1];
+ await fails(f.submit([{...acq,fields:{...acq.fields,attuned:true}}]),'INVALID_REQUEST');
+ await fails(f.submit([{...acq,fields:{...acq.fields,quantity:-1}}]),'INVALID_INTEGER');
+ const old=await f.sync.getReceipt(connector,campaign,f.command.commandId);
+ assert.equal(old.receipt.status,'CONFLICT');assert.equal(old.receipt.records.length,0);
+});
+
+test('safe rebase preserves price and holder, detects a separately applied purchase and never repeats the debit',async t=>{
+ const f=await conflictFixture(t,{reason:'BASELINE_CHANGED'});
+ const wallet=walletRecord();wallet.revision=wallet.fields.revision=2;wallet.fields.gold=301;wallet.fields.platinum=1011750;
+ const holder=profileRecord();holder.revision=holder.fields.revision=2;
+ await f.publish([wallet,holder]);await f.confirm();
+ const plan=await f.plan();assert.equal(plan.status,'READY');assert.equal(plan.operations[0].expectedRevision,2);
+ assert.equal(plan.operations[1].fields.placement.expectedHolderRevision,2);
+ const {command}=await f.submit(plan.operations);await f.sync.decide(f.principal,campaign,decision(command));
+ assert.equal((await f.plan()).status,'ALREADY_FULFILLED');
+ assert.equal((await f.resolve(plan.previewToken)).commandId,command.commandId);
+ const rows=(await f.sync.read(connector,campaign,{kinds:['wallet']})).records;
+ assert.equal(rows[0].fields.gold,301);assert.equal(rows[0].fields.platinum,1004250);
+});

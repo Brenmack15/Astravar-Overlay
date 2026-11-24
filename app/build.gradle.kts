@@ -8,6 +8,7 @@ val remoteStatTest = providers.gradleProperty("astravarRemoteStatTest").map(Stri
 android {
     namespace = "com.yazsras.astravar"
     compileSdk = 36
+    sourceSets["test"].resources.srcDir("../backend/owner-bridge/fixtures")
     defaultConfig {
         applicationId = "com.yazsras.astravar"
         minSdk = 26
