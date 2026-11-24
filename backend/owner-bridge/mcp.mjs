@@ -135,6 +135,9 @@ export async function handleMcp(request, bridge, { ownerId, allowPublicDiscovery
       if(!campaignSync)throw Object.assign(new Error(),{code:'CAMPAIGN_CONNECTION_NOT_CONFIGURED'});
       const {campaignId,...body}=args;
       if(tool.name==='submit_campaign_transaction')value=await campaignSync.submit(principal,campaignId,body);
+      else if(tool.name==='inspect_campaign_conflict')value=await campaignSync.inspectConflict(principal,campaignId,args.commandId);
+      else if(tool.name==='preview_conflict_resolution')value=await campaignSync.conflictPlan(principal,campaignId,args.commandId);
+      else if(tool.name==='resolve_conflicted_transaction')value=await campaignSync.resolveConflict(principal,campaignId,args.commandId,args.previewToken);
       else if(tool.name==='get_campaign_command_receipt')value=await campaignSync.getReceipt(principal,campaignId,args.commandId);
       else if(tool.name==='get_campaign_reference')value=await campaignSync.referencePart(principal,campaignId,{referenceId:args.referenceId,part:args.part??'metadata',index:args.index??0});
       else if(tool.name==='get_campaign_state')value=await campaignSync.session(principal,campaignId);

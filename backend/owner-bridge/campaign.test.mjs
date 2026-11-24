@@ -631,3 +631,63 @@ test('owner browser adds combat write to the same grant without changing receipt
  assert.deepEqual((await f.sync.getReceipt(connector,campaign,command.commandId)).receipt,receipt);
  await fails(f.sync.reviewCombatWrite(owner,{...body,commandId:uuid()},true),'GRANT_REVISION_CONFLICT');
 });
+
+async function conflictFixture(t,{automatic=true,reason=null}={}){
+ const f=await setup(t);
+ const holder=profileRecord(),wallet=walletRecord();
+ wallet.fields.platinum=1011750;wallet.fields.gold=300;
+ await f.publish([holder,wallet]);
+ if(automatic)await f.enable(['currency','inventory']);
+ const ops=[op('adjust_currency','wallet',wallet.recordId,{platinumDelta:-7500}),
+  op('acquire_item','item','fixture-bronze-mail',{title:'Bronze Dragon Scale Mail',quantity:1,evidenceStatus:'Confirmed',
+   placement:{holderProfileId:profile,expectedHolderRevision:1,state:'Carried'}},0)];
+ const {command}=await f.submit(ops);
+ const declined=decision(command,{status:'CONFLICT'});
+ if(reason)declined.failure={code:reason,operation:1};
+ await f.sync.decide(f.principal,campaign,declined);
+ async function confirm(code=58){
+  const grant=await f.sync.authorize(f.principal,campaign,['device']);
+  await f.sync.publish(f.principal,campaign,{commandId:uuid(),records:[],snapshotFingerprint:(await f.sync.mirrorSnapshot(grant)).fingerprint,
+   deviceBuild:{packageName:'com.yazsras.astravar',versionName:'fixture',versionCode:code,androidApi:37,baseApkSha256:'a'.repeat(64),splitApkCount:0}});
+ }
+ return {...f,command,ops,confirm,plan:()=>f.sync.conflictPlan(connector,campaign,command.commandId),
+  resolve:token=>f.sync.resolveConflict(connector,campaign,command.commandId,token)};
+}
+
+test('terminal purchase is inspectable, waits for a fresh compatible Android, and resolves only once',async t=>{
+ const f=await conflictFixture(t);
+ const inspect=await f.sync.inspectConflict(connector,campaign,f.command.commandId);
+ assert.equal(inspect.committed,false);assert.equal(inspect.affected.length,3);
+ assert.equal(inspect.failure.code,'LEGACY_REASON_UNAVAILABLE');
+ assert.equal((await f.plan()).reason,'FRESH_PUBLICATION_REQUIRED');
+ await f.confirm(57);assert.equal((await f.plan()).reason,'UPDATED_ANDROID_REQUIRED');
+ await f.confirm();const plan=await f.plan();assert.equal(plan.status,'READY');assert.equal(plan.automatic,true);
+ await fails(f.resolve('0'.repeat(64)),'RESOLUTION_PREVIEW_CHANGED');
+ const results=await Promise.all([f.resolve(plan.previewToken),f.resolve(plan.previewToken)]);
+ const c=results.find(r=>r.command).command;
+ assert.equal(c.resolutionOf,f.command.commandId);assert.equal(c.status,'PENDING_DELIVERY');
+ assert.equal((await f.sync.pending(f.principal,campaign)).commands.length,1);
+ const result=await f.sync.decide(f.principal,campaign,decision(c));
+ assert.equal(result.receipt.status,'APPLIED');assert.equal(result.receipt.resolutionOf,f.command.commandId);
+ assert.equal((await f.resolve(plan.previewToken)).reason,'APPLIED');
+ const rows=(await f.sync.read(connector,campaign,{kinds:['wallet','item','item-placement']})).records;
+ assert.equal(rows.length,3);const wallet=rows.find(r=>r.kind==='wallet');
+ assert.equal(wallet.fields.platinum,1004250);assert.equal(wallet.fields.gold,300);
+ assert.equal(rows.find(r=>r.kind==='item-placement').fields.state,'Carried');
+ assert.equal((await f.sync.getReceipt(connector,campaign,f.command.commandId)).receipt.status,'CONFLICT');
+});
+
+test('recovery honors material conflicts, scope changes, Android diagnostics and manual grants',async t=>{
+ const f=await conflictFixture(t,{automatic:false,reason:'HOLDER_REVISION_CHANGED'});
+ await f.confirm();const plan=await f.plan();assert.equal(plan.automatic,false);
+ const wallet=walletRecord();wallet.revision=wallet.fields.revision=2;wallet.fields.gold=300;wallet.fields.platinum=1011749;
+ await f.publish([wallet]);assert.equal((await f.resolve(plan.previewToken)).reason,'PAYMENT_DENOMINATION_CHANGED');
+ await f.enable(['currency']);await fails(f.plan(),'GRANT_REVISION_CONFLICT');
+ const g=await conflictFixture(t,{automatic:false});await g.confirm();
+ assert.equal((await g.resolve((await g.plan()).previewToken)).command.status,'PENDING_APPROVAL');
+ const h=await conflictFixture(t,{reason:'PLACEMENT_OUTCOME_MISMATCH'});await h.confirm();
+ assert.equal((await h.plan()).status,'VALIDATION_FAILED');
+ const i=await conflictFixture(t);await i.confirm();
+ const collision=itemRecord();collision.recordId=collision.fields.id='fixture-bronze-mail';await i.publish([collision]);
+ assert.equal((await i.plan()).reason,'DISPUTED_ITEM_IDENTITY');
+});

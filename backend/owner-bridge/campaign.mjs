@@ -24,6 +24,16 @@ function validateDeviceBuild(value) {
 const text=(v,max=4000)=>{if(typeof v!=='string'||!v.trim()||v.length>max)fail(400,'INVALID_TEXT');return v;};
 const commandId=v=>{if(typeof v!=='string'||!UUID.test(v))fail(400,'INVALID_COMMAND_ID');return v;};
 const exact=(v,required,optional=[])=>{if(!v||typeof v!=='object'||Array.isArray(v)||required.some(k=>!Object.hasOwn(v,k))||Object.keys(v).some(k=>!required.includes(k)&&!optional.includes(k)))fail(400,'INVALID_REQUEST');};
+function validateConflictFailure(body){
+ const detail=body.failure;
+ exact(detail,['code','operation'],['field','observedRevision']);
+ if(body.status!=='CONFLICT'||!['HOLDER_REVISION_CHANGED','OWNERSHIP_CONFLICT','PLACEMENT_MISMATCH','EQUIPMENT_REVIEW_REQUIRED',
+  'CURRENCY_BOUNDS','UNKNOWN_BALANCE','BASELINE_CHANGED','DOMAIN_VALIDATION','SIDE_EFFECT_BASELINE',
+  'PLACEMENT_OUTCOME_MISMATCH','OUTCOME_MISMATCH','AFFECTED_IDENTITIES'].includes(detail.code))fail(400,'INVALID_CONFLICT_REASON');
+ integer(detail.operation,-1,24);
+ if(detail.field!==undefined&&!Object.values(FIELD_KEYS).some(fields=>fields.split(' ').includes(detail.field)))fail(400,'INVALID_CONFLICT_FIELD');
+ if(detail.observedRevision!==undefined)integer(detail.observedRevision);
+}
 export function campaignScopeList(v){if(!Array.isArray(v)||v.length>CAMPAIGN_SCOPES.length||new Set(v).size!==v.length||v.some(s=>!CAMPAIGN_SCOPES.includes(s)))fail(400,'INVALID_CAMPAIGN_SCOPES');return [...v].sort();}
 export function validateCampaignAccess(v){exact(v,['readScopes','writeScopes']);const readScopes=campaignScopeList(v.readScopes),writeScopes=campaignScopeList(v.writeScopes);if(!readScopes.length||writeScopes.some(s=>!readScopes.includes(s)))fail(400,'INVALID_CAMPAIGN_SCOPES');return{readScopes,writeScopes};}
 const mechanicsReadScopes = ['character','inventory','companions'];
@@ -446,7 +456,137 @@ export class CampaignBridge{
  }
 
  async getRecord(campaign,kind,rid){return this.s('SELECT * FROM bridge_campaign_records WHERE owner_id=? AND campaign_id=? AND kind=? AND record_id=?',this.ownerId,campaign,kind,rid).first();}
- async submit(p,campaign,b){exact(b,['commandId','expectedGrantRevision','operations','source']);commandId(b.commandId);integer(b.expectedGrantRevision,1);text(b.source,1900);if(!Array.isArray(b.operations)||!b.operations.length||b.operations.length>25)fail(400,'INVALID_TRANSACTION');const g=await this.authorize(p,campaign,['connector']),requestFingerprint=await sha256(canonical({campaignId:campaign,...b})),old=await this.s('SELECT * FROM bridge_campaign_commands WHERE owner_id=? AND campaign_id=? AND command_id=?',this.ownerId,campaign,b.commandId).first();if(old){if(old.request_fingerprint!==requestFingerprint||old.grant_id!==g.id)fail(409,'COMMAND_ID_REUSED');if(old.grant_revision!==g.revision)fail(409,'GRANT_REVISION_CONFLICT');return this.envelope(campaign,{command:JSON.parse(old.command_json)});}if(g.revision!==b.expectedGrantRevision)fail(409,'GRANT_REVISION_CONFLICT');const prepared=[],scopes=[];for(const op of b.operations){const value=await this.prepareOperation(campaign,g,op);prepared.push(value);scopes.push(nativeActionScope[op.type]??value.scope);
+ async failedTransaction(p,campaign,cid) {
+  commandId(cid);
+  const grant=await this.authorize(p,campaign,['connector']);
+  const row=await this.s(`SELECT c.command_json,c.grant_revision,r.receipt_json FROM bridge_campaign_commands c
+   JOIN bridge_campaign_receipts r USING(owner_id,campaign_id,command_id,grant_id)
+   WHERE c.owner_id=? AND c.campaign_id=? AND c.grant_id=? AND c.command_id=?`,
+   this.ownerId,campaign,grant.id,cid).first();
+  if(!row)fail(404,'TERMINAL_CONFLICT_NOT_FOUND');
+  if(row.grant_revision!==grant.revision)fail(409,'GRANT_REVISION_CONFLICT');
+  const command=JSON.parse(row.command_json),receipt=JSON.parse(row.receipt_json);
+  if(receipt.status!=='CONFLICT'||receipt.records.length||receipt.localReceiptId!==null)fail(409,'TERMINAL_CONFLICT_REQUIRED');
+  const reads=JSON.parse(grant.read_scopes_json);
+  // Raw commands can contain nested actor, source or resource fields. Only reveal them to their original audience.
+  for(const op of command.operations){
+   const simple=['adjust_currency','acquire_item'].includes(op.type) || (op.type==='set_record'&&['project','connection'].includes(op.kind));
+   const needed=simple?[op.scope,...(op.fields.placement?['character']:[])]:CAMPAIGN_SCOPES;
+   if(needed.some(scope=>!reads.includes(scope)))fail(403,'READ_SCOPE_DENIED');
+  }
+  return {grant,command,receipt};
+ }
+
+ async inspectConflict(p,campaign,cid) {
+  const {grant,command,receipt}=await this.failedTransaction(p,campaign,cid);
+  const affected=[];
+  for(const op of command.operations){
+   for(const row of [{...op,fields:op.proposedFields},...op.sideEffects]){
+    const current=await this.getRecord(campaign,row.kind,row.recordId);
+    affected.push({kind:row.kind,recordId:row.recordId,expectedRevision:row.expectedRevision,
+     publishedRevision:current?.grant_id===grant.id?current.revision:null,proposedFields:row.fields});
+   }
+  }
+  return this.envelope(campaign,{command,affected,committed:false,terminal:true,grantRevision:grant.revision,
+   failure:receipt.failure??{code:'LEGACY_REASON_UNAVAILABLE'},receipt});
+ }
+
+ async conflictPlan(p,campaign,cid) {
+  const {grant,command,receipt}=await this.failedTransaction(p,campaign,cid);
+  const state=(status,reason,extra={})=>this.envelope(campaign,{failedCommandId:cid,grantRevision:grant.revision,status,reason,...extra});
+  const hash=await sha256(canonical([this.ownerId,campaign,grant.id,cid,'conflict-resolution-v1']));
+  const childId=hash.slice(0,8)+'-'+hash.slice(8,12)+'-5'+hash.slice(13,16)+'-8'+hash.slice(17,20)+'-'+hash.slice(20,32);
+  const child=await this.s('SELECT command_json FROM bridge_campaign_commands WHERE owner_id=? AND campaign_id=? AND grant_id=? AND command_id=?',
+   this.ownerId,campaign,grant.id,childId).first();
+  if(child){
+   if(JSON.parse(child.command_json).resolutionOf!==cid)fail(409,'COMMAND_ID_REUSED');
+   const existing=await this.s('SELECT receipt_json FROM bridge_campaign_receipts WHERE owner_id=? AND campaign_id=? AND grant_id=? AND command_id=?',
+    this.ownerId,campaign,grant.id,childId).first();
+   return state('EXISTING_REPLACEMENT',existing?JSON.parse(existing.receipt_json).status:'PENDING_DEVICE_COMMIT',{commandId:childId});
+  }
+  const ops=command.operations,debit=ops.find(o=>o.type==='adjust_currency'),acquire=ops.find(o=>o.type==='acquire_item');
+  const purchase=ops.length===2 && debit && acquire && acquire.fields.quantity===1 &&
+   acquire.fields.evidenceStatus==='Confirmed' && acquire.fields.placement &&
+   (acquire.fields.placement.state??'Carried')==='Carried' &&
+   Object.values(debit.fields).some(v=>v<0) && Object.values(debit.fields).every(v=>Number.isSafeInteger(v)&&v<=0);
+  const notes=ops.every(o=>o.type==='set_record'&&o.expectedRevision>0 &&
+   ['project','connection'].includes(o.kind)&&Object.keys(o.fields).length===1&&typeof o.fields[o.kind==='project'?'description':'notes']==='string');
+  if(!purchase&&!notes)return state('OWNER_REVIEW','MATERIAL_INTENT_REQUIRES_REVIEW');
+  const scopes=ops.map(o=>o.scope);
+  if(scopes.some(s=>!JSON.parse(grant.write_scopes_json).includes(s)))fail(403,'WRITE_SCOPE_DENIED');
+  const publication=await this.s(`SELECT device_build_json,created_at FROM bridge_campaign_publications
+   WHERE grant_id=? AND expected_generation IS NOT NULL ORDER BY created_at DESC,rowid DESC LIMIT 1`,grant.id).first();
+  if(!publication||this.now()-publication.created_at>FRESHNESS)return state('WAIT_FOR_DEVICE','FRESH_PUBLICATION_REQUIRED');
+  if((JSON.parse(publication.device_build_json??'null')?.versionCode??0)<58)return state('WAIT_FOR_DEVICE','UPDATED_ANDROID_REQUIRED');
+  if(receipt.failure&&!['BASELINE_CHANGED','HOLDER_REVISION_CHANGED','SIDE_EFFECT_BASELINE'].includes(receipt.failure.code))
+   return state('VALIDATION_FAILED',receipt.failure.code);
+  if(!receipt.failure&&!purchase)return state('OWNER_REVIEW','LEGACY_REASON_UNAVAILABLE');
+  const operations=[],proof=[];
+  let fulfilled=0;
+  for(const op of ops){
+   const current=await this.getRecord(campaign,op.kind,op.recordId);
+   if(current&&(current.grant_id!==grant.id||this.now()-current.last_device_sync_at>FRESHNESS))return state('WAIT_FOR_DEVICE','DEVICE_SYNC_STALE');
+   const fields=structuredClone(op.fields),nowFields=current?JSON.parse(current.fields_json):null;
+   proof.push([op.kind,op.recordId,current?.revision??0,nowFields]);
+   if(op===acquire){
+    if(current||await this.getRecord(campaign,'item-placement',op.recordId)){
+     // Require an applied atomic purchase of the same identity and payment, plus current ownership.
+     const prior=await this.s(`SELECT c.command_json FROM bridge_campaign_commands c JOIN bridge_campaign_receipts r
+      USING(owner_id,campaign_id,command_id,grant_id) WHERE c.owner_id=? AND c.campaign_id=? AND c.grant_id=?
+      AND json_extract(r.receipt_json,'$.status')='APPLIED' AND EXISTS(SELECT 1 FROM json_each(c.command_json,'$.operations') o
+      WHERE json_extract(o.value,'$.type')='acquire_item' AND json_extract(o.value,'$.recordId')=?) LIMIT 1`,
+      this.ownerId,campaign,grant.id,op.recordId).first();
+     const paid=prior?JSON.parse(prior.command_json).operations:[],placement=await this.getRecord(campaign,'item-placement',op.recordId);
+     if(current&&placement?.grant_id===grant.id&&this.now()-placement.last_device_sync_at<=FRESHNESS&&
+      JSON.parse(placement.fields_json).holderProfileId===fields.placement.holderProfileId&&
+      paid.length===2&&paid.some(o=>o.type==='adjust_currency'&&o.recordId===debit.recordId&&canonical(o.fields)===canonical(debit.fields))&&
+      paid.some(o=>o.type==='acquire_item'&&o.recordId===op.recordId&&o.fields.placement?.holderProfileId===fields.placement.holderProfileId))
+      return state('ALREADY_FULFILLED','APPLIED_PURCHASE_EXISTS',{commandId:JSON.parse(prior.command_json).commandId});
+     return state('OWNER_REVIEW','DISPUTED_ITEM_IDENTITY');
+    }
+    const holder=await this.getRecord(campaign,'character-profile',fields.placement.holderProfileId);
+    if(!holder||holder.grant_id!==grant.id||this.now()-holder.last_device_sync_at>FRESHNESS)return state('WAIT_FOR_DEVICE','HOLDER_NOT_VERIFIED');
+    const name=JSON.parse(holder.fields_json).name;
+    if((name?.trim()?name:holder.record_id)!==op.proposedFields.owner)return state('OWNER_REVIEW','HOLDER_CHANGED');
+    fields.placement.expectedHolderRevision=holder.revision;
+    proof.push(['character-profile',holder.record_id,holder.revision]);
+   }else if(!current)return state('OWNER_REVIEW','RECORD_UNAVAILABLE');
+   else if(op===debit){
+    if(nowFields.holderProfileId!==op.currentFields.holderProfileId || nowFields.holderProfileId!==acquire.fields.placement.holderProfileId)
+     return state('OWNER_REVIEW','WALLET_OWNERSHIP_CHANGED');
+   }else {
+    const key=Object.keys(fields)[0];
+    if(nowFields[key]===fields[key])fulfilled++;
+    else if(nowFields[key]!==op.currentFields[key])return state('OWNER_REVIEW','FIELD_CHANGED');
+   }
+   operations.push({type:op.type,recordId:op.recordId,kind:op.kind,fields,expectedRevision:current?.revision??0});
+  }
+  if(notes&&fulfilled===ops.length)return state('ALREADY_FULFILLED','PUBLISHED_FIELDS_MATCH');
+  if(notes&&fulfilled)return state('OWNER_REVIEW','PARTIALLY_FULFILLED');
+  if(debit){
+   const balance=proof.find(([kind])=>kind==='wallet')[3];
+   if(Object.keys(debit.fields).some(key=>balance[key.slice(0,-5)]!==debit.currentFields[key.slice(0,-5)]))
+    return state('OWNER_REVIEW','PAYMENT_DENOMINATION_CHANGED');
+  }
+  // Exercise the ordinary typed validator before issuing any preview token.
+  for(const op of operations)await this.prepareOperation(campaign,grant,op);
+  const automatic=scopes.every(s=>JSON.parse(grant.auto_scopes_json).includes(s));
+  const previewToken=await sha256(canonical([command.fingerprint,grant.revision,automatic,proof,operations]));
+  return state('READY',automatic?'TRUSTED_DM_AUTO_SYNC':'NATIVE_APPROVAL_REQUIRED',
+   {commandId:childId,previewToken,automatic,operations});
+ }
+
+ async resolveConflict(p,campaign,cid,token){
+  if(typeof token!=='string'||!/^[a-f0-9]{64}$/.test(token))fail(400,'INVALID_PREVIEW_TOKEN');
+  const plan=await this.conflictPlan(p,campaign,cid);
+  if(plan.status!=='READY')return plan;
+  if(plan.previewToken!==token)fail(409,'RESOLUTION_PREVIEW_CHANGED');
+  const {command}=await this.failedTransaction(p,campaign,cid);
+  return this.submit(p,campaign,{commandId:plan.commandId,expectedGrantRevision:plan.grantRevision,
+   source:command.source,operations:plan.operations},cid);
+ }
+
+ async submit(p,campaign,b,resolutionOf=null){exact(b,['commandId','expectedGrantRevision','operations','source']);commandId(b.commandId);integer(b.expectedGrantRevision,1);text(b.source,1900);if(!Array.isArray(b.operations)||!b.operations.length||b.operations.length>25)fail(400,'INVALID_TRANSACTION');const g=await this.authorize(p,campaign,['connector']),requestFingerprint=await sha256(canonical({campaignId:campaign,...b,...(resolutionOf?{resolutionOf}:{})})),old=await this.s('SELECT * FROM bridge_campaign_commands WHERE owner_id=? AND campaign_id=? AND command_id=?',this.ownerId,campaign,b.commandId).first();if(old){if(old.request_fingerprint!==requestFingerprint||old.grant_id!==g.id)fail(409,'COMMAND_ID_REUSED');if(old.grant_revision!==g.revision)fail(409,'GRANT_REVISION_CONFLICT');return this.envelope(campaign,{command:JSON.parse(old.command_json)});}if(g.revision!==b.expectedGrantRevision)fail(409,'GRANT_REVISION_CONFLICT');const prepared=[],scopes=[];for(const op of b.operations){const value=await this.prepareOperation(campaign,g,op);prepared.push(value);scopes.push(nativeActionScope[op.type]??value.scope);
  if(nativeSourceTypes.includes(op.type)){
   if(b.operations.some(other=>!nativeSourceTypes.includes(other.type)&&!['adjust_currency','save_checkpoint'].includes(other.type)))fail(400,'INVALID_NATIVE_BATCH');
   scopes.push(...nativeSourcePlan(op,campaign,value.currentFields).scopes);
@@ -473,7 +613,12 @@ export class CampaignBridge{
  }else if(op.type==='move_item' && Object.hasOwn(op.fields,'playableTransfer')){
   if(b.operations.length!==1)fail(400,'SINGLE_EQUIPMENT_EDIT_REQUIRED');
   scopes.push('character','companions');
- }}if(new Set(prepared.map(x=>x.kind+'|'+x.recordId)).size!==prepared.length)fail(400,'DUPLICATE_RECORD_OPERATION');if(scopes.some(s=>!JSON.parse(g.write_scopes_json).includes(s)))fail(403,'WRITE_SCOPE_DENIED');const auto=!prepared.some(op=>nativeSourceTypes.includes(op.type)&&nativeSourcePlan(op,campaign,op.currentFields).manual)&&scopes.every(s=>JSON.parse(g.auto_scopes_json).includes(s));const fingerprint=await sha256(canonical({campaignId:campaign,commandId:b.commandId,grantRevision:g.revision,operations:prepared,source:b.source}));const value={commandId:b.commandId,campaignId:campaign,grantRevision:g.revision,operations:prepared,source:b.source,fingerprint,status:auto?'PENDING_DELIVERY':'PENDING_APPROVAL',createdAt:this.now()};if(wireBytes(this.envelope(campaign,{grant:this.grantJson(g),commands:[value],verifiedAt:this.now()}))>MAX_PENDING_BYTES)fail(413,'COMMAND_DELIVERY_TOO_LARGE');const expectedRecords=prepared.flatMap(op=>[{recordId:op.recordId,kind:op.kind,revision:op.expectedRevision+1,fields:op.proposedFields},...op.sideEffects.map(effect=>({recordId:effect.recordId,kind:effect.kind,revision:effect.expectedRevision+1,fields:effect.fields}))]).map(r=>({...r,fields:{...r.fields,source:'x'.repeat(2200),updatedAt:this.now()}}));if(wireBytes({commandId:b.commandId,fingerprint,status:'APPLIED',localReceiptId:'0'.repeat(200),records:expectedRecords})>60*1024)fail(413,'TRANSACTION_RECEIPT_TOO_LARGE');try{await this.s('INSERT INTO bridge_campaign_commands(owner_id,campaign_id,command_id,grant_id,grant_revision,request_fingerprint,fingerprint,command_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)',this.ownerId,campaign,b.commandId,g.id,g.revision,requestFingerprint,fingerprint,canonical(value),this.now()).run();}catch(e){for(const code of ['REVISION_CONFLICT','HOLDER_REVISION_CONFLICT','GRANT_REVISION_CONFLICT','PENDING_LIMIT'])if(String(e).includes(code))fail(code==='PENDING_LIMIT'?429:409,code);throw e;}
+ }}if(new Set(prepared.map(x=>x.kind+'|'+x.recordId)).size!==prepared.length)fail(400,'DUPLICATE_RECORD_OPERATION');if(scopes.some(s=>!JSON.parse(g.write_scopes_json).includes(s)))fail(403,'WRITE_SCOPE_DENIED');const auto=!prepared.some(op=>nativeSourceTypes.includes(op.type)&&nativeSourcePlan(op,campaign,op.currentFields).manual)&&scopes.every(s=>JSON.parse(g.auto_scopes_json).includes(s));const fingerprint=await sha256(canonical({campaignId:campaign,commandId:b.commandId,grantRevision:g.revision,operations:prepared,source:b.source,...(resolutionOf?{resolutionOf}:{})}));const value={...(resolutionOf?{resolutionOf}:{}),commandId:b.commandId,campaignId:campaign,grantRevision:g.revision,operations:prepared,source:b.source,fingerprint,status:auto?'PENDING_DELIVERY':'PENDING_APPROVAL',createdAt:this.now()};if(wireBytes(this.envelope(campaign,{grant:this.grantJson(g),commands:[value],verifiedAt:this.now()}))>MAX_PENDING_BYTES)fail(413,'COMMAND_DELIVERY_TOO_LARGE');const expectedRecords=prepared.flatMap(op=>[{recordId:op.recordId,kind:op.kind,revision:op.expectedRevision+1,fields:op.proposedFields},...op.sideEffects.map(effect=>({recordId:effect.recordId,kind:effect.kind,revision:effect.expectedRevision+1,fields:effect.fields}))]).map(r=>({...r,fields:{...r.fields,source:'x'.repeat(2200),updatedAt:this.now()}}));if(wireBytes({commandId:b.commandId,fingerprint,status:'APPLIED',localReceiptId:'0'.repeat(200),records:expectedRecords})>60*1024)fail(413,'TRANSACTION_RECEIPT_TOO_LARGE');try{await this.s('INSERT INTO bridge_campaign_commands(owner_id,campaign_id,command_id,grant_id,grant_revision,request_fingerprint,fingerprint,command_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)',this.ownerId,campaign,b.commandId,g.id,g.revision,requestFingerprint,fingerprint,canonical(value),this.now()).run();}catch(e){
+ if(resolutionOf){
+  const duplicate=await this.s('SELECT command_json,request_fingerprint FROM bridge_campaign_commands WHERE owner_id=? AND campaign_id=? AND grant_id=? AND command_id=?',this.ownerId,campaign,g.id,b.commandId).first();
+  if(duplicate&&duplicate.request_fingerprint===requestFingerprint)return this.envelope(campaign,{command:JSON.parse(duplicate.command_json),confirmation:'PENDING_DEVICE_COMMIT'});
+ }
+ for(const code of ['REVISION_CONFLICT','HOLDER_REVISION_CONFLICT','GRANT_REVISION_CONFLICT','PENDING_LIMIT'])if(String(e).includes(code))fail(code==='PENDING_LIMIT'?429:409,code);throw e;}
  // The command is already durably queued. Best-effort push wakeup is ALWAYS
  // asynchronous and never changes the response or the commit/receipt contract.
  try{this.onCommandQueued?.({campaignId:campaign,credentialId:g.credential_id,commandId:b.commandId});}catch{}
@@ -644,6 +789,6 @@ export class CampaignBridge{
   requireRecordCampaign({fields:after},campaign);after.revision=op.expectedRevision+1;const identity=op.kind==='character-ability'?after.profileId+':'+after.key:(after.id??after.profileId??after.companionId??after.itemId);if(identity!==op.recordId)fail(400,'RECORD_IDENTITY_MISMATCH');record({recordId:op.recordId,kind:op.kind,revision:after.revision,fields:after});const proposedFields=projectCampaignRecord({recordId:op.recordId,kind:op.kind,revision:after.revision,fields:after},JSON.parse(g.read_scopes_json)).fields;return{...op,scope,currentFields:before,proposedFields,sideEffects:sideEffects.map(effect=>({...effect,currentFields:effect.currentFields===null?null:projectCampaignRecord({recordId:effect.recordId,kind:effect.kind,revision:effect.expectedRevision,fields:effect.currentFields},JSON.parse(g.read_scopes_json)).fields,fields:projectCampaignRecord({recordId:effect.recordId,kind:effect.kind,revision:effect.expectedRevision+1,fields:effect.fields},JSON.parse(g.read_scopes_json)).fields}))};
  }
  async pending(p,campaign){const g=await this.authorize(p,campaign,['device']);const rows=await this.s('SELECT c.command_json FROM bridge_campaign_commands c LEFT JOIN bridge_campaign_receipts r ON r.owner_id=c.owner_id AND r.campaign_id=c.campaign_id AND r.command_id=c.command_id WHERE c.owner_id=? AND c.campaign_id=? AND c.grant_id=? AND c.grant_revision=? AND r.command_id IS NULL ORDER BY c.created_at,c.command_id LIMIT 50',this.ownerId,campaign,g.id,g.revision).all();const commands=[];const envelope=items=>this.envelope(campaign,{grant:this.grantJson(g),commands:items,verifiedAt:this.now(),hasMore:items.length<rows.results.length||rows.results.length===50});for(const row of rows.results){const candidate=JSON.parse(row.command_json);if(wireBytes(envelope([...commands,candidate]))>MAX_PENDING_BYTES)break;commands.push(candidate);}return envelope(commands);}
- async decide(p,campaign,b){exact(b,['commandId','fingerprint','status','localReceiptId','records']);commandId(b.commandId);if(!['APPLIED','REJECTED','CONFLICT'].includes(b.status))fail(400,'INVALID_DECISION');if(!Array.isArray(b.records))fail(400,'INVALID_RECORD_BATCH');const g=await this.authorize(p,campaign,['device']),fp=await sha256(canonical(b)),old=await this.s('SELECT * FROM bridge_campaign_receipts WHERE owner_id=? AND campaign_id=? AND command_id=?',this.ownerId,campaign,b.commandId).first();if(old){if(old.request_fingerprint!==fp||old.grant_id!==g.id)fail(409,'COMMAND_ID_REUSED');return this.getReceipt(p,campaign,b.commandId);}const c=await this.s('SELECT * FROM bridge_campaign_commands WHERE owner_id=? AND campaign_id=? AND command_id=?',this.ownerId,campaign,b.commandId).first();if(!c||c.grant_id!==g.id||c.fingerprint!==b.fingerprint)fail(409,'COMMAND_MISMATCH');const cmd=JSON.parse(c.command_json);if(b.status==='APPLIED'){for(const op of cmd.operations){const destination=op.type==='acquire_item'?op.fields.placement:null;if(destination){const holder=await this.getRecord(campaign,'character-profile',destination.holderProfileId);if(!holder||holder.grant_id!==g.id||holder.revision!==destination.expectedHolderRevision)fail(409,'HOLDER_REVISION_CONFLICT');}}text(b.localReceiptId,200);const expectedRows=cmd.operations.flatMap(op=>[{recordId:op.recordId,kind:op.kind,expectedRevision:op.expectedRevision,fields:op.proposedFields},...(op.sideEffects??[])]);if(b.records.length!==expectedRows.length||new Set(b.records.map(x=>x.kind+'|'+x.recordId)).size!==b.records.length)fail(400,'LOCAL_COMMIT_REQUIRED');for(const op of expectedRows){const result=b.records.find(x=>x.kind===op.kind&&x.recordId===op.recordId);record(result);requireRecordCampaign(result,campaign);if(canonical(projectCampaignRecord(result,JSON.parse(g.read_scopes_json)))!==canonical(result))fail(403,'UNAUTHORIZED_RECORD_FIELDS');if(result.revision!==op.expectedRevision+1)fail(409,'LOCAL_REVISION_MISMATCH');const actual={...projectCampaignRecord(result,JSON.parse(g.read_scopes_json)).fields};delete actual.source;delete actual.updatedAt;delete actual.createdAt;const expected={...projectCampaignRecord({recordId:op.recordId,kind:op.kind,revision:op.expectedRevision+1,fields:op.fields},JSON.parse(g.read_scopes_json)).fields};delete expected.source;delete expected.updatedAt;delete expected.createdAt;if(actual.contentJson&&expected.contentJson){actual.contentJson=JSON.parse(actual.contentJson);expected.contentJson=JSON.parse(expected.contentJson);}if(canonical(actual)!==canonical(expected))fail(409,'LOCAL_FIELDS_MISMATCH');}}else if(b.records.length||b.localReceiptId!==null)fail(400,'REJECTION_MUST_NOT_APPLY');const receipt={commandId:b.commandId,status:b.status,localReceiptId:b.localReceiptId,fingerprint:b.fingerprint,records:b.records,recordedAt:this.now(),eventId:crypto.randomUUID(),deviceCredentialId:p.credentialId};try{await this.s('INSERT INTO bridge_campaign_receipts(owner_id,campaign_id,command_id,grant_id,request_fingerprint,receipt_json,records_json,created_at) VALUES(?,?,?,?,?,?,?,?)',this.ownerId,campaign,b.commandId,g.id,fp,canonical(receipt),canonical(b.records),this.now()).run();}catch(e){for(const code of ['GRANT_REVISION_CONFLICT','REVISION_CONFLICT','HOLDER_REVISION_CONFLICT','GRANT_EXPIRED'])if(String(e).includes(code))fail(409,code);throw e;}return this.envelope(campaign,{receipt});}
+ async decide(p,campaign,b){exact(b,['commandId','fingerprint','status','localReceiptId','records'],['failure']);if(b.failure!==undefined)validateConflictFailure(b);commandId(b.commandId);if(!['APPLIED','REJECTED','CONFLICT'].includes(b.status))fail(400,'INVALID_DECISION');if(!Array.isArray(b.records))fail(400,'INVALID_RECORD_BATCH');const g=await this.authorize(p,campaign,['device']),fp=await sha256(canonical(b)),old=await this.s('SELECT * FROM bridge_campaign_receipts WHERE owner_id=? AND campaign_id=? AND command_id=?',this.ownerId,campaign,b.commandId).first();if(old){if(old.request_fingerprint!==fp||old.grant_id!==g.id)fail(409,'COMMAND_ID_REUSED');return this.getReceipt(p,campaign,b.commandId);}const c=await this.s('SELECT * FROM bridge_campaign_commands WHERE owner_id=? AND campaign_id=? AND command_id=?',this.ownerId,campaign,b.commandId).first();if(!c||c.grant_id!==g.id||c.fingerprint!==b.fingerprint)fail(409,'COMMAND_MISMATCH');const cmd=JSON.parse(c.command_json);if(b.failure && b.failure.operation>=cmd.operations.length)fail(400,'INVALID_CONFLICT_OPERATION');if(b.status==='APPLIED'){for(const op of cmd.operations){const destination=op.type==='acquire_item'?op.fields.placement:null;if(destination){const holder=await this.getRecord(campaign,'character-profile',destination.holderProfileId);if(!holder||holder.grant_id!==g.id||holder.revision!==destination.expectedHolderRevision)fail(409,'HOLDER_REVISION_CONFLICT');}}text(b.localReceiptId,200);const expectedRows=cmd.operations.flatMap(op=>[{recordId:op.recordId,kind:op.kind,expectedRevision:op.expectedRevision,fields:op.proposedFields},...(op.sideEffects??[])]);if(b.records.length!==expectedRows.length||new Set(b.records.map(x=>x.kind+'|'+x.recordId)).size!==b.records.length)fail(400,'LOCAL_COMMIT_REQUIRED');for(const op of expectedRows){const result=b.records.find(x=>x.kind===op.kind&&x.recordId===op.recordId);record(result);requireRecordCampaign(result,campaign);if(canonical(projectCampaignRecord(result,JSON.parse(g.read_scopes_json)))!==canonical(result))fail(403,'UNAUTHORIZED_RECORD_FIELDS');if(result.revision!==op.expectedRevision+1)fail(409,'LOCAL_REVISION_MISMATCH');const actual={...projectCampaignRecord(result,JSON.parse(g.read_scopes_json)).fields};delete actual.source;delete actual.updatedAt;delete actual.createdAt;const expected={...projectCampaignRecord({recordId:op.recordId,kind:op.kind,revision:op.expectedRevision+1,fields:op.fields},JSON.parse(g.read_scopes_json)).fields};delete expected.source;delete expected.updatedAt;delete expected.createdAt;if(actual.contentJson&&expected.contentJson){actual.contentJson=JSON.parse(actual.contentJson);expected.contentJson=JSON.parse(expected.contentJson);}if(canonical(actual)!==canonical(expected))fail(409,'LOCAL_FIELDS_MISMATCH');}}else if(b.records.length||b.localReceiptId!==null)fail(400,'REJECTION_MUST_NOT_APPLY');const receipt={...(b.failure?{failure:b.failure}:{}),...(cmd.resolutionOf?{resolutionOf:cmd.resolutionOf}:{}),commandId:b.commandId,status:b.status,localReceiptId:b.localReceiptId,fingerprint:b.fingerprint,records:b.records,recordedAt:this.now(),eventId:crypto.randomUUID(),deviceCredentialId:p.credentialId};try{await this.s('INSERT INTO bridge_campaign_receipts(owner_id,campaign_id,command_id,grant_id,request_fingerprint,receipt_json,records_json,created_at) VALUES(?,?,?,?,?,?,?,?)',this.ownerId,campaign,b.commandId,g.id,fp,canonical(receipt),canonical(b.records),this.now()).run();}catch(e){for(const code of ['GRANT_REVISION_CONFLICT','REVISION_CONFLICT','HOLDER_REVISION_CONFLICT','GRANT_EXPIRED'])if(String(e).includes(code))fail(409,code);throw e;}return this.envelope(campaign,{receipt});}
  async getReceipt(p,campaign,cid){commandId(cid);const g=await this.authorize(p,campaign),r=await this.s('SELECT * FROM bridge_campaign_receipts WHERE owner_id=? AND campaign_id=? AND command_id=? AND grant_id=?',this.ownerId,campaign,cid,g.id).first();if(!r)fail(404,'RECEIPT_NOT_READY');const receipt=JSON.parse(r.receipt_json),before=receipt.records.length;receipt.records=receipt.records.filter(x=>canReadRecord(x,JSON.parse(g.read_scopes_json))).map(x=>projectCampaignRecord(x,JSON.parse(g.read_scopes_json)));if(before!==receipt.records.length)receipt.recordsRedacted=before-receipt.records.length;return this.envelope(campaign,{receipt});}
 }

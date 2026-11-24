@@ -343,7 +343,7 @@ private fun connectionTime(value: Long?) = value?.let {
             val canApprove = !pending.terminalReceipt && pending.state in setOf("PENDING_APPROVAL", "PENDING_DELIVERY") && pending.operations.isNotEmpty() && pending.operations.all {
                 it.expectedRevision != null && it.currentRevision != null && it.expectedRevision == it.currentRevision && it.proposed.isNotEmpty() && it.previewVerified
             }
-            if (!pending.terminalReceipt && pending.state in setOf("PENDING_APPROVAL", "PENDING_DELIVERY", "CONFLICT")) {
+            if (!pending.terminalReceipt && pending.state in setOf("PENDING_APPROVAL", "PENDING_DELIVERY")) {
                 PlayerButton(onClick = { onDecision(pending.commandId, true) }, enabled = view.connected && !view.busy && canApprove,
                     modifier = Modifier.fillMaxWidth()) { Text("Approve reviewed transaction") }
                 PlayerOutlinedButton(onClick = { onDecision(pending.commandId, false) }, enabled = view.connected && !view.busy,
@@ -461,8 +461,8 @@ internal fun campaignConnectionView(snapshot: JsonObject, now: Long = System.cur
         pushEnabled = (snapshot["pushEnabled"] as? JsonPrimitive)?.booleanOrNull == true,
         pending = snapshot.connectionRows("pending").map { row -> CampaignPendingView(row.connectionText("commandId"), row.connectionText("state"), row.connectionText("source"), row.connectionText("message"),
             row.connectionRows("operations").map { op -> CampaignOperationView(op.connectionText("type"), op.connectionText("recordId"), op.connectionLong("expectedRevision"),
-                op.connectionLong("currentRevision"), displayFields(op["current"] ?: op["currentFields"]), if (op.connectionText("type") in setOf("define_native_item", "define_native_actor")) (nativeSourceReview(op["fields"]) + nativeSourceReview(op["nativePreview"])) else displayFields(op["proposedFields"] ?: op["fields"]),
-                op["proposedFields"] is JsonObject && (op.connectionText("type") !in setOf("define_native_actor","define_native_item") ||
+                op.connectionLong("currentRevision"), displayFields(op["current"] ?: op["currentFields"]), if (op.connectionText("type") in setOf("define_native_item", "define_native_actor")) (nativeSourceReview(op["fields"]) + nativeSourceReview(op["nativePreview"])) else displayFields(op["proposedFields"] ?: op["fields"]) + if (op.connectionText("type") == "acquire_item") nativeSourceReview(op["nativePreview"]) else emptyList(),
+                op["proposedFields"] is JsonObject && (op.connectionText("type") !in setOf("acquire_item","define_native_actor","define_native_item") ||
                     (op["nativePreview"] as? JsonObject)?.get("valid") == JsonPrimitive(true))) }, row.connectionText("commandId") in terminalCommands) },
         receipts = snapshot.connectionRows("history").map { row -> CampaignReceiptView(row.connectionText("commandId"), row.connectionText("state"), row.connectionText("message"),
             row["receiptJson"] != null && row["receiptJson"] !is JsonNull && row.connectionText("state") in setOf("COMMITTED", "VERIFIED", "REJECTED", "CONFLICT")) }

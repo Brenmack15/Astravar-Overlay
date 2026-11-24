@@ -358,7 +358,12 @@ internal suspend fun checkManagedCraft(db: CampaignLedgerDb, command: CraftComma
 internal suspend fun connectAssignedManagedItem(db: CampaignLedgerDb, item: LedgerItem, placement: ItemPlacement,
     commandId: String, source: String) {
     if (genesisProjectionActive(db)) return
-    require(placement.holderProfileId?.let { db.genesisAuthorityDao().actor(it)?.playable } != true) {
-        "This acquisition requires a reviewed playable item definition. Create the item through connected inventory or leave it unassigned for review; nothing was acquired."
-    }
+    val holder = placement.holderProfileId ?: return
+    if (db.genesisAuthorityDao().actor(holder)?.playable != true) return
+    require(placement.state == "Carried") { "Managed equipment requires an explicit equipped definition." }
+    val playable = ReforgeRepository(db)
+    val campaign = CampaignLedgerRepository(db)
+    val review = playable.reviewCampaignItem(campaign, holder, item.id)
+    check(review.source.item == item && review.source.placement == placement && item.source == source)
+    playable.acceptCampaignItem(campaign, review, genesisChild(commandId, "assigned-acquisition"))
 }

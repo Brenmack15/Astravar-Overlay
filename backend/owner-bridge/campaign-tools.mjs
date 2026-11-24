@@ -6,6 +6,11 @@ const str={type:'string',minLength:1,maxLength:1900};
 const read=(name,description,properties={},required=Object.keys(properties))=>({name,description,inputSchema:obj({campaignId:id,...properties},['campaignId',...required]),annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false}});
 const page={after:{type:'string',maxLength:400},limit:{type:'integer',minimum:1,maximum:100}};
 export const CAMPAIGN_TOOLS=Object.freeze([
+ read('inspect_campaign_conflict','Read an immutable failed transaction, affected records, revisions, known device failure and commit status.',{commandId:id}),
+ read('preview_conflict_resolution','Recheck current Android publication, purchase identity, grants and revisions. Only READY supplies a resolution token.',{commandId:id}),
+ {name:'resolve_conflicted_transaction',description:'Revalidate a READY preview and queue one linked replacement. Verify the immutable receipt and updated records independently.',
+  inputSchema:obj({campaignId:id,commandId:id,previewToken:{type:'string',pattern:'^[a-f0-9]{64}$'}}),
+  annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false}},
  read('get_campaign_state','Read a bounded, source-linked active-session aggregate of owner-authorized Android campaign records. Unknowns and stale synchronization remain explicit.',page,[]),
  read('get_playable_loadout','Read one accepted actor’s physical items with their original typed effects and default-context activation reasons, attacks, resources, features, conditions and turn state. Record revision is the actor revision. The effect requiresAttunement flag inherits the item requirement. A separate ATTUNED condition always requires an attuned instance. Use effectStatuses for the calculated result. Verify multipart data against its header hash. Read only.',{profileId:id,...page},['profileId']),
  read('get_playable_spells','Read one accepted actor’s native casting state, slot capacity and remaining uses, current concentration and spell definitions with preparation and source. Missing or null availability is unknown. Each header has an actor revision and content SHA-256. Large definitions have numbered text parts; concatenate in order from the same header, revision and content hash. A read never casts or prepares a spell.',{profileId:id,...page},['profileId']),
