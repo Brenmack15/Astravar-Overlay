@@ -3,6 +3,7 @@ package com.yazsras.astravar
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.UiDevice
 import org.junit.Assert.*
 import org.junit.Rule
@@ -119,7 +120,9 @@ class GenesisUpgradeInstrumentationTest {
         ui.ensurePrimaryTab(product, "Companions")
         if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
         tap("Genesis Legacy Retention Ally")
-        find("7 / 18")
+        // Reopening a companion may restore the scroll offset from its Relationships
+        // section. The retained HP is in the sheet header, above that saved offset.
+        ui.textBounds("7 / 18", product, scrollAttempts = 18, firstDirection = Direction.UP)
         ui.expandDisclosure(product, "Relationships")
         find("Genesis Legacy Retention Actor")
         find("Fictional retained ally")
