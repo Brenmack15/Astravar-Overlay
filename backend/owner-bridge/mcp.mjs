@@ -83,7 +83,7 @@ const safeError = error => typeof error?.code === 'string' && /^[A-Z0-9_]{1,64}$
  * This adapter must not be directly exposed on a host where callers can spoof
  * oai-authenticated-user-id. Ordinary bearer credentials are not MCP identity.
  */
-export async function handleMcp(request, bridge, { ownerId, allowPublicDiscovery = false, connectorScopes = ['character:read', 'proposal:create', 'proposal:read'], liveHp = null, hpConnectorScopes = ['hp:read', 'hp:propose', 'hp:receipt'], campaignBridge=null } = {}) {
+export async function handleMcp(request, bridge, { ownerId, allowPublicDiscovery = false, connectorScopes = ['character:read', 'proposal:create', 'proposal:read'], liveHp = null, hpConnectorScopes = ['hp:read', 'hp:propose', 'hp:receipt'], campaignBridge=null, campaignPush=null } = {}) {
   if (request.method !== 'POST') return rpcError(null, -32600, 'POST_REQUIRED', 405);
   if (request.headers.get('content-type')?.split(';')[0].trim() !== 'application/json') return rpcError(null, -32600, 'JSON_REQUIRED', 415);
   let payload;
@@ -134,7 +134,14 @@ export async function handleMcp(request, bridge, { ownerId, allowPublicDiscovery
     if(CAMPAIGN_TOOLS.some(t=>t.name===tool.name)){
       if(!campaignSync)throw Object.assign(new Error(),{code:'CAMPAIGN_CONNECTION_NOT_CONFIGURED'});
       const {campaignId,...body}=args;
-      if(tool.name==='submit_campaign_transaction')value=await campaignSync.submit(principal,campaignId,body);
+      if(tool.name==='request_campaign_sync'){
+        // Identity is supplied by Sites; the grant chooses the one enrolled device.
+        const grant=await campaignSync.authorize(principal,campaignId);
+        if(!campaignPush)throw Object.assign(new Error(),{code:'PUSH_NOT_CONFIGURED'});
+        const wake=await campaignPush.requestSync({campaignId,credentialId:grant.credential_id});
+        value={mode:'ASTRAVAR_CAMPAIGN_V2',campaignId,...wake,confirmation:'DEVICE_SYNC_UNVERIFIED'};
+      }
+      else if(tool.name==='submit_campaign_transaction')value=await campaignSync.submit(principal,campaignId,body);
       else if(tool.name==='inspect_campaign_conflict')value=await campaignSync.inspectConflict(principal,campaignId,args.commandId);
       else if(tool.name==='preview_conflict_resolution')value=await campaignSync.conflictPlan(principal,campaignId,args.commandId);
       else if(tool.name==='resolve_conflicted_transaction')value=await campaignSync.resolveConflict(principal,campaignId,args.commandId,args.previewToken);
