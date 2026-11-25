@@ -80,7 +80,7 @@ async function handleWorkerRequest(request, env, context) {
   }}):null;
   // Tool schemas contain no private data and are needed for plugin provisioning.
   // Actual tools/call still requires the configured owner and verified identity.
-  if (url.pathname === '/mcp') return handleMcp(request, bridge, { ownerId, allowPublicDiscovery: true,liveHp,campaignBridge });
+  if (url.pathname === '/mcp') return handleMcp(request, bridge, { ownerId, allowPublicDiscovery: true,liveHp,campaignBridge,campaignPush });
   if (!configured) return json({ mode: MODE, error: { code: 'OWNER_CONNECTION_NOT_CONFIGURED' } }, 503);
   const isOwner = request.headers.get('oai-authenticated-user-id') === ownerId;
   const ownerPrincipal = isOwner ? { ownerId, role: 'owner', credentialId: 'sites-owner', scopes: [] } : null;
