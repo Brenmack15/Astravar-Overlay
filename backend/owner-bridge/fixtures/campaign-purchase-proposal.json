@@ -1,0 +1,97 @@
+[
+  {
+    "type": "adjust_currency",
+    "kind": "wallet",
+    "recordId": "fixture-wallet",
+    "fields": {
+      "platinumDelta": -7500
+    },
+    "expectedRevision": 1,
+    "scope": "currency",
+    "currentFields": {
+      "campaignId": "campaign-v2-fixture",
+      "copper": 0,
+      "electrum": null,
+      "gold": 300,
+      "holderProfileId": "fixture-player",
+      "id": "fixture-wallet",
+      "name": "Fictional wallet",
+      "platinum": 1011750,
+      "revision": 1,
+      "silver": 0,
+      "source": "Resolved fictional evidence",
+      "updatedAt": 1
+    },
+    "proposedFields": {
+      "campaignId": "campaign-v2-fixture",
+      "copper": 0,
+      "electrum": null,
+      "gold": 300,
+      "holderProfileId": "fixture-player",
+      "id": "fixture-wallet",
+      "name": "Fictional wallet",
+      "platinum": 1004250,
+      "revision": 2,
+      "silver": 0,
+      "source": "Resolved fictional evidence",
+      "updatedAt": 1
+    },
+    "sideEffects": []
+  },
+  {
+    "type": "acquire_item",
+    "kind": "item",
+    "recordId": "fixture-bronze-mail",
+    "fields": {
+      "title": "Bronze Dragon Scale Mail",
+      "quantity": 1,
+      "evidenceStatus": "Confirmed",
+      "placement": {
+        "holderProfileId": "fixture-player",
+        "expectedHolderRevision": 1,
+        "state": "Carried"
+      }
+    },
+    "expectedRevision": 0,
+    "scope": "inventory",
+    "currentFields": null,
+    "proposedFields": {
+      "title": "Bronze Dragon Scale Mail",
+      "category": "Other",
+      "owner": "Fictional Player",
+      "itemState": "Carried",
+      "location": "Actor:fixture-player",
+      "evidenceStatus": "Confirmed",
+      "quantity": 1,
+      "description": "",
+      "knownProperties": "",
+      "possibleUses": "",
+      "limitations": "",
+      "source": "",
+      "notionPageId": null,
+      "archived": false,
+      "id": "fixture-bronze-mail",
+      "createdAt": 1795560594222,
+      "updatedAt": 1795560594222,
+      "revision": 1
+    },
+    "sideEffects": [
+      {
+        "recordId": "fixture-bronze-mail",
+        "kind": "item-placement",
+        "expectedRevision": 0,
+        "currentFields": null,
+        "fields": {
+          "itemId": "fixture-bronze-mail",
+          "holderProfileId": "fixture-player",
+          "containerItemId": null,
+          "installedProjectId": null,
+          "state": "Carried",
+          "revision": 1,
+          "source": "",
+          "updatedAt": 1795560594222
+        }
+      }
+    ]
+  }
+]

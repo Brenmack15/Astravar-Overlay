@@ -30,6 +30,46 @@ class CampaignSyncDomainTest {
         ledger.party.saveSheet("synthetic-player",PartySheetData(resources=listOf(SheetResource("Level 2",2,3),SheetResource("Unknown charge"))),source=source)
         ledger.party.saveWallet(PartyWallet("synthetic-wallet","synthetic-player","Fictional wallet",gold=10),source=source)
     } }
+    @Test fun confirmedPurchaseUsesThePlayableHolderAndRollsBackRejectedPlacement() = runBlocking {
+        val authority = GenesisAuthorityRepository(db)
+        authority.prepareOwnerLocalCampaign()
+        val id = "fixture-playable-buyer"
+        val character = com.yazsras.astravar.rules.reforge.ReforgeCharacter(id, "Fixture buyer")
+        val buyer = authority.createActor(character.name, GenesisActorRole.PLAYER, campaign, playable = character)
+        ledger.party.saveWallet(PartyWallet("fixture-platinum", id, "Fixture purse", gold = 300, platinum = 1011750), source = source)
+        fun purchase(itemId: String, state: String?) = listOf(
+            CampaignSyncOperation("adjust_currency", "fixture-platinum", "wallet", 1, buildJsonObject { put("platinumDelta",-7500) }),
+            CampaignSyncOperation("acquire_item", itemId, "item", 0, buildJsonObject {
+                put("title","Bronze Dragon Scale Mail"); put("quantity",1); put("category","Magic Item")
+                put("knownProperties","Inert while carried"); put("evidenceStatus","Confirmed")
+                put("placement",buildJsonObject {
+                    put("holderProfileId",id); put("expectedHolderRevision",buyer.profile.revision)
+                    state?.let { put("state",it) }
+                })
+            })
+        )
+        val original = ReforgeRepository(db).get(id)!!
+        val denied = runCatching { domain.apply(campaign, "rejected-acquisition", source, purchase("rejected-item","Equipped"), diagnose = true) }.exceptionOrNull()
+        assertEquals("EQUIPMENT_REVIEW_REQUIRED",(denied as CampaignConflict).code)
+        assertNull(db.ledgerDao().getItem("rejected-item"))
+        assertNull(db.recordsDao().receipt(CampaignSyncDomain.receiptId("rejected-acquisition")))
+        assertEquals(1011750L,db.partyDao().wallet("fixture-platinum")!!.platinum)
+        assertEquals(original,ReforgeRepository(db).get(id))
+        val ops = purchase("fixture-carried-mail",null)
+        val receipt = domain.apply(campaign,"carried-purchase",source,ops)
+        assertEquals(receipt,CampaignSyncDomain(db).apply(campaign,"carried-purchase",source,ops))
+        val rows = campaignJson.decodeFromString<List<CampaignSyncRecord>>(receipt.outcomeJson)
+        assertEquals(setOf("wallet","item","item-placement"),rows.map { it.kind }.toSet())
+        assertEquals(3,rows.size)
+        val wallet = db.partyDao().wallet("fixture-platinum")!!
+        assertEquals(1004250L,wallet.platinum); assertEquals(300L,wallet.gold)
+        val saved = ReforgeRepository(db).get(id)!!.character
+        val armor = saved.items.single { it.id == "fixture-carried-mail" }
+        assertFalse(armor.attuned); assertEquals("CARRIED",armor.state.name)
+        assertEquals(id, db.partyDao().placement(armor.id)!!.holderProfileId)
+        assertEquals("Inert while carried",db.ledgerDao().getItem(armor.id)!!.knownProperties)
+        assertEquals(original.character.resources,saved.resources)
+    }
     @Test fun merchantPurchaseAndCheckpointRecoverTogetherFromAFreshRepository() = runBlocking {
         val merchant = "scenario-merchant"
         val item = "scenario-purchased-item"

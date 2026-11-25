@@ -83,7 +83,7 @@ test('deterministic bundled Worker imports and serves the same authenticated MCP
     assert.equal(await readFile(join(directory, 'server/index.js'), 'utf8'), first);
     const bundled = await import(pathToFileURL(join(directory, 'server/index.js')));
     const response = await bundled.default.fetch(ownerRequest('/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) }), { DB: {}, OWNER_SITE_USER_ID: ownerId });
-    assert.equal((await response.json()).result.tools.length, 33);
+    assert.equal((await response.json()).result.tools.length, 36);
     assert.equal((await readFile(join(directory, '.openai/drizzle/0000_owner_bridge.sql'), 'utf8')).includes('CREATE TABLE'), true);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

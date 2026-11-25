@@ -244,7 +244,10 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
     private fun key(kind: String, id: String) = "$kind\u0000$id"
 
     suspend fun apply(campaignId: String, commandId: String, source: String,
-        operations: List<CampaignSyncOperation>): CommandReceipt = db.withTransaction {
+        operations: List<CampaignSyncOperation>): CommandReceipt = apply(campaignId, commandId, source, operations, diagnose = false)
+
+    internal suspend fun apply(campaignId: String, commandId: String, source: String,
+        operations: List<CampaignSyncOperation>, diagnose: Boolean): CommandReceipt = db.withTransaction {
         OwnerSyncProtocol.id(campaignId); require(commandId.length in 1..120 && source.isNotBlank() && source.length <= 2000)
         require(operations.size in 1..50 && operations.map { key(it.kind,it.recordId) }.distinct().size == operations.size)
         val fingerprint = campaignHash("campaign-sync-v2:" + OwnerSyncProtocol.canonical(buildJsonObject {
@@ -295,62 +298,69 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
         val created = mutableSetOf<String>()
         operations.forEachIndexed { index, operation ->
             require(operation.expectedRevision >= 0 && operation.recordId.length in 1..180)
-            val current = before[key(operation.kind,operation.recordId)]
-            check((current?.revision ?: 0) == operation.expectedRevision) { "Record changed or is outside selected campaign." }
-            require(current != null || operation.expectedRevision == 0L)
-            require(current != null || operation.type in NativeSourceSync.types || operation.type in setOf("set_record", "save_checkpoint", "acquire_item")) { "Existing record required." }
-            if (campaignId != "local-campaign" && current == null && operation.kind in setOf("character-ability", "party-sheet", "wallet")) {
-                val parentProfileId = if (operation.kind == "wallet") operation.fields.optional("holderProfileId") else operation.fields.optional("profileId")
-                    ?: if (operation.kind == "party-sheet") operation.recordId else operation.recordId.substringBeforeLast(':', "").takeIf { it.isNotBlank() }
-                require(parentProfileId == null || before.containsKey(key("character-profile", parentProfileId))) { "Parent identity is outside selected campaign." }
-            }
-            fun known(kind:String,id:String?): Boolean {
-                val normalized=if(kind=="companion") "companion-state" else kind
-                return id!=null && (before.containsKey(key(normalized,id)) || key(normalized,id) in created)
-            }
-            if (operation.type == "acquire_item" && operation.fields.containsKey("placement")) {
-                val destination = operation.fields.getValue("placement").jsonObject
-                destination.allowed("holderProfileId", "expectedHolderRevision", "state")
-                val holderId = destination.text("holderProfileId")
-                val holderRevision = destination.getValue("expectedHolderRevision").jsonPrimitive.long
-                require(holderRevision > 0 && known("character-profile", holderId)) { "Acquiring holder is outside selected campaign." }
-                check(before[key("character-profile", holderId)]?.revision == holderRevision &&
-                    db.recordsDao().characterProfile(holderId)?.revision == holderRevision) { "Acquiring holder changed." }
-                check(db.partyDao().placement(operation.recordId) == null) { "Acquisition placement already exists." }
-            }
-            if(operation.type=="move_item") {
-                for((field,kind) in listOf("holderProfileId" to "character-profile","containerItemId" to "item","installedProjectId" to "project"))
-                    operation.fields.optional(field)?.let {require(known(kind,it)) {"Destination is outside selected campaign."}}
-            }
-            if(operation.kind=="reference" && operation.type=="set_record") {
-                val merged=JsonObject((current?.fields ?: emptyMap())+operation.fields)
-                require(merged.optional("namespace")!="campaign-sync-membership") {"System scope membership cannot be edited remotely."}
-                require(known(merged.optional("recordType") ?: "",merged.optional("recordId"))) {"Reference target is outside selected campaign."}
-            }
-            if (campaignId!="local-campaign" && current==null) {
-                val f=operation.fields
-                val scopedParent=when(operation.kind) {
-                    "item", "project", "connection", "checkpoint", "reference" -> true
-                    "stage", "requirement" -> known("project",f.optional("projectId"))
-                    "fact", "milestone" -> known("connection",f.optional("entityId"))
-                    "item-details", "item-property" -> known("item",f.optional("itemId"))
-                    "companion-state" -> known("character-profile",f.optional("companionId"))
-                    "companion-resource" -> known("companion-state",f.optional("companionId")) || known("character-profile",f.optional("companionId"))
-                    "character-ability", "party-sheet" -> known("character-profile",f.optional("profileId") ?: if(operation.kind=="party-sheet")operation.recordId else operation.recordId.substringBeforeLast(':',"").takeIf{it.isNotBlank()})
-                    "wallet" -> f.optional("holderProfileId")==null || known("character-profile",f.optional("holderProfileId"))
-                    "link" -> known(f.optional("fromType") ?: "",f.optional("fromId")) && known(f.optional("toType") ?: "",f.optional("toId"))
-                    else -> false
+            try {
+                val current = before[key(operation.kind,operation.recordId)]
+                check((current?.revision ?: 0) == operation.expectedRevision) { "Record changed or is outside selected campaign." }
+                require(current != null || operation.expectedRevision == 0L)
+                require(current != null || operation.type in NativeSourceSync.types || operation.type in setOf("set_record", "save_checkpoint", "acquire_item")) { "Existing record required." }
+                if (campaignId != "local-campaign" && current == null && operation.kind in setOf("character-ability", "party-sheet", "wallet")) {
+                    val parentProfileId = if (operation.kind == "wallet") operation.fields.optional("holderProfileId") else operation.fields.optional("profileId")
+                        ?: if (operation.kind == "party-sheet") operation.recordId else operation.recordId.substringBeforeLast(':', "").takeIf { it.isNotBlank() }
+                    require(parentProfileId == null || before.containsKey(key("character-profile", parentProfileId))) { "Parent identity is outside selected campaign." }
                 }
-                require(scopedParent) {"New record has no scoped parent in this campaign."}
-            }
-            applyOne(campaignId, operation, current, evidenceSource, childIds[index])
-            if (current==null) {
-                created += key(operation.kind,operation.recordId)
-                if (campaignId!="local-campaign" && operation.kind in setOf("item","project","connection")) {
-                    party.saveExternalReference(ExternalRecordReference("sync-scope-${campaignHash(campaignId+":"+operation.kind+":"+operation.recordId).take(48)}",
-                        "campaign-sync-membership",campaignHash(operation.kind+":"+operation.recordId),operation.kind,operation.recordId,campaignId=campaignId),
-                        source=source,commandId=childIds[index]+"-scope")
+                fun known(kind:String,id:String?): Boolean {
+                    val normalized=if(kind=="companion") "companion-state" else kind
+                    return id!=null && (before.containsKey(key(normalized,id)) || key(normalized,id) in created)
                 }
+                if (operation.type == "acquire_item" && operation.fields.containsKey("placement")) {
+                    val destination = operation.fields.getValue("placement").jsonObject
+                    destination.allowed("holderProfileId", "expectedHolderRevision", "state")
+                    val holderId = destination.text("holderProfileId")
+                    val holderRevision = destination.getValue("expectedHolderRevision").jsonPrimitive.long
+                    require(holderRevision > 0 && known("character-profile", holderId)) { "Acquiring holder is outside selected campaign." }
+                    check(before[key("character-profile", holderId)]?.revision == holderRevision &&
+                        db.recordsDao().characterProfile(holderId)?.revision == holderRevision) { "Acquiring holder changed." }
+                    check(db.partyDao().placement(operation.recordId) == null) { "Acquisition placement already exists." }
+                }
+                if(operation.type=="move_item") {
+                    for((field,kind) in listOf("holderProfileId" to "character-profile","containerItemId" to "item","installedProjectId" to "project"))
+                        operation.fields.optional(field)?.let {require(known(kind,it)) {"Destination is outside selected campaign."}}
+                }
+                if(operation.kind=="reference" && operation.type=="set_record") {
+                    val merged=JsonObject((current?.fields ?: emptyMap())+operation.fields)
+                    require(merged.optional("namespace")!="campaign-sync-membership") {"System scope membership cannot be edited remotely."}
+                    require(known(merged.optional("recordType") ?: "",merged.optional("recordId"))) {"Reference target is outside selected campaign."}
+                }
+                if (campaignId!="local-campaign" && current==null) {
+                    val f=operation.fields
+                    val scopedParent=when(operation.kind) {
+                        "item", "project", "connection", "checkpoint", "reference" -> true
+                        "stage", "requirement" -> known("project",f.optional("projectId"))
+                        "fact", "milestone" -> known("connection",f.optional("entityId"))
+                        "item-details", "item-property" -> known("item",f.optional("itemId"))
+                        "companion-state" -> known("character-profile",f.optional("companionId"))
+                        "companion-resource" -> known("companion-state",f.optional("companionId")) || known("character-profile",f.optional("companionId"))
+                        "character-ability", "party-sheet" -> known("character-profile",f.optional("profileId") ?: if(operation.kind=="party-sheet")operation.recordId else operation.recordId.substringBeforeLast(':',"").takeIf{it.isNotBlank()})
+                        "wallet" -> f.optional("holderProfileId")==null || known("character-profile",f.optional("holderProfileId"))
+                        "link" -> known(f.optional("fromType") ?: "",f.optional("fromId")) && known(f.optional("toType") ?: "",f.optional("toId"))
+                        else -> false
+                    }
+                    require(scopedParent) {"New record has no scoped parent in this campaign."}
+                }
+                applyOne(campaignId, operation, current, evidenceSource, childIds[index])
+                if (current==null) {
+                    created += key(operation.kind,operation.recordId)
+                    if (campaignId!="local-campaign" && operation.kind in setOf("item","project","connection")) {
+                        party.saveExternalReference(ExternalRecordReference("sync-scope-${campaignHash(campaignId+":"+operation.kind+":"+operation.recordId).take(48)}",
+                            "campaign-sync-membership",campaignHash(operation.kind+":"+operation.recordId),operation.kind,operation.recordId,campaignId=campaignId),
+                            source=source,commandId=childIds[index]+"-scope")
+                    }
+                }
+            } catch (e: IllegalArgumentException) {
+                if (diagnose) throw CampaignConflict.domain(e, index) else throw e
+            } catch (e: IllegalStateException) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                if (diagnose) throw CampaignConflict.domain(e, index) else throw e
             }
         }
         val after = snapshot(campaignId, includeReadOnly = false, mechanics = native, actions = action)
@@ -411,6 +421,9 @@ class CampaignSyncDomain(private val db: CampaignLedgerDb, private val weaponDb:
             PlayableMechanicsSync.DEFENSE, PlayableMechanicsSync.STATE, PlayableMechanicsSync.BONUS -> PlayableMechanicsSync.edit(db, campaignId, op, child, source)
             "acquire_item" -> {
                 require(op.kind == "item" && current == null && op.expectedRevision == 0L)
+                require(db.ledgerDao().getItem(op.recordId) == null && readGenesisAuthorityItem(db, op.recordId) == null) {
+                    "Physical item identity is unavailable."
+                }
                 val destination = f["placement"]?.jsonObject
                 val draft = campaignJson.decodeFromJsonElement<LedgerDraft>(JsonObject(f - "placement"))
                 require(draft.evidenceStatus == "Confirmed" && draft.itemState !in setOf("Consumed", "Sold", "Lost", "Installed")) { "Only a resolved acquisition may establish an item." }

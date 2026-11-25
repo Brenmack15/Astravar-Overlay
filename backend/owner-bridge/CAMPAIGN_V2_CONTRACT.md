@@ -110,3 +110,13 @@ to 65,536 bytes. Unicode and JSON escaping count toward the wire limit; JavaScri
 UTF-16 string length is not the record-size contract. Initial and replayed
 publication acknowledgements carry the exact immutable persisted publication time.
 Current-record readback remains independent of that acknowledgement.
+
+### Terminal conflicts and replacement commands (Android code 58)
+
+Use `inspect_campaign_conflict(campaignId, commandId)` to retrieve the frozen proposal, dependent placement, expected and published revisions and its immutable device receipt. A terminal CONFLICT contains zero saved records and a null local receipt ID. New devices may attach a bounded failure code, zero-based operation index (-1 for a transaction-wide check), schema field and observed revision. Legacy receipts retain the reason as unknown.
+
+Call `preview_conflict_resolution(campaignId, commandId)` on that command. READY includes the rechecked operations, automatic or native approval mode and a preview token. Android remains authoritative. WAIT_FOR_DEVICE requires a fresh complete publication from the upgraded installation. An existing replacement identifies its immutable command. ALREADY_FULFILLED on a purchase identifies the receipt to read independently. OWNER_REVIEW and VALIDATION_FAILED require resolving the reported ambiguity or validation problem first.
+
+For READY, call `resolve_conflicted_transaction(campaignId, commandId, previewToken)`. It rebuilds the preview, binds the new ID to its failed parent and submits through the ordinary grant, revision, native validation and receipt path. Read its receipt and independently read each saved record. Current recovery supports an atomic single-identity carried purchase with a confirmed debit, non-overlapping descriptive edits to existing projects or connections, and fixed current/temporary HP assignments with a verified prior value and unchanged HP capacity. Disputed ownership, changed payment denomination, historical source work and other material decisions receive owner review. A disabled category requires native approval. A replaced or revoked grant cannot retrieve the original private payload through the conflict endpoint.
+
+Existing receipt readers also receive a read-only conflict preview alongside the immutable receipt when their current grant permits inspection.

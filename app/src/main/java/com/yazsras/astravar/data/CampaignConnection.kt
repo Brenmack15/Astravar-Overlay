@@ -24,6 +24,7 @@ object CampaignConnectionProtocol {
         "astravar-campaign-v2:$origin:$campaign:$command".toByteArray(Charsets.UTF_8)).toString()
     fun fingerprint(campaign: String, command: JsonObject) = OwnerSyncProtocol.hash(OwnerSyncProtocol.canonical(buildJsonObject {
         put("campaignId", campaign)
+        command["resolutionOf"]?.let { put("resolutionOf", it) }
         listOf("commandId", "grantRevision", "operations", "source").forEach { put(it, command.getValue(it)) }
     }))
     fun scopeArray(values: Set<String>) = JsonArray(scopes(values).sorted().map(::JsonPrimitive))
@@ -385,7 +386,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
             selectedCampaign != null && !selectedCampaign.archived, actor != null, actor?.campaignId == value.campaignId,
             actor?.campaignId != null && actor.campaignId != value.campaignId, actor?.playable == true,
             activeRead(value).isNotEmpty(), value.grantBody != null, eligible.size, verified, pendingPublications,
-            pendingDevice + if (moreServerPending) 1 else 0, pendingReceipts, commands.any { it.state in setOf("CONFLICT", "DECISION_CONFLICT") },
+            pendingDevice + if (moreServerPending) 1 else 0, pendingReceipts, commands.any { it.state == "DECISION_CONFLICT" || (it.state == "CONFLICT" && it.receiptJson == null) },
             credentialFailure ?: value.lastError, value.lastDeviceSyncAt, now(), pendingRemovals = pendingRemovals,
             canonicalValuesRequireReview = canonicalReviewProfileId != null))
         val diagnostics = syncDiagnostics.snapshot(value, eligible.size - verified + pendingRemovals)
@@ -423,10 +424,10 @@ class CampaignConnectionClient internal constructor(private val context: Context
                 add(buildJsonObject { put("id", it.id); put("name", it.name); put("campaignId", campaignFor(it.id)) })
             } })
             put("pairing", buildJsonObject { put("userCode", if (value.pairingExpiresAt > now()) value.userCode else ""); put("verificationUri", value.verificationUri); put("expiresAt", value.pairingExpiresAt) })
-            put("pending", buildJsonArray { commands.filter { it.state in setOf("PENDING_APPROVAL", "PENDING_DELIVERY", "APPLYING", "APPLIED_PENDING", "REJECTED_PENDING", "CONFLICT_PENDING", "CONFLICT", "DECISION_CONFLICT") }.forEach { command ->
+            put("pending", buildJsonArray { commands.filter { it.state in setOf("PENDING_APPROVAL", "PENDING_DELIVERY", "APPLYING", "APPLIED_PENDING", "REJECTED_PENDING", "CONFLICT_PENDING", "DECISION_CONFLICT") }.forEach { command ->
                 val data = Json.parseToJsonElement(command.body).jsonObject
                 val sourcePreview = if (connected && command.state in setOf("PENDING_APPROVAL","PENDING_DELIVERY") &&
-                    operations(command).any { it.type in NativeSourceSync.types }) previewNativeCommand(value,command) else null
+                    operations(command).any { it.type in NativeSourceSync.types || it.type == "acquire_item" }) previewNativeCommand(value,command) else null
                 add(buildJsonObject {
                     put("commandId", command.commandId); put("state", command.state); put("source", data.getValue("source")); put("message", command.message)
                     put("operations", buildJsonArray { data.getValue("operations").jsonArray.forEach { raw -> val op = raw.jsonObject
@@ -438,9 +439,47 @@ class CampaignConnectionClient internal constructor(private val context: Context
                 })
             } })
             put("history", buildJsonArray { commands.filter { it.state !in setOf("PENDING_DELIVERY", "PENDING_APPROVAL") }.takeLast(50).asReversed().forEach {
-                add(buildJsonObject { put("commandId", it.commandId); put("state", it.state); put("message", it.message); put("receiptJson", it.receiptJson?.let(::JsonPrimitive) ?: JsonNull) })
+                add(buildJsonObject { put("commandId", it.commandId); put("state", it.state); put("message", if (it.state == "CONFLICT") conflictSummary(value,it) else it.message); put("receiptJson", it.receiptJson?.let(::JsonPrimitive) ?: JsonNull) })
             } })
         }
+    }
+    private fun conflictSummary(value: CampaignConnectionSettings, command: CampaignConnectionCommand): String {
+        val failure = command.decisionBody?.let { Json.parseToJsonElement(it).jsonObject["failure"] as? JsonObject }
+        val ops = operations(command)
+        val op = failure?.get("operation")?.jsonPrimitive?.intOrNull?.let(ops::getOrNull)
+        val code = failure?.get("code")?.jsonPrimitive?.content
+        val cause = when (code) {
+            null -> "This app version did not record the failed check."
+            "BASELINE_CHANGED", "SIDE_EFFECT_BASELINE" -> "The saved record differs from the proposed baseline."
+            "HOLDER_REVISION_CHANGED" -> "The holder changed after the purchase was prepared."
+            "UNKNOWN_BALANCE" -> "The payment denomination has an unknown balance."
+            "CURRENCY_BOUNDS" -> "The debit exceeds the available or supported balance."
+            "OWNERSHIP_CONFLICT", "PLACEMENT_MISMATCH" -> "The item has conflicting ownership or placement."
+            "EQUIPMENT_REVIEW_REQUIRED" -> "Equipping this item requires a reviewed playable definition."
+            "OUTCOME_MISMATCH", "PLACEMENT_OUTCOME_MISMATCH", "AFFECTED_IDENTITIES" -> "The Room result differs from the proposed changes."
+            else -> "The native rules rejected the transaction."
+        }
+        val purchase = ops.size == 2 && ops.any { it.type == "acquire_item" && "placement" in it.fields } &&
+            ops.any { it.type == "adjust_currency" }
+        val assignments = ops.all { (it.type == "set_status" && it.kind == "character-profile" && it.fields.isNotEmpty() &&
+            it.fields.keys.all { k -> k in setOf("currentHp","temporaryHp") }) || it.type == "set_record" && it.fields.keys == when (it.kind) {
+            "project" -> setOf("description"); "connection" -> setOf("notes"); else -> emptySet<String>()
+        } }
+        val eligible = (purchase || assignments) && (code in setOf("BASELINE_CHANGED","SIDE_EFFECT_BASELINE","HOLDER_REVISION_CHANGED") ||
+            (purchase && code == null))
+        val next = when {
+            !eligible -> "Owner or rules review required."
+            !authorized(value,command) -> "Automatic resolution disabled. Owner review required."
+            else -> "DM resolution preview permitted. Automatic saving requires fresh matching evidence."
+        }
+        val record = op?.let {
+            val kind = if (code == "PLACEMENT_OUTCOME_MISMATCH") "item-placement" else it.kind
+            "${it.type} · $kind ${it.recordId}."
+        }
+        val observed = failure?.get("observedRevision")?.jsonPrimitive?.longOrNull
+        val revisions = if (op != null && observed != null) "Expected baseline ${op.expectedRevision}. Observed revision $observed." else null
+        return listOfNotNull("Completed failure. No changes committed.", record, cause,
+            failure?.get("field")?.jsonPrimitive?.content?.let { "Field $it." }, revisions, next).joinToString(" ")
     }
     private fun belongs(command: CampaignConnectionCommand, value: CampaignConnectionSettings) =
         command.origin == value.origin && command.campaignId == value.campaignId && command.deviceId == value.deviceId
@@ -598,7 +637,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
             if (page == 3) syncContinuationRequired = true
         }
         publish(value)
-        val conflict = dao.commands().any { belongs(it, value) && it.state in setOf("CONFLICT", "DECISION_CONFLICT") }
+        val conflict = dao.commands().any { belongs(it, value) && (it.state == "DECISION_CONFLICT" || (it.state == "CONFLICT" && it.receiptJson == null)) }
         val queued = dao.commands().any { belongs(it, value) && it.state in setOf("PENDING_APPROVAL", "PENDING_DELIVERY", "APPLIED_PENDING", "APPLYING", "REJECTED_PENDING", "CONFLICT_PENDING") }
         dao.settings(setting().copy(status = when {
             syncContinuationRequired -> "Pending delivery · more queued transactions"
@@ -684,9 +723,8 @@ class CampaignConnectionClient internal constructor(private val context: Context
     suspend fun decide(commandId: String, approve: Boolean): JsonObject = lock.withLock {
         val value = setting(); credential(value)
         val command = requireNotNull(dao.command(commandId)); require(belongs(command, value))
-        require(command.state in setOf("PENDING_APPROVAL", "PENDING_DELIVERY", "CONFLICT")) { "This transaction already has a decision." }
+        require(command.state in setOf("PENDING_APPROVAL", "PENDING_DELIVERY")) { "This transaction already has a decision." }
         if (approve) {
-            require(command.state != "CONFLICT") { "Resolve the revision conflict before approving a new command." }
             validateAuthorization(value, command)
             dao.update(command.copy(state = "APPLYING", message = "Player-approved transaction committing")); finishLocal(value, requireNotNull(dao.command(commandId)), manual = true)
         } else dao.update(command.copy(state = "REJECTED_PENDING", decisionBody = decisionBody(command, "REJECTED", null, emptyList()), message = "Rejected locally · server confirmation pending"))
@@ -707,21 +745,18 @@ class CampaignConnectionClient internal constructor(private val context: Context
     }
     private suspend fun verifyBaseline(value: CampaignConnectionSettings, command: CampaignConnectionCommand) {
         val local = visible(value, domain.snapshot(value.campaignId, includeReadOnly = false, mechanics = supportsMechanics(value), actions = supportsActions(value), strikes = supportsStrikes(value), spellEditing = supportsSpellEditing(value), nativeEditing = supportsNativeEditing(value))).associateBy { it.kind to it.recordId }
-        for (raw in parsed(command).getValue("operations").jsonArray) {
-            val operation = raw.jsonObject
-            val kind = operation.getValue("kind").jsonPrimitive.content
-            val id = operation.getValue("recordId").jsonPrimitive.content
-            val existing = local[kind to id]
-            require(operation.containsKey("currentFields")) { "Command has no verified local baseline." }
-            check((existing?.revision ?: 0) == operation.getValue("expectedRevision").jsonPrimitive.long &&
-                (existing?.fields ?: JsonNull) == operation.getValue("currentFields")) { "Local content differs from the published baseline." }
-            for (effect in (operation["sideEffects"] as? JsonArray).orEmpty()) {
-                val side = effect.jsonObject
-                val old = local[side.getValue("kind").jsonPrimitive.content to side.getValue("recordId").jsonPrimitive.content]
-                require(side.containsKey("currentFields")) { "Affected record has no verified local baseline." }
-                check((old?.revision ?: 0) == side.getValue("expectedRevision").jsonPrimitive.long &&
-                    (old?.fields ?: JsonNull) == side.getValue("currentFields")) { "Affected local record differs from its baseline." }
+        for ((index, raw) in parsed(command).getValue("operations").jsonArray.withIndex()) {
+            fun verify(row: JsonObject, side: Boolean) {
+                val current = local[row.getValue("kind").jsonPrimitive.content to row.getValue("recordId").jsonPrimitive.content]
+                val revision = current?.revision ?: 0L
+                if (revision != row.getValue("expectedRevision").jsonPrimitive.long ||
+                    (current?.fields ?: JsonNull) != row["currentFields"]) {
+                    throw CampaignConflict(if (side) "SIDE_EFFECT_BASELINE" else "BASELINE_CHANGED", index, observedRevision = revision)
+                }
             }
+            val op = raw.jsonObject
+            verify(op, false)
+            for (effect in (op["sideEffects"] as? JsonArray).orEmpty()) verify(effect.jsonObject, true)
         }
     }
     private class PreviewRollback(val result: JsonObject) : RuntimeException()
@@ -734,7 +769,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
                 verifyBaseline(value,command)
                 val ops = operations(command)
                 val receipt = domain.apply(value.campaignId, CampaignConnectionProtocol.localCommand(value.origin,value.campaignId,command.commandId),
-                    parsed(command).getValue("source").jsonPrimitive.content,ops)
+                    parsed(command).getValue("source").jsonPrimitive.content,ops, diagnose = true)
                 verifyProposedOutcome(value,command,visible(value,verifiedLocalOutcome(value,command,receipt)))
                 val actors = ops.filter { it.type in NativeSourceSync.types }.map { NativeSourceSync.parse(it).actorId }.distinct()
                 val results = buildJsonObject {
@@ -773,14 +808,18 @@ class CampaignConnectionClient internal constructor(private val context: Context
             }
         }
         val projected = visible(value, expected)
-        require(projected.size == expected.size && outputs.size == expected.size && projected.map { it.kind to it.recordId }.distinct().size == projected.size) {
-            "The proposed affected identities do not match the authorized transaction."
-        }
+        if (projected.size != expected.size || outputs.size != expected.size || projected.map { it.kind to it.recordId }.distinct().size != projected.size)
+            throw CampaignConflict("AFFECTED_IDENTITIES", -1)
+        val ops = operations(command)
         val byId = projected.associateBy { it.kind to it.recordId }
         for (saved in outputs) {
             val proposed = requireNotNull(byId[saved.kind to saved.recordId]) { "The domain transaction changed an unproposed record." }
-            require(saved.revision == proposed.revision && comparableFields(saved.fields) == comparableFields(proposed.fields)) {
-                "The validated local result differs from the proposed transaction. No records were changed."
+            val actual = comparableFields(saved.fields)
+            val requested = comparableFields(proposed.fields)
+            if (saved.revision != proposed.revision || actual != requested) {
+                val key = (actual.keys + requested.keys).sorted().firstOrNull { actual[it] != requested[it] }
+                throw CampaignConflict(if (saved.kind == "item-placement") "PLACEMENT_OUTCOME_MISMATCH" else "OUTCOME_MISMATCH",
+                    ops.indexOfFirst { it.recordId == saved.recordId }, key, saved.revision)
             }
         }
     }
@@ -807,7 +846,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
                 }
                 requireAutomaticAllowed()
                 verifyBaseline(value, command)
-                val candidate = domain.apply(value.campaignId, localId, parsed(command).getValue("source").jsonPrimitive.content, operations(command))
+                val candidate = domain.apply(value.campaignId, localId, parsed(command).getValue("source").jsonPrimitive.content, operations(command), diagnose = true)
                 val outputs = visible(value, verifiedLocalOutcome(value, command, candidate))
                 verifyProposedOutcome(value, command, outputs)
                 require(decisionBody(command, "APPLIED", candidate.commandId, outputs).toByteArray(Charsets.UTF_8).size <= OwnerSyncProtocol.MAX_BODY_BYTES) {
@@ -816,10 +855,12 @@ class CampaignConnectionClient internal constructor(private val context: Context
                 requireAutomaticAllowed()
                 candidate
             }
-        } catch (e: CancellationException) { throw e } catch (_: IllegalArgumentException) {
-            dao.update(command.copy(state = "CONFLICT_PENDING", decisionBody = decisionBody(command, "CONFLICT", null, emptyList()), message = "Local validation rejected the transaction · no partial changes")); return
-        } catch (_: IllegalStateException) {
-            dao.update(command.copy(state = "CONFLICT_PENDING", decisionBody = decisionBody(command, "CONFLICT", null, emptyList()), message = "Local records changed · no partial transaction applied")); return
+        } catch (e: CancellationException) { throw e } catch (e: RuntimeException) {
+            if (e !is IllegalArgumentException && e !is IllegalStateException) throw e
+            val detail = (e as? CampaignConflict ?: CampaignConflict("DOMAIN_VALIDATION", -1)).json()
+            dao.update(command.copy(state = "CONFLICT_PENDING", decisionBody = decisionBody(command, "CONFLICT", null, emptyList(), detail),
+                message = "Validation failed · no changes committed"))
+            return
         }
         val output = visible(value, verifiedLocalOutcome(value, command, receipt))
         pushStore.lastRoomCommittedAt = now()
@@ -827,8 +868,9 @@ class CampaignConnectionClient internal constructor(private val context: Context
         afterLocalCommit()
         dao.update(command.copy(state = "APPLIED_PENDING", decisionBody = decisionBody(command, "APPLIED", receipt.commandId, output), message = "Saved locally · independent server receipt/readback pending"))
     }
-    private fun decisionBody(command: CampaignConnectionCommand, status: String, receiptId: String?, records: List<CampaignSyncRecord>) = OwnerSyncProtocol.canonical(buildJsonObject {
+    private fun decisionBody(command: CampaignConnectionCommand, status: String, receiptId: String?, records: List<CampaignSyncRecord>, failure: JsonObject? = null) = OwnerSyncProtocol.canonical(buildJsonObject {
         put("commandId", command.commandId); put("fingerprint", command.fingerprint); put("status", status)
+        failure?.let { put("failure", it) }
         put("localReceiptId", receiptId?.let(::JsonPrimitive) ?: JsonNull); put("records", campaignJson.encodeToJsonElement(records))
     })
     private suspend fun readRecord(value: CampaignConnectionSettings, record: CampaignSyncRecord): CampaignSyncRecord {
@@ -854,6 +896,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         }
         require(result.getValue("commandId").jsonPrimitive.content == command.commandId && result.getValue("fingerprint").jsonPrimitive.content == command.fingerprint)
         require(result.getValue("status") == decision.getValue("status") && result.getValue("localReceiptId") == decision.getValue("localReceiptId"))
+        require(result["failure"] == decision["failure"] && result["resolutionOf"] == parsed(command)["resolutionOf"])
         require(result.getValue("deviceCredentialId").jsonPrimitive.content == value.deviceId)
         syncDiagnostics.stage(value, CampaignSyncStage.RECEIPT_READBACK)
         require(request(value, base(value) + "/receipts/${command.commandId}").getValue("receipt") == result)
@@ -871,7 +914,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         val status = decision.getValue("status").jsonPrimitive.content
         pushStore.recordStage("receipt_verified", now(), command.commandId)
         dao.update(command.copy(state = if (status == "APPLIED") "VERIFIED" else status, receiptJson = OwnerSyncProtocol.canonical(result),
-            message = if (status == "APPLIED") "Committed records and immutable receipt independently verified" else if (status == "REJECTED") "Rejection independently verified" else "Conflict independently verified · records retained"))
+            message = if (status == "APPLIED") "Committed records and immutable receipt independently verified" else if (status == "REJECTED") "Rejection independently verified" else "Failed transaction · no changes committed"))
     }
     private fun visible(value: CampaignConnectionSettings, records: List<CampaignSyncRecord>): List<CampaignSyncRecord> =
         CampaignConnectionProjection.project(records, activeRead(value).also { checkedGrant(value, grant(value)) })

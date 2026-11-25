@@ -20,6 +20,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINES = {
+    57: ("689dadcc050d26f686b93ca4357c8c5e907c58e2", "4.0.0-convergence4"),
     56: ("d4240a2c90bec04e1395e7f8b3a3a12d1ba94794", "4.0.0-convergence3"),
     49: ("3543e83bfca5e589f1bbedb09964431ce94a2319", "3.2.0-rc1"),
     54: ("613360f61121390ec925d8229587a7dd95a354b2", "4.0.0-convergence1"),
