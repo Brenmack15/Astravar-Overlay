@@ -25,7 +25,7 @@ test('MCP preserves five fictional tools and adds HP and scoped campaign tools w
   const discovery = await (await handleMcp(request(rpc('server/discover')), bridge, { ownerId })).json();
   assert.deepEqual(discovery.result.supportedVersions, [MCP_VERSION]);
   const listed = await (await handleMcp(request(rpc('tools/list')), bridge, { ownerId })).json();
-  assert.equal(listed.result.tools.length, 36);
+  assert.equal(listed.result.tools.length, 37);
   assert.equal(listed.result.tools.find(tool => tool.name === 'get_playable_loadout').annotations.readOnlyHint, true);
   assert.equal(listed.result.tools.find(tool => tool.name === 'get_playable_spells').annotations.readOnlyHint, true);
   assert.deepEqual(listed.result.tools.slice(-10, -5).map(tool => tool.name), ['get_character', 'get_character_abilities', 'propose_record_update', 'get_pending_updates', 'get_command_receipt']);
@@ -120,4 +120,35 @@ test('MCP rejects oversized and malformed requests before running backend code',
   const notJson = new Request('https://owner.example/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', 'oai-authenticated-user-id': ownerId }, body: '{bad' });
   assert.equal((await handleMcp(notJson, bridge, { ownerId })).status, 400);
   assert.equal(calls.length, 0);
+});
+
+test('owner-scoped sync wake uses only authenticated grant device and never asserts a saved update', async () => {
+  const {bridge}=fixture();
+  const calls=[];
+  const campaignBridge={authorize:async(principal,cid)=>{
+    calls.push(['authorize',principal,cid]);
+    assert.equal(principal.role,'connector');
+    assert.equal(principal.ownerId,ownerId);
+    assert.equal(cid,'local-campaign');
+    return{credential_id:'enrolled-device-credential'};
+  }};
+  const campaignPush={requestSync:async args=>{
+    calls.push(['wake',args]);
+    assert.deepEqual(args,{campaignId:'local-campaign',credentialId:'enrolled-device-credential'});
+    return{status:'WAKE_ACCEPTED',wakeAccepted:true};
+  }};
+  const options={ownerId,campaignBridge,campaignPush};
+  const value=await(await handleMcp(request(call('request_campaign_sync',{campaignId:'local-campaign'})),bridge,options)).json();
+  assert.equal(value.result.isError,false);
+  assert.equal(value.result.structuredContent.wakeAccepted,true);
+  assert.equal(value.result.structuredContent.confirmation,'DEVICE_SYNC_UNVERIFIED');
+  assert.deepEqual(calls.map(c=>c[0]),['authorize','wake']);
+  const extra=await(await handleMcp(request(call('request_campaign_sync',{campaignId:'local-campaign',approve:true})),bridge,options)).json();
+  assert.equal(extra.error.code,-32602);
+  const foreign=await handleMcp(request(call('request_campaign_sync',{campaignId:'local-campaign'}),{'oai-authenticated-user-id':'foreign-owner'}),bridge,options);
+  assert.equal(foreign.status,401);
+  assert.equal(calls.length,2);
+  const missing=await(await handleMcp(request(call('request_campaign_sync',{campaignId:'local-campaign'})),bridge,{ownerId,campaignBridge})).json();
+  assert.equal(missing.result.isError,true);
+  assert.equal(JSON.parse(missing.result.content[0].text).error,'PUSH_NOT_CONFIGURED');
 });
