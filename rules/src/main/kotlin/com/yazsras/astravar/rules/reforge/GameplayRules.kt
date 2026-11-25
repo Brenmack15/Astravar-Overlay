@@ -47,16 +47,66 @@ object GameplayRules {
         return preserveCapacities(character,character.copy(items=character.items.map { if(it.id==itemId) it.copy(attuned=attuned, formKnown=it.formKnown || (definition.requiresAttunement && !attuned), formId=it.formId.takeUnless { definition.requiresAttunement && !attuned }, modesUntil=if(definition.requiresAttunement && !attuned) emptyMap() else it.modesUntil) else it }))
     }
 
-    fun changeWearableForm(character: ReforgeCharacter, itemId: String, formId: String?): ReforgeCharacter {
+    /** Long-duration mechanical forms need real elapsed time and a finite deployment;
+     * switching forms never creates HP, Integrity, charges or an extra turn.
+     */
+    fun changeWearableForm(character: ReforgeCharacter, itemId: String, formId: String?,
+                           elapsedSeconds: Long = 0): ReforgeCharacter {
+        CharacterCalculator.validate(character)
         val item = character.items.single { it.id == itemId }
         val definition = character.itemDefinitions.single { it.id == item.definitionId }
         require(item.state == ItemState.WORN && item.operating && (!definition.requiresAttunement || item.attuned))
-        require(definition.forms.isNotEmpty() && (formId == null || definition.forms.any { it.id == formId && (it.wearerId == null || it.wearerId == character.id) }))
-        require((!item.formKnown || item.formId != formId) && character.items.none { it.id != itemId && (it.formId != null || !it.formKnown) })
+        val nextForm = formId?.let { id -> definition.forms.singleOrNull { it.id == id && (it.wearerId == null || it.wearerId == character.id) } }
+        require(definition.forms.isNotEmpty() && (formId == null || nextForm != null))
+        require((!item.formKnown || item.formId != formId) &&
+            character.items.none { it.id != itemId && (it.formId != null || !it.formKnown) })
+        require(elapsedSeconds in 0..86_400L)
+        // A one-minute deployment cannot be silently compressed into one six-second combat Action.
+        if (nextForm != null && nextForm.activationSeconds > 6) {
+            require(!character.turn.tracking) { "Resolve the uninterrupted deployment before combat or use a timed encounter action." }
+            require(elapsedSeconds >= nextForm.activationSeconds) { "Record the actual uninterrupted transformation time." }
+        }
+        nextForm?.deploymentResourceId?.let { id ->
+            require((character.resources.single { it.id == id }.current ?: 0) > 0) { "Warform deployment is exhausted or unknown." }
+        }
+        nextForm?.integrityResourceId?.let { id ->
+            require((character.resources.single { it.id == id }.current ?: 0) > 0) { "The Warform shell must be repaired before deployment." }
+        }
         val turn = spendAction(character,"Action")
-        return character.copy(items = character.items.map { if (it.id == itemId) it.copy(formId = formId, formKnown = true) else it },
-            turn = turn).also(CharacterCalculator::validate)
+        val started = Math.addExact(character.gameSeconds,elapsedSeconds)
+        val expires = nextForm?.durationSeconds?.let { Math.addExact(started,it.toLong()) }
+        val next = character.copy(
+            gameSeconds = started,
+            items = character.items.map { current ->
+                if (current.id != itemId) current else {
+                    val priorFormKey = current.formId?.let { "form:$it" }
+                    current.copy(formId = formId, formKnown = true,
+                        modesUntil = (if (priorFormKey == null) current.modesUntil else current.modesUntil - priorFormKey) +
+                            (if (expires == null || formId == null) emptyMap() else mapOf("form:$formId" to expires)))
+                }
+            },
+            resources = character.resources.map { pool ->
+                when (pool.id) {
+                    nextForm?.deploymentResourceId -> pool.copy(current = requireNotNull(pool.current) - 1)
+                    nextForm?.resetResourceId -> pool.copy(current = requireNotNull(pool.maximum))
+                    else -> pool
+                }
+            },
+            turn = turn)
+        return preserveCapacities(character,next).also(CharacterCalculator::validate)
     }
+
+    /** Remove expired timed forms without refunding use or healing the detached shell. */
+    private fun expireForms(character: ReforgeCharacter): ReforgeCharacter =
+        character.copy(items = character.items.map { item ->
+            val form = item.formId?.let { id ->
+                character.itemDefinitions.find { it.id == item.definitionId }?.forms?.find { it.id == id }
+            }
+            if (form?.durationSeconds != null &&
+                (item.modesUntil["form:${form.id}"] ?: 0L) <= character.gameSeconds)
+                item.copy(formId = null, modesUntil = item.modesUntil - "form:${form.id}")
+            else item
+        })
 
     /** Preserve outstanding damage rather than treating a capacity change as healing or a rest. */
     fun preserveCapacities(before:ReforgeCharacter,after:ReforgeCharacter):ReforgeCharacter {
@@ -71,6 +121,23 @@ object GameplayRules {
     }
     fun damage(character:ReforgeCharacter,amount:Int):ReforgeCharacter {
         require(amount in 0..1_000_000) { "Damage must be a nonnegative whole number." }
+        if (amount == 0) return character
+        val form = CharacterCalculator.activeForm(character)
+        val integrity = form?.integrityResourceId
+        if (integrity != null) {
+            val pool = character.resources.single { it.id == integrity }
+            val available = requireNotNull(pool.current) { "Warform Integrity is unknown." }
+            val blocked = minOf(amount,available)
+            val shellBroken = blocked == available
+            val updated = character.copy(
+                resources = character.resources.map { if (it.id == integrity) it.copy(current = available-blocked) else it },
+                items = if (shellBroken) character.items.map { item ->
+                    if (item.formId == form.id) item.copy(formId = null,
+                        modesUntil = item.modesUntil - "form:${form.id}") else item
+                } else character.items)
+            // Overflow hits Eek's ordinary HP, but full absorption does not require a known temp-HP value.
+            return if (amount == blocked) updated else damage(updated,amount-blocked)
+        }
         val p=CharacterCalculator.calculate(character)
         require(p.currentHp!=null && character.temporaryHp!=null) { "Current and temporary HP must be known before applying damage." }
         val absorbed=minOf(amount,character.temporaryHp)
@@ -187,7 +254,7 @@ object GameplayRules {
         character.copy(activeStances=if(enabled) character.activeStances+stance else character.activeStances-stance))
     fun advanceTime(character:ReforgeCharacter,seconds:Long,confirmed:Boolean):ReforgeCharacter {
         require(confirmed && seconds>=0 && seconds<=31_536_000) { "Confirm actual elapsed game time." }
-        return preserveCapacities(character,character.copy(gameSeconds=Math.addExact(character.gameSeconds,seconds)))
+        return preserveCapacities(character,expireForms(character.copy(gameSeconds=Math.addExact(character.gameSeconds,seconds))))
     }
     fun nextTurn(character:ReforgeCharacter):ReforgeCharacter=character.copy(turnNumber=Math.addExact(character.turnNumber,1),turn=character.turn.copy(actionAvailable=true,bonusActionAvailable=true,reactionAvailable=true,attacksUsed=0,spellSlotSpent=false))
 
@@ -217,7 +284,7 @@ object GameplayRules {
             concentrationSpellId=if(kind==Recharge.LONG_REST) null else character.concentrationSpellId,
             temporaryHp=if(kind==Recharge.LONG_REST && character.temporaryHp!=null) 0 else character.temporaryHp,
             exhaustionLevel=if(kind==Recharge.LONG_REST) maxOf(0,character.exhaustionLevel-1) else character.exhaustionLevel)
-        val preserved=preserveCapacities(character,next)
+        val preserved=preserveCapacities(character,expireForms(next))
         val maximum=CharacterCalculator.calculate(preserved).maximumHp.value
         return if(kind==Recharge.LONG_REST && preserved.currentHp!=null && maximum!=null)
             preserved.copy(currentHp=maximum,hpDamage=0) else preserved
@@ -265,6 +332,9 @@ object GameplayRules {
 
     fun useFeature(character: ReforgeCharacter, featureId: String): ReforgeCharacter {
         val feature = character.features.single { it.id == featureId }
+        feature.requiredFormId?.let { require(CharacterCalculator.activeForm(character)?.id == it) {
+            "This feature requires its active wearable form."
+        } }
         val pool = feature.resourceId?.let { id -> character.resources.single { it.id == id } }
         if (pool != null) require((pool.current ?: 0) > 0) { "Feature uses are unknown or exhausted." }
         require(feature.actionType.lowercase() in setOf("action","bonus action","reaction","free"))

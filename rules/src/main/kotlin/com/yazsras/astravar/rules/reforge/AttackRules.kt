@@ -25,6 +25,11 @@ object AttackRules {
         val attack=character.attacks.singleOrNull { it.id==attackId } ?: error("Attack not found.")
         require(ConditionRules.activeConditions(character,projection.conditionImmunities).none { it in setOf("incapacitated","unconscious","stunned","paralyzed","petrified") }) { "The current condition prevents attacks." }
         attack.requiredItemId?.let { id->require(character.items.any { it.id==id && it.state in setOf(ItemState.HELD,ItemState.WORN) && it.operating && it.quantity==1 } && character.items.none { id in it.donorInstanceIds }) { "Equip the required standalone item first." } }
+        val activeFormId = CharacterCalculator.activeForm(character)?.id
+        attack.requiredFormId?.let { require(activeFormId == it) { "This attack requires its active form." } }
+        require(activeFormId == null || activeFormId !in attack.excludedFormIds) {
+            "This attack is unavailable in the current form."
+        }
         val attackContext=context.copy(attackId=attackId,tags=context.tags+attack.tags)
         val all=CharacterCalculator.evaluateEffects(character,attackContext.copy(successfulHit=true)).active
         val attackEffects=CharacterCalculator.evaluateEffects(character,attackContext.copy(successfulHit=false)).active

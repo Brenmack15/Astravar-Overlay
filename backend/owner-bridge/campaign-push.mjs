@@ -69,7 +69,7 @@ export class CampaignPushTransport {
    .bind(this.ownerId,campaign,principal.credentialId).run();
   return{mode:'ASTRAVAR_CAMPAIGN_V2',campaignId:campaign,pushRegistered:false};
  }
- async notify({campaignId,credentialId,commandId}){
+ async notify({campaignId,credentialId,commandId,minGapMillis=1500}){
   if(!this.configured||!idPattern.test(campaignId)||!idPattern.test(credentialId)||(commandId!==undefined&&!commandPattern.test(commandId)))return false;
   // Distinct durable commands each retain wake coverage. Provider collapse and
   // Android unique work coalesce bursts; unkeyed retry hints are throttled.
@@ -79,13 +79,14 @@ export class CampaignPushTransport {
    JOIN bridge_credentials c ON c.id=p.credential_id AND c.owner_id=p.owner_id AND c.campaign_id=p.campaign_id
    WHERE p.owner_id=? AND p.campaign_id=? AND p.credential_id=? AND g.revoked=0 AND c.revoked=0 AND c.role='device' AND g.expires_at>? AND c.expires_at>?`)
    .bind(this.ownerId,campaignId,credentialId,now,now).first();
-  if(!row||(commandId===undefined&&now-row.last_push_at<1500))return false;
+  if(!Number.isSafeInteger(minGapMillis)||minGapMillis<1500||minGapMillis>300_000)return false;
+   if(!row||(commandId===undefined&&now-row.last_push_at<minGapMillis))return false;
   let registration;
   try{registration=JSON.parse(await this.decrypt(row.token_iv,row.token_ciphertext,this.context(campaignId,credentialId)));}catch{return false;}
   if(registration?.provider!=='pushy'||typeof registration.token!=='string'||!tokenPattern.test(registration.token))return false;
   const claim=commandId===undefined?
    await this.db.prepare('UPDATE bridge_campaign_push_tokens SET last_push_at=? WHERE owner_id=? AND campaign_id=? AND credential_id=? AND token_hash=? AND last_push_at<?')
-    .bind(now,this.ownerId,campaignId,credentialId,row.token_hash,now-1500).run():
+    .bind(now,this.ownerId,campaignId,credentialId,row.token_hash,now-minGapMillis).run():
    await this.db.prepare('UPDATE bridge_campaign_push_tokens SET last_push_at=? WHERE owner_id=? AND campaign_id=? AND credential_id=? AND token_hash=?')
     .bind(now,this.ownerId,campaignId,credentialId,row.token_hash).run();
   if(!claim?.meta?.changes)return false;
@@ -119,4 +120,11 @@ export class CampaignPushTransport {
    throw Error('PUSH_SEND_FAILED');
   }finally{clearTimeout(timer);}
  }
+ /** Optional wake hint: provider acceptance is not an Android commit or receipt. */
+ async requestSync({campaignId,credentialId}){
+  if(!this.configured)return{status:'PUSH_NOT_CONFIGURED',wakeAccepted:false};
+  const accepted=await this.notify({campaignId,credentialId,minGapMillis:30_000});
+  return{status:accepted?'WAKE_ACCEPTED':'WAKE_NOT_AVAILABLE_OR_THROTTLED',wakeAccepted:accepted};
+ }
+
 }

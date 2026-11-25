@@ -85,7 +85,8 @@ function proposedPlayableAction(before, op) {
  }else if(op.type==='use_native_feature'){
   exact(f,['actorRole','featureId']);id(f.featureId);
  }else if(op.type==='change_wearable_form'){
-  exact(f,['actorRole','itemId','formId']);id(f.itemId);if(f.formId!==null)id(f.formId);
+  exact(f,['actorRole','itemId','formId'],['elapsedSeconds']);id(f.itemId);if(f.formId!==null)id(f.formId);
+  if(f.elapsedSeconds!==undefined)integer(f.elapsedSeconds,0,86_400);
  }else if(op.type==='cast_spell'){
   exact(f,['actorRole','spellId','slotLevel','ritual','replaceConcentration']);
   text(f.spellId,200);
