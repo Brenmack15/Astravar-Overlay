@@ -6,6 +6,9 @@ const str={type:'string',minLength:1,maxLength:1900};
 const read=(name,description,properties={},required=Object.keys(properties))=>({name,description,inputSchema:obj({campaignId:id,...properties},['campaignId',...required]),annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false}});
 const page={after:{type:'string',maxLength:400},limit:{type:'integer',minimum:1,maximum:100}};
 export const CAMPAIGN_TOOLS=Object.freeze([
+ {name:'request_campaign_sync',description:'Request one owner-authorized, rate-limited wake hint for the enrolled Android campaign. This only asks the phone to fetch already authorized pending work; it cannot force network availability, bypass native approvals, change a grant, or prove a device commit. Read the resulting receipts and refreshed records separately.',
+  inputSchema:obj({campaignId:id}),
+  annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false}},
  read('inspect_campaign_conflict','Read an immutable failed transaction, affected records, revisions, known device failure and commit status.',{commandId:id}),
  read('preview_conflict_resolution','Recheck current Android publication, purchase identity, grants and revisions. Only READY supplies a resolution token.',{commandId:id}),
  {name:'resolve_conflicted_transaction',description:'Revalidate a READY preview and queue one linked replacement. Verify the immutable receipt and updated records independently.',
