@@ -9,11 +9,18 @@ object CharacterCalculator {
     fun abilityModifier(score: Int): Int = Math.floorDiv(Math.subtractExact(score,10), 2)
     fun proficiencyBonus(level: Int): Int { require(level in 1..20); return 2 + (level - 1) / 4 }
 
+    /** A timed form becomes mechanically inactive at expiry even before a UI publication. */
+    fun activeForm(character: ReforgeCharacter): WearableForm? = character.items.firstNotNullOfOrNull { item ->
+        val id = item.formId ?: return@firstNotNullOfOrNull null
+        val definition = character.itemDefinitions.find { it.id == item.definitionId } ?: return@firstNotNullOfOrNull null
+        val form = definition.forms.find { it.id == id } ?: return@firstNotNullOfOrNull null
+        if (item.state != ItemState.WORN || !item.operating ||
+            (form.durationSeconds != null && (item.modesUntil["form:$id"] ?: 0L) <= character.gameSeconds)) null else form
+    }
+
     fun calculate(character: ReforgeCharacter, context: CalculationContext = CalculationContext()): CharacterProjection {
         validate(character)
-        val selectedForm = character.items.firstNotNullOfOrNull { item ->
-            if (item.formId == null) null else character.itemDefinitions.single { it.id == item.definitionId }.forms.single { it.id == item.formId }
-        }
+        val selectedForm = activeForm(character)
         val unresolvedForm = character.items.any { !it.formKnown && it.state == ItemState.WORN && it.operating }
         val baseMovement = if (unresolvedForm) mapOf("walk" to null)
             else selectedForm?.movement ?: (character.movement + ("walk" to character.speed))
@@ -22,11 +29,15 @@ object CharacterCalculator {
         val grantedModes = active.mapNotNull { (it.effect.payload as? EffectPayload.Number)?.takeIf { n ->
             n.target == NumericTarget.SPEED && n.operation == NumberOperation.SET && n.key in setOf("fly","swim","climb","burrow")
         }?.key }.associateWith { null }
-        val movement = grantedModes + baseMovement
+        val movement = (grantedModes + baseMovement).let { modes ->
+            if (selectedForm?.grounded == true) modes + ("fly" to null) else modes
+        }
         val abilities = Stat.entries.associateWith { stat ->
             val permanent = character.baseAbilities[stat]?.plus(character.permanentAdvancements[stat] ?: 0)
             val cap = number(null, NumericTarget.ABILITY_CAP, stat.name, active, "Ability maximum")
-            val calculated = number(permanent, NumericTarget.ABILITY, stat.name, active, "Permanent ${stat.name}")
+            val formOverride = selectedForm?.abilityOverrides?.get(stat)
+            val calculated = number(formOverride ?: permanent, NumericTarget.ABILITY, stat.name, active,
+                if (formOverride != null) "Active form ${selectedForm.name} ${stat.name}" else "Permanent ${stat.name}")
             val bounded = if (cap.value != null && calculated.value != null && calculated.value > cap.value) {
                 calculated.copy(value=cap.value, explanation=calculated.explanation + cap.explanation +
                     CalculationLine("cap", "Ability maximum", cap.value, reason="Final value capped"))
@@ -59,7 +70,7 @@ object CharacterCalculator {
             skill.id to number(baseline, NumericTarget.SKILL, skill.id, active, label)
         }
         val dex=abilities.getValue(Stat.DEX).modifier
-        val acBase = character.baseAc?.let { base -> if(character.armorUsesDexterity) dex?.let { base + minOf(it,character.armorDexterityCap ?: Int.MAX_VALUE) } else base }
+        val acBase = selectedForm?.armorClassOverride ?: character.baseAc?.let { base -> if(character.armorUsesDexterity) dex?.let { base + minOf(it,character.armorDexterityCap ?: Int.MAX_VALUE) } else base }
         val con=abilities.getValue(Stat.CON).modifier
         val hpBase = when {
             character.baseMaxHp == null -> null
@@ -91,7 +102,10 @@ object CharacterCalculator {
             skills.filterKeys { it in setOf("Perception","Investigation","Insight") }.mapValues { (key,value)->value.value?.let { 10+it+when(rollMode(character,RollKind.SKILL,key,context)) { DiceMode.ADVANTAGE->5;DiceMode.DISADVANTAGE->-5;else->0 } } }, effects.statuses,
             active.mapNotNull { it.effect.payload as? EffectPayload.Defense },
             active.mapNotNull { (it.effect.payload as? EffectPayload.ConditionImmunity)?.condition }.toSet(),resources,warnings,
-            movement.mapValues { (key,base)->number(base,NumericTarget.SPEED,key,active,"$key speed").value?.let { value->maxOf(0,if(character.rules.core==RuleFamily.LEGACY_2014 && character.exhaustionLevel>=2) value/2 else value) } },character.senses,customSkills)
+            movement.mapValues { (key,base)->
+                if (selectedForm?.grounded == true && key == "fly") null else
+                    number(base,NumericTarget.SPEED,key,active,"$key speed").value?.let { value->maxOf(0,if(character.rules.core==RuleFamily.LEGACY_2014 && character.exhaustionLevel>=2) value/2 else value) }
+            },character.senses,customSkills)
     }
 
     internal fun number(base: Int?,target: NumericTarget,key: String,active: List<ActiveEffect>,baseLabel: String): CalculatedNumber {
@@ -212,10 +226,10 @@ object CharacterCalculator {
         require(c.items.size<=10_000 && c.itemDefinitions.size<=10_000 && c.resources.size<=10_000 && c.attacks.size<=10_000 && c.spells.size<=10_000) { "Character record exceeds the supported collection size." }
         require(c.resources.map { it.id }.distinct().size==c.resources.size && c.attacks.map { it.id }.distinct().size==c.attacks.size && c.spells.map { it.id }.distinct().size==c.spells.size)
         require(c.items.all { it.id.isNotBlank() && it.quantity in 0..1_000_000 && it.id !in it.donorInstanceIds })
-        val actionDefinitions = c.itemDefinitions.filter { it.activations.isNotEmpty() }.associateBy { it.id }
+        val definitions = c.itemDefinitions.associateBy { it.id }
         c.items.forEach { item ->
-            val definition = actionDefinitions[item.definitionId]
-            if (definition == null) {
+            val definition = definitions[item.definitionId]
+            if (definition == null || (definition.activations.isEmpty() && definition.forms.none { it.durationSeconds != null })) {
                 require(item.pools.isEmpty() && item.modesUntil.isEmpty())
                 return@forEach
             }
@@ -225,7 +239,8 @@ object CharacterCalculator {
                 (pool.current == null || pool.current in 0..pool.maximum) && pool.rechargeRoll == null && pool.dieSides == null &&
                 (pool.recoveryAmount == null || pool.recoveryAmount in 0..1_000_000) })
             require(definition.activations.size <= 64 && definition.activations.distinctBy { it.id }.size == definition.activations.size)
-            val modes = definition.activations.flatMap { it.durations.keys }.toSet()
+            val modes = (definition.activations.flatMap { it.durations.keys } +
+                definition.forms.filter { it.durationSeconds != null }.map { "form:${it.id}" }).toSet()
             require(item.modesUntil.keys.all { it in modes } && item.modesUntil.values.all { it >= 0 })
             for (activation in definition.activations) {
                 require(activation.id.isNotBlank() && activation.name.isNotBlank() && activation.actionType in setOf("Action","Bonus Action","Reaction","Free"))
@@ -251,15 +266,29 @@ object CharacterCalculator {
         }
         c.itemDefinitions.forEach { definition ->
             require(definition.forms.size <= 12 && definition.forms.distinctBy { it.id }.size == definition.forms.size)
-            require(definition.forms.all { it.id.isNotBlank() && it.name.isNotBlank() && "walk" in it.movement &&
-                it.movement.keys.all { mode -> mode in setOf("walk","fly","swim","climb","burrow") } &&
-                it.movement.values.all { speed -> speed == null || speed in 0..10000 } })
+            require(definition.forms.all { form ->
+                form.id.isNotBlank() && form.name.isNotBlank() && "walk" in form.movement &&
+                form.movement.keys.all { mode -> mode in setOf("walk","fly","swim","climb","burrow") } &&
+                form.movement.values.all { speed -> speed == null || speed in 0..10000 } &&
+                form.abilityOverrides.all { (_,score) -> score in 0..100 } &&
+                (form.armorClassOverride == null || form.armorClassOverride in 0..100) &&
+                form.activationSeconds in 6..86_400 &&
+                (form.durationSeconds == null || form.durationSeconds in 1..31_536_000) &&
+                (form.size == null || form.size in setOf("Tiny","Small","Medium","Large","Huge","Gargantuan")) &&
+                listOfNotNull(form.deploymentResourceId, form.integrityResourceId, form.resetResourceId).all { id ->
+                    c.resources.any { it.id == id }
+                }
+            })
         }
         require(c.itemDefinitions.all { it.id.isNotBlank() && it.attunementCost in 0..100 && it.minimumLevel in 1..20 })
         require(c.resources.all { (it.maximum==null || it.maximum in 0..1_000_000) && (it.current==null || it.current in 0..1_000_000) && (it.recoveryAmount==null || it.recoveryAmount in 0..1_000_000) && (it.dieSides==null || it.dieSides in 2..1000) })
         require(c.resources.all { pool -> pool.rechargeRoll?.let { it.sides in 2..100 && it.minimum in 1..it.sides && pool.maximum == 1 && pool.recharge == Recharge.NONE } != false })
         require(c.spells.all { it.level in 0..9 && it.resourceCost>=0 })
         require(c.attacks.all { it.fixedAttackBonus==null || it.fixedAttackBonus in -1000..1000 })
+        val formIds = c.itemDefinitions.flatMap { it.forms }.map { it.id }.toSet()
+        require(c.attacks.all { (it.requiredFormId == null || it.requiredFormId in formIds) &&
+            it.excludedFormIds.all(formIds::contains) })
+        require(c.features.all { it.requiredFormId == null || it.requiredFormId in formIds })
         c.attacks.forEach { attack -> attack.recordedSource?.let { source ->
             require(source.profileId == c.id && source.attackId == attack.id && source.sheetRevision > 0)
             require(source.sheetSource.length <= 100_000 && source.attackJson.length in 1..100_000)
