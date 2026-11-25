@@ -78,7 +78,16 @@ internal fun classRulesId(label: String): String = when (label) {
 )
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable data class WearableForm(val id: String, val name: String, val movement: Map<String, Int?>,
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val wearerId: String? = null)
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val wearerId: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val size: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val abilityOverrides: Map<Stat, Int> = emptyMap(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val armorClassOverride: Int? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val activationSeconds: Int = 6,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val durationSeconds: Int? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val deploymentResourceId: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val integrityResourceId: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val resetResourceId: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val grounded: Boolean = false)
 @Serializable data class ItemActivation(val id: String, val name: String, val actionType: String,
     val costs: Map<String,Int> = emptyMap(), val durations: Map<String,Int> = emptyMap(),
     val ends: Set<String> = emptySet(), val temporaryHp: DiceFormula? = null)
@@ -116,7 +125,9 @@ internal fun classRulesId(label: String): String = when (label) {
     val damage: List<DamageComponent> = emptyList(), val addAbilityToDamage: Boolean = true,
     val actionType: String = "Action", val range: String = "5 ft.",
     val requiredItemId: String? = null, val fixedAttackBonus:Int? = null,
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val recordedSource: RecordedAttackSource? = null
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val recordedSource: RecordedAttackSource? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val requiredFormId: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val excludedFormIds: Set<String> = emptySet()
 )
 @Serializable enum class SpellPreparation { KNOWN, PREPARED, ALWAYS_PREPARED }
 @Serializable data class SpellDefinition(
@@ -135,7 +146,8 @@ internal fun classRulesId(label: String): String = when (label) {
 @Serializable enum class FeatureKind { FEAT, CLASS, SPECIES, BACKGROUND, OTHER }
 @Serializable data class CharacterFeature(
     val id:String, val name:String, val source:RuleSource, val description:String = "",
-    val kind:FeatureKind = FeatureKind.OTHER, val actionType:String = "", val resourceId:String? = null
+    val kind:FeatureKind = FeatureKind.OTHER, val actionType:String = "", val resourceId:String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val requiredFormId:String? = null
 )
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable data class ReforgeCharacter(
