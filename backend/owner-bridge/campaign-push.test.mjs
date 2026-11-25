@@ -158,3 +158,19 @@ for(const {stage,table,target} of [
  await f.db.prepare(`UPDATE ${table} SET revoked=1 WHERE id=?`).bind(target==='credential'?f.token.credentialId:f.token.campaignAccess.grantId).run();assert.equal(await registrationCount(f),0);
  release();await denied;assert.equal(await registrationCount(f),0);assert.equal(await f.push.notify({campaignId:campaign,credentialId:f.token.credentialId}),false);assert.equal(f.requests.length,0);
 });
+
+test('owner wake request is bounded, rate-limited and never claims an Android commit',async t=>{
+ const f=await fixture(t);
+ await f.push.register(f.sync,f.principal,campaign,registerBody());
+ const first=await f.push.requestSync({campaignId:campaign,credentialId:f.token.credentialId});
+ assert.deepEqual(first,{status:'WAKE_ACCEPTED',wakeAccepted:true});
+ assert.equal(f.requests.length,1);
+ const repeated=await f.push.requestSync({campaignId:campaign,credentialId:f.token.credentialId});
+ assert.deepEqual(repeated,{status:'WAKE_NOT_AVAILABLE_OR_THROTTLED',wakeAccepted:false});
+ assert.equal(f.requests.length,1);
+ f.advance(30_001);
+ assert.equal((await f.push.requestSync({campaignId:campaign,credentialId:f.token.credentialId})).wakeAccepted,true);
+ assert.equal(f.requests.length,2);
+ await f.push.unregister(f.sync,f.principal,campaign);
+ assert.equal((await f.push.requestSync({campaignId:campaign,credentialId:f.token.credentialId})).wakeAccepted,false);
+});
