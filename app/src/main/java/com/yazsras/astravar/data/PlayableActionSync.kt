@@ -75,10 +75,15 @@ internal object PlayableActionSync {
                 GameplayRules.useFeature(c,f.getValue("featureId").jsonPrimitive.content)
             }
             FORM -> {
-                require(f.keys == setOf("actorRole","itemId","formId"))
+                require(f.keys.containsAll(setOf("actorRole","itemId","formId")) &&
+                    f.keys.all { it in setOf("actorRole","itemId","formId","elapsedSeconds") })
                 val form = f.getValue("formId")
+                val elapsed = f["elapsedSeconds"]?.jsonPrimitive?.let {
+                    require(!it.isString && it.long in 0L..86_400L)
+                    it.long
+                } ?: 0L
                 GameplayRules.changeWearableForm(c, f.getValue("itemId").jsonPrimitive.content,
-                    if (form == JsonNull) null else form.jsonPrimitive.content)
+                    if (form == JsonNull) null else form.jsonPrimitive.content, elapsed)
             }
             DEFINE_SPELL -> {
                 require(f.keys == setOf("actorRole", "mode", "spellId", "definition"))
