@@ -50,7 +50,7 @@ class WearableWarformTest {
                 "warform",form.id,60)
         }
         val next = deploy(before)
-        assertEquals(60,next.gameSeconds)
+        assertEquals(60L,next.gameSeconds)
         assertEquals(0,next.resources.single { it.id == "deployment" }.current)
         assertEquals(75,next.resources.single { it.id == "integrity" }.current)
         assertEquals(60,next.currentHp)
