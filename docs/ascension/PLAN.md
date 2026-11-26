@@ -1,0 +1,50 @@
+# Astravar 4.1 implementation ledger
+
+Owner directive dated 2026-11-26, sections 1–34. The private Active Development Backlog, DM Bridge Gameplay Audit and equipment integration tracker are source keys B, A and E. The requirements matrix indexes the frozen B source in document order. The implementation branch is `ascension/4.1-cloud-authority`. No production campaign or owner enrollment is part of this implementation.
+
+## Baseline
+
+| Evidence checked on 2026-11-26 | Finding |
+|---|---|
+| GitHub PR 40 | Open, code 58 at `883198a3140ae2b707b31f81829c94cd821189b9` |
+| GitHub PR 41 | Open draft at `ae5dfc7622da5d225f97279bcdff837f0b2e893f`, 16 commits on top of code 58. Includes native timed form mechanics and optional wake. |
+| GitHub Actions 45562139259 | Full, fast and historical upgrade gates passed on the development line. Frozen purchase reproduction was skipped in this run. |
+| Main branch | `b4ec3513c93138dbc5e9b2ce2b8a420d10ff4458`. The feature branch descends from PR 41. |
+| Public source identity | Permanent package com.yazsras.astravar. PR 41 still declares 4.0.0-convergence5 / 58. Separate physical acceptance in A is for code 58. |
+| Fresh host regression | `node --test backend/owner-bridge/*.test.mjs` on unmodified PR 41, 163/163 passed using Node 24 and real SQLite. |
+| Issues 36, 38 and 39 | Preserve the reviewed native mechanics and immutable purchase outcome. Lifecycle verification uses a disposable fixture. The known purchase is resolved in the physical audit. |
+| Client authority | The active native sheet writes through Reforge/Genesis. A foreground sync loop and background worker can commit pending legacy commands. Device publication is a filtered mirror. |
+| Server | Existing private Sites Worker uses scoped authenticated device and connector ingress, D1 and optional Pushy. Its existing command submission/acknowledgement records do not constitute cloud gameplay commits. |
+| Backup | Nine Room families. Connected Backup covers the ledger, Reforge and six Genesis families. Independent weapon data, provider-owned media bytes and service receipts require explicit coverage. |
+
+## Architecture decisions
+
+1. Extend the existing owner-private Worker, MCP identity and SQL migration chain. Add typed versioned gameplay endpoints. Both clients execute the same server command planner. Consolidate local calculations into previews or legacy mode after explicit cutover. Cross-check ported rules against native fixtures before accepting parity.
+2. Use SQLite-compatible relational tables on the existing D1 model for this implementation. Separate continuity identities, authorities, epochs, scoped grants, canonical entities, dependencies, proposals, receipts and change history. Store validated domain values with stable references. Never treat a mirror row, unpublished client total, or copied Room blob as a cloud-authoritative actor.
+3. An absent cloud continuity keeps the existing authority model. Cutover requires an owner-authorized, verified source manifest plus a higher epoch. Both generations of ingress must respect a fence. Reading, upgrading and syncing cannot implicitly enroll a campaign. Independent cloud commits persist before any push or Android acknowledgement.
+4. Each command supplies an ID, an epoch and an expected continuity revision. A single database transaction checks the current grant and credential, validates the epoch and revisions, updates all related data and commits immutable evidence. Reuse the canonical JSON digest. Reject a reused ID with different intent. Evaluate event identity before supersession. Scope result visibility, including receipts and relationships.
+5. Keep approved entity media in a private object store and only store checked associations, hashes and versions in SQL. Media upload, validation, owner approval of the exact bytes/target, association and cleanup need separate evidence. No unrestricted binary or arbitrary field writes through gameplay.
+6. Keep the existing native navigation and mechanics available before a separately authorized migration. Cache only scoped, player-known cloud records. Reads can report staleness. Gameplay disables authoritative writes while offline in cloud mode.
+7. Original edition profiles, source-backed overrides and unknown values survive migration. Production staging, publication or cutover are outside the release rehearsal. Public test records and documentation use invented engineering fixtures.
+
+## Provider and operations decision
+
+The service already deploys a single stateless Worker and D1. D1 executes prepared statements in transactional batches and rolls a failed batch back. Use a database assertion inside the batch for comparisons where a zero-row SQL update would otherwise be a success. Independent post-commit reads must go through the primary or a session with appropriate consistency. One database serializes queries. A single private campaign with bounded indexed queries is a plausible first workload. Measure query rows, latency, storage, payload bounds and concurrent mutations at representative volumes before provisioning. [D1 API](https://developers.cloudflare.com/d1/worker-api/d1-database/) · [D1 limits](https://developers.cloudflare.com/d1/platform/limits/)
+
+Managed PostgreSQL also fits foreign keys, strict concurrency and point-in-time recovery. It adds a separate database service, credentials, connectivity and another recovery system to the existing Worker. Revisit if measured write contention, migration size or regional requirements exceed the supported D1 design. [PostgreSQL recovery](https://www.postgresql.org/docs/current/continuous-archiving.html)
+
+Keep test SQL and media isolated. Production region and residency, provider/account, media capacity, billable allowances, export retention and encrypted backup custody await the owner. D1 charges by rows read/written and storage subject to plan allowances. R2 Standard includes a free allowance and charges for stored bytes and operation counts beyond it. D1 Time Travel retention is seven days on Free and thirty on Paid on supported databases. SQL recovery needs a matching private asset manifest and application-level post-restore checks. The existing Site has no configured private media binding in its example. No resources or billing were provisioned. [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/) · [Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/) · [R2 pricing](https://developers.cloudflare.com/r2/pricing/) · [Data location](https://developers.cloudflare.com/d1/configuration/data-location/)
+
+## Phase dependencies and evidence
+
+| Phase | Implementation gate | Independent evidence required for acceptance |
+|---|---|---|
+| 1 | Source and feature audit, traceable decisions, recovered base | Current PR tips, complete linked specifications, code inspection and baseline tests |
+| 2 | Canonical schema and operation contracts | Fresh and upgrade schema tests, cross-continuity foreign keys, atomic failures, stable identity and invariants |
+| 3 | Authoritative service and DM integration | Actual Worker ingress against durable SQL, separate authorized readback, retries/races, approvals and revocation with Android absent |
+| 4 | Four native destinations and connected gameplay | UI/gesture instrumentation, replay-safe submission, read-only stale mode, correct-epoch reconnect and both client directions |
+| 5 | Preservation and migration tooling | Independent counts/digests, real schema-version fixtures, recovery/rollback and refusal to discard later writes |
+| 6 | Release | All per-requirement gates, owner-signed APK identity, alignment, digest, source correspondence and upgrade evidence |
+| 7 | Outside this assignment | Separate owner-authorized production migration |
+
+Each feature needs scoped retrieval, authoring/execution where applicable, permission handling, a durable receipt and independent readback before claiming functional parity. Features unavailable to the new backend remain identified in the trace and capability matrices. Git history records implementation checkpoints. Update this ledger after verification and before any release designation.
