@@ -30,9 +30,11 @@ class GenesisConsolidationNavigationTest {
             }
             compose.onNodeWithText("Appearance").assertIsDisplayed()
             compose.onNodeWithText("Records, backups & connection").performScrollTo().performClick()
-            compose.onNodeWithText("Original armor archive").performScrollTo().performClick()
-            assertEquals(listOf("Weapon backup"), opened)
-            compose.onNodeWithText("Complete backup").performScrollTo().assertExists()
+            compose.onNodeWithText("Character sources").assertDoesNotExist()
+            compose.onNodeWithText("Original armor archive").assertDoesNotExist()
+            compose.onNodeWithText("Complete backup").assertDoesNotExist()
+            compose.onNodeWithText("Owner connection").performScrollTo().performClick()
+            assertEquals(listOf("Owner connection"), opened)
         } finally { activity.pause().stop().destroy() }
     }
 

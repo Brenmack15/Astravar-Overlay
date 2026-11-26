@@ -1,3 +1,4 @@
+import { currentDeployment, closeDeployment } from './cloud-form-deployment.mjs';
 import { recordsFail, recordObject, recordId, recordText, recordSource, recordTitle, recordChoice, recordMaybe, recordInt, recordArray, recordBool, recordsOperation, recordRead, recordNew, recordEdit, partyActor, validateRecordValue, historyRecordId } from './cloud-records-contract.mjs';
 
 const denominations = ['cp','sp','ep','gp','pp'];
@@ -270,6 +271,7 @@ async function moveItemRules(ctx,item,next) {
   }
   if(poolId){
     const pool=await recordRead(ctx,'resource_pool',poolId);
+    if(pool.data.effectHolds?.length)recordsFail('RESOURCE_HAS_PENDING_EFFECT_CHARGES',409);
     if(pool.data.type!=='charge') recordsFail('CHARGE_POOL_TRANSFER_REVIEW_REQUIRED',409);
     records.push(pool);
   }
@@ -343,7 +345,13 @@ async function moveItem(ctx,args,eventType = 'transfer',leg = null) {
 
 async function guardForm(ctx, item, next) {
   if (!item.data.custodianId) return;
-  const actor = await partyActor(ctx,item.data.custodianId);
+  let actor = await partyActor(ctx,item.data.custodianId);
+  const deployment=await currentDeployment(ctx,actor);
+  if(deployment?.data.sourceItemId===item.id && (item.data.custodianId!==next.data.custodianId || next.data.equipment==='packed' ||
+    !next.data.partyAccess || deployment.data.requiresOperating && !next.data.operating || deployment.data.requiresAttunement && !next.data.attuned)){
+    const data=await closeDeployment(ctx,actor,deployment,'interrupted','source_item_unavailable');
+    actor=await ctx.put(recordEdit(actor,data));
+  }
   if (!actor.data.activeFormId) return;
   const form = await recordRead(ctx,'form',actor.data.activeFormId);
   if(form.data.sourceItemId!==item.id)return;
@@ -582,6 +590,27 @@ export const HOLDING_OPERATIONS = Object.freeze({
 });
 
 export const projectPaymentCoins = coins;
+export async function consumeItemUnit(ctx,itemId,definitionId,actorId,reason,source){
+  const item=await recordRead(ctx,'item_instance',itemId),d=item.data;
+  usable(item);
+  if(d.definitionId!==definitionId || d.custodianId!==actorId || d.holding!=='carried' || d.equipment!=='packed' ||
+      d.attuned || d.operating || d.resourcePoolId || d.customized || !Number.isSafeInteger(d.quantity) || d.quantity<1)
+    recordsFail('MATCHING_UNUSED_CONSUMABLE_REQUIRED',409);
+  if(d.ownerId!==actorId)ctx.require('inventory',d.ownerId,true);
+  const dependent=await ctx.service.s(`SELECT 1 AS present FROM cloud_links l JOIN cloud_entities e ON e.owner_id=l.owner_id
+    AND e.continuity_id=l.continuity_id AND e.id=l.from_id WHERE l.owner_id=? AND l.continuity_id=? AND l.to_id=?
+    AND e.life='active' AND l.relation IN('requires_item','resulting_item') LIMIT 1`,...ctx.binding,itemId).first();
+  if(dependent)recordsFail('CONSUMABLE_DEPENDENCY_REVIEW_REQUIRED',409);
+  const quantity=d.quantity-1;
+  const data=quantity?{...d,quantity}:{...d,quantity,custodianId:null,locationId:null,partyAccess:false,holding:'consumed'};
+  const consumed=recordEdit(item,data);
+  await ctx.put(consumed);
+  if(!quantity){
+    await ctx.unlink(item.id,'held_by',actorId);
+    if(d.locationId)await ctx.unlink(item.id,'located_at',d.locationId);
+  }
+  return {itemId,quantityBefore:d.quantity,quantityAfter:quantity,itemEventId:await itemEvent(ctx,'consumption',item,consumed,reason,source,[],item.id)};
+}
 export async function payForProject(ctx, project, walletId, payment, reason, source) {
   const wallet=await walletRecord(ctx,walletId);
   if(wallet.actorId !== null && wallet.actorId !== project.actorId) recordsFail('PROJECT_WALLET_HOLDER_MISMATCH',409);

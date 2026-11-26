@@ -29,7 +29,8 @@ internal fun prepareCloudImage(context:Context,uri:Uri):ByteArray {
     BitmapFactory.decodeByteArray(source,0,source.size,opts)
     require(opts.outWidth in 1..16384 && opts.outHeight in 1..16384 && opts.outWidth.toLong()*opts.outHeight<=48_000_000L)
     opts.inJustDecodeBounds=false;opts.inSampleSize=1
-    while(maxOf(opts.outWidth,opts.outHeight)/opts.inSampleSize > 1024) opts.inSampleSize*=2
+    val longestSide = maxOf(opts.outWidth, opts.outHeight)
+    while (longestSide > 1024 * opts.inSampleSize) opts.inSampleSize *= 2
     val bmp=requireNotNull(BitmapFactory.decodeByteArray(source,0,source.size,opts))
     return try {
         val out=ByteArrayOutputStream();require(bmp.compress(Bitmap.CompressFormat.PNG,100,out))

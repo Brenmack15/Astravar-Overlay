@@ -8,6 +8,7 @@ import {cloudMatches} from '../backend/owner-bridge/cloud-validation.mjs';
 const kinds = {...MECHANIC_KINDS, ...RECORD_KINDS, ...CONTINUITY_KINDS};
 const operations = {...MECHANIC_OPERATIONS, ...RECORD_OPERATIONS};
 const definitions = {
+  story_arc:['define_story_arc','arcId'], campaign_session:['record_campaign_session','sessionId'],
   actor:['define_actor','actorId'], resource_pool:['define_resource','poolId'], form:['define_form','formId'],
   feature:['define_feature','featureId'], world_entity:['define_connection','entityId'], effect:['define_effect','effectId'], attack:['define_attack','attackId'], spell:['define_spell','spellId'],
   spell_grant:['grant_spell','grantId'], action_definition:['define_action','actionId'],

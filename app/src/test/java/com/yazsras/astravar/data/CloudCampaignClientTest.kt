@@ -85,6 +85,26 @@ class CloudCampaignClientTest {
         } finally { db.close() }
     }
 
+    @Test fun privateThumbnailPersistsOnlyUnderTheSameVerifiedGrant(): Unit = runBlocking {
+        val db = cache()
+        var grant = 1
+        val image = byteArrayOf(1, 2, 3)
+        val client = CloudCampaignClient(db, { CloudSession(credential, null) },
+            OwnerConnectionTransport { _, _, _, _, _ -> OwnerSyncResponse(200, page(listOf(row("actor")), grant = grant)) },
+            { now }, { _, target, kind, upload, bytes ->
+                assertEquals("actor", target); assertEquals("actor", kind); assertNull(upload); assertNull(bytes); image
+            })
+        try {
+            val selected = client.refresh(openExisting = true)
+            assertArrayEquals(image, client.image(selected, "actor", "actor"))
+            assertArrayEquals(image, client.cachedImage("actor"))
+            grant++
+            client.refresh()
+            assertNull(client.cachedImage("actor"))
+            assertThrows(OwnerSyncFailure::class.java) { runBlocking { client.image(selected, "actor", "actor") } }
+        } finally { db.close() }
+    }
+
     @Test fun nativeTransportAllowsOnlyConstructedCloudRoutes() {
         assertTrue(validCloudDevicePath("/v3/continuities/isolated/state?limit=20&after=item:A&atRevision=5&atEpoch=1&grantRevision=2"))
         assertFalse(validCloudDevicePath("/v3/continuities/isolated/../secret"))

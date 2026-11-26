@@ -24,8 +24,18 @@ private fun JsonObject.reviewRows(name: String): List<JsonObject> = (this[name] 
 internal fun exactOwnerReviewPage(binding: CloudBinding, commandId: String, digest: String, intent: String): URI {
     require(cloudIdentifier.matches(binding.continuity) && intent in setOf("verify", "refuse"))
     approvalViewSuffix(commandId, digest)
-    return verifiedOwnerPage("${binding.origin}/owner/ascension/${binding.continuity}#request=$commandId&digest=$digest&intent=$intent", binding.origin)
+    val origin = URI(binding.origin)
+    require(origin.rawPath.orEmpty() in setOf("", "/") && origin.rawQuery == null && origin.rawFragment == null)
+    val path = "/owner/ascension/${binding.continuity}#request=$commandId&digest=$digest&intent=$intent"
+    return verifiedOwnerPage(origin.resolve(path).toString(), binding.origin)
 }
+private fun requester(subject: String) = when {
+    subject == "sites-mcp" -> "Authorized Dungeon Master"
+    subject == "sites-owner" -> "Campaign owner"
+    subject.startsWith("device:") -> "Paired Android client"
+    else -> subject
+}
+
 private fun readiness(code: String?) = when (code) {
     "READY" -> "Ready for owner review"
     "REVIEW_BASELINE_CHANGED" -> "Campaign state changed since submission"
@@ -63,7 +73,9 @@ private fun fieldValue(value: JsonElement?): String = when(value) {
 }
 
 @Composable
-internal fun CloudApprovalCenter(client: CloudCampaignClient, snapshot: CloudSnapshot, online: Boolean, close: () -> Unit) {
+internal fun CloudApprovalCenter(
+    client: CloudCampaignClient, snapshot: CloudSnapshot, online: Boolean, onCount: (Int?) -> Unit, close: () -> Unit
+) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var selected by rememberSaveable(snapshot.binding.continuity, snapshot.binding.subject) { mutableStateOf<String?>(null) }
     var digest by rememberSaveable(snapshot.binding.continuity, snapshot.binding.subject) { mutableStateOf<String?>(null) }
@@ -83,18 +95,21 @@ internal fun CloudApprovalCenter(client: CloudCampaignClient, snapshot: CloudSna
         val exact = digest
         if (command != null && exact != null) {
             key(snapshot.binding, snapshot.version, command, exact, reload) {
-                CloudRequestDetail(client, snapshot, command, exact, reload = { reload++ }, back = ::back)
+                CloudRequestDetail(client, snapshot, command, exact, onCount, reload = { reload++ }, back = ::back)
             }
         } else {
             key(snapshot.binding, snapshot.version, reload) {
-                CloudRequestList(client, snapshot, retry = { reload++ }) { id, hash -> selected = id; digest = hash }
+                CloudRequestList(client, snapshot, onCount, retry = { reload++ }) { id, hash -> selected = id; digest = hash }
             }
         }
     }
 }
 
 @Composable
-private fun CloudRequestList(client: CloudCampaignClient, snapshot: CloudSnapshot, retry: () -> Unit, select: (String, String) -> Unit) {
+private fun CloudRequestList(
+    client: CloudCampaignClient, snapshot: CloudSnapshot, onCount: (Int?) -> Unit,
+    retry: () -> Unit, select: (String, String) -> Unit
+) {
     var after by remember { mutableStateOf<String?>(null) }
     var next by remember { mutableStateOf<String?>(null) }
     var rows by remember { mutableStateOf(emptyList<JsonObject>()) }
@@ -111,12 +126,13 @@ private fun CloudRequestList(client: CloudCampaignClient, snapshot: CloudSnapsho
             actionable = page.getValue("actionableCount").jsonPrimitive.int
             count = page.getValue("pendingCount").jsonPrimitive.int
             require(actionable in 0..count)
+            onCount(actionable)
             next = page.reviewText("nextAfter")?.also { require(cloudIdentifier.matches(it)) }
             val found = page.reviewRows("requests")
             found.forEach { approvalViewSuffix(it.cloudText("commandId"), it.cloudText("digest")) }
             rows = (rows + found).distinctBy { it.cloudText("commandId") }
         } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { rows = emptyList(); next = null; error = cloudError(e) }
+        catch (e: Exception) { rows = emptyList(); next = null; onCount(null); error = cloudError(e) }
         finally { waiting = false }
     }
     if (waiting) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -139,7 +155,7 @@ private fun CloudRequestList(client: CloudCampaignClient, snapshot: CloudSnapsho
 
 @Composable
 private fun CloudRequestDetail(
-    client: CloudCampaignClient, snapshot: CloudSnapshot, id: String, digest: String, reload: () -> Unit, back: () -> Unit
+    client: CloudCampaignClient, snapshot: CloudSnapshot, id: String, digest: String, onCount: (Int?) -> Unit, reload: () -> Unit, back: () -> Unit
 ) {
     val context = LocalContext.current
     var response by remember { mutableStateOf<JsonObject?>(null) }
@@ -150,6 +166,11 @@ private fun CloudRequestDetail(
             val approved = client.projection(snapshot, approvalViewSuffix(id, digest))
             require(approved.cloudText("commandId") == id && approved.cloudText("digest") == digest)
             response = approved
+            if (approved.cloudText("status") != "PENDING_APPROVAL") {
+                try { onCount(client.reviewCount()) }
+                catch (e: CancellationException) { throw e }
+                catch (_: Exception) { onCount(null) }
+            }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { response = null; error = cloudError(e) }
     }
@@ -185,7 +206,7 @@ private fun CloudRequestDetail(
     Text(if (value.reviewText("reviewReason") == "OWNER_CONFIRMATION_REQUIRED") "This operation requires explicit owner confirmation."
         else "The requesting party's Auto-Sync settings require review for this change.")
     val command = value.getValue("command").jsonObject
-    Text("Requested by ${value.cloudText("subject")} · Submitted at revision ${command.getValue("expectedRevision")} · Current revision ${value.getValue("revision")}")
+    Text("Requested by ${requester(value.cloudText("subject"))} · Submitted at revision ${command.getValue("expectedRevision")} · Current revision ${value.getValue("revision")}")
     if (!ready) PlayerOutlinedButton({ owner("verify") }) { Text("Resolve request status") }
     val plan = value.getValue("plan").jsonObject
     val current = value.getValue("current").jsonObject
@@ -211,7 +232,9 @@ private fun CloudRequestDetail(
     if (links.isNotEmpty()) { Text("Affected relationships", style = MaterialTheme.typography.titleMedium); RecordFields(links) }
     TextButton({ technical = !technical }) { Text(if (technical) "Hide request details" else "Source and request details") }
     if (technical) {
-        Text("Request $id"); Text("Digest $digest")
+        Text("Requester ${value.cloudText("subject")}")
+        Text("Request $id")
+        Text("Digest $digest")
         RecordFields(command.getValue("args"))
         RecordFields(plan.getValue("access"))
     }

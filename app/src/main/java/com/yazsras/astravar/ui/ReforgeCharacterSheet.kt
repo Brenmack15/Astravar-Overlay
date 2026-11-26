@@ -762,7 +762,13 @@ private enum class SpellbookFilter(val label: String) {
                     ReforgeRichText(character.background)
                     PlayerTextButton(onClick = { dialog = "Identity" }) { Text("Edit background") }
                     PlayerTextButton(onClick = { dialog = "Notes" }) { Text("Character notes") }
+                    PlayerTextButton(onClick = { dialog = "HistoricalSources" }) { Text("Character source evidence") }
                 }
+            }
+            "HistoricalSources" -> LegacyCharacterSources(repository, local, requireNotNull(saved), { dialog = null },
+                { dialog = "HistoricalReferences" })
+            "HistoricalReferences" -> RebuildToolSheet("Armor source references", { dialog = "HistoricalSources" }) {
+                CampaignReferenceLibraryV21(repository)
             }
             "AttackManagement" -> PlayerSheet("Manage attacks", { dialog = null }) {
                 PlayerButton(onClick = { dialog = "Attack" }) { Text("Create attack") }
@@ -792,7 +798,12 @@ private enum class SpellbookFilter(val label: String) {
             "Rest" -> ReforgeRestDialog(character, { dialog = null }) { label, next -> proposedChange = label to next; dialog = null }
             "Defense" -> ReforgeCalculationDialog("Defenses", projection, { dialog = null })
         }
-        inspecting?.let { stat -> ReforgeAbilityInspector(character, projection, Stat.valueOf(stat), { inspecting = null }, { change("Edit permanent ${stat}", it) }) { label, modifier -> requestRoll(label, modifier, RollKind.ABILITY_CHECK, stat) } }
+        inspecting?.let { stat ->
+            ReforgeAbilityInspector(character, projection, Stat.valueOf(stat), { inspecting = null },
+                { change("Edit permanent $stat", it) }, { inspecting = null; dialog = "HistoricalSources" }) { label, modifier ->
+                requestRoll(label, modifier, RollKind.ABILITY_CHECK, stat)
+            }
+        }
         dialog?.takeIf { it.startsWith("InspectAttack:") || it.startsWith("InspectDamage:") }?.let { inspectingAttack ->
             val attack = character.attacks.firstOrNull { it.id == inspectingAttack.substringAfter(':') }
             if (attack != null) PlayerSheet(attack.name, { dialog = null }, actions = {

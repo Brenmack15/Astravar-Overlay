@@ -60,7 +60,7 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
         val tabs = when (tab) {
             "Inventory" -> listOf("Items","Wallets","Projects","Research")
             "Connections" -> listOf("Companions","Beings","Factions","Places","Relationships")
-            "Chronicle" -> listOf("Timeline","Objectives","Encounters","Checkpoints","Lore")
+            "Chronicle" -> listOf("Timeline","Objectives","Encounters","Checkpoints","Lore","Sessions","Story arcs")
             "Inventions" -> listOf("Projects","Research")
             else -> emptyList()
         }
@@ -72,6 +72,7 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
             } else {
                 PlayerSearch(query,{ query=it.take(120) },"Search ${panel.lowercase()}")
                 when (panel) {
+                    "Sessions","Story arcs" -> CloudChronologyPanel(if(panel=="Sessions")"campaign_session" else "story_arc",client,snapshot,online,query,openOperation,inspect)
                     "Encounters" -> CloudEncounterPanel(client,snapshot,online,query,openOperation)
                     "Items" -> {
                         PlayerTextButton({ openOperation("define_item_definition",args("definitionId" to id(),"source" to manual)) }, enabled=online) { Text("Create item definition") }
@@ -139,7 +140,7 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                         }
                         CachedRecordList(client,snapshot,setOf(kind),null,query,allowed={ row ->
                             when(panel){
-                                "Companions"->row.data().s("role")=="companion"
+                                "Companions"->row.data().s("role")=="companion" && cloudPartyMember(row)
                                 "Beings"->row.data().s("category") in setOf("being","person")
                                 "Factions"->row.data().s("category") in setOf("organization","faction")
                                 "Places"->row.data().s("category")=="place"
@@ -477,7 +478,7 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
     when(type) {
         "Party member" -> {
             PlayerTabs(listOf("Give","Lend"),ownership,{ownership=it})
-            CachedRecordList(client,snapshot,setOf("actor"),null,"",allowed={it.data().s("role") in setOf("player","companion")}){target=it.s("id")}
+            CachedRecordList(client,snapshot,setOf("actor"),null,"",allowed={cloudPartyMember(it)}){target=it.s("id")}
         }
         "Storage" -> CachedRecordList(client,snapshot,setOf("world_entity"),null,"",allowed={it.data().s("category")=="place" && it.data().s("partyStorage")=="true"}){target=it.s("id")}
         "External" -> {
@@ -687,7 +688,7 @@ private fun hasTradeCoins(side:JsonObject)=coins.any{(side.obj("coins").s(it)?.t
     val actor=side.s("actorId")
     PlayerHeading(label)
     PlayerDisclosure(if(actor==null)"Choose party member" else recordName(client,snapshot,actor,"Selected party member"),initiallyOpen=actor==null){
-        CachedRecordList(client,snapshot,setOf("actor"),null,"",allowed={it.s("id")!=otherActor && it.data().s("role") in setOf("player","companion")}){row->
+        CachedRecordList(client,snapshot,setOf("actor"),null,"",allowed={it.s("id")!=otherActor && cloudPartyMember(it)}){row->
             if(row.s("id")!=actor)update(emptyTradeSide(row.s("id")))
         }
     }

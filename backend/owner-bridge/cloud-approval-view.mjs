@@ -67,7 +67,7 @@ export async function cloudReviewInbox(service,principal,id,mode,opts={}){
   if(!row)cloudFail(404,'REVIEW_UNAVAILABLE');
   const parsed=JSON.parse(row.request_json),proposal=await readRequestEvidence(service,b,row);
   if(row.status!=='PENDING_APPROVAL'){
-    if(!parsed.reviewRequired && !proposal.plan && !['REFUSED','CONFLICT','SUPERSEDED'].includes(row.status))cloudFail(404,'REVIEW_UNAVAILABLE');
+    if(parsed.reviewRequired!==true && !proposal.plan)cloudFail(404,'REVIEW_UNAVAILABLE');
     const terminal=await service.s('SELECT * FROM cloud_receipts WHERE owner_id=? AND continuity_id=? AND command_id=?',...b,row.command_id).first();
     if(!terminal)cloudFail(503,'CLOUD_EVIDENCE_INCOMPLETE');
     const result=await readResultEvidence(service,b,terminal);

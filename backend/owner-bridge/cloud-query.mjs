@@ -1,3 +1,4 @@
+import { checkpointChronology } from './cloud-chronology.mjs';
 import { cloudAllowed, cloudEntity } from './cloud-plan.mjs';
 import { cloudFail, validCloudId } from './cloud-validation.mjs';
 
@@ -27,8 +28,9 @@ export async function cloudContext(service,principal,id,{actorId=null,sinceRevis
     ${actorId?'AND (h.actor_id=? OR h.actor_id IS NULL)':''} ORDER BY h.revision DESC,h.ordinal DESC LIMIT 26`,
     ...b,after,...cv.values,...visible(service,grant,'nowrow').values,...(actorId?[actorId]:[])).all()).results;
   const actors=(await read('actor',16)).results.map(cloudEntity),objectives=(await read('objective',16)).results.map(cloudEntity);
+  const chronology=await checkpointChronology(service,b,grant,latest?.id);
   await confirm(service,principal,id,opened);
-  return {continuityId:id,epoch:c.epoch,revision:c.revision,checkpoint:latest?cloudEntity(latest):null,checkpointRevision:latest?.cloud_revision??null,
+  return {continuityId:id,chronology,epoch:c.epoch,revision:c.revision,checkpoint:latest?cloudEntity(latest):null,checkpointRevision:latest?.cloud_revision??null,
     actors,objectives,changesSince:after,recentChanges:changes.slice(0,25),moreChanges:changes.length>25,grantRevision:grant.revision,nextChangeAfter:changes.length>25?changes[24].revision+'~'+changes[24].ordinal:null};
 }
 function checkPage(opened,options) {

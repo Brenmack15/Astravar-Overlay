@@ -1,16 +1,19 @@
+import { interruptIfPending } from './cloud-form-deployment.mjs';
+import { arsenalDefinitions, loadChoice, useArsenal, validateArsenal } from './cloud-mechanics-arsenal.mjs';
+import { snapshotComponents } from './cloud-mechanics-combat.mjs';
 import { linkedTypes, linkedDefinitions, linkedArguments, validateLinkedAction, executeLinkedAction } from './cloud-mechanics-linked.mjs';
 import { stats, identifier, named, whole, nullable, arrayOf, option, boolean, fields, actionCost, costSchema, must, op, actor, owned, insert, save, transferableSource, gearEligible, sheet, spend, useTiming } from './cloud-mechanics-core.mjs';
 
 const sizeOrder=['tiny','small','medium','large','huge','gargantuan'];
 const actionSchema=fields({
-  ...linkedDefinitions,actorId:identifier,actionId:identifier,name:named(120),source:named(300),
-  type:option('use','teleport','frighten','roll_bonus','multiattack','fixed_attack_die',...linkedTypes),fixedDieValue:whole(1,20),attackSequence:arrayOf(identifier,12),substitutions:arrayOf(fields({attackId:identifier,replaces:arrayOf(identifier,12),maximum:whole(1,12)},['attackId','replaces','maximum']),12),timing:actionCost,formId:identifier,excludedForms:arrayOf(identifier,16),sourceItemId:identifier,transfersWithItem:boolean,
+  ...linkedDefinitions,...arsenalDefinitions,actorId:identifier,actionId:identifier,name:named(120),source:named(300),
+  type:option('use','teleport','frighten','roll_bonus','multiattack','fixed_attack_die','store_payload','prepare_strike',...linkedTypes),fixedDieValue:whole(1,20),attackSequence:arrayOf(identifier,12),substitutions:arrayOf(fields({attackId:identifier,replaces:arrayOf(identifier,12),maximum:whole(1,12)},['attackId','replaces','maximum']),12),timing:actionCost,formId:identifier,excludedForms:arrayOf(identifier,16),sourceItemId:identifier,transfersWithItem:boolean,
   requiresOperating:boolean,requiresAttunement:boolean,cost:costSchema,range:whole(0,1200),saveDc:whole(1,100),
   saveAbility:option(...stats),durationSeconds:whole(1,86400),bonusAbility:option(...stats),fixedBonus:whole(-100,100)
 },['actorId','actionId','name','source','type','timing']);
 async function define(ctx,x){
   const a=await actor(ctx,x.actorId);
-  await validateLinkedAction(ctx,x);
+  await validateLinkedAction(ctx,x);await validateArsenal(ctx,x);
   must((!x.requiresOperating&&!x.requiresAttunement)||x.sourceItemId,'ACTION_SOURCE_REQUIRED');
   if(x.sourceItemId)must(await ctx.get('item_instance',x.sourceItemId),'ACTION_SOURCE_MISSING');
   await transferableSource(ctx,x);
@@ -36,6 +39,7 @@ async function define(ctx,x){
   if(x.type==='roll_bonus')must(x.timing==='reaction'&&x.range!=null&&(x.bonusAbility!=null)!==(x.fixedBonus!=null),'REACTION_RULE_REQUIRED');
   const {actorId,actionId,name,...data}=x;
   await insert(ctx,'action_definition',actionId,actorId,name,data);
+  for(const v of x.payloadVariants??[])await ctx.link(actionId,'permits_payload',v.spellId);
   if(x.formId)await ctx.link(actionId,'requires_form',x.formId);
   for(const id of new Set(x.excludedForms??[]))await ctx.link(actionId,'excludes_form',id);
   if(x.sourceItemId)await ctx.link(actionId,'requires_item',x.sourceItemId);
@@ -55,7 +59,8 @@ export async function applyCondition(ctx,actorId,key,enabled,sourceId,expiresAt=
   const conditions=[...new Set([...preexisting,...sources.map(s=>s.key)])];
   const ends=conditions.some(c=>['incapacitated','unconscious','stunned','paralyzed','petrified'].includes(c));
   if(ends&&a.data.concentrationCastId)await ctx.unlink(a.id,'concentrates_on',a.data.concentrationCastId);
-  await save(ctx,a,{...a.data,conditionSources:sources,conditions,concentrationCastId:ends?null:a.data.concentrationCastId});
+  const next=enabled && ['incapacitated','unconscious','stunned','paralyzed','petrified'].includes(key)?await interruptIfPending(ctx,a,'actor_incapacitated'):a.data;
+  await save(ctx,a,{...next,conditionSources:sources,conditions,concentrationCastId:ends?null:next.concentrationCastId});
   return {actorId,key,conditions};
 }
 const destination=fields({label:named(200),distanceFeet:whole(0,1200),visible:boolean,unoccupied:boolean,grounded:boolean,
@@ -109,6 +114,7 @@ async function execute(ctx,x){
     data.rollId=roll.id;data.targetActorId=r.targetActorId;data.modifier=bonus;data.originalTotal=before;data.finalTotal=after;
   }
   await executeLinkedAction(ctx,a,action,x,data);
+  await useArsenal(ctx,a,action,x,data,p,snapshotComponents);
   await useTiming(ctx,a,d.timing);
   if(d.cost)data.costs.push(await spend(ctx,a.id,d.cost.poolId,d.cost.amount));
   await insert(ctx,'action_use',x.useId,a.id,action.title,data);
@@ -147,8 +153,25 @@ async function saveAgainst(ctx,x){
 }
 export const actionOperations=Object.freeze({
   define_action:op('combat',actionSchema,define),
-  use_action:op('combat',fields({...linkedArguments,actorId:identifier,actionId:identifier,useId:identifier,declared:{const:true},destination,targets,reaction},['actorId','actionId','useId','declared']),execute),
+  use_action:op('combat',fields({...linkedArguments,load:loadChoice,actorId:identifier,actionId:identifier,useId:identifier,declared:{const:true},destination,targets,reaction},['actorId','actionId','useId','declared']),execute),
   resolve_action_save:op('combat',fields({actorId:identifier,useId:identifier,targetActorId:identifier,rollId:identifier,endOfTurnConfirmed:boolean},['actorId','useId','targetActorId','rollId']),saveAgainst),
+  resolve_attack_rider:op('combat',fields({actorId:identifier,attemptId:identifier,targetActorId:identifier,rollId:identifier,feet:whole(0,200),destination:named(160),source:named(300)},['actorId','attemptId','targetActorId','rollId','feet','source']),async(ctx,x)=>{
+    const attempt=await owned(ctx,'attack_attempt',x.attemptId,x.actorId),d=attempt.data,push=d.preparedPush;
+    const target=await actor(ctx,x.targetActorId),earlier=d.targetResults.find(r=>r.targetActorId===target.id);
+    must(push && earlier?.decision==='hit' && !earlier.pushResult,'NO_PENDING_ATTACK_RIDER');
+    const roll=await owned(ctx,'roll',x.rollId,target.id);
+    must(roll.data.forRiderAttemptId===attempt.id && roll.data.status==='resolved' && !roll.data.adjudicated,'SAVE_EVIDENCE_REQUIRED');
+    const saved=roll.data.total>=push.dc;
+    must(x.feet<=(saved?0:push.feet) && Boolean(x.destination)===(x.feet>0),'INVALID_RESOLVED_MOVEMENT');
+    const current=await sheet(ctx,target.id),immune=current.effects.some(e=>e.data.target==='condition_immunity' && e.data.key==='prone');
+    if(x.feet)await save(ctx,target,{...target.data,position:x.destination});
+    const prone=!saved && push.prone && !immune;
+    if(prone)await applyCondition(ctx,target.id,'prone',true,attempt.id,null);
+    const result={saved,dc:push.dc,acceptedFeet:x.feet,destination:x.destination??null,prone,rollId:roll.id,source:x.source};
+    await save(ctx,roll,{...roll.data,adjudicated:true});
+    await save(ctx,attempt,{...d,targetResults:d.targetResults.map(r=>r.targetActorId===target.id?{...r,pushResult:result}:r)});
+    await ctx.link(attempt.id,'resolved_rider',roll.id);return result;
+  }),
   set_condition:op('combat',fields({actorId:identifier,key:identifier,enabled:boolean,sourceId:identifier},['actorId','key','enabled','sourceId']),async(ctx,x)=>{
     ctx.require('combat',x.actorId);
     // Manually entered declarations carry an independent namespace from effect-generated conditions.

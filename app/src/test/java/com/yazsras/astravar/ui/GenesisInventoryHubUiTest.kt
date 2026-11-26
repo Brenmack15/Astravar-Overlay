@@ -80,6 +80,8 @@ class GenesisInventoryHubUiTest {
                 GenesisInventoryContent(entries, listOf(first, second), "actor-b", emptyMap(), emptySet(), { opened = it }, { sourcesOpened = true })
             } }
             compose.onNodeWithTag("genesis-inventory-item-other-blade").assertExists()
+            compose.onNodeWithTag("genesis-inventory-item-shared:blade").assertExists()
+            compose.onNodeWithText("My items").performClick()
             compose.onNodeWithTag("genesis-inventory-item-shared:blade").assertDoesNotExist()
             compose.onNodeWithText("Add item").performClick()
             compose.runOnIdle { assertEquals(ReforgeSearchDestination.Character("actor-b", "Equipment", "Item"), opened) }

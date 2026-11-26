@@ -85,6 +85,17 @@ private fun formula(c:JsonObject):String{
         val components=row.rowsAt("components")
         val operation=if(standalone)"roll_damage_only" else "resolve_attack"
         val newAttempt=UUID.randomUUID().toString()
+        if (d["payloadRule"] is JsonObject) {
+            // The player must select the stored payload or the exact eligible slot before the dice can be determined.
+            open(operation, buildJsonObject {
+                put("attackId", id)
+                if (standalone) put("rollId", newAttempt) else {
+                    put("attemptId", newAttempt); put("mode", requested); put("includeDamage", withDamage)
+                }
+                putJsonObject("payload") {}
+            })
+            return
+        }
         if(!standalone && !withDamage) latestAttempts=JsonObject(Json.parseToJsonElement(latestAttempts).jsonObject+(id to JsonPrimitive(newAttempt))).toString()
         val body=buildJsonObject{
             put("actorId",actorId);put("attackId",id)

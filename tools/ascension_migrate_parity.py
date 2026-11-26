@@ -8,13 +8,27 @@ def mechanical_parity(source_path, bundle):
     families = {name: records for name, _, records in source_families(native)}
     continuity = bundle["tenant"][1]
     entities = {r["id"]: (r, loads(r["data_json"])) for r in bundle["rows"]["cloud_entities"]}
+    source_digest=sha(raw)
+    aliases={}
+    evidence=bundle["sources"].get(source_digest)
+    if evidence and "reviewedMapping" in evidence[1]:
+        plan=evidence[1]["reviewedMapping"]
+        from ascension_migrate_reviewed import indexed as all_native_rows, path_value
+        _, indexed = all_native_rows(raw)
+        for w in plan["parity"]:
+            if w["source"]==source_digest and w["targetPath"]==["id"] and w["transform"]=="scopedIdentity":
+                original=path_value(indexed[(w["family"],tuple(w["identity"]))],w["sourcePath"])
+                row,_=entities[w["target"]]
+                aliases.setdefault((row["kind"],original),set()).add(w["target"])
     actors = {a["actorId"]: a for _, a in families.get("authority.actors", [])}
     checks, holds = [], []
     def check(kind, identity, field, expected, actual, available=True):
         state = "absent" if not available else "different" if expected != actual else "bothUnknown" if expected is None else "equal"
         checks.append({"kind":kind, "id":identity, "field":field, "native":expected, "cloud":actual, "status":state})
     def target(kind, identity, actor_id=None):
-        row, data = entities.get(identity, ({}, {}))
+        proposed=aliases.get((kind,identity),set())
+        canonical=next(iter(proposed)) if len(proposed)==1 else identity
+        row, data = entities.get(canonical, ({}, {}))
         present = row.get("kind") == kind and (actor_id is None or row.get("actor_id") == actor_id)
         return data if present else {}, present
     def compare_fields(kind, identity, expected, data, present):
@@ -41,7 +55,11 @@ def mechanical_parity(source_path, bundle):
             holds.append({"kind":"actor","id":identity,"reason":"Stored actor identity or revision disagrees with envelope"})
             continue
         data, present = target("actor", identity, identity)
-        expected={k:char[k] for k in ("currentHp","temporaryHp","gameSeconds","level") if k in char}
+        expected={k:char[k] for k in ("currentHp","temporaryHp","gameSeconds","level","baseAc","baselineConstitutionModifier") if k in char}
+        if "baseMaxHp" in char:
+            expected["maxHp"]=char["baseMaxHp"]
+        if isinstance(char.get("reviewedProficiency"),dict) and "bonus" in char["reviewedProficiency"]:
+            expected["proficiency"]=char["reviewedProficiency"]["bonus"]
         if char.get("rules",{}).get("core") in ("LEGACY_2014","REVISED_2024"):
             expected["rulesProfile"] = char["rules"]["core"].lower()
         if binding.get("role") in ("PLAYER","COMPANION","NPC"):

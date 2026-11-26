@@ -277,6 +277,7 @@ if [[ "$astravar_bootstrap_gate" == true ]]; then
   run_test 'com.yazsras.astravar.data.OwnerBootstrapNativeTest#invalidBundlesAndInterruptedPersistenceRemainRetryable' bootstrap-negative.txt
   run_test 'com.yazsras.astravar.data.NotionNativeImportTest#publicContextApplyBackupReimportAndRollbackPreserveIdentity' notion-public-import.txt 360
   run_test 'com.yazsras.astravar.data.CampaignNativeHttpsTest#authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts' native-campaign-https.txt 360
+  (source scripts/ci-ascension-cloud-native.sh)
   run_test 'com.yazsras.astravar.data.AscensionNotificationNativeTest#actualSmallEmblemInStatusBarAndShadeAcrossLightAndDarkThemes' notification-emblem.txt 360
   git rev-parse HEAD >"$astravar_output/SOURCE_COMMIT.txt"
   bash scripts/ci-ascension-api37.sh
@@ -288,7 +289,7 @@ pathlib.Path(sys.argv[1]).write_text(json.dumps({
  'nativeAndroidKeyStore':True,
  'webCryptoEncryptedBootstrap':True,'sameDebugKeyUpdate':'53 to '+os.environ['ASTRAVAR_VERSION_CODE'],
  'legacyAliasAndVaultPreserved':True,'nativePublicNotionImport':True,
- 'nativeCampaignHttpsAndIndependentReadback':True,
+ 'nativeCampaignHttpsAndIndependentReadback':True,'api37ForceStoppedCloudReconnect':True,
  'actualOwnerSigningIdentityTestedInCi':False,'realChatGptHostInvocation':False,
  'physicalGalaxy':False,'android17':True},indent=2)+'\n')
 PY_SCOPE

@@ -85,7 +85,7 @@ async function cast(ctx,x){
   if(x.deliveryActorId){must(d.rangeKind==='touch' && targets.length===1 && x.deliveryActorId!==a.id,'SPELL_DELIVERY_INELIGIBLE');await actor(ctx,x.deliveryActorId);}
   const data={actorId:a.id,rangeKind:d.rangeKind??null,deliveryActorId:x.deliveryActorId??null,formId:p.formId,spellId:spell.id,grantId:g.id,baseLevel:d.baseLevel,level:x.level,
     route:grant.route,source:grant.source,sourceItemId:grant.sourceItemId??null,costs,timing:grant.route==='ritual'?'ritual':d.timing,
-    resolution:d.resolution,hitModifier:hit,save:d.resolution==='save'?{ability:d.saveAbility,dc,success:d.saveSuccess??null}:null,components:snapshotComponents(d.components,p,{},x.level-d.baseLevel),
+    resolution:d.resolution,hitModifier:hit,save:d.resolution==='save'?{ability:d.saveAbility,dc,success:d.saveSuccess??null}:null,components:snapshotComponents(d.components,p,{},x.level-d.baseLevel,'spell',spell.id),
     concentration:d.concentration,duration:d.duration??null,scaling,targets,targetResults:[],outcome:'pending',hit:null,damage:null,
     effectivePolicy:{normal:rollPolicy(p.effects,'spell_attack:'+g.id),advantage:rollPolicy(p.effects,'spell_attack:'+g.id,'advantage'),disadvantage:rollPolicy(p.effects,'spell_attack:'+g.id,'disadvantage')},
     recordedAt:ctx.now,commandId:ctx.commandId};

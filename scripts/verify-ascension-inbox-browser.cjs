@@ -9,9 +9,12 @@ async function main(){
   const root=path.resolve(__dirname,'../backend/owner-bridge'),tmp=fs.mkdtempSync(path.join(os.tmpdir(),'astravar-inbox-page-'));
   const {handleWorker}=await import(pathToFileURL(path.join(root,'worker.mjs')));
   const {SqliteAdapter}=await import(pathToFileURL(path.join(root,'sqlite-adapter.mjs')));
+  const {fileBucket}=await import(pathToFileURL(path.join(root,'fixtures/media-bucket.mjs')));
+  const {encodeMediaPng,mediaDigest}=await import(pathToFileURL(path.join(root,'cloud-media-codec.mjs')));
+  const cleanup=[];const bucket=await fileBucket({after:callback=>cleanup.push(callback)});
   const db=new SqliteAdapter(path.join(tmp,'isolated.db'));db.exec(fs.readFileSync(path.join(root,'schema.sql'),'utf8'));
   const owner='browser-test-owner',id='qa-owner-browser',base='/v3/continuities/'+id,session=randomUUID();
-  const env={DB:db,OWNER_SITE_USER_ID:owner,ASTRAVAR_CLOUD_ENABLED:'1',ASTRAVAR_CLOUD_ENV:'isolated'};
+  const env={DB:db,ASTRAVAR_MEDIA:bucket,OWNER_SITE_USER_ID:owner,ASTRAVAR_CLOUD_ENABLED:'1',ASTRAVAR_CLOUD_ENV:'isolated'};
   let origin,browser;const decisions=[];
   const key=path.join(tmp,'local.key'),cert=path.join(tmp,'local.crt');
   execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-keyout',key,'-out',cert,'-days','1','-subj','/CN=localhost',
@@ -33,7 +36,7 @@ async function main(){
       const r=await handleWorker(new Request(origin+path,{method:'POST',headers:{Origin:origin,'Content-Type':'application/json','oai-authenticated-user-id':owner},body:JSON.stringify(body)}),env);
       const v=await r.json();assert.ok(r.ok,JSON.stringify(v));return v;
     };
-    await post(base+'/isolated',{});await post(base+'/grants/sites-mcp',{scopes:['character.read','character.write'],auto:[],actors:['*'],
+    await post(base+'/isolated',{});await post(base+'/grants/sites-mcp',{scopes:['character.read','character.write','media.read','media.write'],auto:[],actors:['*'],
       expiresAt:Date.now()+86400000,expectedGrantRevision:0,revoked:false});
     await post(base+'/commands',{version:1,commandId:'browser-create',epoch:1,expectedRevision:0,operation:'define_actor',
       args:{actorId:'record-a',name:'Synthetic actor',role:'player',rulesProfile:'legacy_2014',level:1,abilities:{INT:12}}});
@@ -43,10 +46,19 @@ async function main(){
       const p=r.result.structuredContent;assert.equal(p.status,'PENDING_APPROVAL');return p;
     };
     const first=await make('refuse-this-one',15),second=await make('verify-this-one',16);
-    browser=await chromium.launch({executablePath:process.env.CHROME_BIN||'/usr/bin/chromium',headless:true,args:['--disable-dev-shm-usage','--no-sandbox','--disable-background-networking']});
+    browser=await chromium.launch({executablePath:process.env.CHROMIUM_EXECUTABLE||process.env.CHROME_BIN||(fs.existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined),headless:true,args:['--disable-dev-shm-usage','--no-sandbox','--disable-background-networking']});
     const ownerContext=await browser.newContext({ignoreHTTPSErrors:true,extraHTTPHeaders:{'x-private-test-session':session},viewport:{width:392,height:780}});
     const page=await ownerContext.newPage();
     const href=(p,verb)=>origin+'/owner/ascension/'+id+'#request='+p.commandId+'&digest='+p.digest+'&intent='+verb;
+    await page.goto(origin+'/owner/ascension/'+id);
+    await page.getByText('2 ready for approval · 0 require reconciliation',{exact:true}).waitFor();
+    assert.equal(await page.getByRole('link',{name:'Open request for set actor ability'}).count(),2);
+    assert.equal(await page.getByRole('button',{name:'Verify',exact:true}).count(),0);
+    await page.getByRole('link',{name:'Open request for set actor ability'}).first().click();
+    await page.getByRole('button',{name:'Verify',exact:true}).waitFor();
+    assert.ok(await page.getByText('Current',{exact:true}).count()>=1);
+    assert.equal(await page.getByText('12',{exact:true}).count(),1);
+    assert.equal(await page.getByText('15',{exact:true}).count(),1);
     await page.goto(href(first,'refuse'));await page.getByRole('button',{name:'Refuse',exact:true}).waitFor();
     assert.equal(await page.locator('article').count(),1);
     assert.equal(await page.getByRole('button',{name:'Refuse',exact:true}).evaluate(el=>el===document.activeElement),true);
@@ -55,7 +67,8 @@ async function main(){
     await page.getByText('REFUSED · revision 1',{exact:true}).waitFor();
     await page.reload();await page.getByText('REFUSED · revision 1',{exact:true}).waitFor();
     assert.deepEqual(decisions,[[base+'/approvals/'+first.commandId+'/refuse',first.digest]]);
-    const verifyPage=await ownerContext.newPage();
+    // Native deep links can reuse a tab and navigate only the fragment.
+    const verifyPage=page;
     await verifyPage.goto(href(second,'verify'));await verifyPage.getByRole('button',{name:'Verify',exact:true}).waitFor();
     assert.equal(decisions.length,1);await verifyPage.getByRole('button',{name:'Verify',exact:true}).click();
     await verifyPage.getByText('COMMITTED · revision 2',{exact:true}).waitFor();
@@ -67,10 +80,41 @@ async function main(){
     const anonymous=await browser.newPage({ignoreHTTPSErrors:true});
     assert.equal((await anonymous.goto(href(second,'verify'))).status(),401);
     assert.equal(decisions.length,2);
+    const image=await encodeMediaPng(2,1,new Uint8Array([10,20,30,255,200,220,240,255]));
+    const hash=await mediaDigest(image);
+    const media={uploadId:'approved-candidate',targetKind:'actor',targetId:'record-a',sha256:hash};
+    const call=async(name,args)=>{
+      const v=await post('/mcp',{jsonrpc:'2.0',id:4,method:'tools/call',params:{name,arguments:{continuityId:id,...args}}});
+      assert.equal(v.result.isError,false,JSON.stringify(v.result));return v.result.structuredContent;
+    };
+    await call('stage_cloud_image',{...media,bytesBase64:Buffer.from(image).toString('base64')});
+    const assign=await call('submit_cloud_command',{command:{version:1,commandId:'assign-reviewed-image',epoch:1,expectedRevision:2,
+      operation:'assign_primary_image',args:{...media,assetId:'displayed-asset'}}});
+    assert.equal(assign.status,'PENDING_APPROVAL');
+    const art=await ownerContext.newPage();
+    let sendCandidate,originalRequested;
+    const delivery=new Promise(resolve=>{sendCandidate=resolve;});
+    const requested=new Promise(resolve=>{originalRequested=resolve;});
+    await art.route('**/media/uploads/approved-candidate/original',async route=>{
+      originalRequested();await delivery;await route.continue();
+    });
+    await art.goto(href(assign,'verify'),{waitUntil:'domcontentloaded'});
+    await art.getByRole('button',{name:'Verify',exact:true}).waitFor();
+    await requested;
+    assert.equal(await art.getByRole('button',{name:'Verify',exact:true}).isDisabled(),true);
+    assert.equal(decisions.length,2);
+    sendCandidate();
+    await art.waitForFunction(()=>document.querySelector('img')?.naturalWidth===2 && !document.querySelector('[data-decision=verify]').disabled);
+    await art.getByRole('button',{name:'Verify',exact:true}).click();
+    await art.getByText('COMMITTED · revision 3',{exact:true}).waitFor();
+    assert.deepEqual(decisions[2],[base+'/approvals/'+assign.commandId+'/verify',assign.digest]);
+    const primary=await handleWorker(new Request(origin+base+'/media/primary/record-a/original',{headers:{'oai-authenticated-user-id':owner}}),env);
+    assert.equal(primary.status,200);
+    assert.deepEqual(Buffer.from(await primary.arrayBuffer()),Buffer.from(image));
     const current=db.db.prepare("SELECT data_json FROM cloud_entities WHERE id='record-a'").get();
     assert.equal(JSON.parse(current.data_json).abilities.INT,16);
-    console.log(JSON.stringify({status:'VERIFIED',runtime:'Chromium',mobileViewport:true,zeroAutomaticDecisions:true,
-      exactRefusals:1,exactVerifications:1,wrongDigestBlocked:true,ownerSessionRequired:true}));
-  }finally{if(browser)await browser.close();if(server.listening)await new Promise(ok=>server.close(ok));db.close();fs.rmSync(tmp,{recursive:true,force:true});}
+    console.log(JSON.stringify({status:'VERIFIED',runtime:'Chromium',mobileViewport:true,zeroAutomaticDecisions:true,sameTabRetarget:true,
+      exactRefusals:1,exactVerifications:2,exactImagePreviewRequired:true,wrongDigestBlocked:true,ownerSessionRequired:true}));
+  }finally{if(browser)await browser.close();if(server.listening)await new Promise(ok=>server.close(ok));db.close();for(const action of cleanup)await action();fs.rmSync(tmp,{recursive:true,force:true});}
 }
 main().catch(error=>{console.error(error.stack);process.exitCode=1;});

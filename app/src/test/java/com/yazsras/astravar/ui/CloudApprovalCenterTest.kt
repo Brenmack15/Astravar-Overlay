@@ -20,6 +20,9 @@ class CloudApprovalCenterTest {
         assertEquals("synthetic.example", uri.host)
         assertEquals("/owner/ascension/qa-inbox", uri.path)
         assertNull(uri.rawQuery)
+        assertThrows(IllegalArgumentException::class.java) {
+            exactOwnerReviewPage(binding.copy(origin = "https://synthetic.example/#unexpected"), "command-1", hash, "refuse")
+        }
         assertEquals("request=command-1&digest=$hash&intent=verify", uri.rawFragment)
         assertThrows(IllegalArgumentException::class.java) { exactOwnerReviewPage(binding, "command-1", hash, "approve_all") }
     }

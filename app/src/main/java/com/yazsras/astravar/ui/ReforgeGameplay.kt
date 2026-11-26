@@ -180,7 +180,7 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
 }
 
 @Composable internal fun ReforgeAbilityInspector(latestCharacter: ReforgeCharacter, projection: CharacterProjection, stat: Stat,
-    onDismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit, onRoll: (String, Int) -> Unit) {
+    onDismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit, onHistoricalSource: () -> Unit, onRoll: (String, Int) -> Unit) {
     val character = requireNotNull(rememberReforgeSnapshot(latestCharacter))
     val value = projection.abilities.getValue(stat)
     val originalScore = character.baseAbilities[stat]?.toString().orEmpty()
@@ -211,6 +211,7 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
         Text("Ability modifier ${reforgeSigned(value.modifier)} · Check ${reforgeSigned(check)} · Save ${reforgeSigned(save?.value)}")
         Field("Permanent base score", score, { score = it }, enabled = !stale)
         PlayerDisclosure("Calculation sources", initiallyOpen = true) {
+            PlayerTextButton(onClick = onHistoricalSource, enabled = !dirty && !stale) { Text("Character source evidence") }
             (value.effective.explanation + projection.abilityChecks[stat]?.explanation.orEmpty() + save?.explanation.orEmpty()).distinct().forEach { line ->
                 Text("${line.label}${line.value?.let { " · $it" } ?: ""}${line.reason.takeIf(String::isNotBlank)?.let { " · $it" } ?: ""}",
                     color = if (line.applied) MaterialTheme.colorScheme.onSurface else RebuildPalette.Muted)

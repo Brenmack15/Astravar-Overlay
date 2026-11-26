@@ -607,6 +607,9 @@ test('one small actor retains eight physical holdings, ordinary attacks, graded 
   await f.defined({actorId:'listener',name:'Fixture listener',role:'creature'});await f.defined({actorId:'ally',name:'Fixture ally'});
   const ids=['stabilizer','vocoder','ward','dial','optic','step','keepsake','shell-rig'];
   for(const id of ids)await wornFixture(f,id,{attuned:id==='ward',packed:id==='keepsake'});
+  for(const [id,details] of [['speech',{sourceItemId:'vocoder',speech:{capacity:6,languages:['Fixture A','Fixture B','Fixture C'],fullSentences:true}}],
+    ['private-link',{telepathy:{partnerActorId:'ally',twoWay:true,sharedSenses:false}}],['flyby',{mobility:'flyby'}]])
+    await f.command('define_feature',{actorId:who,featureId:id,name:id,kind:'companion',description:'Synthetic source capability',source:'fixture',references:[],...details});
   await f.pool('blink','charge',3,3,'long_rest');await f.pool('dial-pool','charge',1,1,'dawn');
   await f.pool('deploy','charge',1,1,'long_rest');await f.pool('roar','charge',1,1,'deployment');await f.pool('rig-integrity','integrity',75,75,'none');
   await f.command('define_form',{actorId:who,formId:'rig-form',name:'Heavy frame',source:'fixture',size:'large',creatureType:'construct',
@@ -642,7 +645,9 @@ test('one small actor retains eight physical holdings, ordinary attacks, graded 
   await f.command('define_action',{...action,actionId:'shift',name:'Short displacement',type:'teleport',timing:'bonus_action',range:30,sourceItemId:'step',cost:{poolId:'blink',amount:1}});
   await f.command('define_action',{...action,actionId:'cry',name:'Selective cry',type:'frighten',timing:'bonus_action',range:30,sourceItemId:'shell-rig',formId:'rig-form',
     saveDc:15,saveAbility:'WIS',durationSeconds:60,cost:{poolId:'roar',amount:1}});
-  const ordinary=await f.sheet();assert.deepEqual([ordinary.size,ordinary.ac.value,ordinary.skills.stealth.value,ordinary.saves.DEX.value,ordinary.skills.perception.value,ordinary.senses.darkvision],['tiny',16,13,8,7,180]);
+  const ordinary=await f.sheet();assert.equal(ordinary.mobilityRules[0].eligible,true);
+  assert.equal(ordinary.communications.find(v=>v.kind==='speech').unassigned,3);assert.equal(ordinary.communications.find(v=>v.kind==='telepathy').sharedSenses,false);
+  assert.deepEqual([ordinary.size,ordinary.ac.value,ordinary.skills.stealth.value,ordinary.saves.DEX.value,ordinary.skills.perception.value,ordinary.senses.darkvision],['tiny',16,13,8,7,180]);
   assert.equal(ordinary.rollModes['save:DEX'].normal.count,3);assert.equal(ordinary.rollModes['skill:stealth'].normal.count,3);
   const scan=(id,distanceFeet,faint,obstacle)=>f.command('use_action',declaredAction('scan',id,{thermalReading:{distanceFeet,faint,obstacle}}));
   assert.equal((await scan('warm',150,false,'none')).out.sensor.eligible,true);
@@ -659,7 +664,8 @@ test('one small actor retains eight physical holdings, ordinary attacks, graded 
   await f.command('use_action',declaredAction('shift','ordinary-shift',{destination:dest}));
   assert.equal((await f.preview('rig-form')).projection.abilities.STR.effective,20);assert.equal((await f.read('deploy')).data.current,1);
   await f.command('change_form',{actorId:who,formId:'rig-form',elapsedSeconds:60,uninterrupted:true,willing:true});
-  const large=await f.sheet();assert.deepEqual([large.size,large.ac.value,large.movement.walk,large.movement.fly,large.currentHp],['large',18,40,0,60]);
+  const large=await f.sheet();assert.deepEqual(large.communications,ordinary.communications);assert.equal(large.mobilityRules[0].eligible,false);
+  assert.deepEqual([large.size,large.ac.value,large.movement.walk,large.movement.fly,large.currentHp],['large',18,40,0,60]);
   await assert.rejects(f.command('use_action',declaredAction('basic-pair','invalid-pair')),/ACTION_FORM_INELIGIBLE/);
   await assert.rejects(f.command('resolve_attack',declaredAttack('rake','invalid-rake',{hit:dice(10)})),/ATTACK_FORM_INELIGIBLE/);
   await assert.rejects(f.command('use_action',declaredAction('shift','bad-destination',{destination:dest})),/GROUNDED_DESTINATION_REQUIRED/);
@@ -703,8 +709,7 @@ test('three anatomies share four holdings, one rechargeable breath and one timed
   await f.command('define_action',{actorId:who,actionId:'extended',name:'Timed reach',source:'fixture',sourceItemId:'tattoo',requiresAttunement:true,
     type:'timed_attack_mode',timing:'bonus_action',durationSeconds:60,modeReach:15,cost:{poolId:'shared-mode',amount:1},
     modeAttacks:['bite-base','claw-base','bite-hybrid','claw-hybrid'],modeComponent:component('surge','force',1,6,0)});
-  const breath={actorId:who,source:'synthetic source-backed geometry',timing:'action',delivery:'area',resolution:'save',saveSuccess:'half',fixedHit:undefined,cost:{poolId:'shared-breath',amount:1}};
-  delete breath.fixedHit;
+  const breath={actorId:who,source:'synthetic source-backed geometry',timing:'action',delivery:'area',resolution:'save',saveSuccess:'half',cost:{poolId:'shared-breath',amount:1}};
   for(const [id,type,save,die,sides,extra] of [
     ['stream','acid','DEX',8,8,{range:60,area:'60 by 5 line',excludedForms:['civilian']}],['focused','acid','DEX',8,8,{range:60,area:'one target',sourceItemId:'harness',excludedForms:['civilian']}],
     ['fan','acid','DEX',8,8,{range:30,area:'cone',sourceItemId:'harness',excludedForms:['civilian']}],['frost','cold','CON',8,8,{area:'synthetic cold geometry',excludedForms:['civilian','winged-hybrid']}],
@@ -783,4 +788,92 @@ test('separate actor turn, gate, Evasion and two competing reactions resolve aga
     const resolution=await f.command('resolve_attack_target',{actorId:enemy,attemptId:id,targetActorId:who,saveRollId:'save-'+id,source:'confirmed target resolution'});
     assert.equal(resolution.out.amount,amount);
   }
+});
+
+test('revising a finite pool preserves identity, source and balance while replacing only its configured recovery trigger', async t => {
+  const f=await setup(t); await f.defined();
+  await f.defined({actorId:'operator',name:'Fixture operator'});
+  await f.pool('reserve','charge',2,4,'long_rest');
+  const edit={actorId:who,poolId:'reserve',name:'Emergency reserve',maximum:6,recovery:'short_rest',recoveryActorId:'operator',source:'reviewed instructions'};
+  const first=await f.command('revise_resource',edit);
+  assert.deepEqual([first.out.current,first.out.maximum],[2,6]);
+  assert.equal((await f.read('reserve')).data.originalSource,'fixture configuration');
+  assert.deepEqual((await f.read('operator')).data.recoveryPoolIds,['reserve']);
+  assert.equal((await f.retry(first.command)).receipt.transactionId,first.result.receipt.transactionId);
+  await assert.rejects(f.command('revise_resource',{...edit,maximum:1}),/POOL_EXCEEDS_MAXIMUM/);
+  await assert.rejects(f.command('revise_resource',{...edit,recovery:'dawn'}),/EXTERNAL_RECOVERY_TRIGGER_INVALID/);
+  assert.deepEqual([(await f.read('reserve')).data.current,(await f.read('reserve')).data.maximum],[2,6]);
+  await f.command('revise_resource',{actorId:who,poolId:'reserve',recoveryActorId:null,recovery:'dawn',source:'reviewed dawn trigger'});
+  assert.deepEqual((await f.read('operator')).data.recoveryPoolIds,[]);
+  assert.equal((await f.read('reserve')).data.current,2);
+  await f.pool('limited','lifetime',null,null,'none');
+  await assert.rejects(f.command('revise_resource',{actorId:who,poolId:'limited',recovery:'long_rest',source:'fixture'}),/LIFETIME_POOL_CANNOT_RECOVER/);
+  assert.equal((await f.read('limited')).data.current,null);
+});
+
+test('seven armor attack families share one physical source, bounded charge, prepared payloads and weapon cooldown',async t=>{
+  const f=await setup(t);await f.defined({abilities:{STR:21,DEX:16,CON:16,INT:20,WIS:12,CHA:10},attunementCapacity:1});
+  await f.defined({actorId:'target',role:'creature',name:'Sparring fixture',maxHp:200,currentHp:200,baseAc:12});
+  await wornFixture(f,'frame',{attuned:true});
+  await f.command('define_item_definition',{definitionId:'scroll-def',name:'Fixture scroll',category:'consumable',description:'Bound fixture payload',rarity:null,
+    stackable:true,wearable:false,handheld:false,attunement:'none',source:'fixture'});
+  await f.command('acquire_item',{itemId:'scrolls',definitionId:'scroll-def',ownerId:who,quantity:2,source:'fixture'});
+  await f.pool('slots','spell_slot',3,3,'long_rest',{slotLevel:2});await f.pool('blast-budget','ordinary',1,1,'long_rest');
+  const gear={actorId:who,source:'fixture reviewed configuration',sourceItemId:'frame',requiresAttunement:true};
+  await f.command('define_spell',{actorId:who,spellId:'spark',name:'Fictional spell',source:'reviewed damage-only variant',baseLevel:1,
+    concentration:false,ritual:false,resolution:'automatic',timing:'action',components:[component('pulse','radiant',1,6,0,{extraDicePerLevel:1})]});
+  await f.command('define_action',{...gear,actionId:'reservoir',name:'Reservoir',timing:'bonus_action',type:'store_payload',
+    capacity:1,releasesPerTurn:1,payloadVariants:[{id:'spark-two',spellId:'spark',level:2,slotLevel:2,scrollDefinitionId:'scroll-def'}]});
+  await f.command('define_action',{...gear,actionId:'prime',name:'Prime melee strike',timing:'bonus_action',type:'prepare_strike',
+    chargeType:'thunder',chargeAbilities:['STR','DEX','INT']});
+  const allowed=['acid','cold','fire','lightning','poison','thunder'];
+  const force=component('force','force',3,12,5),selector=component('element','cold',2,8,0,{variants:allowed}),sound=component('thunder','thunder',1,8,5);
+  const shot={...gear,timing:'attack',delivery:'ranged',resolution:'attack',fixedHit:9,range:300,longRange:1200,weaponBus:{},components:[force,selector]};
+  const fist={...gear,timing:'attack',delivery:'melee',resolution:'attack',fixedHit:9,reach:5,weaponBus:{},components:[force,selector,sound]};
+  const imbued={payloadRule:{componentId:'element',storeActionId:'reservoir'}};
+  for(const [id,config] of [['shot',shot],['fist',fist],['primed',{...fist,chargeActionId:'prime',preparedPush:{feet:15,ability:'DEX',dc:15,prone:true}}],
+    ['imbued-shot',{...shot,...imbued}],['imbued-fist',{...fist,...imbued}],
+    ['blast',{...gear,timing:'action',delivery:'area',resolution:'save',saveDc:17,saveAbility:'DEX',saveSuccess:'half',weaponBus:{cooldownSeconds:600},cost:{poolId:'blast-budget',amount:1},components:[component('blast','force',12,12,0)]}],
+    ['guardian',{...gear,timing:'attack',delivery:'melee',resolution:'attack',fixedHit:8,reach:5,components:[sound]}]])
+    await f.command('define_attack',{...config,attackId:id,name:id});
+  for(const [attackId,type] of [['shot','fire'],['fist','cold']])await f.command('select_damage_variant',{actorId:who,attackId,componentId:'element',type});
+  await assert.rejects(f.command('select_damage_variant',{actorId:who,attackId:'shot',componentId:'element',type:'force'}),/DAMAGE_VARIANT_UNAVAILABLE/);
+  const execute=(id,attempt,extra={})=>f.command('resolve_attack',declaredAttack(id,attempt,{hit:dice(14),...extra}));
+  const fire=await execute('shot','ranged-attempt');assert.deepEqual(fire.out.components.map(c=>[c.type,c.dice,c.sides,c.flat]),[['force',3,12,5],['fire',2,8,0]]);
+  const cold=await execute('fist','melee-attempt');assert.deepEqual(cold.out.components.map(c=>c.type),['force','cold','thunder']);
+  const loaded=await f.command('use_action',declaredAction('reservoir','loaded',{load:{variantId:'spark-two',slotPoolId:'slots'}}));
+  assert.equal(loaded.out.costs[0].after,2);await f.retry(loaded.command);
+  await assert.rejects(f.command('use_action',declaredAction('reservoir','overfill',{load:{variantId:'spark-two',slotPoolId:'slots'}})),/RESERVOIR_FULL/);
+  await assert.rejects(execute('imbued-shot','unselected'),/PAYLOAD_SELECTION_REQUIRED/);
+  const release={variantId:'spark-two',storedUseId:'loaded'};
+  const published=await execute('imbued-shot','first-release',{payload:release});
+  assert.deepEqual(published.out.components.map(c=>[c.type,c.dice]),[['force',3],['radiant',2]]);
+  assert.equal(published.out.payload.level,2);assert.deepEqual(published.out.costs,[]);assert.equal((await f.read('slots')).data.current,2);
+  await assert.rejects(execute('imbued-shot','same-load',{payload:release}),/STORED_PAYLOAD_UNAVAILABLE/);
+  const instant={variantId:'spark-two',slotPoolId:'slots'};
+  await assert.rejects(execute('imbued-fist','too-soon',{payload:instant}),/PAYLOAD_TURN_LIMIT/);
+  assert.equal((await f.read('slots')).data.current,2);assert.equal(await f.read('too-soon'),undefined);
+  await f.command('advance_actor_time',{actorId:who,elapsedSeconds:6,confirmed:true});
+  const castless=await execute('imbued-fist','second-release',{payload:instant});
+  assert.deepEqual(castless.out.components.map(c=>c.type),['force','radiant','thunder']);assert.equal(castless.out.costs[0].after,1);
+  const scroll=await f.command('use_action',declaredAction('reservoir','scroll-payload',{load:{variantId:'spark-two',scrollItemId:'scrolls'}}));
+  assert.equal(scroll.out.scroll.quantityAfter,1);await f.retry(scroll.command);assert.equal((await f.read('scrolls')).data.quantity,1);
+  await assert.rejects(execute('primed','no-prep'),/PREPARED_STRIKE_REQUIRED/);
+  await f.command('use_action',declaredAction('prime','prepared'));
+  const prepared=await execute('primed','charged-hit',{targets:['target'],includeDamage:true,damage:[
+    {id:'force',evidence:dice(1,1,1)},{id:'element',evidence:dice(1,2)},{id:'thunder',evidence:dice(3)},{id:'prepared-bonus',evidence:dice()}]});
+  assert.equal(prepared.out.preparedUseId,'prepared');assert.equal(prepared.out.components.at(-1).flat,13);
+  await assert.rejects(execute('primed','double-charge'),/PREPARED_STRIKE_REQUIRED/);
+  await f.command('resolve_attack_target',{actorId:who,attemptId:'charged-hit',targetActorId:'target',source:'observed hit'});
+  await f.command('record_check',{actorId:'target',rollId:'rider-save',check:check('save','DEX'),evidence:dice(3),forRiderAttemptId:'charged-hit'});
+  const rider={actorId:who,attemptId:'charged-hit',targetActorId:'target',rollId:'rider-save',feet:15,destination:'fixture marker',source:'clear path confirmed'};
+  assert.equal((await f.command('resolve_attack_rider',rider)).out.prone,true);assert.deepEqual((await f.read('target')).data.conditions,['prone']);
+  await assert.rejects(f.command('resolve_attack_rider',rider),/NO_PENDING_ATTACK_RIDER/);
+  const blast=await f.command('resolve_attack',declaredAttack('blast','discharge',{includeDamage:true,damage:[{id:'blast',evidence:dice(...Array(12).fill(6))}]}));
+  assert.equal(blast.out.hit,null);assert.equal(blast.out.damage[0].total,72);assert.equal((await f.read('blast-budget')).data.current,0);
+  await assert.rejects(execute('shot','cooldown'),/WEAPON_BUS_UNAVAILABLE/);
+  assert.ok((await execute('guardian','independent-weapon')).out.hit);
+  await f.command('advance_actor_time',{actorId:who,elapsedSeconds:599,confirmed:true});await assert.rejects(execute('shot','not-yet'),/WEAPON_BUS_UNAVAILABLE/);
+  await f.command('advance_actor_time',{actorId:who,elapsedSeconds:1,confirmed:true});assert.ok((await execute('shot','ready-again')).out.hit);
+  assert.equal((await f.read('frame')).data.attuned,true);assert.equal((await f.read('blast-budget')).data.current,0);
 });

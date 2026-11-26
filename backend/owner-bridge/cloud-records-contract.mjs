@@ -1,3 +1,4 @@
+import { actorMembership } from './cloud-continuity.mjs';
 import { BridgeError, sha256 } from './core.mjs';
 import { cloudMatches } from './cloud-validation.mjs';
 
@@ -37,7 +38,8 @@ export async function recordRead(ctx, kind, id, includeArchived = false) {
 }
 export async function partyActor(ctx, id) {
   const actor = await recordRead(ctx, 'actor', id);
-  if (!['player','companion'].includes(actor.data.role)) recordsFail('PARTY_ACTOR_REQUIRED', 409);
+  const membership=actorMembership(actor.data);
+  if (membership.participation!=='active' || !membership.inParty) recordsFail('PARTY_ACTOR_REQUIRED', 409);
   return actor;
 }
 export function recordEdit(row, data, change = {}) {
@@ -49,6 +51,6 @@ export function uniqueRecordIds(values) {
 export const RECORD_DOMAIN_KINDS = Object.freeze({
   wallet: 'economy', coin_transaction: 'economy', party_exchange:'economy', item_definition: 'inventory', item_instance: 'inventory',
   item_event: 'inventory', world_entity: 'world', relationship: 'world', known_fact: 'world',
-  timeline_event: 'chronicle', objective: 'chronicle', checkpoint: 'chronicle', research_note: 'crafting',
+  timeline_event: 'chronicle', story_arc:'chronicle', campaign_session:'chronicle', objective: 'chronicle', checkpoint: 'chronicle', research_note: 'crafting',
   invention_project: 'crafting', blueprint_version: 'crafting', project_stage: 'crafting', component_event: 'crafting',
 });

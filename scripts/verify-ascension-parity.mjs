@@ -16,7 +16,8 @@ const root=fileURLToPath(new URL('..',import.meta.url));
 const declared={...MECHANIC_OPERATIONS,...RECORD_OPERATIONS,...CLOUD_MEDIA_OPERATIONS,...CLOUD_LIFECYCLE_OPERATIONS,...CONTINUITY_OPERATIONS};
 try{
   for(const direction of ['device','mcp']){
-    const proc=spawnSync(process.execPath,['--test','backend/owner-bridge/cloud-mechanics.test.mjs','backend/owner-bridge/cloud-records.test.mjs','backend/owner-bridge/cloud-parity-review.test.mjs'],{
+    const proc=spawnSync(process.execPath,['--test','backend/owner-bridge/cloud-mechanics.test.mjs','backend/owner-bridge/cloud-records.test.mjs',
+      'backend/owner-bridge/cloud-structured-effects.test.mjs','backend/owner-bridge/cloud-parity-review.test.mjs'],{
       cwd:root,encoding:'utf8',maxBuffer:8000000,env:{...process.env,ASTRAVAR_PARITY_SIDE:direction,ASTRAVAR_PARITY_REPORT_DIR:directory}});
     if(proc.status!==0)throw new Error(direction+' parity suite failed\n'+proc.stdout+'\n'+proc.stderr);
   }

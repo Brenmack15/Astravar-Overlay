@@ -1,4 +1,4 @@
-import { cloudFail, cloudObject } from './cloud-validation.mjs';
+import { CLOUD_ID, cloudFail, cloudObject } from './cloud-validation.mjs';
 
 export const CONTINUITY_KINDS = Object.freeze({continuity_profile:'campaign'});
 const metadataSchema = cloudObject({
@@ -6,7 +6,29 @@ const metadataSchema = cloudObject({
   notes: {anyOf:[{type:'string', maxLength:4000}, {type:'null'}]},
 });
 
+// Pre-roster characters keep their established default until an explicit membership decision.
+export function actorMembership(data) {
+  return data.membership ?? {participation:'active',inParty:['player','companion'].includes(data.role),worldTime:null,source:null};
+}
+export const partyMembershipSql = "COALESCE(json_extract(data_json,'$.membership.participation'),'active')='active' AND COALESCE(json_extract(data_json,'$.membership.inParty'),json_extract(data_json,'$.role') IN('player','companion'))=1";
+
 export const CONTINUITY_OPERATIONS = Object.freeze({
+  set_actor_membership: {
+    scope:'character',ownerReview:true,schema:cloudObject({
+      actorId:CLOUD_ID, participation:{enum:['active','historical']},inParty:{type:'boolean'},
+      worldTime:{anyOf:[{type:'string',minLength:1,maxLength:160},{type:'null'}]},
+      source:{type:'string',minLength:1,maxLength:300,pattern:'\\S'}
+    }),
+    async plan(ctx,args) {
+      const row=await ctx.get('actor',args.actorId);
+      if(!row || row.life!=='active' || row.actorId!==args.actorId)cloudFail(404,'ACTOR_UNAVAILABLE');
+      if(args.participation==='historical' && (args.inParty || row.data.encounterId))cloudFail(409,'ACTIVE_MEMBERSHIP_DEPENDENCY');
+      const previous=actorMembership(row.data);
+      const membership={participation:args.participation,inParty:args.inParty,worldTime:args.worldTime,source:args.source};
+      await ctx.put({...row,data:{...row.data,membership}});
+      return {actorId:row.id,previous,membership};
+    }
+  },
   update_continuity_settings: {
     scope:'campaign', ownerOnly:true, schema:metadataSchema,
     async plan(ctx, args) {

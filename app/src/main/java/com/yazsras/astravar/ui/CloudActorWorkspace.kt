@@ -65,7 +65,7 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
         var more=true
         while (result.size<50 && more) {
             val raw=client.records(cursor,kinds=setOf("actor"))
-            result+=raw.filter { it.obj("data").value("role") in setOf("player","companion") }
+            result+=raw.filter { cloudPartyMember(it) && it.obj("data").value("role") in setOf("player","companion") }
             more=raw.size==50
             if (raw.isEmpty()) break
             cursor=raw.last().cloudText("id")
@@ -128,7 +128,7 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
                 val hp=(sheet?:data).value("currentHp")?.toIntOrNull()
                 val max=(sheet?:data).value("maxHp")?.toIntOrNull()
                 val temp=(sheet?:data).value("temporaryHp")?.toIntOrNull()
-                Column(Modifier.fillMaxWidth().clickable(role=Role.Button){openOperation("apply_hp_change",args("actorId" to actorId))}.padding(4.dp)) {
+                Column(Modifier.fillMaxWidth().clickable(role=Role.Button){overlay="HP"}.padding(4.dp)) {
                     Text("HP",style=MaterialTheme.typography.labelSmall)
                     Text("${hp ?: "—"} / ${max ?: "—"}",style=MaterialTheme.typography.titleMedium)
                     if(temp!=null && temp>0) Text("($temp)",color=RebuildPalette.Cyan)
@@ -187,6 +187,19 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
             if(actorId!=null)PlayerTextButton({overlay=null;openOperation("advance_actor_level",args("actorId" to actorId))},enabled=online){Text("Advance selected character")}
         }
         "Rest" -> if(actorId!=null) PlayerSheet("Rest",{overlay=null}) { CloudSpellRest("Rest",actorId,client,snapshot,online,openOperation) }
+        "HP" -> PlayerSheet("Hit points", { overlay = null }) {
+            val current = sheet ?: data
+            Text("${current.value("currentHp") ?: "Unknown"} / ${current.value("maxHp") ?: "Unknown"} HP")
+            Text("Temporary HP · ${current.value("temporaryHp") ?: "Unknown"}")
+            if (actorId != null) {
+                for ((kind, label) in listOf("damage" to "Damage", "heal" to "Healing", "temporary" to "Temporary HP")) {
+                    PlayerOutlinedButton(onClick = {
+                        overlay = null; openOperation("apply_hp_change", args("actorId" to actorId, "kind" to kind))
+                    }, enabled = online) { Text(label) }
+                }
+            }
+            CloudHpMaximumSources(sheet)
+        }
         "AC" -> PlayerSheet("Armor class",{overlay=null}) { RecordFields(sheet.obj("ac") ?: JsonNull) }
         "Conditions" -> PlayerSheet("Conditions",{overlay=null}) { RecordFields((sheet?:data)?.get("conditions") ?: JsonNull)
             if(actorId!=null)PlayerOutlinedButton({overlay=null;openOperation("set_condition",args("actorId" to actorId))},enabled=online){Text("Manage condition")} }

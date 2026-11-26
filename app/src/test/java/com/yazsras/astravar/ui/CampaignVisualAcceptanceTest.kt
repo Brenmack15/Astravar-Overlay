@@ -146,7 +146,10 @@ class CampaignVisualAcceptanceTest {
         textFullyVisible(text, singleLine = true)
     }
     private fun textFullyVisible(text: String, singleLine: Boolean = false) {
-        val node = compose.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
+        val selector = if (text in rebuildDestinations) {
+            hasText(text) and hasAnyAncestor(hasTestTag("navigation-$text"))
+        } else hasText(text)
+        val node = compose.onNode(selector, useUnmergedTree = true).fetchSemanticsNode()
         val layouts = mutableListOf<TextLayoutResult>()
         compose.runOnIdle {
             assertTrue("Text layout must be inspectable: $text", node.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(layouts) == true)

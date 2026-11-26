@@ -1,3 +1,4 @@
+import { actorMembership, partyMembershipSql } from './cloud-continuity.mjs';
 import { cloudAllowed, cloudEntity } from './cloud-plan.mjs';
 import { cloudFail, validCloudId } from './cloud-validation.mjs';
 
@@ -30,7 +31,7 @@ async function subject(service,b,grant,id,expected) {
   return row;
 }
 const partyActors=`SELECT id FROM cloud_entities WHERE owner_id=? AND continuity_id=? AND kind='actor'
- AND life='active' AND json_extract(data_json,'$.role') IN('player','companion')`;
+ AND life='active' AND ${partyMembershipSql}`;
 const walletBase=`WITH party AS (${partyActors}), wallets AS (
  SELECT w.* FROM cloud_entities w WHERE w.owner_id=? AND w.continuity_id=? AND w.kind='wallet' AND w.life='active'
  AND ((w.actor_id IN(SELECT id FROM party) AND json_extract(w.data_json,'$.holderId')=w.actor_id)
@@ -104,7 +105,7 @@ async function inventoryOverview(service,b,grant,opts) {
 }
 async function actorEquipment(service,b,grant,actor,opts) {
   if(!cloudAllowed(grant,'inventory',actor.id) || actor.life!=='active' ||
-      !['player','companion'].includes(JSON.parse(actor.data_json).role))cloudFail(404,'RECORD_UNAVAILABLE');
+      !actorMembership(JSON.parse(actor.data_json)).inParty)cloudFail(404,'RECORD_UNAVAILABLE');
   const allowed=actorRule(grant,'i');
   const rows=(await service.s(`SELECT i.*,CASE WHEN json_extract(i.data_json,'$.customized')=1 THEN i.title ELSE d.title END AS display_title
     FROM cloud_entities i JOIN cloud_entities d ON d.owner_id=i.owner_id AND d.continuity_id=i.continuity_id

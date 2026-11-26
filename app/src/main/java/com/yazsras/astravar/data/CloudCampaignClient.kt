@@ -70,6 +70,11 @@ internal class CloudCampaignClient(
             catch(_:Exception){conceal()}
         }
         val code = (result.json["error"] as? JsonObject)?.get("code")?.jsonPrimitive?.contentOrNull
+        if (suffix == "commands" && body != null && result.status in setOf(400, 403, 404, 409, 422) &&
+            code != null && code != "COMMAND_ID_REUSED") {
+            val id = Json.parseToJsonElement(body).jsonObject.cloudText("commandId")
+            cache.acknowledge(s.binding, id); notifyCache()
+        }
         throw OwnerSyncFailure(code?.takeIf { it.matches(Regex("[A-Z0-9_]{1,80}")) } ?: "CLOUD_HTTP_${result.status}")
     }
 
@@ -186,6 +191,14 @@ internal class CloudCampaignClient(
         }
     }
 
+    suspend fun uncertain(operation: String? = null, actorId: String? = null): JsonObject? = withContext(Dispatchers.IO) {
+        lock.withLock {
+            val s = current()
+            val w = cache.workspace()
+            if (w?.visible != true || w.version.grantExpiresAt <= now()) null else cache.uncertain(s.binding, operation, actorId)
+        }
+    }
+
     /** Re-read the submitted command and current state separately. A dropped response leaves the original local intent for inspection. */
     suspend fun submit(operation: String, args: JsonObject, reviewed: CloudSnapshot, commandId:String=UUID.randomUUID().toString()): JsonObject = withContext(Dispatchers.IO) {
         lock.withLock {
@@ -201,6 +214,8 @@ internal class CloudCampaignClient(
             val w = cache.workspace() ?: throw OwnerSyncFailure("CLOUD_NOT_SELECTED")
             if (!w.visible || w.version != reviewed.version || w.binding != reviewed.binding ||
                 w.version.grantExpiresAt <= now()) throw OwnerSyncFailure("CLOUD_REVIEW_STALE")
+            val actorId = args["actorId"]?.jsonPrimitive?.contentOrNull
+            if (cache.uncertain(s.binding, operation, actorId) != null) throw OwnerSyncFailure("CLOUD_PRIOR_COMMAND_UNVERIFIED")
             val command = buildJsonObject {
                 put("version", 1); put("commandId", commandId)
                 put("epoch", w.version.epoch); put("expectedRevision", w.version.revision)
@@ -210,7 +225,9 @@ internal class CloudCampaignClient(
             notifyCache()
             val response = request(s, "commands", command.toString())
             require(response.cloudText("commandId") == command.cloudText("commandId"))
-            if (response.cloudText("status") == "PENDING_APPROVAL") response else verifyLocked(s, command.cloudText("commandId"))
+            if (response.cloudText("status") == "PENDING_APPROVAL") {
+                cache.acknowledge(s.binding, commandId); notifyCache(); response
+            } else verifyLocked(s, commandId)
         }
     }
 
@@ -233,7 +250,9 @@ internal class CloudCampaignClient(
             throw OwnerSyncFailure("CLOUD_REVIEW_STALE")
         val result = request(s,"commands",command.toString())
         require(result.cloudText("commandId")==id)
-        return if(result.cloudText("status")=="PENDING_APPROVAL") result else verifyLocked(s,id)
+        return if (result.cloudText("status") == "PENDING_APPROVAL") {
+            cache.acknowledge(s.binding, id); notifyCache(); result
+        } else verifyLocked(s,id)
     }
 
     suspend fun reviewCount(): Int = withContext(Dispatchers.IO) {
@@ -252,7 +271,9 @@ internal class CloudCampaignClient(
         require(cloudIdentifier.matches(id))
         val response = request(s, "receipts/$id")
         require(response.cloudText("commandId") == id)
-        if (response.cloudText("status") == "PENDING_APPROVAL") return response
+        if (response.cloudText("status") == "PENDING_APPROVAL") {
+            cache.acknowledge(s.binding, id); notifyCache(); return response
+        }
         val receipt = response["receipt"] as? JsonObject ?: throw OwnerSyncFailure("CLOUD_RECEIPT_UNVERIFIED")
         require(receipt.cloudText("commandId") == id && receipt.cloudText("status") == response.cloudText("status"))
         require(receipt.cloudText("transactionId").isNotBlank())

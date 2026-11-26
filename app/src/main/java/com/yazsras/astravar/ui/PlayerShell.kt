@@ -163,7 +163,6 @@ val rebuildDestinations = listOf("Character", "Inventory", "Connections", "Chron
         PlayerEntry("ChatGPT Prompts", "Edit campaign handoff prompts", "More", { open("ChatGPT Prompts") })
         PlayerEntry("Appearance", "Visual and feedback preferences", "Settings", { open("Appearance") })
         PlayerDisclosure("Records, backups & connection") {
-            PlayerEntry("Character sources", "Original campaign values and revisions", "History", { open("Character sources") })
             PlayerEntry("Owner connection", "Trusted pairing and approvals", "Settings", { open("Owner connection") })
             if (com.yazsras.astravar.BuildConfig.DEBUG) {
                 PlayerEntry("Fictional sync", "Isolated test lab", "More", { open("Fictional sync") })

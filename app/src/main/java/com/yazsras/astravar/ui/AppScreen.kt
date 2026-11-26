@@ -365,12 +365,9 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                         "Companions" -> PartyPageV2(app.campaignLedger, current, openReferences={tool=null;tab="Chronicle";campaignPage="Reference Library"}) {
                             tool = null; requestedInventory = "Campaign items"; inventoryRoute++; tab = "Inventory"
                         }
-                        "Character sources" -> Page {
-                            CharacterOverviewV2(app.campaignLedger, current)
-                            PlayerTextButton(onClick = { tool = null; tab = "Chronicle"; campaignPage = "Reference Library" }) {
-                                Text("Armor source references")
-                            }
-                        }
+                        "Character sources" -> PlayerEntry("Character source evidence", "Open an ability inspector on the selected sheet", "History", {
+                            tool = null; tab = "Character"
+                        })
                         else -> HelpPage()
                     }
                 }}

@@ -492,6 +492,23 @@ class ReforgeCharacterUiTest {
         }
     }
 
+    @Test fun selectedAbilityReopensTheOriginalProvenCampaignRecordWithoutChangingTheActor() {
+        val actor = fixture()
+        lateinit var local: ReforgeRepository
+        withSheet(character = actor, localSetup = { local = it }, campaignSetup = { ledger ->
+            runBlocking { local.createReviewedCampaignIdentity(ledger, requireNotNull(local.get(actor.id))) }
+        }) { repository ->
+            val before = runBlocking { repository.get(actor.id) }
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("reforge-STR").performTouchInput { click(androidx.compose.ui.geometry.Offset(width / 2f, 4f)) }
+            compose.onNodeWithText("Character source evidence").performScrollTo().performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Original campaign record").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Original campaign record").assertExists()
+            compose.onNodeWithText("Armor source references").assertExists()
+            assertEquals(before, runBlocking { repository.get(actor.id) })
+        }
+    }
+
     @Test fun nestedAbilityControlsSeparateInspectionOptionsAndSavedQuickResults() {
         val actor = fixture().copy(effects = listOf(EffectDefinition("training-bonus", "Check practice",
             RuleSource("practice", "Reviewed fixture training", Acceptance.ACCEPTED_HOMEBREW),

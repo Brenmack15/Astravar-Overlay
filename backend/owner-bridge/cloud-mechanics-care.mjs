@@ -1,4 +1,4 @@
-import { identifier, whole, named, fields, option, evidence, must, op, actor, owned, insert, save, spend, addClock, checkDiceOwner } from './cloud-mechanics-core.mjs';
+import { identifier, whole, named, fields, option, evidence, must, op, actor, owned, insert, save, spend, addClock, checkDiceOwner, sheet, healedHp } from './cloud-mechanics-core.mjs';
 import { observed } from './cloud-mechanics-rolls.mjs';
 
 const protocol=fields({actorId:identifier,operatorId:identifier,protocolId:identifier,spellId:identifier,toolDefinitionId:identifier,
@@ -31,21 +31,24 @@ async function complete(ctx,x){
   const cast=await owned(ctx,'cast_instance',x.castId,operator.id);
   must(cast.data.spellId===d.spellId && cast.data.targets.includes(a.id) && cast.data.outcome==='pending' && !cast.data.careEventId,'ACTUAL_UNUSED_CARE_CAST_REQUIRED');
   must(x.elapsedSeconds>=(reconstruction?d.reconstructionSeconds:d.repairSeconds),'CARE_DURATION_INCOMPLETE');
-  must(a.data.currentHp!=null && a.data.maxHp!=null,'HP_UNKNOWN');
+  const next=await addClock(ctx,a,x.elapsedSeconds);
+  await save(ctx,a,next);
+  const cap=(await sheet(ctx,a.id)).maxHp;
+  must(a.data.currentHp!=null && cap!=null,'HP_UNKNOWN');
   let roll=null,after;
   if(reconstruction){
     must(a.data.activityState==='disabled' && a.data.currentHp===0 && !x.dice && x.toolItemId,'RECONSTRUCTION_REQUIRES_DISABLED_ACTOR_AND_TOOL');
     const tool=await ctx.get('item_instance',x.toolItemId);
     must(tool?.life==='active' && tool.data.definitionId===d.toolDefinitionId && tool.data.custodianId===operator.id && tool.data.partyAccess && tool.data.holding==='carried' && tool.data.quantity>0,'RECONSTRUCTION_TOOL_UNAVAILABLE');
-    after=a.data.maxHp;
+    after=cap;
   }else{
     must(a.data.activityState==='active' && a.data.currentHp>0 && x.dice && !x.toolItemId,'REPAIR_REQUIRES_ACTIVE_ACTOR_AND_DICE');
     checkDiceOwner(ctx,operator,'spell',x.dice.origin);
     roll=observed('Repair',d.repairDice,d.repairSides,0,'sum',x.dice);
-    after=Math.min(a.data.maxHp,a.data.currentHp+roll.total);
+    after=healedHp(a.data.currentHp,cap,roll.total);
   }
   const cost=await spend(ctx,a.id,reconstruction?d.reconstructionPoolId:d.repairPoolId,1);
-  const next=await addClock(ctx,a,x.elapsedSeconds);await save(ctx,operator,await addClock(ctx,operator,x.elapsedSeconds));
+  await save(ctx,operator,await addClock(ctx,operator,x.elapsedSeconds));
   if(a.data.activeFormId && !next.activeFormId)await ctx.unlink(a.id,'active_form',a.data.activeFormId);
   await save(ctx,a,{...next,currentHp:after,activityState:'active'});
   const result={actorId:a.id,operatorId:operator.id,protocolId:p.id,castId:cast.id,type:x.kind,pool:cost,roll,beforeHp:a.data.currentHp,afterHp:after,

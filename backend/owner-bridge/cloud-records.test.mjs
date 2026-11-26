@@ -552,3 +552,51 @@ test('successor assembly preserves earlier component identity and no nested item
   const items=await cloudRecordView(f.service,dm,continuity,'inventory');
   assert.equal(items.groups.length,1);assert.equal(items.groups[0].knownQuantity,1);
 });
+
+test('story arcs and sessions retain sourced chronology, stable revision history and scoped event and checkpoint links',async t=>{
+  const f=await fixture(t);
+  const arc={arcId:'sourced-arc',classification:'adventure',title:'Fixture voyage',parentArcId:null,summary:null,
+    state:'active',worldStart:null,worldEnd:null,eventIds:[],source:'Synthetic session notes'};
+  await f.run('define_story_arc',arc);
+  const event={eventId:'temporal-event',title:'Read the chart',narrative:'The route was identified.',category:'discovery',
+    status:'confirmed',worldTime:null,subjects:[],correctsId:null,source};
+  await f.run('record_chronicle_event',event);
+  await f.run('save_checkpoint',{checkpointId:'temporal-checkpoint',title:'Before departure',scene:'At the quay',locationId:null,worldTime:null,
+    lastEventId:event.eventId,unresolved:'Choose when to depart',pendingRollId:null,encounterId:null,objectiveIds:[],actorIds:[],source});
+  const session={sessionId:'table-one',arcId:arc.arcId,previousSessionId:null,playedOn:null,title:'First session',summary:null,
+    state:'complete',worldStart:null,worldEnd:null,eventIds:[event.eventId],openingCheckpointId:null,closingCheckpointId:'temporal-checkpoint',source};
+  const first=await f.body('record_campaign_session',session);
+  const saved=await f.submit(first);
+  const child={...arc,classification:'story_arc',arcId:'coast-arc',parentArcId:arc.arcId,title:'The coast'};
+  await f.run('define_story_arc',child);
+  const next={...session,sessionId:'table-two',title:'Second session',state:'planned',arcId:child.arcId,
+    previousSessionId:'table-one',eventIds:[],openingCheckpointId:'temporal-checkpoint',closingCheckpointId:null};
+  await f.run('record_campaign_session',next);
+  const firstRow=await f.record('table-one'),arcRow=await f.record(arc.arcId);
+  assert.equal(firstRow.data.playedOn,null);assert.equal(firstRow.data.worldStart,null);
+  assert.ok(Number.isSafeInteger(firstRow.data.recordedAt));
+  await assert.rejects(f.run('revise_story_arc',{...arc,parentArcId:child.arcId,expectedRevision:arcRow.revision,reason:'Fixture cycle'}),/CHRONOLOGY_CYCLE/);
+  await assert.rejects(f.run('revise_campaign_session',{...session,previousSessionId:'table-two',
+    expectedRevision:firstRow.revision,reason:'Fixture cycle'}),/CHRONOLOGY_CYCLE/);
+  await assert.rejects(f.run('revise_campaign_session',{...next,sessionId:'table-one',previousSessionId:null,eventIds:['absent'],
+    expectedRevision:firstRow.revision,reason:'Fixture missing link'}),/RECORD_UNAVAILABLE/);
+  await f.run('revise_story_arc',{...arc,title:'Revised voyage title',eventIds:[event.eventId],expectedRevision:arcRow.revision,reason:'Source title correction'});
+  await f.run('revise_campaign_session',{...session,playedOn:'2026-11-26',worldStart:'First full moon',expectedRevision:firstRow.revision,reason:'Source chronology recovered'});
+  await assert.rejects(f.run('revise_campaign_session',{...session,expectedRevision:firstRow.revision,reason:'Stale revision'}),/CHRONOLOGY_REVISION_CHANGED/);
+  f.reopen();
+  assert.deepEqual((await f.service.receipt(dm,continuity,first.commandId)).receipt,saved.receipt);
+  const current=await f.record('table-one');assert.equal(current.data.recordedAt,firstRow.data.recordedAt);
+  assert.equal(current.data.playedOn,'2026-11-26');assert.equal(current.data.worldEnd,null);
+  const links=(await f.db.prepare('SELECT relation,to_id FROM cloud_links WHERE owner_id=? AND continuity_id=? AND from_id=? ORDER BY relation')
+    .bind(owner.ownerId,continuity,'table-one').all()).results;
+  assert.deepEqual(links.map(x=>[x.relation,x.to_id]),[['closes_at_checkpoint','temporal-checkpoint'],['includes_event',event.eventId],['session_in_arc',arc.arcId]]);
+  assert.equal((await f.record(event.eventId)).revision,1);assert.equal((await f.record('temporal-checkpoint')).revision,1);
+  const {cloudContext}=await import('./cloud-query.mjs');
+  const handoff=await cloudContext(f.service,dm,continuity);
+  assert.deepEqual(handoff.chronology.sessions.map(s=>s.id).sort(),['table-one','table-two']);
+  assert.equal(handoff.chronology.storyArcs.length,2);assert.equal(handoff.chronology.truncated,false);
+  await f.grant(['chronicle.read','chronicle.write'],['hero']);
+  assert.equal((await f.service.state(dm,continuity,{kind:'campaign_session'})).records.length,0);
+  assert.deepEqual((await cloudContext(f.service,dm,continuity)).chronology.sessions,[]);
+  await assert.rejects(f.run('define_story_arc',{...arc,arcId:'narrow-arc'}),/DENIED|FORBIDDEN/);
+});

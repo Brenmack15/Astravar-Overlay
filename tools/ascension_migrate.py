@@ -18,7 +18,7 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
-from ascension_migrate_reviewed import FORMAT as REVIEW_FORMAT, project as reviewed_graph, template as mapping_template
+from ascension_migrate_reviewed import FORMAT as REVIEW_FORMAT, project as reviewed_graph, template as mapping_template, scoped_identity
 from ascension_migrate_parity import mechanical_parity
 from ascension_migrate_legacy import (HASH, MAX_BYTES, compare_legacy, encode, file_hash, legacy_review, loads,
                                      read_limited, review_bytes, sha, verify, weapon_review)
@@ -690,6 +690,10 @@ def control(folder, action, approval=None, carry_pending=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="operation", required=True)
+    alias = sub.add_parser("mapping-identity", help="Derive a repeatable canonical alias from a native field or a store-local composite identity")
+    for field in ("owner","continuity","family","kind","native-value"):
+        alias.add_argument("--"+field, required=True)
+    alias.add_argument("--identity", required=True, action="append")
     for op in ("mapping-template", "convert-reviewed"):
         p = sub.add_parser(op)
         p.add_argument("--source", type=Path, required=True, action="append", help="Exact native export, repeat for independent sources")
@@ -732,6 +736,8 @@ def main():
             p.add_argument("--carry-pending-for-review", action="store_true",
                            help="Preserve exact pending cloud approvals for separate review under the recovered epoch")
     args = parser.parse_args()
+    if args.operation == "mapping-identity":
+        return {"canonicalId": scoped_identity((args.owner,args.continuity), args.family, args.identity, args.kind, args.native_value)}
     if args.operation == "mapping-template":
         return mapping_template([read_limited(p) for p in args.source], args.owner, args.continuity)
     if args.operation == "convert-reviewed":

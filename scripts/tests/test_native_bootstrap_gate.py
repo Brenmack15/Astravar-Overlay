@@ -17,6 +17,7 @@ METHODS = [
     'invalidBundlesAndInterruptedPersistenceRemainRetryable',
     'publicContextApplyBackupReimportAndRollbackPreserveIdentity',
     'authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts',
+    'ci-ascension-cloud-native.sh',
     'actualSmallEmblemInStatusBarAndShadeAcrossLightAndDarkThemes',
     'ci-ascension-api37.sh',
 ]
@@ -35,6 +36,11 @@ astravar_bootstrap_gate=$TEST_ENABLED
 run_test() {
   printf '%s\\n' "$1" >>"$astravar_output/executed.txt"
   [[ -z "$TEST_FAILURE" || "$1" != *"$TEST_FAILURE" ]]
+}
+source() {
+  [[ "$1" == scripts/ci-ascension-cloud-native.sh ]]
+  printf '%s\\n' "${1##*/}" >>"$astravar_output/executed.txt"
+  [[ "$TEST_FAILURE" != "${1##*/}" ]]
 }
 bash() {
   [[ "$1" == scripts/ci-ascension-api37.sh ]]
@@ -57,6 +63,7 @@ git() { printf '%s\\n' 0123456789012345678901234567890123456789; }
         scope = json.loads((root/'SCOPE.json').read_text())
         self.assertEqual(37, scope['emulatorApi'])
         self.assertTrue(scope['android17'])
+        self.assertTrue(scope['api37ForceStoppedCloudReconnect'])
         self.assertTrue(scope['nativePublicNotionImport'])
         self.assertTrue(scope['nativeCampaignHttpsAndIndependentReadback'])
         self.assertFalse(scope['actualOwnerSigningIdentityTestedInCi'])

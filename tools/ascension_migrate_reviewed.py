@@ -27,6 +27,8 @@ REQUIRED = {
     "checkpoint": "scene source", "research_note": "source", "invention_project": "intent status requirements source",
     "blueprint_version": "source", "project_stage": "source", "component_event": "source",
     "continuity_profile": "notes source",
+    "story_arc":"classification parentArcId summary state worldStart worldEnd eventIds source",
+    "campaign_session":"arcId previousSessionId playedOn openingCheckpointId closingCheckpointId summary state worldStart worldEnd eventIds source",
 }
 HISTORICAL = {
     "campaign.events", "records.receipts", "records.audit", "records.crafts", "records.consumptions", "records.milestones",
@@ -45,6 +47,9 @@ REF = {
     "resource_pool": {"recoveryActorId": "actor"}, "wallet": {"holderId": "actor"},
     "item_instance": {"definitionId": "item_definition", "ownerId": "actor", "custodianId": "actor",
                       "locationId": "world_entity", "resourcePoolId": "resource_pool", "externalRecipientId": "world_entity"},
+    "story_arc":{"parentArcId":"story_arc","eventIds":"timeline_event"},
+    "campaign_session":{"arcId":"story_arc","previousSessionId":"campaign_session","openingCheckpointId":"checkpoint",
+                        "closingCheckpointId":"checkpoint","eventIds":"timeline_event"},
     "form": {"sourceItemId": "item_instance", "integrityPoolId": "resource_pool", "deploymentPoolId": "resource_pool",
              "resetPoolId": "resource_pool", "suppressedItemIds": "item_instance"},
     "effect": {"formId": "form", "sourceItemId": "item_instance"}, "feature": {"formId": "form"},
@@ -54,6 +59,8 @@ REF = {
     "project_stage": {"projectId": "invention_project"}, "blueprint_version": {"projectId": "invention_project"},
 }
 EDGE_TARGET = {
+    "includes_event":"timeline_event","part_of_arc":"story_arc","follows_session":"campaign_session","session_in_arc":"story_arc",
+    "opens_at_checkpoint":"checkpoint","closes_at_checkpoint":"checkpoint",
     "actor": "actor", "represents_actor": "actor", "owned_by": "actor", "held_by": "actor", "located_at": "world_entity",
     "definition": "item_definition", "charge_pool": "resource_pool", "uses_pool": "resource_pool", "excludes_form": "form", "feature_mechanic": "*",
     "applies_to_spell":"spell", "for_cast":"cast_instance","for_attempt":"attack_attempt","for_use":"action_use",
@@ -79,6 +86,8 @@ EDGE_TARGET = {
     "part_of_trade": "party_exchange", "trade_party": "actor", "trade_wallet": "wallet", "trade_holding": "item_instance",
 }
 EDGE_FROM = {
+    "part_of_arc":{"story_arc"},"follows_session":{"campaign_session"},"session_in_arc":{"campaign_session"},
+    "opens_at_checkpoint":{"campaign_session"},"closes_at_checkpoint":{"campaign_session"},"includes_event":{"story_arc","campaign_session"},
     "definition": {"item_instance"}, "owned_by": {"item_instance"}, "held_by": {"item_instance", "wallet"},
     "located_at": {"item_instance"}, "known_about": {"known_fact"}, "represents_actor": {"world_entity"},
     "from_subject": {"relationship"}, "to_subject": {"relationship"}, "design_for": {"blueprint_version"},
@@ -235,6 +244,8 @@ def check_target(row, entities):
                "Invalid actor mechanics collections")
     if kind=="actor":
         verify(not data.get("diceDelegations"), "Roll delegation requires fresh owner authorization")
+    if kind=="effect":
+        verify(row["id"] in entities[aid]["data"].get("effectIds",[]), "Actor does not reference its effect")
     if kind=="resource_pool":
         verify(all(integer(data[k]) for k in ("maximum","current")) and
                (None in (data["maximum"],data["current"]) or data["current"]<=data["maximum"]), "Resource exceeds recorded capacity")
@@ -261,6 +272,8 @@ def check_target(row, entities):
         verify(data["equipment"] in ("packed","held","worn") and
                (data["equipment"]=="packed" or data["partyAccess"] and data["custodianId"] is not None and data["holding"]=="carried"),
                "Inaccessible or uncarried equipment cannot be active")
+    if kind in ("story_arc","campaign_session"):
+        verify(aid is None,"Campaign chronology cannot be actor-owned")
     if kind=="continuity_profile":
         verify(aid is None, "Continuity metadata cannot be actor-owned")
     for field, expected_kind in REF.get(kind,{}).items():
@@ -291,13 +304,13 @@ def required_witnesses(row):
 MECHANICAL_NAMES = {
     "currentHp":{"currentHp","hpCurrent","hp"}, "maxHp":{"maxHp","maximumHp","hpMax","maxHitPoints","baseMaxHp"},
     "temporaryHp":{"temporaryHp","tempHp"}, "baseAc":{"baseAc","baseArmorClass","armorClass"},
-    "proficiency":{"proficiency","proficiencyBonus"}, "level":{"level","currentLevel","totalLevel"},
+    "proficiency":{"proficiency","proficiencyBonus","bonus"}, "level":{"level","currentLevel","totalLevel"},
     "current":{"current","remaining","available","balance"}, "maximum":{"maximum","max","capacity"},
     "quantity":{"quantity","count"}, "definitionId":{"definitionId","id","definitionKey"},
     "ownerId":{"ownerId","ownerActorId","ownerProfileId","holderProfileId"},
     "custodianId":{"custodianId","carriedBy","holderProfileId","ownerActorId"}, "locationId":{"locationId","storageId"},
     "holderId":{"holderId","holderProfileId","ownerActorId"}, "attuned":{"attuned","isAttuned"},
-    "equipment":{"equipment","equipmentState"}, "operating":{"operating","activated","isOperating"},
+    "equipment":{"equipment","equipmentState","state"}, "operating":{"operating","activated","isOperating"},
     **{key:{key,name} for key,name in COINS.items()}, **{stat:{stat,stat.lower()} for stat in STATS},
 }
 NATIVE_KIND = {"resources":"resource_pool","spellSlots":"resource_pool","effects":"effect","items":"item_instance",
@@ -305,6 +318,13 @@ NATIVE_KIND = {"resources":"resource_pool","spellSlots":"resource_pool","effects
                "rollPresets":"roll_preset","forms":"form","wearableForms":"form","activations":"action_definition",
                "permanentAdvancements":"progression_event","customSkills":"actor","conditions":"actor","activeStances":"actor"}
 SCALAR_RULES = {"lowercase":str.lower, "uppercase":str.upper}
+WIRE_ENUMS = {
+    "numericEffectTarget":{"ABILITY":"ability_score","ABILITY_CHECK":"ability_check","SAVE":"save","SKILL":"skill",
+                           "INITIATIVE":"initiative","ARMOR_CLASS":"ac","MAX_HP":"max_hp","ATTACK":"attack","DAMAGE":"damage",
+                           "SPELL_ATTACK":"spell_attack","SPELL_DC":"spell_dc","SPEED":"speed","PASSIVE":"passive"},
+    "unqualifiedEffectKey":{"":"all"},
+    "equipmentState":{"STORED":"packed","CARRIED":"packed","HELD":"held","WORN":"worn"},
+}
 def scalar_paths(value, prefix=()):
     if isinstance(value,dict):
         for key,child in value.items():
@@ -377,9 +397,14 @@ def project(raw_by_hash, plan, tenant):
         decisions[key]=d
     verify(decisions.keys()==entries.keys(),"Every original source row requires an exact disposition")
     active_by_native={}
+    immutable_by_native={}
     for key,d in decisions.items():
         if d["disposition"]=="superseded":
             verify(decisions[source_key(d["supersededBy"])]["disposition"]=="map","Superseding source did not map to a verified target")
+        if d["disposition"]=="historical" and key[1] in ("campaign.events","records.receipts","records.crafts","authority.receipts","playable.changes","playable.rolls"):
+            prior=immutable_by_native.get(key[1:],d["rowSha256"])
+            verify(prior==d["rowSha256"], "Conflicting native immutable command or event evidence requires review")
+            immutable_by_native[key[1:]]=prior
         if d["disposition"]!="map":
             continue
         native_identity=key[1:]
@@ -407,7 +432,14 @@ def project(raw_by_hash, plan, tenant):
             kind=NATIVE_KIND.get(key[1].rsplit(".",1)[-1])
             verify(kind is None or any(entities[i]["kind"]==kind for i in d["targets"]),
                    "Nested native mechanic lacks its typed target")
+    memberships={}
+    for key, native in entries.items():
+        if key[1]=="authority.actors" and decisions[key]["disposition"]!="superseded" and native.get("campaignId") is not None:
+            memberships.setdefault(native["actorId"],set()).add(native["campaignId"])
     for target in entities.values():
+        if target["kind"]=="actor":
+            verify(memberships.get(target["id"],{tenant[1]})=={tenant[1]},
+                   "Mapped actor conflicts with independently recorded continuity membership")
         check_target(target,entities)
     aliases={}
     for w in plan["parity"]:
@@ -421,7 +453,7 @@ def project(raw_by_hash, plan, tenant):
     witnesses={}
     for w in plan["parity"]:
         verify(isinstance(w,dict) and set(w)=={"source","family","identity","sourcePath","target","targetPath","transform"} and
-               isinstance(w["target"],str) and w["target"] in entities and w["transform"] in ("exact","omittedUnknown","scopedIdentity","canonicalRef",*SCALAR_RULES),
+               isinstance(w["target"],str) and w["target"] in entities and w["transform"] in ("exact","omittedUnknown","scopedIdentity","canonicalRef",*SCALAR_RULES,*WIRE_ENUMS),
                "Invalid mechanical evidence witness")
         key=source_key(w)
         verify(key in decisions and w["target"] in decisions[key]["targets"], "Mechanical evidence belongs to another row or target")
@@ -439,6 +471,25 @@ def project(raw_by_hash, plan, tenant):
             verify(tp[0]=="data" and isinstance(actual,str) and actual in aliases and exact(aliases[actual],expected),
                    "Canonical relationship lacks its original source identity")
             expected=actual
+        if w["transform"] in WIRE_ENUMS:
+            mapping=WIRE_ENUMS[w["transform"]]
+            verify(isinstance(expected,str) and expected in mapping, "Unsupported native enum conversion")
+            if w["transform"] in ("numericEffectTarget","unqualifiedEffectKey"):
+                native=entries[key]
+                verify(key[1].endswith(".effects") and isinstance(native.get("payload"),dict) and
+                       native["payload"].get("operation") in ("ADD","SET","MINIMUM","MAXIMUM") and
+                       native.get("source",{}).get("acceptance") in ("OFFICIAL","ACCEPTED_HOMEBREW") and
+                       not native.get("conditions") and not native.get("chargeResourceId") and not native.get("chargeCost") and
+                       native.get("expiresOn","NONE")=="NONE" and not native.get("expiresAtGameSeconds"),
+                       "Native effect needs review of acceptance, eligibility, expiration or charge evidence")
+                verify(tp==["data","target" if w["transform"]=="numericEffectTarget" else "key"],
+                       "Effect transform targets the wrong field")
+                if w["transform"]=="unqualifiedEffectKey":
+                    verify(native["payload"].get("target") in ("MAX_HP","DAMAGE","INITIATIVE","ARMOR_CLASS","SPELL_ATTACK","SPELL_DC","ATTACK"),
+                           "Native effect requires an explicit typed subject")
+            if w["transform"]=="equipmentState":
+                verify(tp==["data","equipment"] and sp and sp[-1]=="state", "Invalid equipment state transform")
+            expected=mapping[expected]
         if w["transform"] in SCALAR_RULES:
             verify(isinstance(expected,str), "Case normalization requires a recorded enumeration")
             expected=SCALAR_RULES[w["transform"]](expected)
@@ -453,6 +504,10 @@ def project(raw_by_hash, plan, tenant):
         if tp==["id"]:
             verify(isinstance(expected,str) and w["transform"] in ("scopedIdentity","exact"), "Canonical identity must retain an original native identity")
         witnesses[pair]=key
+    bound_fields={i:set() for i in entities}
+    for i,path in witnesses:
+        if len(path)>1 and path[0]=="data":
+            bound_fields[i].add(path[1])
     for ident,target in entities.items():
         need=required_witnesses(target)
         need.update(("data",)+path for path,value in scalar_paths(target["data"]) if type(value) in (float,int))
@@ -472,7 +527,7 @@ def project(raw_by_hash, plan, tenant):
         # Arbitrary prose or numbers cannot replace the original mechanical body of less common record families.
         if target["kind"] not in ("actor","resource_pool","wallet","item_instance"):
             for key in target["data"]:
-                verify(any(i==ident and p[:2]==("data",key) for i,p in witnesses), "Unbound typed field "+key)
+                verify(key in bound_fields[ident], "Unbound typed field "+key)
     # Cross-validate the same typed contract used by the service. This process only
     # evaluates schemas. It cannot authorize a client, execute dice or spend a resource.
     contract = Path(__file__).with_name("ascension_migrate_contracts.mjs")
@@ -498,10 +553,24 @@ def project(raw_by_hash, plan, tenant):
     must_link={"wallet":{"holderId":"held_by"},"item_instance":{"definitionId":"definition","ownerId":"owned_by","custodianId":"held_by","locationId":"located_at","resourcePoolId":"charge_pool"},
                "spell_grant":{"spellId":"grants_spell","sourceItemId":"requires_item","resourceId":"uses_pool"},
                "actor":{"activeFormId":"active_form","concentrationCastId":"concentrates_on"}}
+    must_link["story_arc"]={"parentArcId":"part_of_arc","eventIds":"includes_event"}
+    must_link["campaign_session"]={"arcId":"session_in_arc","previousSessionId":"follows_session",
+        "openingCheckpointId":"opens_at_checkpoint","closingCheckpointId":"closes_at_checkpoint","eventIds":"includes_event"}
+    ancestry={start:end for start,relation,end in seen if relation in ("follows_session","part_of_arc")}
+    closed=set()
+    for ident in ancestry:
+        visited=set()
+        node=ident
+        while node in ancestry and node not in closed:
+            verify(node not in visited,"Circular chronology relationship")
+            visited.add(node)
+            node=ancestry[node]
+        closed.update(visited)
     for ident,target in entities.items():
         for field,relation in must_link.get(target["kind"],{}).items():
             val=target["data"].get(field)
-            verify(val is None or (ident,relation,val) in seen, "Missing canonical edge for "+field)
+            values=val if isinstance(val,list) else [] if val is None else [val]
+            verify(all((ident,relation,i) in seen for i in values), "Missing canonical edge for "+field)
     rows=sorted(({"owner_id":tenant[0],"continuity_id":tenant[1],"id":t["id"],"kind":t["kind"],"actor_id":t["actorId"],
                   "title":t["title"],"life":t["life"],"revision":t["revision"],"data_json":encode(t["data"]).decode()} for t in entities.values()),key=lambda x:x["id"])
     links.sort(key=lambda r:(r["from_id"],r["relation"],r["to_id"]))
@@ -541,6 +610,16 @@ def project(raw_by_hash, plan, tenant):
         links.append({"owner_id":tenant[0],"continuity_id":tenant[1],"from_id":m["target"],"relation":"primary_image","to_id":media_id})
     rows.sort(key=lambda r:r["id"])
     links.sort(key=lambda r:(r["from_id"],r["relation"],r["to_id"]))
+    contributing={(key,ident) for (ident,_),key in witnesses.items()}
+    for link in plan["links"]:
+        contributing.add((source_key(link),link["from"]))
+    for m in plan.get("media",[]):
+        contributing.add((source_key(m),m["target"]))
+    content_contributions={(key[1:],decisions[key]["rowSha256"],ident) for key,ident in contributing}
+    for key,d in decisions.items():
+        if d["disposition"]=="map":
+            verify(any((key[1:],d["rowSha256"],ident) in content_contributions for ident in d["targets"]),
+                   "Mapped source row has no independent contribution to its canonical target")
     manifest_hash=sha(encode(plan))
     reports={}
     for digest in raw_by_hash:

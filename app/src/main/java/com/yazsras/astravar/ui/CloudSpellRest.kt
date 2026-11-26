@@ -290,6 +290,11 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
             PlayerOutlinedButton({edit("spend_resource")},enabled=online && (data.num("current") ?: 0)>0) { Text("Spend uses") }
             if (data.str("recovery")=="recharge_roll")
                 PlayerOutlinedButton({edit("resolve_pool_recharge")},enabled=online && data.num("current")==0) { Text("Record recharge roll") }
+            PlayerTextButton({edit("revise_resource"){
+                put("name",identified.str("title")); put("maximum",data["maximum"] ?: JsonNull)
+                data.str("recovery")?.let { put("recovery",it) }
+                data["recoveryAmount"]?.let { put("recoveryAmount",it) }
+            }},enabled=online) { Text("Edit resource rules") }
             PlayerTextButton({edit("correct_resource_balance"){ put("before",data["current"] ?: JsonNull) }},enabled=online) { Text("Review balance correction") }
             Text("Balance history",style=MaterialTheme.typography.titleSmall)
             failure?.let { Text(it); PlayerTextButton({scope.launch {load(null)}}) {Text("Retry history")} }
@@ -432,6 +437,30 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
     },confirmButton={TextButton({manage=false}){Text("Done")}})
 }
 
+@Composable internal fun CloudHpMaximumSources(sheet: JsonObject?) {
+    val maximum = sheet?.get("hpMaximum") as? JsonObject ?: return
+    var expanded by rememberSaveable(sheet?.str("actorId")) { mutableStateOf(false) }
+    PlayerTextButton({ expanded = !expanded }) { Text("Maximum HP sources") }
+    if (expanded) {
+        Text("Base maximum · ${maximum.num("baseMaxHp") ?: "Unknown"}")
+        maximum.num("baselineConstitutionModifier")?.let {
+            Text("Constitution adjustment · ${maximum.num("constitutionAdjustment") ?: "Unknown"}")
+        }
+        maximum.rows("sources").forEach { source ->
+            val value = source.num("value")
+            val adjustment = when (source.str("operation")) {
+                "add" -> if (value != null && value > 0) "+$value" else value?.toString()
+                "set" -> "Set to $value"
+                "minimum" -> "At least $value"
+                "maximum" -> "At most $value"
+                else -> null
+            }
+            Text("${source.str("source") ?: source.str("id") ?: "Unknown source"} · ${adjustment ?: "Unknown"}")
+        }
+        Text("Effective maximum · ${maximum.num("value") ?: "Unknown"}")
+    }
+}
+
 @Composable internal fun CloudRestPlan(
     actorId:String, actor:JsonObject?, sheet:JsonObject?, pools:List<JsonObject>, online:Boolean,
     submit:(String,JsonObject)->Unit
@@ -466,7 +495,9 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
             }
         }
     }
-    Text("Hit points ${actor?.num("currentHp")?:"?"}/${actor?.num("maxHp")?:"?"}",style=MaterialTheme.typography.titleMedium)
+    val vitals=sheet?:actor
+    Text("Hit points ${vitals?.num("currentHp")?:"?"}/${vitals?.num("maxHp")?:"?"}",style=MaterialTheme.typography.titleMedium)
+    CloudHpMaximumSources(sheet)
     Row(horizontalArrangement=Arrangement.spacedBy(4.dp)) {
         listOf("short_rest" to "Short rest","long_rest" to "Long rest").forEach{(key,label)->
             FilterChip(selected=kind==key,onClick={kind=key;minutes=if(key=="long_rest")"480" else "60"},label={Text(label)})

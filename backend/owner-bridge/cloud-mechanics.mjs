@@ -1,5 +1,7 @@
-import { checkDiceOwner, diceCategories, stats, damageTypes, standardSkills, identifier, boolean, whole, nullable, named, option, fields, actorSchema, resourceSchema, formSchema, effectSchema, restSchema, must, op, owned, actor, insert, save, transferableSource, gearEligible, activeForm, sheet, spend, useTiming, addClock } from './cloud-mechanics-core.mjs';
+import { checkDiceOwner, diceCategories, stats, damageTypes, standardSkills, identifier, boolean, whole, nullable, named, option, fields, actorSchema, resourceSchema, formSchema, effectSchema, restSchema, must, op, owned, actor, insert, save, transferableSource, gearEligible, activeForm, sheet, healedHp, spend, useTiming, addClock } from './cloud-mechanics-core.mjs';
+import { deploymentOperations, eligibleForm, planCompletion, deploymentView, interruptIfPending } from './cloud-form-deployment.mjs';
 import { careOperations } from './cloud-mechanics-care.mjs';
+import { settleEffectCosts } from './cloud-effect-costs.mjs';
 import { profileOperations } from './cloud-mechanics-profile.mjs';
 import { rollOperations } from './cloud-mechanics-rolls.mjs';
 import { combatOperations } from './cloud-mechanics-combat.mjs';
@@ -7,7 +9,7 @@ import { actionOperations } from './cloud-mechanics-actions.mjs';
 import { spellOperations } from './cloud-mechanics-spells.mjs';
 
 export const MECHANIC_KINDS=Object.freeze({
-  actor:'character',care_protocol:'character',care_event:'resources',feature:'character',progression_event:'character', form:'character', effect:'character', resource_pool:'resources', rest_report:'resources',recovery_event:'resources',
+  actor:'character',care_protocol:'character',care_event:'resources',feature:'character',progression_event:'character',form_deployment:'character', form:'character', effect:'character', resource_pool:'resources', rest_report:'resources',recovery_event:'resources',
   roll:'rolls',roll_batch:'rolls',roll_preset:'rolls',attack:'combat',attack_attempt:'combat',encounter:'combat',
   action_definition:'combat',action_use:'combat',concentration_check:'spells',spell:'spells',spell_grant:'spells',cast_instance:'spells'
 });
@@ -27,7 +29,7 @@ export async function mechanicFormPreview(ctx,actorId,formId){
   for(const id of [d.deploymentPoolId,d.integrityPoolId,d.resetPoolId].filter(Boolean)){
     const pool=await owned(ctx,'resource_pool',id,actorId);pools.push({id,current:pool.data.current,maximum:pool.data.maximum,role:pool.data.type});
   }
-  return {status:'preview',activeFormId:a.data.activeFormId,formId,projection,pools,activationSeconds:d.activationSeconds,
+  return {status:'preview',trackedEncounter:Boolean(a.data.encounterId),deployment:await deploymentView(ctx,a,formId),activeFormId:a.data.activeFormId,formId,projection,pools,activationSeconds:d.activationSeconds,
     durationSeconds:d.durationSeconds??null,requiresWilling:d.requiresWilling??false,
     sourceEligible:await gearEligible(ctx,d.sourceItemId,actorId,d.requiresAttunement,d.requiresOperating)};
 }
@@ -42,7 +44,7 @@ async function defineActor(ctx,x){
   const data={role,rulesProfile,level,initiativeAfterActorId:x.initiativeAfterActorId??null,proficiencyMethod:x.proficiency===undefined && role==='player' && rulesProfile!=='custom'?'level':x.proficiency!=null?'reviewed':'unknown',source:source??null,proficiency:x.proficiency===undefined?
     (role==='player' && rulesProfile!=='custom'?2+Math.floor((level-1)/4):null):x.proficiency,
     abilities:Object.fromEntries(stats.map(stat=>[stat,x.abilities?.[stat]??null])),
-    baseAc:x.baseAc??null,maxHp:x.maxHp??null,currentHp:x.currentHp??null,temporaryHp:x.temporaryHp??null,
+    baseAc:x.baseAc??null,maxHp:x.maxHp??null,baselineConstitutionModifier:x.baselineConstitutionModifier??null,currentHp:x.currentHp??null,temporaryHp:x.temporaryHp??null,
     speeds:x.speeds??{},senses:x.senses??{},size:x.size??null,creatureType:x.creatureType??null,gameSeconds:x.gameSeconds??null,saveProficiencies:x.saveProficiencies??[],
     attacksPerAction:x.attacksPerAction??1,attunementCapacity:x.attunementCapacity??null,conditions:[],conditionSources:[],activeFormId:null,formExpiresAt:null,concentrationCastId:null,encounterId:null,
     poolIds:[],effectIds:[],skills:{}};
@@ -50,14 +52,17 @@ async function defineActor(ctx,x){
   if(x.initiativeAfterActorId)await ctx.link(actorId,'initiative_after',x.initiativeAfterActorId);
   return {actorId};
 }
+function validateResourceRules(data) {
+  must(data.maximum==null||data.current==null||data.current<=data.maximum,'POOL_EXCEEDS_MAXIMUM');
+  must((data.type==='hit_die')===(data.dieSides!=null) && (data.type==='spell_slot')===(data.slotLevel!=null),'POOL_SHAPE_INVALID');
+  must(data.recovery==='recharge_roll'?data.rechargeSides!=null && data.rechargeMinimum!=null && data.rechargeMinimum<=data.rechargeSides && data.maximum===1:data.rechargeSides===undefined && data.rechargeMinimum===undefined,'INVALID_RECHARGE_DIE');
+  must(data.type!=='lifetime'||data.recovery==='none','LIFETIME_POOL_CANNOT_RECOVER');
+  must(data.recovery!=='edition_hit_dice'||data.type==='hit_die','HIT_DICE_PROFILE_REQUIRED');
+  must(data.type!=='integrity'||data.recovery!=='deployment','INTEGRITY_DEPLOYMENT_REFILL_UNSUPPORTED');
+}
 async function defineResource(ctx,x){
   const a=await actor(ctx,x.actorId);
-  must(x.maximum==null||x.current==null||x.current<=x.maximum,'POOL_EXCEEDS_MAXIMUM');
-  must((x.type==='hit_die')===(x.dieSides!=null) && (x.type==='spell_slot')===(x.slotLevel!=null),'POOL_SHAPE_INVALID');
-  must(x.recovery==='recharge_roll'?x.rechargeSides!=null && x.rechargeMinimum!=null && x.rechargeMinimum<=x.rechargeSides && x.maximum===1:x.rechargeSides===undefined && x.rechargeMinimum===undefined,'INVALID_RECHARGE_DIE');
-  must(x.type!=='lifetime'||x.recovery==='none','LIFETIME_POOL_CANNOT_RECOVER');
-  must(x.recovery!=='edition_hit_dice'||x.type==='hit_die','HIT_DICE_PROFILE_REQUIRED');
-  must(x.type!=='integrity'||x.recovery!=='deployment','INTEGRITY_DEPLOYMENT_REFILL_UNSUPPORTED');
+  validateResourceRules(x);
   must(a.data.poolIds.length<128,'ACTOR_POOL_LIMIT');
   if(x.recoveryActorId && x.recoveryActorId!==a.id){
     must(['short_rest','long_rest','either_rest'].includes(x.recovery) && !['hit_die','spell_slot'].includes(x.type),'EXTERNAL_RECOVERY_TRIGGER_INVALID');
@@ -69,6 +74,42 @@ async function defineResource(ctx,x){
   await save(ctx,a,{...a.data,poolIds:[...a.data.poolIds,poolId]});
   if(x.recoveryActorId&&x.recoveryActorId!==a.id)await ctx.link(poolId,'recovers_on_actor_rest',x.recoveryActorId);
   return {poolId,current:x.current,maximum:x.maximum};
+}
+const resourceRevisionSchema = fields({
+  actorId:identifier, poolId:identifier, name:named(160), maximum:nullable(whole()),
+  recovery:resourceSchema.properties.recovery, recoveryAmount:nullable(whole(1)),
+  recoveryActorId:nullable(identifier), rechargeSides:whole(2,100), rechargeMinimum:whole(1,100), source:named(300)
+}, ['actorId','poolId','source']);
+
+async function reviseResource(ctx,x) {
+  const p = await owned(ctx,'resource_pool',x.poolId,x.actorId), d = p.data;
+  must(Object.keys(x).some(k => !['actorId','poolId','source'].includes(k)), 'RESOURCE_REVISION_EMPTY');
+  const next = {...d, originalSource:d.originalSource ?? d.source, source:x.source};
+  for (const key of ['maximum','recovery','recoveryAmount','recoveryActorId','rechargeSides','rechargeMinimum'])
+    if (Object.hasOwn(x,key)) next[key]=x[key];
+  if(next.recovery!=='recharge_roll') {
+    must(!Object.hasOwn(x,'rechargeSides') && !Object.hasOwn(x,'rechargeMinimum'),'INVALID_RECHARGE_DIE');
+    delete next.rechargeSides; delete next.rechargeMinimum;
+  }
+  validateResourceRules(next);
+  const priorTrigger = d.recoveryActorId && d.recoveryActorId!==p.actorId ? d.recoveryActorId : null;
+  const nextTrigger = next.recoveryActorId && next.recoveryActorId!==p.actorId ? next.recoveryActorId : null;
+  if(nextTrigger) must(['short_rest','long_rest','either_rest'].includes(next.recovery) && !['hit_die','spell_slot'].includes(next.type),'EXTERNAL_RECOVERY_TRIGGER_INVALID');
+  if(priorTrigger!==nextTrigger) {
+    if(priorTrigger) {
+      const previous=await actor(ctx,priorTrigger);
+      await save(ctx,previous,{...previous.data,recoveryPoolIds:(previous.data.recoveryPoolIds??[]).filter(id=>id!==p.id)});
+      await ctx.unlink(p.id,'recovers_on_actor_rest',priorTrigger);
+    }
+    if(nextTrigger) {
+      const trigger=await actor(ctx,nextTrigger), ids=trigger.data.recoveryPoolIds??[];
+      must(ids.length<96 && !ids.includes(p.id),'EXTERNAL_RECOVERY_LIMIT');
+      await save(ctx,trigger,{...trigger.data,recoveryPoolIds:[...ids,p.id]});
+      await ctx.link(p.id,'recovers_on_actor_rest',nextTrigger);
+    }
+  }
+  await ctx.put({...p,title:x.name??p.title,data:next});
+  return {poolId:p.id,current:next.current,maximum:next.maximum,recovery:next.recovery,source:x.source};
 }
 async function defineForm(ctx,x,edit=false){
   const a=await actor(ctx,x.actorId);
@@ -104,16 +145,13 @@ async function changeForm(ctx,x){
   must(x.formId!==old,'FORM_ALREADY_SELECTED');
   const form=x.formId?await owned(ctx,'form',x.formId,a.id):null;
   const elapsed=x.elapsedSeconds, config=form?.data;
-  if(config){
-    must(!['disabled','dormant'].includes(a.data.activityState) && !a.data.conditions.some(c=>['incapacitated','unconscious','stunned','petrified','paralyzed'].includes(c)) && (!config.requiresWilling||x.willing===true),'FORM_TRANSFORMATION_INELIGIBLE');
-    must(await gearEligible(ctx,config.sourceItemId,a.id,config.requiresAttunement,config.requiresOperating),'FORM_SOURCE_INELIGIBLE');
+  const tracked=await planCompletion(ctx,a,form,x);
+  if(config && !tracked){
+    await eligibleForm(ctx,a,form,x.willing);
     if(config.activationSeconds>6)must(elapsed>=config.activationSeconds && x.uninterrupted===true && !a.data.encounterId,'UNINTERRUPTED_DEPLOYMENT_REQUIRED');
-    if(config.integrityPoolId){
-      const p=await owned(ctx,'resource_pool',config.integrityPoolId,a.id);
-      must(p.data.current!=null && p.data.current>0,'FORM_INTEGRITY_UNAVAILABLE');
-    }
   }
-  const next=await addClock(ctx,a,elapsed);
+  if(a.data.encounterId && !tracked)must(elapsed<=6,'TRACKED_ENCOUNTER_CLOCK_REQUIRED');
+  const next=tracked?.next??await addClock(ctx,a,elapsed);
   must(!config?.durationSeconds||next.gameSeconds!=null,'GAME_CLOCK_UNKNOWN');
   const costs=[];
   if(config?.deploymentPoolId)costs.push(await spend(ctx,a.id,config.deploymentPoolId,1));
@@ -121,23 +159,46 @@ async function changeForm(ctx,x){
     const p=await owned(ctx,'resource_pool',config.resetPoolId,a.id);
     await save(ctx,p,{...p.data,current:p.data.maximum});
   }
-  await useTiming(ctx,a,config?.timing??'action');
+  if(!tracked)await useTiming(ctx,a,config?.timing??'action');
   const expires=config?.durationSeconds?next.gameSeconds+config.durationSeconds:null;
   await save(ctx,a,{...next,activeFormId:x.formId,formExpiresAt:expires});
   if(old)await ctx.unlink(a.id,'active_form',old);
   if(form)await ctx.link(a.id,'active_form',form.id);
-  return {actorId:a.id,previousFormId:old,formId:x.formId,expires,costs};
+  return {actorId:a.id,previousFormId:old,formId:x.formId,expires,costs,...(tracked?{deploymentId:x.deploymentId,elapsedSeconds:tracked.elapsedSeconds}:{})};
 }
 async function effect(ctx,x,edit=false){
   const a=await actor(ctx,x.actorId), old=edit?await owned(ctx,'effect',x.effectId,a.id):null;
   must(old||a.data.effectIds.length<128,'ACTOR_EFFECT_LIMIT');
-  const numeric=['ability_score','ability_check','skill','save','passive','initiative','ac','attack','spell_attack','spell_dc','speed','sense'];
+  const numeric=['ability_score','ability_check','skill','save','passive','initiative','ac','max_hp','attack','damage','spell_attack','spell_dc','speed','sense'];
+  if(x.charge){
+    must(['attack','spell_attack','damage'].includes(x.target) && (x.charge.trigger==='attempt'||x.target==='damage'),'EFFECT_CHARGE_TRIGGER_INVALID');
+    const pool=await owned(ctx,'resource_pool',x.charge.poolId,a.id);
+    must(['charge','ordinary','lifetime'].includes(pool.data.type),'EFFECT_CHARGE_POOL_INVALID');
+    if(x.target==='spell_attack' && x.key!=='all')await owned(ctx,'spell_grant',x.key,a.id);
+  }
+  if(x.target!=='damage')must([x.damageRoute,x.damageComponentId,x.damageType,x.eachMatchingComponent].every(v=>v===undefined),'DAMAGE_SELECTOR_ON_OTHER_EFFECT');
   if(numeric.includes(x.target)){
     must(['add','set','minimum','maximum'].includes(x.operation)&&x.amount!=null,'NUMERIC_EFFECT_INVALID');
     if(['ability_score','ability_check','save'].includes(x.target))must(x.key==='all'||stats.includes(x.key),'INVALID_ABILITY');
     if(x.target==='speed')must(['all','walk','fly','hover','swim','climb','burrow'].includes(x.key),'INVALID_MOVEMENT');
     if(x.target==='sense')must(['all','darkvision','blindsight','tremorsense','truesight'].includes(x.key),'INVALID_SENSE');
-    if(['ac','initiative'].includes(x.target))must(x.key==='all','INVALID_CALCULATION_KEY');
+    if(['ac','initiative','max_hp'].includes(x.target))must(x.key==='all','INVALID_CALCULATION_KEY');
+    if(x.target==='attack' && x.key!=='all'){
+      const attack=await owned(ctx,'attack',x.key,a.id);
+      if(x.transfersWithItem)must(attack.data.transfersWithItem && attack.data.sourceItemId===x.sourceItemId,'TRANSFERABLE_ATTACK_TARGET_REQUIRED');
+    }
+    if(x.target==='damage'){
+      must(!x.eachMatchingComponent || x.damageType,'TYPED_COMPONENT_SELECTOR_REQUIRED');
+      must(!x.damageComponentId || x.key!=='all','NAMED_DAMAGE_SOURCE_REQUIRED');
+      if(x.key!=='all'){
+        const route=x.damageRoute??'attack';
+        must(route!=='both','NAMED_DAMAGE_ROUTE_REQUIRED');
+        const source=await owned(ctx,route,x.key,a.id);
+        if(x.transfersWithItem)must(source.data.transfersWithItem && source.data.sourceItemId===x.sourceItemId,'TRANSFERABLE_DAMAGE_TARGET_REQUIRED');
+        if(x.damageComponentId)must(source.data.components.some(c=>c.id===x.damageComponentId && c.type!=='healing' &&
+          (!x.damageType||c.type===x.damageType||c.variants?.includes(x.damageType))),'DAMAGE_COMPONENT_TARGET_UNAVAILABLE');
+      }
+    }
   }else if(x.target==='damage_defense'){
     must(damageTypes.includes(x.key)&&['immunity','resistance','vulnerability'].includes(x.operation)&&x.amount===undefined,'DEFENSE_INVALID');
   }else if(x.target==='save_mitigation'){
@@ -156,6 +217,9 @@ async function effect(ctx,x,edit=false){
   const {actorId,effectId,name,...config}=x;
   const data={...config,enabled:x.enabled??old?.data.enabled??true,priority:x.priority??0};
   if(old){
+    if(old.data.charge && old.data.charge.poolId!==x.charge?.poolId)await ctx.unlink(effectId,'uses_pool',old.data.charge.poolId);
+    if(old.data.target==='attack' && old.data.key!=='all' && (x.target!=='attack'||old.data.key!==x.key))await ctx.unlink(effectId,'modifies_attack',old.data.key);
+    if(old.data.target==='damage' && old.data.key!=='all' && (x.target!=='damage'||old.data.key!==x.key))await ctx.unlink(effectId,'modifies_damage',old.data.key);
     if(old.data.sourceItemId&&old.data.sourceItemId!==x.sourceItemId)await ctx.unlink(effectId,'requires_item',old.data.sourceItemId);
     if(old.data.formId&&old.data.formId!==x.formId)await ctx.unlink(effectId,'requires_form',old.data.formId);
     if(old.data.target==='spell_damage_immunity' && (x.target!=='spell_damage_immunity'||old.data.key!==x.key))await ctx.unlink(effectId,'applies_to_spell',old.data.key);
@@ -164,7 +228,10 @@ async function effect(ctx,x,edit=false){
     await insert(ctx,'effect',effectId,actorId,name,data);
     await save(ctx,a,{...a.data,effectIds:[...a.data.effectIds,effectId]});
   }
+  if(x.charge)await ctx.link(effectId,'uses_pool',x.charge.poolId);
   if(x.target==='spell_damage_immunity')await ctx.link(effectId,'applies_to_spell',x.key);
+  if(x.target==='attack' && x.key!=='all')await ctx.link(effectId,'modifies_attack',x.key);
+  if(x.target==='damage' && x.key!=='all')await ctx.link(effectId,'modifies_damage',x.key);
   if(x.formId)await ctx.link(effectId,'requires_form',x.formId);
   if(x.sourceItemId)await ctx.link(effectId,'requires_item',x.sourceItemId);
   return {effectId};
@@ -189,8 +256,9 @@ async function hp(ctx,x){
     }
   }else if(x.kind==='heal'){
     must(before.activityState!=='disabled','DISABLED_ACTOR_REQUIRES_RECONSTRUCTION');
-    must(before.currentHp!=null&&before.maxHp!=null,'HP_UNKNOWN');
-    after.currentHp=Math.min(before.maxHp,before.currentHp+amount);
+    const cap=(await sheet(ctx,a.id)).maxHp;
+    must(before.currentHp!=null&&cap!=null,'HP_UNKNOWN');
+    after.currentHp=healedHp(before.currentHp,cap,amount);
   }else{
     must(before.temporaryHp===0||x.replaceTemporary===true,'TEMPORARY_HP_DECISION_REQUIRED');
     after.temporaryHp=x.amount;
@@ -199,6 +267,8 @@ async function hp(ctx,x){
     if(after.activeFormId)await ctx.unlink(a.id,'active_form',after.activeFormId);
     after={...after,activityState:'disabled',activeFormId:null,formExpiresAt:null};
   }
+  if(before.activeDeploymentId && before.activityState!=='disabled' && after.activityState==='disabled')
+    after=await interruptIfPending(ctx,{...a,data:after},'actor_disabled');
   await save(ctx,a,after);
   let concentrationCheckId=null;
   const qualifyingDamage=x.kind==='damage'?x.amount-shell:0;
@@ -268,7 +338,10 @@ async function applyAttemptTarget(ctx,x,isCast=false){
   const result={targetActorId:target.id,decision,evasion,ac:d.resolution==='attack'?p.ac.value:null,saveRollId:x.saveRollId??null,
     amount:total,healing,actualHealing:healing?applied.afterHp-applied.beforeHp:0,components,hp:applied,source:x.source,commandId:ctx.commandId};
   const targetResults=[...prior,result], complete=targetResults.length===d.targets.length;
-  await save(ctx,attempt,{...d,targetResults,outcome:complete?'resolved':'pending',appliedDamage:targetResults.reduce((n,r)=>n+r.amount,0)});
+  const settled=await settleEffectCosts(ctx,attempt.actorId,attempt.id,d.effectCharges,decision==='hit'?'confirmed_hit':complete?'miss':'pending');
+  if(settled.costs.length)result.effectCosts=settled.costs;
+  await save(ctx,attempt,{...d,...(d.effectCharges?.length?{effectCharges:settled.charges,costs:[...d.costs,...settled.costs]}:{}),
+    targetResults,outcome:complete?'resolved':'pending',appliedDamage:targetResults.reduce((n,r)=>n+r.amount,0)});
   if(x.saveRollId)await ctx.link(attempt.id,'resolved_save',x.saveRollId);
   return {...(isCast?{castId:attempt.id}:{attemptId:attempt.id}),...result,complete};
 }
@@ -281,8 +354,11 @@ async function completeRest(ctx,x){
   must(!long || a.data.rulesProfile!=='custom','CUSTOM_LONG_REST_REQUIRES_ADJUDICATION');
   const pools=new Map();
   for(const id of a.data.poolIds)pools.set(id,await owned(ctx,'resource_pool',id,a.id));
-  const startHp=a.data.currentHp, max=a.data.maxHp;
-  const con=x.hitDice.length?(await sheet(ctx,a.id)).abilities.CON.modifier:null;
+  const next=await addClock(ctx,a,x.elapsedSeconds);
+  if(a.data.activeFormId && !next.activeFormId)await ctx.unlink(a.id,'active_form',a.data.activeFormId);
+  await save(ctx,a,next);
+  const stats=await sheet(ctx,a.id),startHp=a.data.currentHp,max=stats.maxHp;
+  const con=stats.abilities.CON.modifier;
   let hp=startHp;const dice=[],deltas=[],unresolved=[];
   const selected=new Set();
   for(const entry of x.hitDice){
@@ -293,7 +369,7 @@ async function completeRest(ctx,x){
     must(entry.faces.length>0&&p.data.current!=null&&p.data.current>=entry.faces.length&&con!=null&&hp!=null&&max!=null,'HIT_DICE_OR_HP_UNKNOWN');
     for(const face of entry.faces){
       must(face>=1 && face<=p.data.dieSides,'INVALID_HIT_DIE_FACE');
-      const healing=Math.max(0,face+con),actual=Math.min(healing,max-hp); hp+=actual;
+      const healing=Math.max(0,face+con),actual=healedHp(hp,max,healing)-hp; hp+=actual;
       dice.push({poolId:p.id,origin:entry.origin,sides:p.data.dieSides,face,modifier:con,healing,actual});
     }
     const result=await spend(ctx,a.id,p.id,entry.faces.length);
@@ -343,14 +419,12 @@ async function completeRest(ctx,x){
     const after=Math.min(d.maximum,d.current+(d.recoveryAmount??d.maximum));
     if(after!==d.current){await save(ctx,p,{...d,current:after});deltas.push({poolId:id,before:d.current,after,amount:after-d.current,reason:'linked_actor_rest'});}
   }
-  const next=await addClock(ctx,a,x.elapsedSeconds);
-  if(a.data.activeFormId && !next.activeFormId)await ctx.unlink(a.id,'active_form',a.data.activeFormId);
-  if(long && hp!=null && max!=null)hp=max;
+  if(long && hp!=null && max!=null)hp=Math.max(hp,max);
   if(long && (hp==null||max==null))unresolved.push({reason:'unknown_hit_points'});
   if(long && a.data.concentrationCastId)await ctx.unlink(a.id,'concentrates_on',a.data.concentrationCastId);
   await save(ctx,a,{...next,currentHp:hp,temporaryHp:long&&next.temporaryHp!=null?0:next.temporaryHp,concentrationCastId:long?null:next.concentrationCastId});
   const reportId=ctx.commandId;
-  const report={actorId:a.id,kind:x.kind,status:'completed',elapsedSeconds:x.elapsedSeconds,beforeHp:startHp,afterHp:hp,
+  const report={actorId:a.id,kind:x.kind,status:'completed',elapsedSeconds:x.elapsedSeconds,beforeHp:startHp,afterHp:hp,maxHp:max,
     actualHealing:hp==null||startHp==null?null:hp-startHp,hitDice:dice,deltas,unresolved,
     remainingHitDice:await Promise.all([...pools.values()].filter(p=>p.data.type==='hit_die').map(async p=>({poolId:p.id,remaining:(await owned(ctx,'resource_pool',p.id,a.id)).data.current}))),
     commandId:ctx.commandId,recordedAt:ctx.now};
@@ -394,16 +468,18 @@ export const MECHANIC_OPERATIONS=Object.freeze({
     return {skillId:x.skillId,...train};
   }),
   define_resource:op('resources',resourceSchema,defineResource),
+  revise_resource:op('resources',resourceRevisionSchema,reviseResource),
   correct_resource_balance:{...op('resources',fields({actorId:identifier,poolId:identifier,before:nullable(whole()),after:nullable(whole()),source:named(300)},['actorId','poolId','before','after','source']),async(ctx,x)=>{
     const p=await owned(ctx,'resource_pool',x.poolId,x.actorId);
     must(p.data.current===x.before && (p.data.maximum==null||x.after==null||x.after<=p.data.maximum),'RESOURCE_CORRECTION_BASELINE_CHANGED');
+    if(p.data.effectHolds?.length)must(x.after!=null && x.after>=p.data.effectHolds.reduce((n,h)=>n+h.amount,0),'RESOURCE_HAS_PENDING_EFFECT_CHARGES');
     await save(ctx,p,{...p.data,current:x.after});return {poolId:p.id,before:x.before,after:x.after,source:x.source};
   }),ownerReview:true},
   spend_resource:op('resources',fields({actorId:identifier,poolId:identifier,amount:whole(1)},['actorId','poolId','amount']),async(ctx,x)=>spend(ctx,x.actorId,x.poolId,x.amount)),
   resolve_pool_recharge:op('resources',fields({actorId:identifier,poolId:identifier,face:whole(1,100),origin:option('dm','delegated','app','player_physical','player_digital'),atStartOfTurn:{const:true}},['actorId','poolId','face','origin','atStartOfTurn']),async(ctx,x)=>{
     const a=await actor(ctx,x.actorId),p=await owned(ctx,'resource_pool',x.poolId,a.id),d=p.data;
     const enc=a.data.encounterId?await ctx.get('encounter',a.data.encounterId):null;
-    must(enc?.data.active && enc.data.participants[enc.data.index]===a.id && d.current===0 && d.recovery==='recharge_roll' && x.face<=d.rechargeSides,'RECHARGE_WINDOW_UNAVAILABLE');
+    must(enc?.data.active && !enc.data.actedThisTurn && enc.data.participants[enc.data.index]===a.id && d.current===0 && d.recovery==='recharge_roll' && x.face<=d.rechargeSides,'RECHARGE_WINDOW_UNAVAILABLE');
     checkDiceOwner(ctx,a,'custom',x.origin);
     const window=enc.id+':'+enc.data.round+':'+enc.data.index;must(d.lastRechargeWindow!==window,'RECHARGE_ALREADY_CHECKED');
     const after=x.face>=d.rechargeMinimum?1:0;
@@ -429,7 +505,7 @@ export const MECHANIC_OPERATIONS=Object.freeze({
   complete_rest:op('resources',restSchema,completeRest),
   define_form:op('character',formSchema,(ctx,x)=>defineForm(ctx,x,false)),
   revise_form:op('character',formSchema,(ctx,x)=>defineForm(ctx,x,true)),
-  change_form:op('character',fields({actorId:identifier,formId:nullable(identifier),elapsedSeconds:whole(0,86400),uninterrupted:boolean,willing:boolean},['actorId','formId','elapsedSeconds']),changeForm),
+  change_form:op('character',fields({actorId:identifier,formId:nullable(identifier),deploymentId:identifier,elapsedSeconds:whole(0,86400),uninterrupted:boolean,willing:boolean},['actorId','formId','elapsedSeconds']),changeForm),
   advance_actor_time:op('character',fields({actorId:identifier,elapsedSeconds:whole(1,31536000),confirmed:{const:true}},['actorId','elapsedSeconds','confirmed']),async(ctx,x)=>{
     const a=await actor(ctx,x.actorId);const next=await addClock(ctx,a,x.elapsedSeconds);
     if(a.data.activeFormId && !next.activeFormId)await ctx.unlink(a.id,'active_form',a.data.activeFormId);
@@ -453,5 +529,5 @@ export const MECHANIC_OPERATIONS=Object.freeze({
   resolve_attack_target:op('combat',fields({actorId:identifier,attemptId:identifier,targetActorId:identifier,saveRollId:identifier,source:named(300)},['actorId','attemptId','targetActorId','source']),(ctx,x)=>applyAttemptTarget(ctx,x)),
   resolve_cast_target:op('spells',fields({actorId:identifier,castId:identifier,targetActorId:identifier,saveRollId:identifier,source:named(300)},['actorId','castId','targetActorId','source']),(ctx,x)=>applyAttemptTarget(ctx,x,true)),
   apply_hp_change:op('combat',fields({actorId:identifier,kind:option('damage','heal','temporary'),amount:whole(),replaceTemporary:boolean},['actorId','kind','amount']),hp),
-  ...careOperations,...profileOperations,...rollOperations,...combatOperations,...spellOperations,...actionOperations
+  ...deploymentOperations,...careOperations,...profileOperations,...rollOperations,...combatOperations,...spellOperations,...actionOperations
 });

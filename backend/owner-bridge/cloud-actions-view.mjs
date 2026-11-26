@@ -2,6 +2,7 @@ import { CloudPlan } from './cloud-plan.mjs';
 import { BridgeError } from './core.mjs';
 import { cloudFail, validCloudId } from './cloud-validation.mjs';
 import { sheet, gearEligible, rollPolicy, checkTiming } from './cloud-mechanics-core.mjs';
+import { checkArsenal } from './cloud-mechanics-arsenal.mjs';
 import { attackModeFor } from './cloud-mechanics-linked.mjs';
 import { attackModifier, attackSaveDc, snapshotComponents } from './cloud-mechanics-combat.mjs';
 
@@ -33,8 +34,10 @@ export async function cloudActions(service,principal,id,actorId,options={}) {
     let components=[],hit=null,resolvedSaveDc=null,configuration=d;
     if(entity.kind==='attack'){
       const chosen=Object.fromEntries((d.selections??[]).filter(s=>(s.actorId??entity.actorId)===a.id && s.formId===p.formId).map(s=>[s.componentId,s.type]));
-      try { const mode=await attackModeFor(ctx,a,entity);
-        components=snapshotComponents([...d.components,...mode.components],p,chosen);
+      try { const charge=await checkArsenal(ctx,a,d),mode=await attackModeFor(ctx,a,entity);
+        const base=d.components.filter(c=>c.id!==d.payloadRule?.componentId);
+        const chargeComponent=charge?[{id:'prepared-bonus',name:'Prepared strike',type:charge.type,dice:0,sides:4,flat:charge.flat,critical:false}]:[];
+        components=snapshotComponents([...base,...mode.components,...chargeComponent],p,chosen,0,'attack',entity.id);
         configuration={...d,reach:mode.reach,modeUseIds:mode.useIds};if(d.resolution==='attack')hit=attackModifier(entity,p);
         if(d.resolution==='save')resolvedSaveDc=attackSaveDc(d,p); }
       catch(e){if(!(e instanceof BridgeError))throw e;reasons.push(e.code);damageReasons.push(e.code);}

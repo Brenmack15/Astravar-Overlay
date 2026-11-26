@@ -58,7 +58,7 @@ internal fun cloudPage(body: JsonObject, binding: CloudBinding, after: String?, 
 
 /** Disposable, credential-bound read model. This database has no gameplay mutation API. */
 internal class CloudSnapshotCache(context: Context, name: String? = "astravar-cloud-cache.db") :
-    SQLiteOpenHelper(context.applicationContext, name, null, 3) {
+    SQLiteOpenHelper(context.applicationContext, name, null, 4) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE workspace(slot INTEGER PRIMARY KEY CHECK(slot=1), origin TEXT NOT NULL,
@@ -71,7 +71,7 @@ internal class CloudSnapshotCache(context: Context, name: String? = "astravar-cl
         db.execSQL("CREATE TABLE fenced(continuity TEXT PRIMARY KEY)")
         db.execSQL("CREATE INDEX cloud_cache_list ON records(token,life,kind,id)")
         db.execSQL("""CREATE TABLE commands(id TEXT PRIMARY KEY,origin TEXT NOT NULL,continuity TEXT NOT NULL,
-            subject TEXT NOT NULL,envelope TEXT NOT NULL)""")
+            subject TEXT NOT NULL,envelope TEXT NOT NULL,acknowledged INTEGER NOT NULL DEFAULT 0)""")
     }
 
     private fun createMediaCache(db:SQLiteDatabase) = db.execSQL(
@@ -83,8 +83,13 @@ internal class CloudSnapshotCache(context: Context, name: String? = "astravar-cl
     )
 
     override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) {
-        require(old in 1..2 && new == 3) { "Unsupported cloud cache version." }
+        require(old in 1..3 && new == 4) { "Unsupported cloud cache version." }
         if (old == 1) createMediaCache(db)
+        if (old < 3) migrateHistoryIndex(db)
+        db.execSQL("ALTER TABLE commands ADD COLUMN acknowledged INTEGER NOT NULL DEFAULT 0")
+    }
+
+    private fun migrateHistoryIndex(db: SQLiteDatabase) {
         db.execSQL("ALTER TABLE records ADD COLUMN recorded_at INTEGER")
         db.rawQuery("SELECT token,id,body FROM records", null).use { cursor ->
             val update = db.compileStatement("UPDATE records SET recorded_at=? WHERE token=? AND id=?")
@@ -238,6 +243,23 @@ internal class CloudSnapshotCache(context: Context, name: String? = "astravar-cl
         "SELECT envelope FROM commands WHERE origin=? AND continuity=? AND subject=? AND id=?",
         arrayOf(binding.origin,binding.continuity,binding.subject,id)
     ).use { if(it.moveToFirst()) Json.parseToJsonElement(it.getString(0)).jsonObject else null }
+
+    fun acknowledge(binding: CloudBinding, id: String) {
+        writableDatabase.execSQL("UPDATE commands SET acknowledged=1 WHERE origin=? AND continuity=? AND subject=? AND id=?",
+            arrayOf(binding.origin, binding.continuity, binding.subject, id))
+    }
+
+    fun uncertain(binding: CloudBinding, operation: String? = null, actorId: String? = null): JsonObject? = readableDatabase.rawQuery(
+        "SELECT envelope FROM commands WHERE origin=? AND continuity=? AND subject=? AND acknowledged=0 ORDER BY rowid",
+        arrayOf(binding.origin, binding.continuity, binding.subject)
+    ).use { cursor ->
+        while (cursor.moveToNext()) {
+            val command = Json.parseToJsonElement(cursor.getString(0)).jsonObject
+            val actor = (command["args"] as? JsonObject)?.get("actorId")?.jsonPrimitive?.contentOrNull
+            if (operation == null || (command.cloudText("operation") == operation && actor == actorId)) return@use command
+        }
+        null
+    }
 
     fun pending(binding: CloudBinding): List<JsonObject> = readableDatabase.rawQuery(
         "SELECT envelope FROM commands WHERE origin=? AND continuity=? AND subject=? ORDER BY rowid LIMIT 100",

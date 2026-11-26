@@ -47,7 +47,7 @@ export async function cloudSpellbook(service,principal,id,actorId,options={}) {
       if(d.route==='ritual'&&a.data.encounterId)reasons.push('RITUAL_UNAVAILABLE');
       if(def.resolution==='attack'&&hit===null||def.resolution==='save'&&dc===null)reasons.push('CASTING_STAT_UNKNOWN');
       let components=[];
-      try{components=snapshotComponents(def.components,stats,{},level-def.baseLevel);}
+      try{components=snapshotComponents(def.components,stats,{},level-def.baseLevel,'spell',spell.id);}
       catch(e){if(!(e instanceof BridgeError))throw e;reasons.push(e.code);}
       rows.push({scaling:scaledSpellEffects(def,level),grantId,spellId:spell.id,name:spell.title,baseLevel:def.baseLevel,level,route:d.route,source:d.source,preparation:d.preparation,
         concentration:def.concentration,requiresConcentrationDecision:Boolean(def.concentration&&a.data.concentrationCastId),

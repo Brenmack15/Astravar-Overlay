@@ -126,7 +126,9 @@ class NavigationV2Test {
             compose.waitUntil(10_000) { compose.onAllNodesWithText("‹ Chronicle").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("navigation-Chronicle").assertIsSelected()
             compose.onNodeWithText("‹ Chronicle").performClick()
-            compose.onNodeWithText("Inventions").performScrollTo().performClick()
+            compose.onNodeWithTag("navigation-Inventory").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Inventions & research").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Inventions & research").performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithText("Add Invention").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("navigation-Inventory").assertIsSelected()
             compose.onNodeWithTag("navigation-Connections").performClick()

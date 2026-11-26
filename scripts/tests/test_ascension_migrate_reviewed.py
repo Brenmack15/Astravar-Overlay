@@ -1,5 +1,7 @@
 """Exercise reviewed imports against the real staged schema, reopening the isolated store after every command."""
+import base64
 import copy
+import subprocess
 import json
 import sys
 import tempfile
@@ -10,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 import ascension_migrate as mig
 from ascension_migrate_legacy import COINS, encode
-from ascension_migrate_reviewed import STATS, template
+from ascension_migrate_reviewed import STATS, scoped_identity, template
 
 TENANT=("fixture-owner","fixture-continuity")
 ACTOR="fixture-actor"
@@ -30,8 +32,8 @@ class ReviewedGraphTest(unittest.TestCase):
         self.dst=self.root/"recovery.zip"
         self.path=self.root/"mapping.json"
         actor={"id":ACTOR,"name":"Fixture","revision":3,"level":4,"rules":{"core":"LEGACY_2014"},
-               "baseAbilities":dict(zip(STATS,(8,12,13,14,10,9))),"currentHp":13,"maxHp":22,"temporaryHp":None,
-               "proficiencyBonus":2,"baseAc":12,"gameSeconds":12,"resources":[{"id":POOL,"name":"Clips","current":1,"maximum":4,
+               "baseAbilities":dict(zip(STATS,(8,12,13,14,10,9))),"currentHp":13,"baseMaxHp":22,"baselineConstitutionModifier":1,"temporaryHp":None,
+               "reviewedProficiency":{"bonus":2,"source":{"id":"review","name":"Verified baseline","acceptance":"ACCEPTED_HOMEBREW"}},"baseAc":12,"gameSeconds":12,"resources":[{"id":POOL,"name":"Clips","current":1,"maximum":4,
                "type":"ordinary","recovery":"none","source":"Fixture protocol"}]}
         definition={"id":DEF,"name":"Fixture type","category":"tool","description":"Fixture implement","rarity":None,
                     "stackable":True,"wearable":False,"handheld":True,"attunement":"none","source":"Fixture catalog"}
@@ -69,8 +71,8 @@ class ReviewedGraphTest(unittest.TestCase):
         def target(i,kind,aid,title,data,rev):
             self.plan["targets"].append(dict(id=i,kind=kind,actorId=aid,title=title,data=data,life="active",revision=rev))
         target(ACTOR,"actor",ACTOR,actor["name"],{"role":"player","rulesProfile":"legacy_2014","level":actor["level"],
-               "proficiency":actor["proficiencyBonus"],"abilities":actor["baseAbilities"],"baseAc":actor["baseAc"],
-               "maxHp":actor["maxHp"],"currentHp":actor["currentHp"],"temporaryHp":None,"gameSeconds":12,
+               "proficiency":actor["reviewedProficiency"]["bonus"],"abilities":actor["baseAbilities"],"baseAc":actor["baseAc"],
+               "maxHp":actor["baseMaxHp"],"baselineConstitutionModifier":1,"currentHp":actor["currentHp"],"temporaryHp":None,"gameSeconds":12,
                "speeds":{},"conditions":[],"poolIds":[POOL],"effectIds":[],"skills":{}},3)
         target(POOL,"resource_pool",ACTOR,"Clips",{k:v for k,v in actor["resources"][0].items() if k not in ("id","name")},3)
         target(DEF,"item_definition",None,definition["name"],{k:v for k,v in definition.items() if k not in ("id","name")},2)
@@ -86,16 +88,17 @@ class ReviewedGraphTest(unittest.TestCase):
         p=["characterJson","$json"]
         w="playable.characters"
         witness(w,ACTOR,["id"],["profileId"])
-        for k in ("level","currentHp","temporaryHp","maxHp","gameSeconds","baseAc"):
+        for k in ("level","currentHp","temporaryHp","gameSeconds","baseAc","baselineConstitutionModifier"):
             witness(w,ACTOR,["data",k],p+[k])
         witness(w,ACTOR,["data","abilities"],p+["baseAbilities"])
-        witness(w,ACTOR,["data","proficiency"],p+["proficiencyBonus"])
+        witness(w,ACTOR,["data","maxHp"],p+["baseMaxHp"])
+        witness(w,ACTOR,["data","proficiency"],p+["reviewedProficiency","bonus"])
         witness(w,ACTOR,["data","rulesProfile"],p+["rules","core"],"lowercase")
         witness("authority.actors",ACTOR,["data","role"],["role"],"lowercase")
         witness(w,ACTOR,["data","poolIds",0],p+["resources",0,"id"])
-        witness(w,POOL,["id"],p+["resources",0,"id"])
+        witness("playable.characters.resources",POOL,["id"],["id"])
         for k in ("current","maximum","type","recovery","source"):
-            witness(w,POOL,["data",k],p+["resources",0,k])
+            witness("playable.characters.resources",POOL,["data",k],[k])
         witness("authority.items",DEF,["id"],["definitionJson","$json","id"])
         for k in self.plan["targets"][2]["data"]:
             witness("authority.items",DEF,["data",k],["definitionJson","$json",k])
@@ -141,6 +144,9 @@ class ReviewedGraphTest(unittest.TestCase):
             self.assertIn(b"historical-purchase",mig.sources(db)[mig.sha(self.files[0].read_bytes())][0])
         accepted=mig.control(self.lab,"cutover")["approvalSha256"]
         self.assertEqual("ISOLATED_CLOUD",mig.control(self.lab,"cutover",accepted)["status"])
+        worker=mig.ROOT/"scripts/tests/ascension_reviewed_readback.mjs"
+        after=json.loads(subprocess.check_output(["node",str(worker),mig.inspect(self.lab)["database"]],cwd=mig.ROOT))
+        self.assertEqual((2,0,13,1,3),(after["epoch"],after["revision"],after["ordinaryHp"],after["pool"],after["items"]))
         copied=self.root/"verified.zip"
         mig.export(self.lab,copied)
         mig.check_database(mig.read_bundle(copied))
@@ -181,6 +187,178 @@ class ReviewedGraphTest(unittest.TestCase):
             mig.control(self.lab,"cutover")
         decision=mig.control(self.lab,"rollback")["approvalSha256"]
         self.assertEqual("ROLLED_BACK",mig.control(self.lab,"rollback",decision)["status"])
+
+    def rebind_source(self,index,doc):
+        old=mig.sha(self.files[index].read_bytes())
+        self.files[index].write_bytes(encode(doc))
+        fresh=template([self.files[index].read_bytes()],*TENANT)
+        new=next(iter(fresh["sources"]))
+        self.plan["sources"][new]=self.plan["sources"].pop(old)
+        current={(d["family"],tuple(d["identity"])):d for d in fresh["decisions"]}
+        for section in ("decisions","links","parity","media"):
+            for d in self.plan[section]:
+                if d["source"]==old:
+                    d["source"]=new
+                    if section=="decisions":
+                        d["rowSha256"]=current[d["family"],tuple(d["identity"])]["rowSha256"]
+        return new
+
+    def test_same_reviewed_candidate_is_decoded_and_restored_as_canonical_private_media(self):
+        script="""import {encodeMediaPng} from './backend/owner-bridge/cloud-media-codec.mjs';
+        process.stdout.write(await encodeMediaPng(180,1,new Uint8Array(180*4).fill(149)));"""
+        png=subprocess.check_output(["node","--input-type=module","-e",script],cwd=mig.ROOT)
+        row=self.complete["playable"]["characters"][0]
+        parsed=json.loads(row["characterJson"])
+        parsed["portraitBase64"]=base64.b64encode(png).decode()
+        row["characterJson"]=json.dumps(parsed)
+        self.rebind_source(0,self.complete)
+        d=self.by_family["playable.characters"]
+        media={**{k:d[k] for k in ("source","family","identity")},"sourcePath":["characterJson","$json","portraitBase64"],
+               "target":ACTOR,"approvedSha256":"0"*64}
+        self.plan["media"]=[media]
+        with self.assertRaisesRegex(ValueError,"approved digest"):
+            self.package()
+        media["approvedSha256"]=mig.sha(png)
+        self.package()
+        bundle=mig.read_bundle(self.dst)
+        self.assertEqual(2,len(bundle["objects"]))
+        self.assertEqual(png,bundle["objects"][mig.sha(png)])
+        entity=next(r for r in bundle["rows"]["cloud_entities"] if r["kind"]=="media_asset")
+        self.assertEqual(ACTOR,entity["actor_id"])
+        self.assertEqual(entity["id"],next(r["to_id"] for r in bundle["rows"]["cloud_links"] if r["relation"]=="primary_image"))
+        self.assertEqual(180,json.loads(entity["data_json"])["width"])
+        proof=mig.inspect(self.lab,self.dst)["approvalSha256"]
+        mig.apply(self.lab,self.dst,proof)
+        again=self.root/"media-reopened.zip"
+        mig.export(self.lab,again)
+        self.assertEqual(bundle["objects"],mig.read_bundle(again)["objects"])
+
+    def test_source_local_collision_alias_rewrites_only_proven_references(self):
+        d=self.by_family["playable.characters.resources"]
+        alias=scoped_identity(TENANT,d["family"],d["identity"],"resource_pool",POOL)
+        self.plan["targets"][0]["data"]["poolIds"]=[alias]
+        self.plan["targets"][1]["id"]=alias
+        for d in self.plan["decisions"]:
+            d["targets"]=[alias if i==POOL else i for i in d["targets"]]
+        for w in self.plan["parity"]:
+            if w["target"]==POOL:
+                w["target"]=alias
+                if w["targetPath"]==["id"]:
+                    w["transform"]="scopedIdentity"
+            if w["targetPath"]==["data","poolIds",0]:
+                w["transform"]="canonicalRef"
+        self.package()
+        bundle=mig.read_bundle(self.dst)
+        self.assertIn(alias,{r["id"] for r in bundle["rows"]["cloud_entities"]})
+
+    def test_normalized_classification_requires_independent_original_and_cannot_author_balances(self):
+        d=self.by_family["playable.characters.resources"]
+        binding={k:d[k] for k in ("source","family","identity","rowSha256")}
+        facts={"format":"astravar-reviewed-source-facts","version":1,"owner":TENANT[0],"continuity":TENANT[1],
+               "facts":[{"id":"mechanical-classification","sourceBinding":binding,"reason":"Reviewed original pool and authored definition",
+                         "values":{"type":"ordinary","current":1}}]}
+        path=self.root/"facts.json";path.write_bytes(encode(facts));self.files.append(path)
+        prefix=template([path.read_bytes()],*TENANT)
+        f=prefix["decisions"][0]
+        f.update(disposition="map",reason="Approved semantic classification for this source pool",targets=[POOL],playerKnown=True)
+        self.plan["sources"].update(prefix["sources"]);self.plan["decisions"].append(f)
+        w=next(w for w in self.plan["parity"] if w["target"]==POOL and w["targetPath"]==["data","type"])
+        w.update({k:f[k] for k in ("source","family","identity")},sourcePath=["values","type"])
+        evidence=copy.deepcopy(next(w for w in self.plan["parity"] if w["target"]==POOL and w["targetPath"]==["data","current"]))
+        idx=self.plan["parity"].index(evidence)
+        self.plan["parity"][idx]={**w,"targetPath":["data","current"],"sourcePath":["values","current"]}
+        with self.assertRaisesRegex(ValueError,"cannot supply"):
+            self.package()
+        self.plan["parity"][idx]=evidence
+        facts["facts"][0]["sourceBinding"]["rowSha256"]="0"*64
+        self.rebind_source(2,facts)
+        with self.assertRaisesRegex(ValueError,"original row"):
+            self.package()
+        facts["facts"][0]["sourceBinding"]["rowSha256"]=d["rowSha256"]
+        self.rebind_source(2,facts)
+        self.assertEqual(3,self.package()["originalSources"])
+
+    def test_accepted_native_maximum_hp_and_damage_effects_use_shared_types(self):
+        raw=self.complete["playable"]["characters"][0]
+        ch=json.loads(raw["characterJson"])
+        ch["effects"]=[{"id":"native-"+target.lower(),"name":"Synthetic typed effect","source":{"id":"native-reference",
+            "name":"Source fixture","acceptance":"ACCEPTED_HOMEBREW","revision":1},
+            "payload":{"target":target,"operation":"ADD","amount":2,"key":""},"enabled":True} for target in ("MAX_HP","DAMAGE")]
+        raw["characterJson"]=json.dumps(ch)
+        self.rebind_source(0,self.complete)
+        fresh=template([self.files[0].read_bytes()],*TENANT)
+        actor=self.plan["targets"][0]
+        for index,effect in enumerate(ch["effects"]):
+            ident=effect["id"]
+            d=next(d for d in fresh["decisions"] if d["family"]=="playable.characters.effects" and d["identity"][-1]==ident)
+            d.update(disposition="map",targets=[ident],reason="Accepted native numeric effect",playerKnown=True)
+            self.plan["decisions"].append(d)
+            actor["data"]["effectIds"].append(ident)
+            adr=self.by_family["playable.characters"]
+            self.plan["parity"].append({**{k:adr[k] for k in ("source","family","identity")},
+               "sourcePath":["characterJson","$json","effects",index,"id"],"target":ACTOR,"targetPath":["data","effectIds",index],"transform":"exact"})
+            data={"target":("max_hp","damage")[index],"operation":"add","amount":2,"key":"all","source":"Source fixture","enabled":True}
+            self.plan["targets"].append(dict(id=ident,kind="effect",actorId=ACTOR,title=effect["name"],life="active",revision=1,data=data))
+            for source,target,transform in ((["id"],["id"],"exact"),(["payload","target"],["data","target"],"numericEffectTarget"),
+                 (["payload","operation"],["data","operation"],"lowercase"),(["payload","amount"],["data","amount"],"exact"),
+                 (["payload","key"],["data","key"],"unqualifiedEffectKey"),(["source","name"],["data","source"],"exact"),
+                 (["enabled"],["data","enabled"],"exact")):
+                self.plan["parity"].append({**{k:d[k] for k in ("source","family","identity")},
+                    "sourcePath":source,"target":ident,"targetPath":target,"transform":transform})
+        self.package()
+        result=mig.read_bundle(self.dst)
+        self.assertEqual({"max_hp","damage"},{json.loads(r["data_json"])["target"] for r in result["rows"]["cloud_entities"] if r["kind"]=="effect"})
+
+    def test_reference_archive_can_restore_source_backed_arc_and_session_with_unknown_dates(self):
+        def doc(identity,kind,props):
+            return {"externalId":identity,"category":kind,"visibility":"player","body":"Archived player-known account",
+                    "contentSha256":mig.sha(b"Archived player-known account"),"propertiesJson":json.dumps(props),"relationIds":[],
+                    "sourceUrl":"https://example.test/"+identity}
+        core={"summary":None,"state":"active","worldStart":None,"worldEnd":None,"eventIds":[],"source":"Approved public reference"}
+        arc={"classification":"story_arc","parentArcId":None,**core}
+        session={"previousSessionId":None,"arcId":"fixture-arc","playedOn":None,"openingCheckpointId":None,"closingCheckpointId":None,**core}
+        payload={"campaignId":TENANT[1],"title":"Fixture archive","sourceRootUrl":"https://example.test/fixture","sourceRootRevision":"1",
+                 "records":[doc("fixture-arc","story_arc",arc),doc("fixture-session","campaign_session",session)]}
+        raw=json.dumps(payload)
+        archive={"format":"astravar-campaign-archive","schema":1,"payloadSha256":mig.sha(raw.encode()),"payload":raw}
+        self.files=[self.root/"references.json"];self.files[0].write_bytes(encode(archive))
+        self.plan=template([self.files[0].read_bytes()],*TENANT)
+        for d in self.plan["decisions"]:
+            if d["family"]=="reference.metadata":
+                d.update(disposition="historical",reason="Original archive header")
+                continue
+            identity=d["identity"][0]
+            kind,data=("story_arc",arc) if identity=="fixture-arc" else ("campaign_session",session)
+            d.update(disposition="map",targets=[identity],playerKnown=True,reason="Reviewed named historical source")
+            self.plan["targets"].append(dict(id=identity,kind=kind,actorId=None,title=identity,revision=1,life="active",data=data))
+            src={k:d[k] for k in ("source","family","identity")}
+            self.plan["parity"].append({**src,"sourcePath":["externalId"],"target":identity,"targetPath":["id"],"transform":"exact"})
+            for key in data:
+                self.plan["parity"].append({**src,"sourcePath":["propertiesJson","$json",key],"target":identity,"targetPath":["data",key],"transform":"exact"})
+            if kind=="campaign_session":
+                self.plan["links"].append({**src,"from":identity,"to":"fixture-arc","relation":"session_in_arc",
+                                           "targetPath":["propertiesJson","$json","arcId"]})
+        self.assertEqual(2,self.package()["counts"]["cloud_entities"])
+        self.assertEqual("session_in_arc",mig.read_bundle(self.dst)["rows"]["cloud_links"][0]["relation"])
+
+    def test_older_source_requires_explicit_proven_supersession(self):
+        earlier=copy.deepcopy(self.complete["campaign"])
+        earlier["records"]["wallets"][0]["revision"]=1
+        earlier["records"]["wallets"][0]["gold"]=20
+        earlier["events"]=[]
+        path=self.root/"earlier.json";path.write_bytes(encode(earlier));self.files.append(path)
+        prefix=template([path.read_bytes()],*TENANT)
+        older=prefix["decisions"][0]
+        older.update(disposition="map",reason="Prior source",playerKnown=True,targets=[WALLET])
+        self.plan["sources"].update(prefix["sources"]);self.plan["decisions"].append(older)
+        with self.assertRaisesRegex(ValueError,"Conflicting native source versions"):
+            self.package()
+        current=self.by_family["records.wallets"]
+        older.update(disposition="superseded",targets=[],playerKnown=False,reason="Both wallets reviewed with matching stable identity and later revision",
+                     supersededBy={k:current[k] for k in ("source","family","identity","rowSha256")})
+        self.assertEqual(3,self.package()["originalSources"])
+        b=mig.read_bundle(self.dst)
+        self.assertEqual(14,json.loads(next(r["data_json"] for r in b["rows"]["cloud_entities"] if r["id"]==WALLET))["coins"]["gp"])
 
     def test_native_amount_cannot_substitute_equal_unrelated_event(self):
         self.wallet["silver"]=14

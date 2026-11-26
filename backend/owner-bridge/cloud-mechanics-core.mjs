@@ -29,7 +29,7 @@ export const component = fields({
 export const actorSchema = fields({
   actorId:identifier, name:named(160), role:option('player','companion','npc','creature'),
   rulesProfile:option('legacy_2014','revised_2024','custom'), level:whole(1,20),initiativeAfterActorId:identifier,
-  proficiency:nullable(whole(0,30)), maxHp:nullable(whole()), baselineConstitutionModifier:nullable(whole(-10,50)),currentHp:nullable(whole()), temporaryHp:nullable(whole()),
+  proficiency:nullable(whole(0,30)), maxHp:nullable(whole()), baselineConstitutionModifier:nullable(whole(-100,100)),currentHp:nullable(whole()), temporaryHp:nullable(whole()),
   baseAc:nullable(whole(0,100)), abilities:abilityMap, speeds:movementMap, senses:sensesMap, size:option('tiny','small','medium','large','huge','gargantuan'),creatureType:named(60), saveProficiencies:arrayOf(option(...stats),6),
   attacksPerAction:whole(1,12), attunementCapacity:nullable(whole(0,12)), gameSeconds:nullable(whole(0,100000000000)),
   source:named(300)
@@ -54,6 +54,7 @@ export const effectSchema = fields({
   amount:whole(-1000,1000), priority:whole(-100,100), stackingKey:identifier,
   sourceItemId:identifier, transfersWithItem:boolean, requiresAttunement:boolean, requiresOperating:boolean, formId:identifier, contextTag:identifier,
   damageRoute:option('attack','spell','both'),damageComponentId:identifier,damageType:option(...damageTypes),eachMatchingComponent:boolean,
+  charge:fields({poolId:identifier,amount:whole(1),trigger:option('attempt','confirmed_hit')},['poolId','amount','trigger']),
   expiresAt:nullable(whole(0,100000000000)), enabled:boolean
 }, ['actorId','effectId','name','source','target','key','operation']);
 export const costSchema = fields({poolId:identifier,amount:whole(1)},['poolId','amount']);
@@ -77,6 +78,9 @@ export const attackSchema = fields({
   dcBase:whole(0,100), dcProficient:boolean, dcBonus:whole(-100,100),saveSuccess:option('none','half','full'),
   reach:whole(0,10000), range:whole(0,10000), longRange:whole(0,10000), area:named(160),
   components:arrayOf(component,24), cost:costSchema, description:named(2000),
+  weaponBus:fields({cooldownSeconds:whole(1,86400)}),chargeActionId:identifier,
+  payloadRule:fields({componentId:identifier,storeActionId:identifier},['componentId','storeActionId']),
+  preparedPush:fields({feet:whole(1,200),ability:option(...stats),dc:whole(1,100),prone:boolean},['feet','ability','dc','prone']),
   riders:arrayOf(fields({id:identifier,trigger:option('hit','failed_save','prepared_charge','custom'),effect:named(500),
     duration:named(160),componentId:identifier,saveAbility:option(...stats),saveDc:whole(1,100)},['id','trigger','effect']),16)
 },['actorId','attackId','name','source','timing','delivery','resolution','components']);
@@ -116,9 +120,10 @@ export async function transferableSource(ctx,config){
   const item=config.sourceItemId?await ctx.get('item_instance',config.sourceItemId):null;
   must(item?.life==='active' && item.data.partyAccess && item.data.quantity===1 && item.data.custodianId===config.actorId &&
     !config.formId && !config.excludedForms?.length,'TRANSFERABLE_RULE_REQUIRES_INDEPENDENT_ITEM');
-  if(config.cost){
-    must(item.data.resourcePoolId===config.cost.poolId,'TRANSFERABLE_RULE_REQUIRES_ITEM_CHARGES');
-    const pool=await owned(ctx,'resource_pool',config.cost.poolId,config.actorId);
+  const cost=config.cost??config.charge;
+  if(cost){
+    must(item.data.resourcePoolId===cost.poolId,'TRANSFERABLE_RULE_REQUIRES_ITEM_CHARGES');
+    const pool=await owned(ctx,'resource_pool',cost.poolId,config.actorId);
     must(pool.data.type==='charge','TRANSFERABLE_RULE_REQUIRES_ITEM_CHARGES');
   }
 }
@@ -144,11 +149,12 @@ export async function activeForm(ctx,a) {
   return await gearEligible(ctx,f.data.sourceItemId,a.id,f.data.requiresAttunement,f.data.requiresOperating,null) ? f:null;
 }
 export function preferredEffect(candidate,prior) {
-  return !prior || candidate.data.priority>prior.data.priority || (candidate.data.priority===prior.data.priority &&
+  const priority=candidate.data.priority??0,previous=prior?.data.priority??0;
+  return !prior || priority>previous || (priority===previous &&
     ((candidate.data.amount??0)>(prior.data.amount??0) || ((candidate.data.amount??0)===(prior.data.amount??0) && candidate.id<prior.id)));
 }
-export async function activeEffects(ctx,a,form,contextTags=[]) {
-  const winners=new Map(), suppressed=[];
+export async function activeEffects(ctx,a,form,contextTags=[],chargedEffectIds=[]) {
+  const winners=new Map(), suppressed=[],optional=[];
   for (const id of a.data.effectIds) {
     const row=await ctx.get('effect',id);
     if (!row || row.actorId!==a.id || row.life!=='active') continue;
@@ -158,6 +164,11 @@ export async function activeEffects(ctx,a,form,contextTags=[]) {
       (d.expiresAt==null || (a.data.gameSeconds!=null && a.data.gameSeconds<d.expiresAt)) &&
       await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating,form);
     if (!eligible) {suppressed.push(id); continue;}
+    if(d.charge){
+      optional.push({id,title:row.title,target:d.target,key:d.key,damageRoute:d.damageRoute??'attack',damageType:d.damageType??null,
+        damageComponentId:d.damageComponentId??null,charge:d.charge});
+      if(!chargedEffectIds.includes(id))continue;
+    }
     // A shared anti-stacking key affects only the same mechanical target and subject.
     const qualifier=d.target==='damage'?[d.damageRoute??'attack',d.damageComponentId??null,d.damageType??null,!!d.eachMatchingComponent]:
       d.target==='roll_edge'||d.target==='damage_defense'?d.operation:null;
@@ -189,10 +200,16 @@ export async function activeEffects(ctx,a,form,contextTags=[]) {
     for(const c of ['grappled','restrained','paralyzed','petrified','unconscious'])if(applies(c))add(c,'speed','all','maximum',0);
     if(applies('petrified'))for(const type of damageTypes)add('petrified','damage_defense',type,'resistance');
   }
-  return {active,suppressed};
+  return {active,suppressed,optional};
 }
 export function numeric(base,active,target,key) {
-  const matching=active.filter(r=>r.data.target===target && (r.data.key===key||r.data.key==='all'));
+  const applicable=new Map();
+  for(const row of active){
+    if(row.data.target!==target || row.data.key!==key && row.data.key!=='all')continue;
+    const group=row.data.stackingKey??row.id;
+    if(preferredEffect(row,applicable.get(group)))applicable.set(group,row);
+  }
+  const matching=[...applicable.values()];
   const sets=matching.filter(r=>r.data.operation==='set').sort((a,b)=>b.data.priority-a.data.priority||b.data.amount-a.data.amount||a.id.localeCompare(b.id));
   const applied=matching.filter(r=>r.data.operation==='add');
   const starting=sets.length ? sets[0].data.amount : base;
@@ -211,9 +228,9 @@ export function rollPolicy(active,key,requested='normal') {
 export function healedHp(current,maximum,amount){
   return current+Math.min(Math.max(0,maximum-current),amount);
 }
-export async function sheet(ctx,id,contextTags=[],previewFormId=undefined) {
+export async function sheet(ctx,id,contextTags=[],previewFormId=undefined,chargedEffectIds=[]) {
   const a=await actor(ctx,id), form=previewFormId===undefined?await activeForm(ctx,a):previewFormId?await owned(ctx,'form',previewFormId,id):null;
-  const {active,suppressed}=await activeEffects(ctx,a,form,contextTags);
+  const {active,suppressed,optional}=await activeEffects(ctx,a,form,contextTags,chargedEffectIds);
   const abilities={},checks={},saves={},skills={},passives={},skillDefinitions={};
   for(const stat of stats){
     const base=a.data.abilities[stat]??null;
@@ -261,18 +278,31 @@ export async function sheet(ctx,id,contextTags=[],previewFormId=undefined) {
       for(const key of subjects.filter(k=>k.startsWith('ability:')||k.startsWith('skill:')))rollRestrictions[key]='REQUIRED_SENSE_UNAVAILABLE';
   }
   const rollModes=Object.fromEntries(subjects.map(key=>[key,Object.fromEntries(['normal','advantage','disadvantage'].map(mode=>[mode,rollPolicy(active,key,mode)]))]));
-  return {actorId:id,activityState:a.data.activityState??null,formId:form?.id??null,size:form?.data.size??a.data.size??null,creatureType:form?.data.creatureType??a.data.creatureType??null,
+  const communications=[],mobilityRules=[];
+  for(const featureId of a.data.sensoryFeatureIds??[]){
+    const feature=await ctx.get('feature',featureId),d=feature?.data;
+    if(feature?.life!=='active'||feature.actorId!==id||d.formId&&d.formId!==form?.id||
+      !await gearEligible(ctx,d.sourceItemId,id,d.requiresAttunement,d.requiresOperating,form))continue;
+    if(d.speech)communications.push({featureId,kind:'speech',...d.speech,unassigned:d.speech.capacity-d.speech.languages.length});
+    if(d.telepathy)communications.push({featureId,kind:'telepathy',...d.telepathy});
+    if(d.mobility)mobilityRules.push({featureId,kind:d.mobility,eligible:movement.fly>0,requiresMovement:'fly'});
+  }
+  return {actorId:id,communications,mobilityRules,activityState:a.data.activityState??null,formId:form?.id??null,size:form?.data.size??a.data.size??null,creatureType:form?.data.creatureType??a.data.creatureType??null,
     senses,abilities,checks,saves,skills,passives,skillDefinitions,ac,movement,
     initiative:numeric(abilities.DEX.modifier,active,'initiative','all'),proficiency:a.data.proficiency,
     currentHp:a.data.currentHp,maxHp:hpMaximum.value,temporaryHp:a.data.temporaryHp,
     hpMaximum:{...hpMaximum,baseMaxHp:a.data.maxHp,baselineConstitutionModifier:baselineCon,constitutionAdjustment:conDelta},
-    activeEffects:active.map(r=>r.id),suppressedEffects:suppressed,conditions:a.data.conditions,rollModes,rollRestrictions,contextTags:a.data.contextTags??[],
+    activeEffects:active.map(r=>r.id),suppressedEffects:suppressed,optionalChargedEffects:optional,conditions:a.data.conditions,rollModes,rollRestrictions,contextTags:a.data.contextTags??[],
     defenses:active.filter(r=>r.data.target==='damage_defense').map(r=>({type:r.data.key,kind:r.data.operation,source:r.id})),
     effects:active};
 }
+export function availableUses(pool){
+  return pool.current==null?null:pool.current-(pool.effectHolds??[]).reduce((n,h)=>n+h.amount,0);
+}
 export async function spend(ctx,actorId,id,amount) {
   const p=await owned(ctx,'resource_pool',id,actorId);
-  must(Number.isSafeInteger(p.data.current)&&p.data.current>=amount,'RESOURCE_EMPTY_OR_UNKNOWN');
+  const available=availableUses(p.data);
+  must(Number.isSafeInteger(available)&&available>=amount,'RESOURCE_EMPTY_OR_UNKNOWN');
   const after=p.data.current-amount;
   await save(ctx,p,{...p.data,current:after});
   return {poolId:id,before:p.data.current,after,amount};
@@ -293,7 +323,7 @@ export async function useTiming(ctx,a,timing) {
   const {encounter,turn}=cost,next={...turn};
   if(timing==='attack'){next.attacks--;next.action=next.attacks>0;}
   else {next[timing]=false;if(timing==='action')next.attacks=0;}
-  await save(ctx,encounter,{...encounter.data,economy:{...encounter.data.economy,[a.id]:next}});
+  await save(ctx,encounter,{...encounter.data,actedThisTurn:encounter.data.actedThisTurn===true||encounter.data.participants[encounter.data.index]===a.id,economy:{...encounter.data.economy,[a.id]:next}});
 }
 export async function addClock(ctx,a,seconds) {
   const now=a.data.gameSeconds;

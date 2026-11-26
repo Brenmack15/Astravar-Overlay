@@ -274,3 +274,42 @@ test('pool ledger preserves exact scoped balances, receipt confidentiality and a
   await l.grant('sites-mcp',['resources.read'],[],['other-fixture'],2);
   assert.equal((await l.rpc('get_cloud_pool_history',{id:'relay'})).error,'POOL_UNAVAILABLE');
 });
+
+test('reviewed roster changes recompute party wealth and inventory without moving property, currency or granting access', async t => {
+  const l=await lab(t); let revision=0;
+  async function commit(name,args) {
+    let result=await l.post(path+'/commands',command(revision,name,args));
+    if(name==='set_actor_membership') {
+      assert.equal(result.value.status,'PENDING_APPROVAL');
+      const request=result.value;
+      result=await l.post(path+'/approvals/'+request.commandId+'/verify',{digest:request.digest});
+    }
+    assert.equal(result.value.status,'COMMITTED',JSON.stringify(result.value)); revision++;
+    return result.value;
+  }
+  const f=(id,party)=>({actorId:id,participation:'active',inParty:party,worldTime:null,source:'synthetic owner decision'});
+  await commit('define_actor',player);
+  await commit('define_actor',{...player,actorId:'author',name:'Fixture chronicler',role:'npc'});
+  await commit('define_wallet',{walletId:'traveller-wallet',title:'Known purse',holderId:player.actorId,shared:false,coins:gp(25),source:'fixture'});
+  await commit('define_item_definition',{definitionId:'compass-type',name:'Fixture compass',category:'tool',description:'For the rehearsal',rarity:null,stackable:false,wearable:false,handheld:true,attunement:'none',source:'fixture'});
+  await commit('acquire_item',{itemId:'compass',definitionId:'compass-type',ownerId:player.actorId,quantity:1,source:'fixture'});
+  async function totals() {
+    return [(await l.rpc('get_cloud_record_view',{view:'wallets'})).totals.coins.gp,
+      (await l.rpc('get_cloud_record_view',{view:'inventory'})).groups.length];
+  }
+  assert.deepEqual(await totals(),['25',1]);
+  const reviewed=await commit('set_actor_membership',f(player.actorId,false));
+  assert.equal(reviewed.receipt.outcome.previous.inParty,true);
+  assert.deepEqual(await totals(),['0',0]);
+  const state=id=>l.rpc('get_cloud_state',{id});
+  assert.equal((await state('traveller-wallet')).records[0].data.coins.gp,25);
+  assert.equal((await state('compass')).records[0].data.ownerId,player.actorId);
+  assert.equal((await l.post(path+'/commands',command(revision,'set_actor_membership',{...f(player.actorId,true),participation:'historical'}))).status,409);
+  await commit('set_actor_membership',f('author',true));
+  assert.equal((await state('author')).records[0].data.role,'npc');
+  await commit('set_actor_membership',f(player.actorId,true));
+  assert.deepEqual(await totals(),['25',1]);
+  await l.grant('sites-mcp',baseScopes,[],['author'],1);
+  assert.equal((await state('compass')).records.length,0);
+  assert.equal((await l.rpc('get_cloud_record_view',{view:'wallets'})).error,'PARTY_AGGREGATE_SCOPE_REQUIRED');
+});

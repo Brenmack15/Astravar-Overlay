@@ -28,6 +28,11 @@ test('owner-reviewed resource, delegation, context, artwork and lifecycle produc
   await assert.rejects(submit(settings),/OWNER_REQUIRED/);
   const actorId='review-actor',poolId='review-pool',source='isolated table agreement';
   for(const id of [actorId,'disposable'])await run('define_actor',{actorId:id,name:'Synthetic actor',role:'companion',rulesProfile:'legacy_2014',level:1});
+  const membership={actorId,participation:'active',inParty:false,worldTime:null,source:'reviewed fixture roster'};
+  const left=await run('set_actor_membership',membership,{review:true});
+  assert.equal(left.receipt.outcome.previous.inParty,true);
+  assert.equal(left.receipt.outcome.membership.inParty,false);
+  await run('set_actor_membership',{...membership,inParty:true},{review:true});
   await run('define_resource',{actorId,poolId,name:'Fixture uses',type:'charge',maximum:4,current:null,recovery:'none',source});
   await run('correct_resource_balance',{actorId,poolId,before:null,after:2,source},{review:true});
   await run('set_dice_delegation',{actorId,category:'hit_dice',enabled:true,source},{review:true});

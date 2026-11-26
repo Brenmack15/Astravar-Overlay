@@ -94,6 +94,7 @@ private val categoryScopes = mapOf(
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val clipboard = LocalClipboardManager.current
     var tab by rememberSaveable { mutableStateOf("Character") }
+    var inboxFromTools by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     var search by rememberSaveable { mutableStateOf(false) }
     var tool by rememberSaveable { mutableStateOf<String?>(null) }
@@ -187,7 +188,7 @@ private val categoryScopes = mapOf(
 
     Scaffold(containerColor = RebuildPalette.Canvas, topBar = {
         RebuildAppHeader(false, search = { search = !search; query = "" }, tools = { tool = "Tools" },
-            notifications = { tool = "Inbox" }, actionable = count)
+            notifications = { inboxFromTools = false; tool = "Inbox" }, actionable = count)
     }, bottomBar = { RebuildPrimaryNavigation(tab) { tab=it; inspected=null; search=false; query="" } },
         floatingActionButton = {
             if (tab == "Character" && !search && snapshot.visible && actorId != null) FloatingActionButton(
@@ -241,14 +242,17 @@ private val categoryScopes = mapOf(
         "Tools" -> PlayerSheet("Owner connection", { tool=null }) {
             Text("Cloud campaign · ${snapshot.binding.continuity}")
             Text("Last cached revision ${snapshot.version.revision}")
+            PlayerOutlinedButton({ inboxFromTools = true; tool = "Inbox" }) { Text("Pending owner reviews") }
             PlayerButton({ ownerPage(access=true) }) { Text("Manage campaign access") }
             PlayerTextButton({tool="Settings"}) {Text("Campaign settings")}
+            PlayerTextButton({tool="Roster"}) {Text("Campaign roster")}
             PlayerTextButton({ tool="Device" }) { Text("Manage device connection") }
             PlayerTextButton({ tool="Archive" },enabled=verified && !busy) { Text("Archive manager") }
             PlayerTextButton({ tool="Recovery" }) { Text("Local backup and recovery") }
             PlayerTextButton({ tool="History" }) { Text("Check submitted commands") }
             PlayerTextButton({ menuScope=null; tool="Operations" },enabled=verified && !busy) { Text("All permitted operations") }
         }
+        "Roster" -> if (snapshot.visible) CloudRoster(client,snapshot,verified && !busy,::openOperation){tool=null}
         "Settings" -> PlayerSheet("Campaign settings",{tool=null}) {
             var metadata by remember { mutableStateOf<JsonObject?>(null) }
             var loaded by remember { mutableStateOf(false) }
@@ -279,7 +283,7 @@ private val categoryScopes = mapOf(
             }
         }
         "Dice" -> actorId?.let { if (snapshot.visible) CloudRollManager(client,snapshot,it,verified) { tool=null } }
-        "Inbox" -> CloudApprovalCenter(client,snapshot,verified) { tool=null }
+        "Inbox" -> CloudApprovalCenter(client,snapshot,verified, onCount = { count = it }) { tool = if (inboxFromTools) "Tools" else null }
         "Operations" -> PlayerSheet("Campaign operations",{tool=null}) {
             operations.filter { menuScope==null || it.cloudText("scope") in menuScope.orEmpty() }.sortedBy { it.cloudText("name") }.forEach { op ->
                 PlayerTextButton({ openOperation(op.cloudText("name"),buildJsonObject {}) },enabled=verified && !busy) {
@@ -300,12 +304,16 @@ private val categoryScopes = mapOf(
             Text(cloudLabel(r.cloudText("status").lowercase()))
             val receipt=r["receipt"] as? JsonObject
             val outcome=receipt?.get("outcome") as? JsonObject
-            val lines=outcome?.let(::namedCloudResults).orEmpty()
-            if(lines.isEmpty())RecordFields(outcome ?: r)
-            else lines.forEach { line->
-                Text(line,Modifier.fillMaxWidth().clickable(onClickLabel="Copy roll result"){
-                    clipboard.setText(AnnotatedString(line))
-                }.padding(vertical=12.dp),style=MaterialTheme.typography.titleMedium)
+            val lines = outcome?.let(::namedCloudResults).orEmpty()
+            if (lines.isEmpty()) {
+                RecordFields(outcome ?: r)
+            } else {
+                for (line in lines) {
+                    val copyResult = Modifier.fillMaxWidth()
+                        .clickable(onClickLabel = "Copy roll result") { clipboard.setText(AnnotatedString(line)) }
+                        .padding(vertical = 12.dp)
+                    Text(line, modifier = copyResult, style = MaterialTheme.typography.titleMedium)
+                }
             }
             if(outcome!=null && "appliedDamage" in outcome && outcome["appliedDamage"]==JsonNull)
                 Text("Potential damage · awaiting target resolution")

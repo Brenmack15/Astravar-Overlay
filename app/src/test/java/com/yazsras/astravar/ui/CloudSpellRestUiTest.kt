@@ -81,7 +81,14 @@ class CloudSpellRestUiTest {
         val activity=Robolectric.buildActivity(ComponentActivity::class.java).setup()
         val calls=mutableListOf<Pair<String,JsonObject>>()
         val actor=buildJsonObject { put("currentHp",11);put("maxHp",18);put("rulesProfile","legacy_2014") }
-        val sheet=buildJsonObject { putJsonObject("abilities"){putJsonObject("CON"){put("modifier",2)}} }
+        val sheet=buildJsonObject {
+            put("currentHp",11);put("maxHp",22)
+            putJsonObject("abilities"){putJsonObject("CON"){put("modifier",2)}}
+            putJsonObject("hpMaximum"){
+                put("value",22);put("baseMaxHp",18)
+                putJsonArray("sources"){add(buildJsonObject{put("source","Protective lining");put("operation","add");put("value",4)})}
+            }
+        }
         val pool=buildJsonObject {put("id","hd");put("title","Fixture Hit Dice");putJsonObject("data"){
             put("type","hit_die");put("dieSides",8);put("maximum",3);put("current",2);put("recovery","edition_hit_dice")
         }}
@@ -89,6 +96,11 @@ class CloudSpellRestUiTest {
             activity.get().setContent { AstravarTheme { Column(Modifier.verticalScroll(rememberScrollState())) {
                 CloudRestPlan("fixture",actor,sheet,listOf(pool),true){name,args->calls.add(name to args)}
             } } }
+            compose.onNodeWithText("Hit points 11/22").assertExists()
+            compose.onNodeWithText("Maximum HP sources").performScrollTo().performClick()
+            compose.onNodeWithText("Protective lining · +4").assertExists()
+            compose.onNodeWithText("Effective maximum · 22").assertExists()
+            compose.onNodeWithText("Maximum HP sources").performClick()
             compose.onNodeWithText("Complete short rest").performScrollTo().performClick()
             compose.onNodeWithText("Cancel").performClick()
             assertTrue(calls.isEmpty())

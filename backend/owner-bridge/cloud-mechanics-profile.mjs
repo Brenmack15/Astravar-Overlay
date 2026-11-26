@@ -7,7 +7,10 @@ const trainSchema=fields({actorId:identifier,category:option('save','tool','weap
   trained:boolean,source:named(300)},['actorId','category','key','trained','source']);
 const featureKinds=['effect','action_definition','attack','resource_pool','spell_grant'];
 const featureSchema=fields({actorId:identifier,featureId:identifier,name:named(160),kind:option('class','subclass','species','feat','homebrew','companion','form'),
-  description:named(3000),source:named(300),formId:identifier,references:arrayOf(fields({id:identifier,kind:option(...featureKinds)},['id','kind']),24)},
+  description:named(3000),source:named(300),formId:identifier,sourceItemId:identifier,requiresOperating:boolean,requiresAttunement:boolean,
+  speech:fields({languages:arrayOf(named(80),24),capacity:whole(0,24),fullSentences:boolean},['languages','capacity','fullSentences']),
+  telepathy:fields({partnerActorId:identifier,twoWay:boolean,sharedSenses:boolean,limitFeet:whole(1,1000000)},['partnerActorId','twoWay','sharedSenses']),
+  mobility:option('flyby'),references:arrayOf(fields({id:identifier,kind:option(...featureKinds)},['id','kind']),24)},
   ['actorId','featureId','name','kind','description','source','references']);
 const capacity=fields({poolId:identifier,previous:whole(),maximum:whole(),granted:whole()},['poolId','previous','maximum','granted']);
 const advancementSchema=fields({actorId:identifier,eventId:identifier,fromLevel:whole(1,19),toLevel:whole(2,20),source:named(300),
@@ -42,14 +45,29 @@ async function feature(ctx,x,edit){
   const a=await actor(ctx,x.actorId),old=edit?await owned(ctx,'feature',x.featureId,a.id):null;
   if(x.formId)await owned(ctx,'form',x.formId,a.id);
   must(x.kind!=='form'||x.formId,'FEATURE_FORM_REQUIRED');
+  must((!x.requiresOperating&&!x.requiresAttunement)||x.sourceItemId,'FEATURE_ITEM_REQUIRED');
+  if(x.sourceItemId)must((await ctx.get('item_instance',x.sourceItemId))?.life==='active','FEATURE_ITEM_REQUIRED');
+  if(x.speech)must(x.speech.languages.length<=x.speech.capacity && new Set(x.speech.languages.map(l=>l.toLowerCase())).size===x.speech.languages.length,'INVALID_LANGUAGE_PACKAGES');
+  if(x.telepathy){must(x.telepathy.partnerActorId!==a.id,'FEATURE_PARTNER_INVALID');await actor(ctx,x.telepathy.partnerActorId);}
+  const sensory=Boolean(x.speech||x.telepathy||x.mobility);
+  const indexed=(a.data.sensoryFeatureIds??[]).filter(id=>id!==x.featureId);
+  if(sensory)indexed.push(x.featureId);
+  must(indexed.length<=64,'SENSORY_FEATURE_LIMIT');
   must(new Set(x.references.map(r=>r.id)).size===x.references.length,'DUPLICATE_FEATURE_REFERENCE');
   for(const r of x.references)await owned(ctx,r.kind,r.id,a.id);
-  const data={category:x.kind,description:x.description,source:x.source,formId:x.formId??null,references:x.references};
+  const data={category:x.kind,description:x.description,source:x.source,formId:x.formId??null,references:x.references,
+    ...(x.sourceItemId?{sourceItemId:x.sourceItemId,requiresAttunement:x.requiresAttunement??false,requiresOperating:x.requiresOperating??false}:{}),
+    ...(x.speech?{speech:x.speech}:{}),...(x.telepathy?{telepathy:x.telepathy}:{}),...(x.mobility?{mobility:x.mobility}:{})};
   if(old){
     for(const r of old.data.references)if(!x.references.some(n=>n.id===r.id))await ctx.unlink(old.id,'feature_mechanic',r.id);
     if(old.data.formId&&old.data.formId!==x.formId)await ctx.unlink(old.id,'feature_form',old.data.formId);
     await ctx.put({...old,title:x.name,data});
   }else await insert(ctx,'feature',x.featureId,a.id,x.name,data);
+  if(sensory||a.data.sensoryFeatureIds?.includes(x.featureId))await save(ctx,a,{...a.data,sensoryFeatureIds:indexed});
+  for(const [kind,prev,next] of [['feature_source',old?.data.sourceItemId,x.sourceItemId],['communicates_with',old?.data.telepathy?.partnerActorId,x.telepathy?.partnerActorId]]){
+    if(prev && prev!==next)await ctx.unlink(x.featureId,kind,prev);
+    if(next && prev!==next)await ctx.link(x.featureId,kind,next);
+  }
   for(const r of x.references)if(!old?.data.references.some(b=>b.id===r.id))await ctx.link(x.featureId,'feature_mechanic',r.id);
   if(x.formId && x.formId!==old?.data.formId)await ctx.link(x.featureId,'feature_form',x.formId);
   return {actorId:a.id,featureId:x.featureId,...data};

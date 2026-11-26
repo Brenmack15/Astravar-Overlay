@@ -32,11 +32,31 @@ async function grant(r){
   return required(r,route+'/grants/sites-mcp','POST',{scopes,actors:['*'],auto:['character.write','media.write'],revoked:false,
     expiresAt:Date.now()+86400000,expectedGrantRevision:0});
 }
+async function unresolvedMappingBlocksProviderCutover(tmp){
+  const blockedRoot=path.join(tmp,'retained-root'),native=path.join(tmp,'unresolved-native.json');
+  const mapping=path.join(tmp,'review.json'),archive=path.join(tmp,'retained.zip');
+  fs.writeFileSync(native,JSON.stringify({format:'astravar-reforge',schema:2,exportedAt:100,characters:[],
+    rolls:[{id:'unresolved-roll',profileId:'unknown-member',formula:'1d20'}],changes:[]}));
+  const cli=path.join(project,'tools/ascension_migrate.py'),scope=['--source',native,'--owner',owner,'--continuity',id];
+  const plan=JSON.parse(execFileSync('python3',[cli,'mapping-template',...scope],{encoding:'utf8'}));
+  assert.equal(plan.decisions.length,1);
+  Object.assign(plan.decisions[0],{disposition:'retain',reason:'The original does not establish campaign membership.'});
+  fs.writeFileSync(mapping,JSON.stringify(plan));
+  execFileSync('python3',[cli,'convert-reviewed',...scope,mapping,archive]);
+  await recovery.create(blockedRoot,owner,id,mod);
+  const stage=await recovery.prepare(blockedRoot,archive,null,mod);
+  await recovery.prepare(blockedRoot,archive,stage.approvalSha256,mod);
+  await assert.rejects(recovery.cutover(blockedRoot,null,false,mod),/Source records still require reviewed reconciliation/);
+  const state=await recovery.inspect(blockedRoot,mod);
+  assert.equal(state.current,null);
+  assert.equal(state.stage.authority,'staged');
+}
 async function verify(){
   process.umask(0o077);const previous=process.cwd(),tmp=fs.mkdtempSync(path.join(os.tmpdir(),'ascension-provider-proof-'));
   process.chdir(tmp);
   const root=path.join(tmp,'store'),zip=path.join(tmp,'cold.zip');
   try{
+    await unresolvedMappingBlocksProviderCutover(tmp);
     await recovery.create(root,owner,id,mod);
     const {encodeMediaPng,mediaDigest}=await import(pathToFileURL(path.join(project,'backend/owner-bridge/cloud-media-codec.mjs')));
     const bytes=await encodeMediaPng(2,2,new Uint8Array([1,9,70,255,2,50,190,255,3,20,210,255,4,99,60,255]));
@@ -55,6 +75,12 @@ async function verify(){
       pending=await submit(r,envelope('provider-pending-event',2,'record_chronicle_event',{eventId:'fixture-event',title:'Proposed entry',
         narrative:'Awaiting owner verification.',category:'conversation',worldTime:null,subjects:[{kind:'actor',id:actorId}],correctsId:null,status:'confirmed',source:'isolated fixture'}));
       assert.equal(pending.status,'PENDING_APPROVAL');
+      const queue=await required(r,route+'/review-inbox?limit=1');
+      assert.equal(queue.actionableCount,1);
+      assert.deepEqual(queue.requests.map(rec=>rec.commandId),[pending.commandId]);
+      const exact=await required(r,route+'/review-inbox/'+pending.commandId+'?digest='+pending.digest);
+      assert.equal(exact.readiness,'READY');
+      assert.equal(exact.plan.changes[0].after.id,'fixture-event');
     },mod);
     const portable=await recovery.backup(root,zip,mod);
     const checked=JSON.parse(execFileSync('python3',[path.join(project,'tools/ascension_migrate.py'),'validate',zip],{encoding:'utf8'}));
@@ -137,7 +163,7 @@ async function verify(){
     assert.equal((await recovery.backup(root,scopedBackup,mod)).source.revision,4);
     await assert.rejects(recovery.prepare(root,scopedBackup,null,mod),/shared provider root/);
     console.log(JSON.stringify({status:'VERIFIED',runtime:'workerd',initialRevision:2,recoveredEpoch:2,postRecoveryRevision:4,
-      originalReceipts:2,preservedPending:1,restoredImage:true,failedExportPublished:false,staleCutoverRefused:true,inFlightGrantChangeDetected:true,sharedGenerationProtected:true,production:false}));
+      originalReceipts:2,preservedPending:1,restoredImage:true,failedExportPublished:false,staleCutoverRefused:true,inFlightGrantChangeDetected:true,sharedGenerationProtected:true,unresolvedSourceCutoverBlocked:true,providerInboxRead:true,production:false}));
   }finally{process.chdir(previous);fs.rmSync(tmp,{force:true,recursive:true});}
 }
 verify().catch(error=>{console.error(error.stderr?.toString().trim()||error.stack);process.exitCode=1;});
