@@ -150,6 +150,35 @@ test('stale event receives a conflict disposition; scoped replacement binds orig
   assert.equal((await l.rpc('get_cloud_state',{id:'inventor'})).records[0].data.abilities.INT,17);
 });
 
+test('owner replacement retains original grant through a second review and cannot fork a settled request',async t=>{
+  const l=await lab(t);
+  await l.rpc('submit_cloud_command',{command:command(0,'define_actor',player)});
+  await l.grant('sites-mcp',baseScopes,[],['*'],1);
+  const args={actorId:'inventor',ability:'INT',score:17},original=command(1,'set_actor_ability',args);
+  const originalProposal=await l.rpc('submit_cloud_command',{command:original});
+  await l.post(path+'/commands',command(1,'set_actor_ability',{...args,score:15}));
+  const decide=p=>l.post(path+'/approvals/'+p.commandId+'/verify',{digest:p.digest});
+  const conflict=await decide(originalProposal);
+  assert.equal(conflict.value.status,'CONFLICT');
+  const replace=(prior,revision)=>({...command(revision,original.operation,args),replacesCommandId:prior.commandId,replacesDigest:prior.digest});
+  const child=(await l.post(path+'/commands',replace(originalProposal,2))).value;
+  assert.equal(child.status,'PENDING_APPROVAL');
+  await l.post(path+'/commands',command(2,'set_actor_ability',{...args,score:16}));
+  assert.equal((await decide(child)).value.status,'CONFLICT');
+  const next=(await l.post(path+'/commands',replace(child,3))).value;
+  assert.equal(next.status,'PENDING_APPROVAL');
+  assert.equal((await l.post(path+'/commands',replace(originalProposal,3))).status,409);
+  await l.grant('sites-mcp',baseScopes,[],['*'],2,true);
+  const refused=await decide(next);
+  assert.equal(refused.value.status,'REFUSED');
+  assert.equal(refused.value.receipt.reason,'REPLACEMENT_AUTHORITY_UNAVAILABLE');
+  assert.equal((await decide(next)).value.receipt.transactionId,refused.value.receipt.transactionId);
+  const authority=await l.request(path+'/state?id=inventor');
+  assert.equal(authority.value.revision,3);
+  assert.equal(authority.value.records[0].data.abilities.INT,16);
+  assert.deepEqual((await l.request(path+'/receipts/'+original.commandId)).value,conflict.value);
+});
+
 test('spellbook inspection and level previews calculate scaling without casting or changing slots',async t=>{
   const l=await lab(t);let rev=0;
   async function seed(operation,args){

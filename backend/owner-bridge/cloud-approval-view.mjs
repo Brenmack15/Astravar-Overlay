@@ -71,8 +71,18 @@ export async function cloudReviewInbox(service,principal,id,mode,opts={}){
     const terminal=await service.s('SELECT * FROM cloud_receipts WHERE owner_id=? AND continuity_id=? AND command_id=?',...b,row.command_id).first();
     if(!terminal)cloudFail(503,'CLOUD_EVIDENCE_INCOMPLETE');
     const result=await readResultEvidence(service,b,terminal);
+    const canReviewReplacement=terminal.status==='CONFLICT' && result.reason==='REVIEW_BASELINE_CHANGED' &&
+      proposal.command?.epoch===c.epoch && !proposal.evidenceErased;
+    let replacement=null;
+    if(canReviewReplacement && principal.role==='owner'){
+      const child=await service.s(`SELECT command_id,digest FROM cloud_requests WHERE owner_id=? AND continuity_id=?
+        AND json_extract(request_json,'$.command.replacesCommandId')=?
+        ORDER BY submitted_at DESC, command_id LIMIT 1`,...b,row.command_id).first();
+      replacement=child?{commandId:child.command_id,digest:child.digest}:null;
+    }
     await confirm(service,principal,id,grant,c);
-    return {...stamp,commandId:row.command_id,digest:row.digest,operation:parsed.command.operation,status:terminal.status,reason:result.reason??null,
+    return {...stamp,canReviewReplacement,...(canReviewReplacement && principal.role==='owner'?{originalCommand:proposal.command,replacement}:{}),
+      commandId:row.command_id,digest:row.digest,operation:parsed.command.operation,status:terminal.status,reason:result.reason??null,
       receipt:{transactionId:terminal.transaction_id,epoch:terminal.epoch,revision:terminal.revision}};
   }
   const pending=await service.s("SELECT q.command_id,q.digest,q.subject,q.submitted_at,q.readiness,json_extract(q.request_json,'$.command.operation') AS operation"+base+

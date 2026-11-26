@@ -598,6 +598,20 @@ class ReforgeCharacterUiTest {
         }
     }
 
+    @Test
+    @Config(qualifiers = "w360dp-h680dp")
+    fun skillQuickRollRemainsAboveTheFloatingDieOnASmallPhone() = withSheet { repository ->
+        val skill = compose.onNodeWithTag("skill-quick-Survival")
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag("skill-quick-Survival").fetchSemanticsNodes().isNotEmpty() }
+        skill.performScrollTo().assertIsDisplayed()
+        val die = compose.onNodeWithContentDescription("Roll Manager")
+        assertTrue(skill.fetchSemanticsNode().boundsInRoot.bottom <= die.fetchSemanticsNode().boundsInRoot.top)
+        skill.performTouchInput { click(center) }
+        compose.waitUntil(10_000) { runBlocking { repository.rollHistory(fixture().id).first() }.size == 1 }
+        assertEquals("Survival", runBlocking { repository.rollHistory(fixture().id).first() }.single().label)
+        compose.onNodeWithText("Roll All").assertDoesNotExist()
+    }
+
     @Test fun openingDiceDoesNotRollAndOnlyExplicitSavedRollPersists() = withSheet { repository ->
         compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("reforge-check-STR").performSemanticsAction(SemanticsActions.OnLongClick)

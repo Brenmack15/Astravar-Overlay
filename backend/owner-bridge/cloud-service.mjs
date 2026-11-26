@@ -97,8 +97,18 @@ export class CloudService {
   async access(principal,id){
     const subject=subjectFor(principal,this.ownerId,id);
     // Scope-check ordinary callers before exposing continuity membership.
-    const grant=await this.grantForSubject(id,subject);
-    return {grant,continuity:await this.continuity(id)};
+    try{
+      const grant=await this.grantForSubject(id,subject);
+      return {grant,continuity:await this.continuity(id)};
+    }catch(error){
+      // Only a genuinely paired, authenticated device sees the disposition of its own grant.
+      if(principal.role==='device' && !principal.inactive && error instanceof BridgeError && error.code==='CLOUD_GRANT_DENIED'){
+        const saved=await this.s('SELECT revoked,expires_at FROM cloud_grants WHERE owner_id=? AND continuity_id=? AND subject=?',...this.key(id),subject).first();
+        if(saved?.revoked)cloudFail(403,'CLOUD_DEVICE_GRANT_REVOKED');
+        if(saved && saved.expires_at<=this.now())cloudFail(403,'CLOUD_DEVICE_GRANT_EXPIRED');
+      }
+      throw error;
+    }
   }
   async capabilities(principal,id) {
     const {grant,continuity:c}=await this.access(principal,id);
@@ -227,6 +237,23 @@ export class CloudService {
       catch(e){if(!(e instanceof BridgeError))throw e;}
     }
   }
+  async replacementSource(id,command,requester) {
+    const b=this.key(id);
+    const prior=await this.s('SELECT * FROM cloud_requests WHERE owner_id=? AND continuity_id=? AND command_id=?',...b,command.replacesCommandId).first();
+    if(!prior || prior.status!=='CONFLICT' || prior.digest!==command.replacesDigest ||
+       (prior.subject!==requester.subject && requester.subject!=='sites-owner'))cloudFail(409,'REPLACEMENT_EVIDENCE_REQUIRED');
+    const access=JSON.parse(prior.access_json);
+    assertAccess(requester,access,true);
+    const proof=await readRequestEvidence(this,b,prior);
+    if(proof.evidenceErased || proof.command.epoch!==command.epoch || proof.command.operation!==command.operation ||
+       canonical(proof.command.args)!==canonical(command.args))cloudFail(409,'MATERIAL_INTENT_CHANGED');
+    // An owner-proposed replacement retains the original party's scope through subsequent reviewed conflicts.
+    const source=proof.replacementSource??{subject:prior.subject,revision:proof.grantRevision};
+    const sourceGrant=await this.grantForSubject(id,source.subject);
+    if(sourceGrant.revision!==source.revision)cloudFail(409,'REPLACEMENT_GRANT_CHANGED');
+    assertAccess(sourceGrant,access,true);
+    return sourceGrant;
+  }
   async submit(principal,id,command) {
     const {grant,continuity:c}=await this.access(principal,id),b=this.key(id);
     const def=validateCloudCommand(command,this.operations),digest=await sha256(canonical(command));
@@ -244,22 +271,18 @@ export class CloudService {
       error.conflict={commandId:command.commandId,epoch:c.epoch,expectedEpoch:command.epoch,actualRevision:c.revision,expectedRevision:command.expectedRevision};
       throw error;
     }
-    if(command.replacesCommandId){
-      const prior=await this.s('SELECT * FROM cloud_requests WHERE owner_id=? AND continuity_id=? AND command_id=?',...b,command.replacesCommandId).first();
-      if(!prior || prior.status!=='CONFLICT'||prior.digest!==command.replacesDigest || (prior.subject!==grant.subject && grant.subject!=='sites-owner'))cloudFail(409,'REPLACEMENT_EVIDENCE_REQUIRED');
-      assertAccess(grant,JSON.parse(prior.access_json),true);
-      const evidence=await readRequestEvidence(this,b,prior);
-      if(evidence.evidenceErased||evidence.command.operation!==command.operation||canonical(evidence.command.args)!==canonical(command.args))cloudFail(409,'MATERIAL_INTENT_CHANGED');
-    }
+    const sourceGrant=command.replacesCommandId?await this.replacementSource(id,command,grant):null;
     const now=this.now(),ctx=new CloudPlan(this,b,grant,command,now);
     const plan=ctx.freeze(await def.plan(ctx,command.args));
     if(!plan.access.some(e=>e.write && e.scope===def.scope))cloudFail(403,'COMMAND_SCOPE_UNBOUND');
     const direct=plan.access.filter(e=>e.write).every(e=>grant.auto.includes(e.scope+'.write')) && !def.ownerReview && !command.replacesCommandId;
     const status=direct?'COMMITTED':'PENDING_APPROVAL',access=canonical(plan.access), next=c.revision+1;
-    const evidence=await requestEvidence(this,b,command,grant.revision,plan,direct);
+    const evidence=await requestEvidence(this,b,command,grant.revision,plan,direct,sourceGrant);
     const statements=this.batchGuards(id,c,grant);
-    if(command.replacesCommandId){
-      statements.push(this.guard("NOT EXISTS(SELECT 1 FROM cloud_requests WHERE owner_id=? AND continuity_id=? AND json_extract(request_json,'$.command.replacesCommandId')=? AND status IN('PENDING_APPROVAL','COMMITTED','SUPERSEDED'))",...b,command.replacesCommandId));
+    if(sourceGrant){
+      assertAccess(sourceGrant,plan.access,true);
+      if(sourceGrant.subject!==grant.subject)statements.push(...this.batchGuards(id,c,sourceGrant));
+      statements.push(this.guard("NOT EXISTS(SELECT 1 FROM cloud_requests WHERE owner_id=? AND continuity_id=? AND json_extract(request_json,'$.command.replacesCommandId')=?)",...b,command.replacesCommandId));
     }
     statements.push(this.s('INSERT INTO cloud_requests(owner_id,continuity_id,command_id,subject,digest,request_json,access_json,status,submitted_at) VALUES(?,?,?,?,?,?,?,?,?)',...b,command.commandId,grant.subject,digest,evidence.stored,access,status,now),...evidence.writes);
     if(direct){
@@ -315,10 +338,16 @@ export class CloudService {
     const proposal=await readRequestEvidence(this,b,req);
     if(proposal.evidenceErased)cloudFail(409,'REVIEW_EVIDENCE_UNAVAILABLE');
     const {command,plan,grantRevision}=proposal;
-    const access=JSON.parse(req.access_json);let status='REFUSED',reason='OWNER_REFUSED',grant=null,evidence=null;
+    const access=JSON.parse(req.access_json);let status='REFUSED',reason='OWNER_REFUSED',grant=null,evidence=null,sourceGrant=null;
     if(action!=='refuse'){
-      try {grant=await this.grantForSubject(id,req.subject);assertAccess(grant,access,true);}
-      catch(e){if(!(e instanceof BridgeError))throw e;reason='SUBMITTER_GRANT_INACTIVE';}
+      try {
+        grant=await this.grantForSubject(id,req.subject);
+        if(grant.revision===grantRevision){
+          assertAccess(grant,access,true);
+          if(command.replacesCommandId){sourceGrant=await this.replacementSource(id,command,grant);assertAccess(sourceGrant,access,true);}
+        }
+      }
+      catch(e){if(!(e instanceof BridgeError))throw e;grant=null;reason=command.replacesCommandId?'REPLACEMENT_AUTHORITY_UNAVAILABLE':'SUBMITTER_GRANT_INACTIVE';}
       if(grant){
         if(grant.revision!==grantRevision){status='CONFLICT';reason='SUBMITTER_GRANT_CHANGED';}
         else if(command.epoch!==c.epoch||command.expectedRevision!==c.revision){
@@ -330,6 +359,7 @@ export class CloudService {
     }
     if(action==='reconcile' && status!=='SUPERSEDED')return this.receipt(principal,id,commandId);
     const checks=this.batchGuards(id,c,(status==='COMMITTED'||status==='SUPERSEDED')?grant:{subject:'sites-owner'});
+    if(status==='COMMITTED' && sourceGrant && sourceGrant.subject!==grant.subject)checks.push(...this.batchGuards(id,c,sourceGrant));
     checks.push(this.guard("EXISTS(SELECT 1 FROM cloud_requests WHERE owner_id=? AND continuity_id=? AND command_id=? AND digest=? AND status='PENDING_APPROVAL')",...b,commandId,digest));
     const newRevision=c.revision+Number(status==='COMMITTED');
     if(status==='COMMITTED'){

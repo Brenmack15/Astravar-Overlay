@@ -37,7 +37,7 @@ function presentCloudInbox() {
     return reasons[value] || 'Validation requires review';
   }
   function exactHash(id, digest, intent) {
-    if (!validId.test(id || '') || !/^[0-9a-f]{64}$/.test(digest || '') || !['verify', 'refuse'].includes(intent))
+    if (!validId.test(id || '') || !/^[0-9a-f]{64}$/.test(digest || '') || !['verify', 'refuse', 'replace'].includes(intent))
       throw Error('The exact review link is invalid.');
     return '#' + new URLSearchParams({request: id, digest, intent}).toString();
   }
@@ -170,7 +170,7 @@ function presentCloudInbox() {
     element(detail, 'pre', JSON.stringify({
       command: req.command, digest: req.digest, requester: req.subject, permissions: req.plan.access, changes: req.plan.changes,
     }, null, 2));
-    if (!buttons[intent].disabled) buttons[intent].focus();
+    if (buttons[intent] && !buttons[intent].disabled) buttons[intent].focus();
   }
   async function exact() {
     const params = new URLSearchParams(openedHash.slice(1));
@@ -190,6 +190,29 @@ function presentCloudInbox() {
       element(main, 'p', req.status + ' · revision ' + req.receipt.revision);
       if (req.reason) element(main, 'p', label(req.reason).toLowerCase());
       status.textContent = 'The owner decision has already been recorded.';
+      if (req.canReviewReplacement && req.originalCommand) {
+        if (req.replacement) {
+          element(main, 'a', 'Open linked replacement').href = location.pathname + exactHash(req.replacement.commandId, req.replacement.digest, 'verify');
+        } else {
+          element(main, 'p', 'The original request ended at revision ' + req.receipt.revision + '. Review a new proposal against revision ' + req.revision + '.');
+          element(main, 'pre', JSON.stringify(req.originalCommand.args, null, 2));
+          const generate = element(main, 'button', 'Prepare linked replacement');
+          const envelope = {version:1,commandId:crypto.randomUUID(),epoch:req.epoch,expectedRevision:req.revision,
+            operation:req.operation,args:req.originalCommand.args,replacesCommandId:req.commandId,replacesDigest:req.digest};
+          generate.type = 'button';
+          generate.onclick = async () => {
+            if(generate.disabled || openedHash!==location.hash)return;
+            generate.disabled = true;
+            try {
+              const response = await fetch(base+'/commands',{...options,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(envelope)});
+              const next = await response.json();
+              if (!response.ok || next.commandId!==envelope.commandId || next.status!=='PENDING_APPROVAL')
+                throw Error(next.error?.code || 'Replacement could not be verified.');
+              location.hash = exactHash(next.commandId,next.digest,'verify');
+            } catch(error) {status.textContent=error.message;generate.disabled=false;}
+          };
+        }
+      }
     }
     element(main, 'a', 'All owner requests').href = location.pathname;
   }

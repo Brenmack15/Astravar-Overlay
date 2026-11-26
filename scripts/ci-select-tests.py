@@ -15,6 +15,7 @@ CRITICAL = {
     'com.yazsras.astravar.ui.GenesisConsolidationNavigationTest',
     'com.yazsras.astravar.ui.PartyPlayerFirstTest',
     'com.yazsras.astravar.ui.CloudGameplayWorkflowsInteropTest',
+    'com.yazsras.astravar.ui.CloudEncounterWorkflowInteropTest',
     'com.yazsras.astravar.ui.GenesisSpellReservoirUiTest',
 }
 GROUPS = {

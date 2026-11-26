@@ -78,14 +78,17 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
     fun readable(term: String?) = term.orEmpty().replace('_', ' ')
     val rest = outcome.str("kind") in setOf("long_rest", "short_rest")
     val casting = outcome.containsKey("spellId")
+    val preparation = outcome.str("preparation")
     return buildString {
         appendLine(when {
             rest -> readable(outcome.str("kind")).replaceFirstChar { it.uppercase() }
             casting -> "Casting result · " + label(outcome.str("spellId"))
+            preparation != null -> "Spell preparation · " + label(outcome.str("grantId"))
             else -> readable(value.str("status") ?: "Gameplay result").replaceFirstChar { it.uppercase() }
         })
         val status = value.str("status") ?: outcome.str("status")
         if (status != null) appendLine(readable(status))
+        if (preparation != null) appendLine("Preparation · " + readable(preparation))
         if (outcome.containsKey("actorId")) appendLine("Actor · " + label(outcome.str("actorId")))
         if (rest) {
             appendLine("Elapsed · " + shown(outcome, "elapsedSeconds") + " seconds")
@@ -174,7 +177,9 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
         catch (e: Exception) { error = e.message ?: "Campaign data is unavailable." }
     }
     val spendOperation = if (tab == "Spells") "cast_spell" else "complete_rest"
-    val uncertain = rememberedUnconfirmedCommand(client, snapshot, spendOperation, actorId)
+    val uncertainSpend = rememberedUnconfirmedCommand(client, snapshot, spendOperation, actorId)
+    val uncertainHit = if(tab=="Spells") rememberedUnconfirmedCommand(client, snapshot, "link_cast_roll", actorId) else null
+    val uncertain = uncertainSpend ?: uncertainHit
     fun runCommand(action: suspend () -> JsonObject) {
         if (!online || busy) return
         busy = true; error = null
@@ -186,7 +191,15 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
         }
     }
     fun submit(op: String, args: JsonObject) {
-        if (uncertain == null) runCommand { client.submit(op, args, snapshot) }
+        if (uncertain == null) runCommand {
+            val response=client.submit(op, args, snapshot)
+            val castId=args.str("castId")
+            if(op=="link_cast_roll" && castId!=null && response.str("status")=="COMMITTED") {
+                val saved=client.record(castId)?.details()
+                if(saved!=null) JsonObject(response+("savedReport" to JsonObject(saved+("castId" to JsonPrimitive(castId)))))
+                else response
+            } else response
+        }
     }
     if (uncertain != null && tab in listOf("Spells", "Rest")) {
         CloudCommandRecovery(uncertain, online && !busy) { id -> runCommand { client.retry(id) } }
@@ -240,10 +253,16 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
         val castId=cast.str("castId") ?: cast.str("commandId")?.let { command ->
             records.firstOrNull { it.str("kind")=="cast_instance" && it.details().str("commandId")==command }?.str("id")
         }
-        AlertDialog(onDismissRequest={result=null}, title={Text(if(tab=="Spells") "Casting result" else "Rest result")},
+        val reportTitle=when {
+            cast.containsKey("preparation") -> "Spell preparation"
+            tab=="Spells" -> "Casting result"
+            else -> "Rest result"
+        }
+        AlertDialog(onDismissRequest={result=null}, title={Text(reportTitle)},
             text={Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(text)
                 if(tab=="Spells"&&castId!=null&&cast.containsKey("spellId")&&online) {
+                    CloudCastHit(actorId,castId,cast,names[cast.str("spellId")] ?: "Spell",online && !busy && uncertain==null,::submit)
                     PlayerTextButton({result=null;openOperation("link_cast_roll",buildJsonObject{put("actorId",actorId);put("castId",castId)})}){Text("Record casting rolls")}
                     for(id in cast.strings("targets")){
                         PlayerTextButton({result=null;openOperation("resolve_cast_target",buildJsonObject{put("actorId",actorId);put("castId",castId);put("targetActorId",id)})}){Text("Resolve target · "+(possibleTargets.find{it.str("id")==id}?.str("title")?:id))}
@@ -252,7 +271,7 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
                 PlayerTextButton({details=!details}) { Text(if(details) "Hide technical details" else "Technical details") }
                 if(details) Text(Json { prettyPrint=true }.encodeToString(JsonObject.serializer(),value))
             }},
-            confirmButton={TextButton({clipboard.setText(AnnotatedString(text))}){Text(if(tab=="Spells") "Copy casting result" else "Copy rest result")}},
+            confirmButton={TextButton({clipboard.setText(AnnotatedString(text))}){Text("Copy ${reportTitle.lowercase()}")}},
             dismissButton={TextButton({result=null}){Text("Close")}})
     }
 }
@@ -354,6 +373,12 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
     var inspect by remember(actorId){mutableStateOf<JsonObject?>(null)}
     var choice by remember(actorId){mutableStateOf<JsonObject?>(null)}
     var manage by rememberSaveable(actorId){mutableStateOf(false)}
+    var castChoices by remember(actorId) { mutableStateOf<Pair<String?,Int>?>(null) }
+    val pendingCasts = remember(cached) {
+        cached.filter { cast -> cast.str("kind")=="cast_instance" && cast.details().let { data ->
+            data.str("resolution")=="attack" && data["hit"]==JsonNull && !data.containsKey("chargeRelease")
+        } }.groupBy { cast -> cast.details().let { it.str("grantId") to it.num("level") } }
+    }
     val levels=rows.mapNotNull { it.num("level") }.distinct().sorted()
     OutlinedTextField(query,{query=it},label={Text("Search spells")},singleLine=true,modifier=Modifier.fillMaxWidth())
     Row(horizontalArrangement=Arrangement.spacedBy(4.dp)) {
@@ -406,11 +431,26 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
                     Text(listOfNotNull(row.str("source"),row.str("preparation")?.replace('_',' ')).joinToString(" · "),style=MaterialTheme.typography.labelSmall)
                 }
                 val verb=when(row.str("route")){"ritual"->"As ritual";"at_will"->"At will";"item","limited"->"Use";else->"Cast"}
+                val key=row.str("grantId") to level
+                val attempts=pendingCasts[key].orEmpty()
+                attempts.singleOrNull()?.let { c -> CloudCastHit(actorId,c.getValue("id").jsonPrimitive.content,c.details(),row.str("name") ?: "Spell",online,submit) }
+                if(attempts.size>1)PlayerTextButton({castChoices=key},enabled=online){Text("Choose cast")}
                 PlayerTextButton({cast(row)},enabled=online && row.strings("unavailable").isEmpty()){Text(verb)}
             }
             HorizontalDivider()
         }
     }
+    castChoices?.let { key -> PlayerSheet("Choose a pending cast",{castChoices=null}) {
+        pendingCasts[key].orEmpty().forEach { cast ->
+            val data=cast.details()
+            val id=cast.getValue("id").jsonPrimitive.content
+            val time=data["recordedAt"]?.jsonPrimitive?.longOrNull?.let { java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it)) }
+            Text(listOfNotNull(cast.str("title"),time).joinToString(" · "))
+            val targets=data.strings("targets").map { target->possibleTargets.firstOrNull{it.str("id")==target}?.str("title") ?: target }
+            Text(if(targets.isEmpty()) "Target unresolved" else targets.joinToString())
+            CloudCastHit(actorId,id,data,cast.str("title") ?: "Spell",online){ op,args ->castChoices=null;submit(op,args) }
+        }
+    } }
     inspect?.let { original ->
         val options=rows.filter{it.str("grantId")==original.str("grantId")}.sortedBy{it.num("level")}
         AlertDialog(onDismissRequest={inspect=null},title={Text(original.str("name").orEmpty())},text={
@@ -466,11 +506,20 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
             PlayerOutlinedButton({manage=false;openOperation("grant_spell",buildJsonObject{put("actorId",actorId)})}){Text("Add casting source")}
             rows.distinctBy{it.str("grantId")}.forEach{g->
                 val prepared=g.str("preparation")
+                val grant=cached.find{it.str("kind")=="spell_grant" && it.str("id")==g.str("grantId")}
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
-                    Text(g.str("name").orEmpty(),Modifier.weight(1f))
+                    Column(Modifier.weight(1f)) {
+                        Text(g.str("name").orEmpty())
+                        Text(listOfNotNull(g.str("source"),g.str("route")?.replace('_',' ')).joinToString(" · "),style=MaterialTheme.typography.labelSmall)
+                    }
                     if(prepared in setOf("known","prepared"))TextButton({manage=false;submit("prepare_spell",buildJsonObject{put("actorId",actorId);put("grantId",g.str("grantId"));put("prepared",prepared=="known")})}){Text(if(prepared=="known")"Prepare" else "Unprepare")}
                     else Text(prepared.orEmpty().replace('_',' '),style=MaterialTheme.typography.labelSmall)
                 }
+                if(grant!=null)PlayerTextButton({
+                    manage=false
+                    openOperation("revise_spell_grant",JsonObject(grant.details()+mapOf(
+                        "actorId" to JsonPrimitive(actorId),"grantId" to grant.getValue("id"))))
+                },enabled=online){ Text("Edit casting source · ${g.str("source")}") }
             }
         }
     },confirmButton={TextButton({manage=false}){Text("Done")}})

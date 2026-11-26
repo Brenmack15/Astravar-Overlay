@@ -129,8 +129,9 @@ class CloudRestoredFormsInteropTest {
                         val formId = form.cloudText("id"); val formTitle = form.cloudText("title")
                         val hash = form.cloudText("thumbnailSha256")
                         assertTrue("Each restored form must have its own source image.", seenDigests.add(hash))
-                        awaitText(formTitle)
-                        compose.onNodeWithText(formTitle).performScrollTo().performClick()
+                        val formRow = hasText(formTitle) and hasText("Form")
+                        compose.waitUntil(20_000) { compose.onAllNodes(formRow).fetchSemanticsNodes().size == 1 }
+                        compose.onNode(formRow).performScrollTo().performClick()
                         awaitText("Preview form")
                         awaitImage(formTitle, formId, hash, insideDialog = true)
                         compose.onNodeWithText("Close").performClick()

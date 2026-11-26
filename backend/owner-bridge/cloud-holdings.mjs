@@ -26,8 +26,9 @@ const purchaseItem = recordObject({...buyFields,storageId:recordId},Object.keys(
 const destinationFields={ type: recordChoice('party_actor','storage','unassigned','external_gift','lost','dropped','loan'),
   actorId: nullableId, locationId: nullableId, recipientId: nullableId, recipientName: recordMaybe(recordTitle) };
 const destination = recordObject({...destinationFields,partyOwned:recordBool},Object.keys(destinationFields));
-const sellItem = recordObject({ itemId: recordId, quantity: count, splitId: nullableId, walletId: recordId,
-  proceeds: coins, buyerId: nullableId, buyerName: recordMaybe(recordTitle), source: recordSource });
+const saleFields = { itemId: recordId, quantity: count, splitId: nullableId, walletId: recordId,
+  proceeds: coins, buyerId: nullableId, buyerName: recordMaybe(recordTitle), source: recordSource };
+const sellItem = recordObject({...saleFields, locationId:nullableId},Object.keys(saleFields));
 const transferItem = recordObject({ itemId: recordId, quantity: count, splitId: nullableId, destination,
   reason: recordTitle, source: recordSource });
 const splitItem = recordObject({ itemId: recordId, splitId: recordId, quantity: count, source: recordSource });
@@ -513,7 +514,7 @@ export const HOLDING_OPERATIONS = Object.freeze({
     assertPositive(args.proceeds);
     const next=changedCoins(wallet.data.coins,args.proceeds);
     const moved=await moveItem(ctx,{...args,reason:'Sale',destination:{type:'external_sale',actorId:null,
-      locationId:null,recipientId:args.buyerId,recipientName:args.buyerName}},'sale');
+      locationId:args.locationId??null,recipientId:args.buyerId,recipientName:args.buyerName}},'sale');
     const payment=await recordPayment(ctx,'sale',[{wallet,next}],'Sale',args.source);
     await ctx.link(moved.itemEventId,'payment',payment.transactionRecordId);
     return {...moved,...payment};

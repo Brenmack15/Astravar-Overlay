@@ -118,7 +118,10 @@ internal fun CloudArchiveManager(
                 back = { candidate = null }, choose = { selected ->
                     chosen = if (chosen.any { it.id == selected.id }) chosen.filterNot { it.id == selected.id } else chosen + selected
                     candidate = null
-                })
+                }, recover = if (online && "recover_item" in allowed) { args ->
+                    onDismiss()
+                    openOperation("recover_item", args)
+                } else null)
             return@PlayerSheet
         }
         PlayerTabs(listOf("Archived", "Active"), mode, { mode = it })
@@ -205,7 +208,7 @@ private fun ArchiveRows(
 @Composable
 private fun ArchiveInspector(
     client: CloudCampaignClient, snapshot: CloudSnapshot, listed: JsonObject, chosen: List<ArchiveChoice>, online: Boolean,
-    back: () -> Unit, choose: (ArchiveChoice) -> Unit
+    back: () -> Unit, choose: (ArchiveChoice) -> Unit, recover: ((JsonObject) -> Unit)?
 ) {
     var details by remember(listed, snapshot.version) { mutableStateOf<JsonObject?>(null) }
     var choice by remember(listed, snapshot.version) { mutableStateOf<ArchiveChoice?>(null) }
@@ -239,7 +242,28 @@ private fun ArchiveInspector(
         refs.forEach { row -> Text("${row.archiveText("title") ?: row.cloudText("id")} · ${cloudLabel(row.cloudText("kind"))}") }
         if (checked.legacyReceipts > 0) Text("Earlier immutable evidence contains this record in ${checked.legacyReceipts} transactions.")
         TextButton({ showFields = !showFields }) { Text(if (showFields) "Hide record details" else "Show record details") }
-        if (showFields) RecordFields(verified.getValue("record").jsonObject.getValue("data"))
+        val data = verified.getValue("record").jsonObject.getValue("data").jsonObject
+        if (showFields) RecordFields(data)
+        if (checked.kind == "item_instance" && data.archiveText("holding") == "external" && data.archiveText("partyAccess") == "false") {
+            Text("Outside party access · ${cloudLabel(data.archiveText("disposition") ?: "unknown")}")
+            data.archiveText("externalRecipientName")?.let { Text("Last recorded recipient · $it") }
+            if (recover != null) PlayerDisclosure("Record gameplay reacquisition") {
+                var member by remember(checked.id) { mutableStateOf<JsonObject?>(null) }
+                var reason by remember(checked.id) { mutableStateOf("") }
+                var source by remember(checked.id) { mutableStateOf("") }
+                Text("Receiving party member")
+                CachedRecordList(client, snapshot, setOf("actor"), null, "", allowed = ::cloudPartyMember) { member = it }
+                member?.let { Text("Receiving · ${it.cloudText("title")}") }
+                Field("Reacquisition reason", reason, { reason = it.take(180) })
+                Field("Reacquisition source", source, { source = it.take(1000) })
+                PlayerButton({
+                    recover(buildJsonObject {
+                        put("itemId", checked.id); put("ownerId", requireNotNull(member).cloudText("id"))
+                        put("reason", reason); put("source", source)
+                    })
+                }, enabled = member != null && reason.isNotBlank() && source.isNotBlank()) { Text("Review reacquisition") }
+            }
+        }
         val selected = chosen.any { it.id == checked.id }
         PlayerButton({ choose(checked) }, enabled = online && (selected || chosen.size < 24)) {
             Text(if (selected) "Remove from selection" else "Select record")

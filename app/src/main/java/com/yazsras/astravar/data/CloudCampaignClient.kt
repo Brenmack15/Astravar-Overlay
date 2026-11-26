@@ -13,6 +13,8 @@ import java.util.UUID
 private val cloudPrefix = Regex("/v3/continuities/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/")
 private val cloudReadRoute = Regex("(?:capabilities|commands|review-status|settings|context|(?:receipts|sheet|links)/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}|state\\?limit=[0-9]{1,3}(?:&after=[A-Za-z0-9][A-Za-z0-9._:-]{0,127}&atRevision=[0-9]+&atEpoch=[0-9]+&grantRevision=[0-9]+|&id=[A-Za-z0-9][A-Za-z0-9._:-]{0,127}&activeOnly=false&atRevision=[0-9]+&atEpoch=[0-9]+&grantRevision=[0-9]+)?)")
 
+private const val linkedIdPattern = "[A-Za-z0-9][A-Za-z0-9._:-]{0,127}"
+private val cloudLinkProjection = Regex("links/$linkedIdPattern(?:\\?after=${linkedIdPattern}~[a-z0-9_]{1,80}~${linkedIdPattern}&atEpoch=[0-9]+&atRevision=[0-9]+&grantRevision=[0-9]+)?")
 private val formProjectionPath = Regex("forms/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
 private val actorProjectionPath = Regex("(?:spellbook|actions|pool-history)/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?:\\?after=[A-Za-z0-9][A-Za-z0-9._:-]{0,127}&atRevision=[0-9]+&atEpoch=[0-9]+&grantRevision=[0-9]+)?")
 
@@ -20,7 +22,7 @@ internal fun validCloudDevicePath(path: String): Boolean {
     if (path.substringBefore('?').split('/').any { it == "." || it == ".." }) return false
     val prefix = cloudPrefix.matchAt(path, 0) ?: return false
     val route = path.substring(prefix.range.last + 1)
-    return cloudReadRoute.matches(route) || primaryAssociationPath.matches(route) || formProjectionPath.matches(route) || actorProjectionPath.matches(route) || validRecordViewSuffix(route) || validArchiveSuffix(route) || validApprovalViewSuffix(route)
+    return cloudReadRoute.matches(route) || cloudLinkProjection.matches(route) || primaryAssociationPath.matches(route) || formProjectionPath.matches(route) || actorProjectionPath.matches(route) || validRecordViewSuffix(route) || validArchiveSuffix(route) || validApprovalViewSuffix(route)
 }
 
 internal class CloudSession(val credential: OwnerSyncCredential, val access: String?) {
@@ -413,7 +415,7 @@ internal class CloudCampaignClient(
             val w = cache.workspace() ?: throw OwnerSyncFailure("CLOUD_NOT_SELECTED")
             if (!w.visible || w.version.grantExpiresAt <= now() || snapshot.binding != s.binding || w.version != snapshot.version)
                 throw OwnerSyncFailure("CLOUD_REVIEW_STALE")
-            require(primaryAssociationPath.matches(suffix) || suffix == "context" || suffix == "settings" || formProjectionPath.matches(suffix) || suffix.startsWith("sheet/") || actorProjectionPath.matches(suffix) || suffix.startsWith("links/") || validRecordViewSuffix(suffix) || validArchiveSuffix(suffix) || validApprovalViewSuffix(suffix))
+            require(primaryAssociationPath.matches(suffix) || suffix == "context" || suffix == "settings" || formProjectionPath.matches(suffix) || suffix.startsWith("sheet/") || actorProjectionPath.matches(suffix) || cloudLinkProjection.matches(suffix) || validRecordViewSuffix(suffix) || validArchiveSuffix(suffix) || validApprovalViewSuffix(suffix))
             val result = request(s, suffix)
             if (result.getValue("epoch").jsonPrimitive.long != w.version.epoch ||
                 result.getValue("revision").jsonPrimitive.long != w.version.revision) throw OwnerSyncFailure("SNAPSHOT_CHANGED")

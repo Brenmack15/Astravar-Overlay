@@ -298,7 +298,7 @@ private enum class SpellbookFilter(val label: String) {
                 }
         } else {
             key(character.id) {
-                Column(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxSize().padding(bottom = 56.dp)) {
                     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(horizontal = 16.dp).testTag("reforge-error"))

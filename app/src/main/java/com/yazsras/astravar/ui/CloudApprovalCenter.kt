@@ -22,7 +22,7 @@ private fun JsonObject.reviewText(name: String): String? = (this[name] as? JsonP
 private fun JsonObject.reviewRows(name: String): List<JsonObject> = (this[name] as? JsonArray).orEmpty().map { it.jsonObject }
 
 internal fun exactOwnerReviewPage(binding: CloudBinding, commandId: String, digest: String, intent: String): URI {
-    require(cloudIdentifier.matches(binding.continuity) && intent in setOf("verify", "refuse"))
+    require(cloudIdentifier.matches(binding.continuity) && intent in setOf("verify", "refuse", "replace"))
     approvalViewSuffix(commandId, digest)
     val origin = URI(binding.origin)
     require(origin.rawPath.orEmpty() in setOf("", "/") && origin.rawQuery == null && origin.rawFragment == null)
@@ -192,6 +192,9 @@ private fun CloudRequestDetail(
         value.reviewText("reason")?.let { Text(cloudLabel(it.lowercase())) }
         val receipt = value.getValue("receipt").jsonObject
         Text("Authoritative revision ${receipt.getValue("revision")}")
+        if(value["canReviewReplacement"]?.jsonPrimitive?.booleanOrNull==true) {
+            PlayerOutlinedButton({ owner("replace") }) { Text("Review a linked replacement") }
+        }
         Text("Transaction ${receipt.cloudText("transactionId")}", style = MaterialTheme.typography.labelSmall)
         TextButton(back) { Text("Back to requests") }
         return

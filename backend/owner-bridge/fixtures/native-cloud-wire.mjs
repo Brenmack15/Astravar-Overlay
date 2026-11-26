@@ -67,10 +67,10 @@ async function setup(route, body) {
     assert.equal(response.status, 200);
     return response.json;
 }
-async function grant(subject, revision, revoked = false, automatic = true, reviewedCategories = []) {
+async function grant(subject, revision, revoked = false, automatic = true, reviewedCategories = [], actors = ['*']) {
     return setup(path + '/grants/' + subject, {
         scopes: gameplayCategories.flatMap(k=>[k+'.read',k+'.write']).concat(subject.startsWith('device:')?['approval.read']:[]),
-        actors: ['*'], auto: automatic?gameplayCategories.filter(k=>!reviewedCategories.includes(k)).map(k=>k+'.write'):[],
+        actors, auto: automatic?gameplayCategories.filter(k=>!reviewedCategories.includes(k)).map(k=>k+'.write'):[],
         expiresAt, expectedGrantRevision: revision, revoked
     });
 }
@@ -120,7 +120,33 @@ try {
                 assert.ok(result.result);
                 emit(result.result.structuredContent);
             } else if (call === 'requireReview') emit(await grant('sites-mcp',1,false,false));
+            else if (call === 'restrictWorldReader' && process.argv.includes('--exercise-gameplay')) {
+                emit(await setup(path+'/grants/sites-mcp',{scopes:['world.read','character.read','chronicle.read','media.read'],
+                    actors:['companion'],auto:[],expiresAt,expectedGrantRevision:1,revoked:false}));
+            }
             else if (call === 'deviceTradeReview' && process.argv.includes('--exercise-gameplay')) emit(await grant('device:'+device,1,false,true,['economy']));
+            else if (call === 'scopeEncounterAudience' && process.argv.includes('--exercise-gameplay')) {
+                // Establish the narrow player audience before storing any owner-only fixture actor.
+                for (const subject of ['sites-mcp','device:'+device]) await grant(subject,1,false,true,[],['engineer','scout']);
+                async function privateCommand(operation,args) {
+                    const {json:state}=await request(path+'/state?limit=1',null,ownerHeaders);
+                    const result=await setup(path+'/commands',{version:1,epoch:state.epoch,expectedRevision:state.revision,
+                        commandId:'owner-restricted-'+operation,operation,args});
+                    assert.equal(result.status,'COMMITTED');
+                }
+                const actorId='unrevealed-witness',rollId='private-initiative';
+                await privateCommand('define_actor',{actorId,name:'Unrevealed fixture witness',role:'creature',
+                    rulesProfile:'revised_2024',level:1,abilities:{STR:10,DEX:12,CON:10,INT:10,WIS:10,CHA:10},source:'Isolated owner-only record'});
+                await privateCommand('record_check',{actorId,rollId,check:{kind:'initiative',key:'initiative',mode:'normal'},evidence:{origin:'dm',faces:[9]}});
+                await privateCommand('start_encounter',{encounterId:'restricted-watch',name:'Unrevealed encounter',
+                    participants:[{actorId,initiativeRollId:rollId}]});
+                emit({restricted:true});
+            }
+            else if (call === 'observedDeviceCommand' && process.argv.includes('--exercise-gameplay')) {
+                assert.match(args.operation,/^[a-z_]{1,80}$/);
+                const observed=[...recordedDeviceCommands.values()].filter(c=>c.operation===args.operation).at(-1);
+                assert.ok(observed); emit(observed);
+            }
             else if (call === 'redeliverDeviceCommand' && process.argv.includes('--exercise-gameplay')) {
                 const command=recordedDeviceCommands.get(args.commandId);assert.ok(command);
                 const response=await request(path+'/commands',command,{Authorization:'Bearer '+bearer,'X-Astravar-Credential':device});

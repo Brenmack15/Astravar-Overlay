@@ -30,7 +30,9 @@ internal fun reviewedEncounterStart(id:String,title:String,roster:Map<String,Str
         put("eventId",UUID.randomUUID().toString());put("category","encounter");put("status","unresolved")
         put("worldTime",JsonNull);put("correctsId",JsonNull);put("subjects",JsonArray(emptyList()))
     })},enabled=online){Text("Record non-combat encounter")}
-    CachedRecordList(client,snapshot,setOf("encounter"),null,query){row->route=row.encText("id")}
+    CachedRecordList(client,snapshot,setOf("encounter","timeline_event"),null,query,allowed={ row ->
+        row.encText("kind")=="encounter" || row.encObject("data").encText("category")=="encounter"
+    }){row->route=row.encText("id")}
     route?.let { id->key(id){
         if(id=="new")EncounterSetup(client,snapshot,online,{route=null}){ args->route=null;open("start_encounter",args) }
         else {
@@ -55,7 +57,13 @@ internal fun reviewedEncounterStart(id:String,title:String,roster:Map<String,Str
             val current=chain.getOrNull(index).encText("actorId")
             PlayerSheet(encounter.encText("title")?:"Encounter",{route=null}){
                 if(failure)Text("This encounter could not be read.") else if(d==null)Text("Reading encounter…")
-                else{
+                else if(encounter.encText("kind")=="timeline_event"){
+                    Text("Non-combat encounter",style=MaterialTheme.typography.titleMedium)
+                    d.encText("status")?.let{Text(cloudLabel(it))}
+                    d.encText("narrative")?.let{Text(it)}
+                    d.encText("worldTime")?.let{Text(it)}
+                    d.encText("source")?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
+                }else{
                     Text(if(active)"Round ${d.encText("round")?:"Unknown"}" else "Encounter completed",style=MaterialTheme.typography.titleLarge)
                     if(!active)d.encText("outcome")?.let{Text(it)}
                     chain.forEachIndexed { i,slot ->

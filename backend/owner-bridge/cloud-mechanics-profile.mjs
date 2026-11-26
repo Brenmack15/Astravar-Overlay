@@ -1,7 +1,8 @@
-import { stats, identifier, whole, named, option, nullable, boolean, arrayOf, fields, must, op, actor, owned, insert, save } from './cloud-mechanics-core.mjs';
+import {applyClassGain,checkedClassTracks} from './cloud-class-progression.mjs';
+import { classIdentityFields,classTracksSchema,subclassPin,stats, identifier, whole, named, option, nullable, boolean, arrayOf, fields, must, op, actor, owned, insert, save } from './cloud-mechanics-core.mjs';
 
 const notes=nullable(named(4000));
-const profileSchema=fields({actorId:identifier,source:named(300),name:named(160),species:notes,className:notes,
+const profileSchema=fields({actorId:identifier,source:named(300),name:named(160),classTracks:classTracksSchema,species:notes,className:notes,
   subclass:notes,background:notes,appearance:notes,personality:notes,backstory:notes,notes},['actorId','source']);
 const trainSchema=fields({actorId:identifier,category:option('save','tool','weapon','armor','language'),key:named(120),
   trained:boolean,source:named(300)},['actorId','category','key','trained','source']);
@@ -18,16 +19,19 @@ const featureSchema=fields({actorId:identifier,featureId:identifier,name:named(1
   ['actorId','featureId','name','kind','description','source','references']);
 const capacity=fields({poolId:identifier,previous:whole(),maximum:whole(),granted:whole()},['poolId','previous','maximum','granted']);
 const advancementSchema=fields({actorId:identifier,eventId:identifier,fromLevel:whole(1,19),toLevel:whole(2,20),source:named(300),
+  classGain:fields({classId:identifier,fromClassLevel:whole(0,19),newClass:fields(classIdentityFields,['name','edition','source']),subclass:subclassPin},['classId','fromClassLevel']),
   abilityGains:fields(Object.fromEntries(stats.map(k=>[k,whole(1,100)]))),hitPointGain:whole(),increaseCurrentHp:boolean,
   reviewedProficiency:whole(0,30),capacities:arrayOf(capacity,24)},['actorId','eventId','fromLevel','toLevel','source']);
 
 async function profileDetails(ctx,x){
   const a=await actor(ctx,x.actorId), biography={...a.data.biography};
-  const entries=Object.entries(x).filter(([key])=>!['actorId','source','name'].includes(key));
-  must(entries.length>0||x.name,'PROFILE_CHANGE_REQUIRED');
+  const entries=Object.entries(x).filter(([key])=>!['actorId','source','name','classTracks'].includes(key));
+  must(entries.length>0||x.name||x.classTracks,'PROFILE_CHANGE_REQUIRED');
+  must(!x.classTracks||!a.data.classTracks,'CLASS_BASELINE_ALREADY_PINNED');
+  const classes=x.classTracks?{classTracks:checkedClassTracks(a.data.level,x.classTracks),classBaselineSource:x.source}:{};
   for(const [key,value] of entries)biography[key]={value,source:x.source};
-  await ctx.put({...a,title:x.name??a.title,data:{...a.data,biography,...(x.name?{nameSource:x.source}:{})}});
-  return {actorId:a.id,fields:entries.map(([key])=>key),name:x.name??a.title};
+  await ctx.put({...a,title:x.name??a.title,data:{...a.data,biography,...classes,...(x.name?{nameSource:x.source}:{})}});
+  return {actorId:a.id,fields:[...entries.map(([key])=>key),...(x.classTracks?['classTracks']:[])],name:x.name??a.title};
 }
 async function training(ctx,x){
   const a=await actor(ctx,x.actorId), key=x.key.trim();
@@ -95,6 +99,7 @@ async function advance(ctx,x){
   const a=await actor(ctx,x.actorId), before=a.data, next={...before,abilities:{...before.abilities}};
   must(before.level===x.fromLevel && x.toLevel===x.fromLevel+1,'ADVANCEMENT_LEVEL_CHANGED');
   must(!before.encounterId,'ADVANCEMENT_IN_ENCOUNTER');
+  const classChange=applyClassGain(before,x,next);
   must(x.increaseCurrentHp===undefined||x.hitPointGain!==undefined,'HIT_POINT_GAIN_REQUIRED');
   for(const [key,rise] of Object.entries(x.abilityGains??{})){
     must(before.abilities[key]!=null && before.abilities[key]+rise<=100,'ABILITY_GAIN_REQUIRES_KNOWN_BASE');
@@ -112,6 +117,7 @@ async function advance(ctx,x){
   for(const c of x.capacities??[]){
     must(!seen.has(c.poolId),'DUPLICATE_CAPACITY');seen.add(c.poolId);
     const p=await owned(ctx,'resource_pool',c.poolId,a.id);
+    must(!p.data.classId||p.data.classId===x.classGain?.classId,'HIT_DIE_CLASS_MISMATCH');
     must(p.data.maximum===c.previous && c.maximum>=c.previous && c.granted<=c.maximum-c.previous,'ADVANCEMENT_CAPACITY_CHANGED');
     must(!c.granted||p.data.current!=null,'BALANCE_UNKNOWN');
     const resulting=p.data.current==null?null:p.data.current+c.granted;
@@ -119,7 +125,7 @@ async function advance(ctx,x){
     changes.push({...c,before:p.data.current,after:resulting});
   }
   await save(ctx,a,next);
-  const data={fromLevel:x.fromLevel,toLevel:x.toLevel,beforeAbilities:before.abilities,afterAbilities:next.abilities,
+  const data={fromLevel:x.fromLevel,toLevel:x.toLevel,...(classChange?{classChange}:{}),beforeAbilities:before.abilities,afterAbilities:next.abilities,
     previousMaxHp:before.maxHp,maxHp:next.maxHp,previousHp:before.currentHp,hp:next.currentHp,previousProficiency:before.proficiency,
     proficiency:next.proficiency,pools:changes,source:x.source,commandId:ctx.commandId,recordedAt:ctx.now};
   await insert(ctx,'progression_event',x.eventId,a.id,`Level ${x.toLevel}`,data);

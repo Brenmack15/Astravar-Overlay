@@ -61,6 +61,7 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
     var overlay by rememberSaveable { mutableStateOf<String?>(null) }
     var rollOption by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedAbility by rememberSaveable { mutableStateOf<String?>(null) }
+    var featureDetail by rememberSaveable(actorId) { mutableStateOf<String?>(null) }
     var profileTab by rememberSaveable { mutableStateOf("Defenses") }
     val pager=rememberPagerState { sections.size }
     suspend fun loadActors(after:String = "") {
@@ -87,7 +88,7 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
     LaunchedEffect(snapshot.version,snapshot.visible) {
         try { loadActors() } catch(e:CancellationException){throw e} catch(e:Exception){ actors=emptyList(); select(null); notice=cloudError(e) }
     }
-    LaunchedEffect(actorId,snapshot.version,overlay){if(overlay=="Profile")try{loadFeatures()}catch(e:CancellationException){throw e}catch(e:Exception){notice=cloudError(e);features=emptyList()}}
+    LaunchedEffect(actorId,snapshot.version,overlay){if(overlay=="Profile"||overlay=="Feature")try{loadFeatures()}catch(e:CancellationException){throw e}catch(e:Exception){notice=cloudError(e);features=emptyList()}}
     val selected=actors.firstOrNull { it.cloudText("id")==actorId }
     val data=selected.obj("data")
     LaunchedEffect(actorId,snapshot.version,online) {
@@ -206,8 +207,11 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
                 { select(row.cloudText("id"));overlay=null }) }
             if(actorMore) PlayerTextButton({scope.launch { loadActors(actorAfter) }}) {Text("More characters")}
             PlayerButton({overlay=null;openOperation("define_actor",buildJsonObject {})},enabled=online){Text("Create character")}
-            if(actorId!=null)PlayerTextButton({overlay=null;openOperation("advance_actor_level",args("actorId" to actorId))},enabled=online){Text("Advance selected character")}
+            if(actorId!=null)PlayerTextButton({overlay="Advancement"},enabled=online){Text("Advance selected character")}
         }
+        "Advancement" -> selected?.let { CloudProgression(client,snapshot,it,online,{overlay=null}) { operation, fields ->
+            overlay=null;openOperation(operation,fields)
+        } }
         "Rest" -> if(actorId!=null) PlayerSheet("Rest",{overlay=null}) { CloudSpellRest("Rest",actorId,client,snapshot,online,openOperation) }
         "HP" -> PlayerSheet("Hit points", { overlay = null }) {
             val current = sheet ?: data
@@ -243,12 +247,15 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
                 }
             }
             if(actorId!=null)PlayerOutlinedButton({overlay=null;openOperation("set_condition",args("actorId" to actorId))},enabled=online){Text("Manage condition")} }
+        "Feature" -> features.find { it.cloudText("id")==featureDetail }?.let { feature ->
+            CloudProfileFeature(client,snapshot,feature,{overlay="Profile"},{linked->overlay=null;inspect(linked)})
+        }
         "Profile" -> PlayerSheet("Character Profile",{overlay=null}) {
             PlayerTabs(listOf("Defenses","Features & Traits","Proficiencies & Training","Background"),profileTab,{profileTab=it})
             when(profileTab){
-                "Defenses" -> RecordFields(sheet?.get("defenses") ?: JsonNull)
+                "Defenses" -> CloudProfileDefenses(sheet,inspect)
                 "Features & Traits" -> {
-                    features.forEach { row->PlayerEntry(row.cloudText("title"),row.obj("data").value("source").orEmpty(),"Emblem",{overlay=null;inspect(row.cloudText("id"))}) }
+                    features.forEach { row->PlayerEntry(row.cloudText("title"),row.obj("data").value("source").orEmpty(),"Emblem",{featureDetail=row.cloudText("id");overlay="Feature"}) }
                     featureCursor?.let { c->PlayerTextButton({scope.launch{loadFeatures(c)}}){Text("More features")} }
                     if(actorId!=null)PlayerTextButton({overlay=null;openOperation("define_feature",args("actorId" to actorId))},enabled=online){Text("Add feature")}
                 }
@@ -314,7 +321,7 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
 }
 
 @OptIn(ExperimentalFoundationApi::class)
-@Composable private fun QuickControl(label:String,text:String,enabled:Boolean,tap:()->Unit,options:()->Unit,large:Boolean=false,saveProficient:Boolean?=null) {
+@Composable internal fun QuickControl(label:String,text:String,enabled:Boolean,tap:()->Unit,options:()->Unit,large:Boolean=false,saveProficient:Boolean?=null) {
     Box(Modifier.heightIn(min=48.dp).widthIn(min=48.dp).combinedClickable(enabled=enabled,role=Role.Button,
         onClickLabel="Roll $label",onLongClickLabel="Roll options",onClick=tap,onLongClick=options)
         .semantics { contentDescription=when(saveProficient) {

@@ -1,4 +1,4 @@
-import { BridgeError } from './core.mjs';
+import { BridgeError, sha256 } from './core.mjs';
 
 export const stats = ['STR','DEX','CON','INT','WIS','CHA'];
 export const damageTypes = ['acid','bludgeoning','cold','fire','force','lightning','necrotic','piercing','poison','psychic','radiant','slashing','thunder'];
@@ -26,8 +26,13 @@ export const component = fields({
   flat:whole(-1000,1000), critical:boolean, abilityBonus:option(...stats),
   variants:arrayOf(option(...damageTypes),13), extraDicePerLevel:whole(0,20)
 }, ['id','name','type','dice','sides','flat']);
+const classText = limit=>({...named(limit),pattern:'\\S'});
+export const classIdentityFields = {name:classText(120),edition:option('legacy_2014','revised_2024','custom'),source:classText(300)};
+export const subclassPin = fields({name:classText(120),source:classText(300)},['name','source']);
+export const classTracksSchema = {...arrayOf(fields({classId:identifier,...classIdentityFields,subclass:subclassPin,level:whole(1,20)},
+  ['classId','name','edition','source','level']),20),minItems:1};
 export const actorSchema = fields({
-  actorId:identifier, name:named(160), role:option('player','companion','npc','creature'),
+  actorId:identifier, name:named(160), classTracks:classTracksSchema, role:option('player','companion','npc','creature'),
   rulesProfile:option('legacy_2014','revised_2024','custom'), level:whole(1,20),initiativeAfterActorId:identifier,
   proficiency:nullable(whole(0,30)), maxHp:nullable(whole()), baselineConstitutionModifier:nullable(whole(-100,100)),currentHp:nullable(whole()), temporaryHp:nullable(whole()),
   baseAc:nullable(whole(0,100)), abilities:abilityMap, speeds:movementMap, senses:sensesMap, size:option('tiny','small','medium','large','huge','gargantuan'),creatureType:named(60), saveProficiencies:arrayOf(option(...stats),6),
@@ -35,7 +40,7 @@ export const actorSchema = fields({
   source:named(300)
 }, ['actorId','name','role','rulesProfile','level']);
 export const resourceSchema = fields({
-  actorId:identifier, poolId:identifier, name:named(160),
+  actorId:identifier, poolId:identifier, name:named(160), classId:identifier,
   type:option('ordinary','hit_die','spell_slot','integrity','lifetime','charge'), maximum:nullable(whole()),
   current:nullable(whole()), recovery:option('none','short_rest','long_rest','either_rest','dawn','deployment','edition_hit_dice','recharge_roll'),rechargeSides:whole(2,100),rechargeMinimum:whole(1,100),
   recoveryActorId:identifier,recoveryAmount:nullable(whole(1)), dieSides:nullable(whole(2,1000)), slotLevel:nullable(whole(1,9)), source:named(300)
@@ -333,13 +338,16 @@ export async function sheet(ctx,id,contextTags=[],previewFormId=undefined,charge
     if(d.lipReading)communications.push({featureId,kind:'lip_reading',requiresVisibleMouth:true,requiresUnderstoodLanguage:true});
     if(d.mobility)mobilityRules.push({featureId,kind:d.mobility,eligible:movement.fly>0,requiresMovement:'fly'});
   }
-  return {actorId:id,activeDeploymentId:a.data.activeDeploymentId??null,communications,mobilityRules,exhaustion,activityState:a.data.activityState??null,formId:form?.id??null,ruleFormIds:ruleFormIds(form),size:form?.data.size??a.data.size??null,creatureType:form?.data.creatureType??a.data.creatureType??null,
+  return {actorId:id,level:a.data.level,rulesProfile:a.data.rulesProfile,classTracks:a.data.classTracks??null,activeDeploymentId:a.data.activeDeploymentId??null,communications,mobilityRules,exhaustion,activityState:a.data.activityState??null,formId:form?.id??null,ruleFormIds:ruleFormIds(form),size:form?.data.size??a.data.size??null,creatureType:form?.data.creatureType??a.data.creatureType??null,
     senses,abilities,checks,saves,skills,passives,skillDefinitions,ac,movement,
     initiative:numeric(abilities.DEX.modifier,active,'initiative','all'),proficiency:a.data.proficiency,
     currentHp:a.data.currentHp,maxHp:hpMaximum.value,temporaryHp:a.data.temporaryHp,
     hpMaximum:{...hpMaximum,baseMaxHp:a.data.maxHp,baselineConstitutionModifier:baselineCon,constitutionAdjustment:conDelta},
     activeEffects:active.map(r=>r.id),suppressedEffects:suppressed,optionalChargedEffects:optional,conditions:a.data.conditions,rollModes,rollRestrictions,contextTags:a.data.contextTags??[],
-    defenses:active.filter(r=>r.data.target==='damage_defense').map(r=>({type:r.data.key,kind:r.data.operation,source:r.id})),
+    defenses:active.filter(r=>r.data.target==='damage_defense').map(r=>({type:r.data.key,kind:r.data.operation,source:r.id,
+      title:r.title,provenance:r.data.source??null,sourceItemId:r.data.sourceItemId??null,formId:r.data.formId??null,
+      requiresAttunement:r.data.requiresAttunement===true,requiresOperating:r.data.requiresOperating===true,
+      contextTag:r.data.contextTag??null})),
     effects:active};
 }
 export function availableUses(pool){
@@ -352,6 +360,15 @@ export async function spend(ctx,actorId,id,amount) {
   const after=p.data.current-amount;
   await save(ctx,p,{...p.data,current:after});
   return {poolId:id,before:p.data.current,after,amount};
+}
+// The opaque turn binding lets an actor-scoped roll retain its original interrupt window
+// without including the encounter roster, hidden actor identities or initiative order.
+export async function reactionRollWindow(ctx,a) {
+  if(!a?.data.encounterId)return null;
+  const encounter=await ctx.current(a.data.encounterId),d=encounter?.data;
+  must(encounter?.kind==='encounter' && encounter.life==='active' && d.active && d.participants.includes(a.id),'ENCOUNTER_STATE_UNRESOLVED');
+  // Active records from before turn tokens retain a stable binding until the next turn.
+  return d.turnWindow??sha256(JSON.stringify([encounter.id,d.round,d.index]));
 }
 export async function checkTiming(ctx,a,timing) {
   if(a.data.exhaustionLevel!==0 && (Object.hasOwn(a.data,'exhaustionLevel')||(a.data.conditions??[]).includes('exhaustion')))

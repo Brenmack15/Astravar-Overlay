@@ -1,3 +1,4 @@
+import {checkedClassTracks} from './cloud-class-progression.mjs';
 import {formCollectionOperations} from './cloud-form-collection.mjs';
 import { checkDiceOwner, diceCategories, stats, damageTypes, standardSkills, identifier, boolean, whole, nullable, named, option, fields, actorSchema, resourceSchema, formSchema, effectSchema, restSchema, must, op, owned, actor, insert, save, transferableSource, gearEligible, activeForm, sheet, healedHp, spend, useTiming, addClock } from './cloud-mechanics-core.mjs';
 import { deploymentOperations, eligibleForm, planCompletion, deploymentView, interruptIfPending } from './cloud-form-deployment.mjs';
@@ -51,6 +52,7 @@ async function defineActor(ctx,x){
     speeds:x.speeds??{},senses:x.senses??{},size:x.size??null,creatureType:x.creatureType??null,gameSeconds:x.gameSeconds??null,saveProficiencies:x.saveProficiencies??[],
     attacksPerAction:x.attacksPerAction??1,attunementCapacity:x.attunementCapacity??null,conditions:[],conditionSources:[],activeFormId:null,formExpiresAt:null,concentrationCastId:null,encounterId:null,
     poolIds:[],effectIds:[],skills:{}};
+  if(x.classTracks)data.classTracks=checkedClassTracks(level,x.classTracks);
   data.exhaustionLevel=x.exhaustionLevel===undefined?0:x.exhaustionLevel;
   if(data.exhaustionLevel>0){data.conditions.push('exhaustion');data.exhaustionSource=source;data.conditionSources.push({key:'exhaustion',sourceId:'initial',expiresAt:null});}
   await insert(ctx,'actor',actorId,actorId,name,data);
@@ -68,6 +70,7 @@ function validateResourceRules(data) {
 async function defineResource(ctx,x){
   const a=await actor(ctx,x.actorId);
   validateResourceRules(x);
+  must(!x.classId||x.type==='hit_die'&&a.data.classTracks?.some(t=>t.classId===x.classId),'HIT_DIE_CLASS_UNAVAILABLE');
   must(a.data.poolIds.length<128,'ACTOR_POOL_LIMIT');
   if(x.recoveryActorId && x.recoveryActorId!==a.id){
     must(['short_rest','long_rest','either_rest'].includes(x.recovery) && !['hit_die','spell_slot'].includes(x.type),'EXTERNAL_RECOVERY_TRIGGER_INVALID');

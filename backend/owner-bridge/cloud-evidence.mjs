@@ -23,8 +23,9 @@ async function segments(service,b,commandId,inputs) {
   return {parts,writes};
 }
 
-export async function requestEvidence(service,b,command,grantRevision,plan,direct) {
-  const input={command,grantRevision,...(direct?{}:{plan})};
+export async function requestEvidence(service,b,command,grantRevision,plan,direct,sourceGrant=null) {
+  const input={command,grantRevision,...(direct?{}:{plan}),
+    ...(sourceGrant?{replacementSource:{subject:sourceGrant.subject,revision:sourceGrant.revision}}:{})};
   const {parts,writes}=await segments(service,b,command.commandId,[{part:'request',value:input,ids:referenced(plan,plan.access)}]);
   const {args,...skeleton}=command;
   // Storage cleanup uses these opaque references to protect a pending upload.

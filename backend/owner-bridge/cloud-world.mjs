@@ -13,8 +13,13 @@ const worldFields = { entityId: recordId, name: recordTitle, category: worldKind
 const defineWorld = recordObject({ ...worldFields, partyStorage: {type:'boolean'} },Object.keys(worldFields));
 const relateWorld = recordObject({ relationshipId: recordId, from: subject, to: subject, relationship: recordTitle,
   terms: maybeText, status: recordChoice('current','ended','disputed'), source: recordSource });
-const fact = recordObject({ factId: recordId, subject, title: recordTitle, detail: recordText, evidence: credence,
-  learnedAt: maybeText, originalWorldTime: maybeText, source: recordSource });
+const referenceKind = recordChoice('book','letter','map','research','document','lore');
+const factFields = { factId: recordId, subject, title: recordTitle, detail: recordText, evidence: credence,
+  learnedAt: maybeText, originalWorldTime: maybeText, source: recordSource };
+const fact = recordObject({...factFields,referenceKind},Object.keys(factFields));
+const expectedRevision=recordInt(1,Number.MAX_SAFE_INTEGER);
+const revisedFactFields = {factId:recordId,expectedRevision,title:recordTitle,detail:recordText,
+  evidence:credence,learnedAt:maybeText,originalWorldTime:maybeText,reason:recordTitle,source:recordSource};
 const chronicle = recordObject({ eventId: recordId, title: recordTitle, narrative: recordText,
   category: recordChoice('decision','conversation','agreement','discovery','research','travel','encounter','relationship','objective','advancement','crafting','other'),
   status: recordChoice('confirmed','planned','rumor','unresolved'), worldTime: maybeText, subjects: subjectList,
@@ -28,7 +33,6 @@ const checkpointFields = { checkpointId: recordId, title: recordTitle, scene: re
   actorIds: recordArray(recordId,16), source: recordSource };
 const lastEventKind=recordChoice('timeline_event','item_event','coin_transaction','party_exchange','component_event','rest_report');
 const checkpoint = recordObject({ ...checkpointFields, pendingRollPrompt: maybeText, lastEventKind }, Object.keys(checkpointFields));
-const expectedRevision=recordInt(1,Number.MAX_SAFE_INTEGER);
 
 async function reference(ctx, value) {
   return recordRead(ctx, value.kind, value.id);
@@ -117,12 +121,12 @@ export const WORLD_OPERATIONS=Object.freeze({
     const about=await reference(ctx,args.subject);
     await ctx.put({id:args.factId,kind:'known_fact',actorId:about.actorId,title:args.title,data:{
       detail:args.detail,evidence:args.evidence,learnedAt:args.learnedAt,originalWorldTime:args.originalWorldTime,
+      ...(args.referenceKind?{referenceKind:args.referenceKind}:{}),
       recordedAt:ctx.now,source:args.source}});
     await ctx.link(args.factId,'known_about',about.id);
     return {factId:args.factId,evidence:args.evidence};
   }),
-  revise_known_fact:recordsOperation('world',recordObject({factId:recordId,expectedRevision,title:recordTitle,detail:recordText,
-    evidence:credence,learnedAt:maybeText,originalWorldTime:maybeText,reason:recordTitle,source:recordSource}),async(ctx,args)=>{
+  revise_known_fact:recordsOperation('world',recordObject({...revisedFactFields,referenceKind},Object.keys(revisedFactFields)),async(ctx,args)=>{
     const current=await recordRead(ctx,'known_fact',args.factId);
     if(current.revision!==args.expectedRevision) recordsFail('FACT_REVISION_CHANGED',409);
     const {factId,title,expectedRevision,reason,...changes}=args;

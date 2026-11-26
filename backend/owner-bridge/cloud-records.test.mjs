@@ -186,9 +186,15 @@ test('partial external departures, merge, shop sale and legitimate recovery keep
   const merged=await f.run('merge_stacks',{keepId:'rations',mergeId:'smaller',source});
   assert.equal(merged.quantity,10);
   assert.equal((await f.record('smaller')).data.holding,'merged');
-  const sale=await f.run('sell_item',{itemId:'rations',quantity:2,splitId:'sold',walletId:'purse',proceeds:amounts({cp:7}),buyerId:null,buyerName:'Traveling buyer',source});
+  await f.run('define_connection',{entityId:'buyer',name:'Traveling buyer',category:'person',actorId:null,knownDescription:null,source});
+  await f.run('define_connection',{entityId:'market',name:'Open market',category:'place',actorId:null,knownDescription:null,source});
+  const saleArgs={itemId:'rations',quantity:2,splitId:'sold',walletId:'purse',proceeds:amounts({cp:7}),buyerId:'buyer',buyerName:'Traveling buyer',source};
+  await assert.rejects(f.run('sell_item',{...saleArgs,locationId:'buyer'}),/STORAGE_LOCATION_REQUIRED/);
+  assert.equal((await f.record('rations')).data.quantity,10);assert.equal((await f.record('purse')).data.coins.cp,0);
+  const sale=await f.run('sell_item',{...saleArgs,locationId:'market'});
   assert.equal(sale.quantity,2);assert.equal((await f.record('rations')).data.quantity,8);
   assert.equal((await f.record('sold')).data.partyAccess,false);
+  assert.equal((await f.record('sold')).data.locationId,'market');assert.equal((await f.record('sold')).data.externalRecipientId,'buyer');
   assert.equal((await f.record('sold')).life,'archived');
   assert.equal((await f.record('purse')).data.coins.cp,7);
   await assert.rejects(f.run('split_stack',{itemId:'sold',splitId:'again',quantity:1,source}),/RECORD_UNAVAILABLE/);
@@ -642,4 +648,23 @@ test('story arcs and sessions retain sourced chronology, stable revision history
   assert.equal((await f.service.state(dm,continuity,{kind:'campaign_session'})).records.length,0);
   assert.deepEqual((await cloudContext(f.service,dm,continuity)).chronology.sessions,[]);
   await assert.rejects(f.run('define_story_arc',{...arc,arcId:'narrow-arc'}),/DENIED|FORBIDDEN/);
+});
+
+test('known reference kinds carry source-backed text and preserve unclassified older records and their evidence',async t=>{
+  const f=await fixture(t);
+  const facts={subject:{kind:'actor',id:'hero'},title:'Fixture reference',detail:'The party read one sentence.',
+    evidence:'confirmed',learnedAt:null,originalWorldTime:null,source};
+  await f.run('record_known_fact',{...facts,factId:'old-source'});
+  assert.equal(Object.hasOwn((await f.record('old-source')).data,'referenceKind'),false);
+  const original=await f.submit(await f.body('record_known_fact',{...facts,factId:'letter',referenceKind:'letter'}));
+  const edit={factId:'letter',expectedRevision:1,title:'Annotated letter',detail:'The handwritten reference is now legible.',
+    evidence:'confirmed',learnedAt:null,originalWorldTime:null,source,reason:'Reviewed transcription'};
+  await f.run('revise_known_fact',edit);
+  assert.equal((await f.record('letter')).data.referenceKind,'letter');
+  const revision=await f.body('revise_known_fact',{...edit,expectedRevision:2,referenceKind:'map',reason:'Reviewed cartographic source'});
+  await f.submit(revision);f.reopen();
+  const stored=await f.record('letter');
+  assert.equal(stored.data.referenceKind,'map');assert.equal(stored.data.originalWorldTime,null);
+  assert.deepEqual((await f.service.receipt(dm,continuity,original.commandId)).receipt,original.receipt);
+  assert.equal((await f.db.prepare("SELECT count(*) AS n FROM cloud_links WHERE from_id='letter' AND relation='known_about' AND to_id=?").bind('hero').first()).n,1);
 });

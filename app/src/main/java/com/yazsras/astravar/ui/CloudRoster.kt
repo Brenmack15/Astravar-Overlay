@@ -8,6 +8,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import com.yazsras.astravar.data.CloudCampaignClient
 import com.yazsras.astravar.data.CloudSnapshot
 import kotlinx.serialization.json.*
+import java.util.UUID
 
 internal fun cloudPartyMember(row: JsonObject): Boolean {
     val data = row["data"] as? JsonObject ?: return false
@@ -27,6 +28,8 @@ internal fun cloudPartyMember(row: JsonObject): Boolean {
         val row = selected
         if (row == null) {
             PlayerTabs(listOf("Party","All actors"),filter,{filter=it})
+            PlayerOutlinedButton({open("define_actor",buildJsonObject{put("actorId",UUID.randomUUID().toString());put("role","companion")})},
+                enabled=online){Text("Create companion")}
             OutlinedTextField(query,{query=it},label={Text("Find actor")},singleLine=true)
             CachedRecordList(client,snapshot,setOf("actor"),null,query,allowed={filter!="Party" || cloudPartyMember(it)}) {selected=it}
         } else {

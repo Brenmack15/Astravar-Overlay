@@ -1,4 +1,4 @@
-import { checkDiceOwner, stats, identifier, named, whole, arrayOf, fields, option, boolean, checkSpec, evidence, must, op, owned, actor, insert, save, sheet, rollPolicy } from './cloud-mechanics-core.mjs';
+import { checkDiceOwner, stats, identifier, named, whole, arrayOf, fields, option, boolean, checkSpec, evidence, must, op, owned, actor, insert, save, sheet, rollPolicy, reactionRollWindow } from './cloud-mechanics-core.mjs';
 
 export function observed(name,count,sides,flat,keeps,e,eligibleD20=false) {
   must(Number.isSafeInteger(flat) && count>=0 && count<=200 && e.faces.length===count && e.faces.every(v=>Number.isInteger(v)&&v>=1&&v<=sides),'INVALID_RECORDED_FACES');
@@ -68,7 +68,8 @@ async function calculate(ctx,actorId,s,e,verifiedTags=[]){
   const keeps=effective.mode==='normal'?'sum':effective.mode==='advantage'?'highest':'lowest';
   const result=observed(custom?s.name:checkName(s.kind,s.key,a),isCheck?effective.count:s.dice,custom?s.sides:20,signed,keeps,e,isCheck);
   return {...result,mode:effective.mode,actorId,formId:projection.formId,kind:s.kind,key:s.key,requestedMode:s.mode,
-    sourceRevision:a.revision,recordedAt:ctx.now,commandId:ctx.commandId};
+    sourceRevision:a.revision,recordedAt:ctx.now,commandId:ctx.commandId,
+    ...(['ability','save','skill'].includes(s.kind)?{reactionWindow:await reactionRollWindow(ctx,a)}:{})};
 }
 async function recordCheck(ctx,x){
   const tags=[];

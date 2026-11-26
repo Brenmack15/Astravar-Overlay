@@ -41,8 +41,8 @@ private fun formula(c:JsonObject):String{
     openOperation:(String,JsonObject)->Unit,inspect:(String)->Unit,commit:(String,JsonObject)->Unit){
     val scope=rememberCoroutineScope()
     val clipboard=LocalClipboardManager.current
-    var records by remember(actorId,section,snapshot.version.grantRevision){mutableStateOf<List<JsonObject>>(emptyList())}
-    var more by remember {mutableStateOf<String?>(null)}
+    var records by remember(actorId,section,snapshot.binding,snapshot.version,online){mutableStateOf<List<JsonObject>>(emptyList())}
+    var more by remember(actorId,section,snapshot.binding,snapshot.version,online) {mutableStateOf<String?>(null)}
     var details by rememberSaveable(actorId,section){mutableStateOf<String?>(null)}
     var reviewedItem by rememberSaveable(actorId) { mutableStateOf<String?>(null) }
     var selection by rememberSaveable(actorId,section){mutableStateOf<String?>(null)}
@@ -50,6 +50,7 @@ private fun formula(c:JsonObject):String{
     var error by remember {mutableStateOf<String?>(null)}
     var loading by remember {mutableStateOf(false)}
     var currentForm by remember(actorId){mutableStateOf<String?>(null)}
+    var reactionWindow by remember(actorId,snapshot.binding){mutableStateOf<String?>(null)}
     var pendingForm by remember(actorId, snapshot.binding){mutableStateOf<JsonObject?>(null)}
     var pendingDeploymentId by remember(actorId,snapshot.binding){mutableStateOf<String?>(null)}
     var latestAttempts by rememberSaveable(actorId,snapshot.binding){mutableStateOf("{}")}
@@ -59,7 +60,7 @@ private fun formula(c:JsonObject):String{
             val rows=if(section=="Actions"&&online){
                 val v=snapshot.version
                 val suffix="actions/$actorId"+(after?.let{"?after=$it&atRevision=${v.revision}&atEpoch=${v.epoch}&grantRevision=${v.grantRevision}"}?:"")
-                val page=client.projection(snapshot,suffix); more=page.textValue("nextAfter");currentForm=page.textValue("formId")
+                val page=client.projection(snapshot,suffix); more=page.textValue("nextAfter");currentForm=page.textValue("formId");reactionWindow=page.textValue("reactionWindow")
                 page.rowsAt("rows")
             }else{
                 if(section=="Forms"){
@@ -181,7 +182,9 @@ private fun formula(c:JsonObject):String{
                             val formula=row.rowsAt("components").joinToString(" + ",transform=::formula)
                             Box(Modifier.widthIn(min=48.dp,max=128.dp).heightIn(min=48.dp).combinedClickable(enabled=damageAvailable,role=Role.Button,onClickLabel="Roll damage",
                                 onLongClickLabel="Damage options",onLongClick={selection=id;details="Damage options"},onClick={damageClick(row)}),contentAlignment=Alignment.Center){Text(formula.ifBlank{"Damage"},style=MaterialTheme.typography.labelMedium)}
-                        }else PlayerTextButton({open("use_action",buildJsonObject{put("actionId",id);put("useId",UUID.randomUUID().toString())})},enabled=enabled){Text("Use")}
+                        }else if(cfg.textValue("type")=="roll_bonus")
+                            PlayerTextButton({selection=id;details="Roll reaction"},enabled=enabled){Text("Choose roll")}
+                        else PlayerTextButton({open("use_action",buildJsonObject{put("actionId",id);put("useId",UUID.randomUUID().toString())})},enabled=enabled){Text("Use")}
                     }
                 }
             }
@@ -202,6 +205,8 @@ private fun formula(c:JsonObject):String{
             val data=row.getValue("data").jsonObject;val id=row.cloudText("id")
             PlayerEntry(row.cloudText("title"),cloudLabel(row.cloudText("kind")),"Journal",{if(section=="Forms"){selection=id;details="Preview form"}else inspect(id)})
             if(section=="History"){
+                if(row.cloudText("kind")=="roll" && data.textValue("status")=="pending")
+                    CloudPendingRoll(client,snapshot,actorId,row,online,commit)
                 if(row.cloudText("kind")=="attack_attempt")CloudAttackRiderStatus(data)
                 data.textValue("text")?.let{line->PlayerTextButton({clipboard.setText(AnnotatedString(line))}){Text(line)}}
                 if(row.cloudText("kind")=="attack_attempt"&&data["damage"]==JsonNull)
@@ -212,6 +217,9 @@ private fun formula(c:JsonObject):String{
     if(records.isEmpty()&&!loading)Text("No records in this view.")
     more?.let{cursor->PlayerTextButton({scope.launch{load(cursor)}},enabled=!loading){Text("More")}}
     error?.let{Text(it,color=MaterialTheme.colorScheme.error)}
+    if(details=="Roll reaction")records.firstOrNull{it.textValue("id")==selection}?.let { rule ->
+        CloudRollInterrupt(client,snapshot,actorId,rule,reactionWindow,online,{details=null}) { args ->open("use_action",args) }
+    }
     if(details=="Manage attacks")PlayerSheet("Manage attacks",{details=null}){
         PlayerButton({reviewedItem=null;selection=null;details="Build attack"},enabled=online){Text("Create Attack")}
         PlayerTextButton({details="Source attacks"}){Text("Review Source Attacks")}

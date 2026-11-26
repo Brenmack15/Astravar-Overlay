@@ -355,7 +355,26 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                             Text("New Owner · ${if(component)"Unchanged"else ownerCaption(client,snapshot,body.obj("after"))}")
                             Text("Reason · ${if(component)cloudLabel(event.cloudText("title"))else event.cloudText("title")}",style=MaterialTheme.typography.titleSmall)
                             CloudReceiptLink(client,snapshot,online,body.s("commandId"))
-                            if(body.s("historical")=="true") Text(listOfNotNull(body.s("evidence")?.let(::cloudLabel),body.s("worldTime")).joinToString(" · "),color=RebuildPalette.Muted)
+                            if (body.s("historical") == "true") {
+                                Text(listOfNotNull(body.s("evidence")?.let(::cloudLabel),body.s("worldTime")).joinToString(" · "),color=RebuildPalette.Muted)
+                                PlayerTextButton({
+                                    fun ownerInput(key: String): JsonElement {
+                                        val recorded = body[key] as? JsonObject ?: return JsonNull
+                                        val kind = recorded.s("kind")?.takeIf { it in setOf("actor", "world_entity", "named", "unknown") } ?: return JsonNull
+                                        return buildJsonObject {
+                                            put("kind", kind)
+                                            put("id", recorded["ownerId"]?.takeUnless { it == JsonNull } ?: recorded["externalRecipientId"] ?: JsonNull)
+                                            put("name", recorded["externalRecipientName"] ?: JsonNull)
+                                        }
+                                    }
+                                    open("record_historical_item_event", buildJsonObject {
+                                        put("eventId", id()); put("itemId", itemId); put("eventType",body.getValue("type"))
+                                        put("previousOwner", ownerInput("before")); put("newOwner", ownerInput("after"))
+                                        put("worldTime", body["worldTime"] ?: JsonNull); put("sourcePublishedAt", JsonNull)
+                                        put("evidence", body.getValue("evidence")); put("correctsId", event.cloudText("id"))
+                                    })
+                                }, enabled = online) { Text("Correct this historical event") }
+                            }
                         }
                     }
                     if(page.rows("events").isEmpty())Text("No recorded item history.")
@@ -374,14 +393,22 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                 }else Text("Connect to retrieve component history.")
                 "Transfer" -> HoldingTransfer(client,snapshot,item,online,open)
                 else->{
-                    (d.s("description")?:definition?.data()?.s("description"))?.let{Text(it)}
+                    val description = d.s("description") ?: definition?.data()?.s("description")
+                    description?.let { Text(it) }
                     Text("Owner · ${ownerCaption(client,snapshot,d)}")
                     d.s("custodianId")?.let{Text("Carried by · "+recordName(client,snapshot,it,"Unknown"))}
                     d.s("locationId")?.let{Text("Stored at · "+recordName(client,snapshot,it,"Unknown"))}
                     Text(if(d.s("attuned")=="true") "Attuned" else "Unattuned")
                     if(def!=null && catalogVisible)PlayerOutlinedButton({manage(def)}){Text("Manage in Inventory")}
-                    PlayerTextButton({open("customize_item",args("itemId" to word(itemId),"name" to item.getValue("title"),
-                        "condition" to word(d.s("condition")?:"standard"),"source" to manual))},enabled=online && d.s("quantity")=="1"){Text("Customize this instance")}
+                    PlayerTextButton({
+                        open("customize_item", buildJsonObject {
+                            put("itemId", itemId)
+                            put("name", name)
+                            description?.let { put("description", it) }
+                            d.s("condition")?.let { put("condition", it) }
+                            put("source", manual)
+                        })
+                    }, enabled = online && d.s("quantity") == "1") { Text("Customize this instance") }
                     if(d.s("holding")=="carried" && d.s("quantity")=="1"){
                         definition?.let{ linked->
                             val spec=linked.data()
@@ -456,6 +483,8 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
     var type by rememberSaveable(itemId){mutableStateOf("Party member")}
     var target by rememberSaveable(itemId,type){mutableStateOf<String?>(null)}
     var recipient by rememberSaveable(itemId,type){mutableStateOf("")}
+    var recipientId by rememberSaveable(itemId,type){mutableStateOf<String?>(null)}
+    var outsideLocation by rememberSaveable(itemId,type){mutableStateOf<String?>(null)}
     var reason by rememberSaveable(itemId,type){mutableStateOf("")}
     var disposition by rememberSaveable(itemId,type){mutableStateOf("Gift")}
     var ownership by rememberSaveable(itemId,type){mutableStateOf("Give")}
@@ -485,7 +514,21 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
         "Storage" -> CachedRecordList(client,snapshot,setOf("world_entity"),null,"",allowed={it.data().s("category")=="place" && it.data().s("partyStorage")=="true"}){target=it.s("id")}
         "External" -> {
             PlayerTabs(listOf("Gift","Lost","Dropped"),disposition,{disposition=it})
-            if(disposition=="Gift")Field("Known recipient (optional)",recipient,{recipient=it.take(180)})
+            if (disposition == "Gift") {
+                Field("Known recipient (optional)", recipient, { recipient=it.take(180); recipientId=null })
+                PlayerDisclosure("Choose a known recipient") {
+                    CachedRecordList(client,snapshot,setOf("world_entity"),null,"",allowed={it.data().s("category") != "place"}) { row ->
+                        recipientId = row.cloudText("id"); recipient = row.cloudText("title")
+                    }
+                }
+            }
+            PlayerDisclosure("Last known location") {
+                Text(outsideLocation?.let { recordName(client,snapshot,it,"Unknown") } ?: "Location unknown")
+                CachedRecordList(client,snapshot,setOf("world_entity"),null,"",allowed={it.data().s("category") == "place"}) { row ->
+                    outsideLocation = row.cloudText("id")
+                }
+                if (outsideLocation != null) PlayerTextButton({ outsideLocation=null }) { Text("Clear location") }
+            }
         }
         else->Text("The party retains this holding with its physical location unresolved.")
     }
@@ -496,7 +539,8 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
     }
     PlayerButton({
         val dest=args("type" to word(destination),"actorId" to (target?.takeIf{type=="Party member"}?.let(::word)?:JsonNull),
-            "locationId" to (target?.takeIf{type=="Storage"}?.let(::word)?:JsonNull),"recipientId" to JsonNull,
+            "locationId" to ((if(type=="External")outsideLocation else target?.takeIf{type=="Storage"})?.let(::word)?:JsonNull),
+            "recipientId" to (recipientId?.takeIf{destination=="external_gift"}?.let(::word)?:JsonNull),
             "recipientName" to (recipient.takeIf{destination=="external_gift" && it.isNotBlank()}?.let(::word)?:JsonNull))
         val chosen=if(shared && type in setOf("Storage","Unassigned")) JsonObject(dest+("partyOwned" to JsonPrimitive(true))) else dest
         open("transfer_item",args("itemId" to word(itemId),"quantity" to JsonPrimitive(quantity),
@@ -504,7 +548,8 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
     },enabled=online && selectable && reason.isNotBlank() && (type !in setOf("Party member","Storage") || target!=null)) {Text("Review transfer")}
     if(type=="External")PlayerOutlinedButton({
         open("sell_item",args("itemId" to word(itemId),"quantity" to JsonPrimitive(quantity),"splitId" to (if(quantity==stock)JsonNull else word(splitId)),
-            "buyerId" to JsonNull,"buyerName" to (recipient.takeIf{it.isNotBlank()}?.let(::word)?:JsonNull),"source" to manual))
+            "buyerId" to (recipientId?.let(::word)?:JsonNull),"buyerName" to (recipient.takeIf{it.isNotBlank()}?.let(::word)?:JsonNull),
+            "locationId" to (outsideLocation?.let(::word)?:JsonNull),"source" to manual))
     },enabled=online && selectable){Text("Record sale")}
 }
 
@@ -569,6 +614,7 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
             d.s("intent")?.let{Text(it)}
             val uses=(d["requirements"] as? JsonArray).orEmpty().mapNotNull {(it as? JsonPrimitive)?.contentOrNull}
             if(uses.isNotEmpty()) {Text("Requirements",style=MaterialTheme.typography.titleSmall);uses.forEach {Text(it)}}
+            CloudLinkedRecords(client, snapshot, projectId, online, inspect)
             PlayerDisclosure("Blueprints and stages",initiallyOpen=true) {
                 CachedRecordList(client,snapshot,setOf("project_stage","blueprint_version"),null,"",allowed={it.data().s("projectId")==projectId}) {
                     if(it.s("kind")=="project_stage" && d.s("status")!="completed" && online)
@@ -584,6 +630,9 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                 for((label,op,identity) in listOf(Triple("Record blueprint","record_blueprint_version","blueprintId"),Triple("Add construction stage","define_construction_stage","stageId"),
                     Triple("Record component integration","integrate_component","eventId"))) {
                     PlayerTextButton({open(op,args("projectId" to word(projectId),identity to id(),"source" to manual))},enabled=online){Text(label)}
+                }
+                PlayerDisclosure("Component rules") {
+                    Text("A confirmed stage can install or incorporate a physical component, or consume a recorded material quantity. Record a proposed extraction or detachment in the project plan for adjudication.")
                 }
                 PlayerTextButton({open("pay_construction_cost",args("projectId" to word(projectId),"source" to manual))},enabled=online){Text("Record payment")}
                 PlayerTextButton({open("link_completed_invention",args("projectId" to word(projectId),"source" to manual))},enabled=online){Text("Link completed invention")}
@@ -602,7 +651,7 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
             val title=row.cloudText("title")
             if(kind=="world_entity") CloudEntityImage(client,snapshot,online,recordId,kind,title)
             Text(title,style=MaterialTheme.typography.titleLarge)
-            listOf("category","status","evidence","worldTime","originalWorldTime").mapNotNull { d.s(it) }
+            listOf("referenceKind","category","status","evidence","worldTime","originalWorldTime").mapNotNull { d.s(it) }
                 .takeIf{it.isNotEmpty()}?.let{Text(it.joinToString(" · "){s->cloudLabel(s)},color=RebuildPalette.Gold)}
             for(key in listOf("knownDescription","terms","detail","finding","narrative")) d.s(key)?.let{Text(it)}
             val requirements=(d["knownRequirements"] as? JsonArray).orEmpty().mapNotNull{(it as? JsonPrimitive)?.contentOrNull}
@@ -623,7 +672,7 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                 when(kind){
                     "world_entity"->{operation="edit_connection";values=prefill("entityId",listOf("category","knownDescription","partyStorage"))
                         values["name"]=word(title);values["actorId"]=row["actorId"]?:JsonNull}
-                    "known_fact"->{operation="revise_known_fact";values=prefill("factId",listOf("detail","evidence","learnedAt","originalWorldTime"),true);values["title"]=word(title)}
+                    "known_fact"->{operation="revise_known_fact";values=prefill("factId",listOf("detail","evidence","learnedAt","originalWorldTime","referenceKind"),true);values["title"]=word(title)}
                     "research_note"->{operation="revise_research_finding";values=prefill("researchId",listOf("finding","evidence"),true);values["title"]=word(title)}
                     "objective"->{operation="revise_objective";values=prefill("objectiveId",listOf("knownRequirements"),true);values["title"]=word(title)}
                     else->{operation="record_chronicle_event";values=prefill("correctsId",listOf("category","worldTime"))
@@ -653,7 +702,11 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                 },enabled=online){Text("Edit relationship")} }
             }
             d.s("source")?.let{PlayerDisclosure("Source"){Text(it)}}
-            PlayerTextButton({inspect(recordId)}){Text("Inspect linked records")}
+            PlayerTextButton({
+                open("record_known_fact",args("factId" to id(),"subject" to args("id" to word(recordId),"kind" to word(kind)),
+                    "referenceKind" to word("document"),"learnedAt" to JsonNull,"originalWorldTime" to JsonNull,"source" to manual))
+            },enabled=online){Text("Link known document")}
+            CloudLinkedRecords(client,snapshot,recordId,online,inspect)
         }
     }
 }

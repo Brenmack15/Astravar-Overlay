@@ -1,5 +1,9 @@
 package com.yazsras.astravar.ui
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -15,6 +19,7 @@ import kotlinx.serialization.json.*
 }
 
 @Composable internal fun CloudHistoricalReceipt(client: CloudCampaignClient, snapshot: CloudSnapshot, id: String, close: () -> Unit) {
+    val context=LocalContext.current
     var evidence by remember(snapshot.binding, snapshot.version, id) { mutableStateOf<JsonObject?>(null) }
     var error by remember(snapshot.binding, snapshot.version, id) { mutableStateOf<String?>(null) }
     LaunchedEffect(client, snapshot, id) {
@@ -29,6 +34,14 @@ import kotlinx.serialization.json.*
             Text(cloudLabel(observed.cloudText("status").lowercase()), style = MaterialTheme.typography.titleMedium)
             Text("Recorded at authority epoch ${observed.getValue("epoch")} · revision ${observed.getValue("revision")}")
             Text("Current authority epoch ${snapshot.version.epoch}")
+            if(observed.cloudText("status")=="CONFLICT" && receipt["reason"]?.jsonPrimitive?.contentOrNull=="REVIEW_BASELINE_CHANGED" &&
+                observed["epoch"]?.jsonPrimitive?.longOrNull==snapshot.version.epoch) {
+                PlayerOutlinedButton({
+                    val destination=exactOwnerReviewPage(snapshot.binding,id,observed.cloudText("digest"),"replace")
+                    try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(destination.toString()))) }
+                    catch(_:ActivityNotFoundException){error="Open the owner account to review this conflict."}
+                }) { Text("Review a linked replacement") }
+            }
             receipt["outcome"]?.let { RecordFields(it) }
             PlayerDisclosure("Receipt and recorded changes") { RecordFields(receipt) }
         }

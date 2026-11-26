@@ -29,8 +29,18 @@ jobs:
       - name: Install the local provider for native cold-restoration testing
         run: |
           runtime_dir="$RUNNER_TEMP/ascension-native-provider"
-          npm install --prefix "$runtime_dir" --no-audit --no-fund --no-save miniflare@5.20261123.1-beta
+          npm install --prefix "$runtime_dir" --no-audit --no-fund --no-save miniflare@5.20261123.1-beta playwright@1.62.1
           echo "ASTRAVAR_MINIFLARE_PATH=$runtime_dir/node_modules/miniflare" >> "$GITHUB_ENV"
+      - name: Verify mobile owner reviews and scoped authorization
+        run: |
+          set -o pipefail
+          mkdir -p validation
+          export NODE_PATH="$RUNNER_TEMP/ascension-native-provider/node_modules"
+          CHROMIUM_EXECUTABLE=$(command -v google-chrome-stable || command -v google-chrome || command -v chromium)
+          export CHROMIUM_EXECUTABLE
+          test -x "$CHROMIUM_EXECUTABLE"
+          node scripts/verify-ascension-inbox-browser.cjs | tee validation/ascension-owner-review.json
+          node scripts/verify-ascension-owner-settings.cjs | tee validation/ascension-owner-access.json
       - name: Authenticated bridge protocol regression
         run: node --test backend/owner-bridge/*.test.mjs
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
@@ -42,7 +52,9 @@ jobs:
         run: bash scripts/ci-android-sdk.sh
       - name: Verify migration boundaries and retained provenance
         run: |
+          set -o pipefail
           bash scripts/ci-python-tests.sh
+          python3 scripts/tests/ascension_detached_archive_smoke.py | tee validation/ascension-detached-recovery.json
           python3 scripts/verify_v2_protected_source.py
           python3 scripts/verify_ui_foundation.py
           python3 scripts/verify_upgrade_integrity.py

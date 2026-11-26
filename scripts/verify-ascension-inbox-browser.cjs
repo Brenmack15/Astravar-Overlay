@@ -113,8 +113,44 @@ async function main(){
     assert.deepEqual(Buffer.from(await primary.arrayBuffer()),Buffer.from(image));
     const current=db.db.prepare("SELECT data_json FROM cloud_entities WHERE id='record-a'").get();
     assert.equal(JSON.parse(current.data_json).abilities.INT,16);
+    const original={version:1,commandId:'changed-while-reviewed',epoch:1,expectedRevision:3,
+      operation:'set_actor_ability',args:{actorId:'record-a',ability:'INT',score:17}};
+    const delayed=await call('submit_cloud_command',{command:original});
+    const change=async(revision,score)=>post(base+'/commands',{...original,commandId:randomUUID(),expectedRevision:revision,args:{...original.args,score}});
+    await change(3,18);
+    const resolution=await ownerContext.newPage();
+    await resolution.goto(href(delayed,'verify'));
+    await resolution.getByRole('button',{name:'Resolve status',exact:true}).click();
+    await resolution.getByText('CONFLICT · revision 4',{exact:true}).waitFor();
+    const prepare=resolution.getByRole('button',{name:'Prepare linked replacement',exact:true});
+    const oldProof=await call('get_cloud_receipt',{commandId:original.commandId});
+    await prepare.click();
+    await resolution.getByRole('button',{name:'Verify',exact:true}).waitFor();
+    const nextId=new URL(resolution.url()).hash.match(/request=([^&]+)/)[1];
+    assert.notEqual(nextId,original.commandId);
+    assert.equal((await call('get_cloud_receipt',{commandId:nextId})).status,'PENDING_APPROVAL');
+    await change(4,19);
+    await resolution.getByRole('button',{name:'Verify',exact:true}).click();
+    await resolution.getByText('CONFLICT · revision 5',{exact:true}).waitFor();
+    await prepare.click();
+    await resolution.getByRole('button',{name:'Verify',exact:true}).waitFor();
+    const finalId=new URL(resolution.url()).hash.match(/request=([^&]+)/)[1];
+    assert.notEqual(nextId,finalId);
+    assert.equal(JSON.parse(db.db.prepare("SELECT data_json FROM cloud_entities WHERE id='record-a'").get().data_json).abilities.INT,19);
+    await resolution.getByRole('button',{name:'Verify',exact:true}).click();
+    await resolution.getByText('COMMITTED · revision 6',{exact:true}).waitFor();
+    assert.equal(JSON.parse(db.db.prepare("SELECT data_json FROM cloud_entities WHERE id='record-a'").get().data_json).abilities.INT,17);
+    assert.equal((await call('get_cloud_receipt',{commandId:finalId})).status,'COMMITTED');
+    assert.deepEqual(await call('get_cloud_receipt',{commandId:original.commandId}),oldProof);
+    await resolution.goto(href(delayed,'replace'));
+    // The immediate replacement also conflicted. Preparing a second live sibling of the committed descendant is prohibited.
+    const rootLink=resolution.getByRole('link',{name:'Open linked replacement'});
+    await rootLink.waitFor();
+    await rootLink.click();
+    await resolution.getByRole('link',{name:'Open linked replacement'}).click();
+    await resolution.getByText('COMMITTED · revision 6',{exact:true}).waitFor();
     console.log(JSON.stringify({status:'VERIFIED',runtime:'Chromium',mobileViewport:true,zeroAutomaticDecisions:true,sameTabRetarget:true,
-      exactRefusals:1,exactVerifications:2,exactImagePreviewRequired:true,wrongDigestBlocked:true,ownerSessionRequired:true}));
+      reviewedReplacementConflicts:2,linkedReplacements:2,originalReceiptPreserved:true,exactRefusals:1,exactVerifications:3,exactImagePreviewRequired:true,wrongDigestBlocked:true,ownerSessionRequired:true}));
   }finally{if(browser)await browser.close();if(server.listening)await new Promise(ok=>server.close(ok));db.close();for(const action of cleanup)await action();fs.rmSync(tmp,{recursive:true,force:true});}
 }
 main().catch(error=>{console.error(error.stack);process.exitCode=1;});

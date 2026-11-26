@@ -75,6 +75,8 @@ import kotlinx.serialization.json.*
 
 internal fun cloudError(e: Exception): String = when ((e as? OwnerSyncFailure)?.code) {
     "CLOUD_NOT_SELECTED","CLOUD_CONTINUITY_UNKNOWN","CLOUD_AUTHORITY_REQUIRED","CLOUD_HTTP_404" -> "A cloud-authoritative campaign has not been verified for this pairing."
+    "CLOUD_DEVICE_GRANT_REVOKED" -> "This device’s cloud access was revoked."
+    "CLOUD_DEVICE_GRANT_EXPIRED" -> "This device’s cloud grant expired."
     "AUTHENTICATION_REQUIRED","CLOUD_BINDING_CHANGED","CLOUD_GRANT_DENIED","CLOUD_GRANT_UNVERIFIED","CREDENTIAL_REVOKED_OR_EXPIRED" -> "Access is unavailable. Check this device’s campaign and cloud grant."
     "SNAPSHOT_CHANGED","CLOUD_REVIEW_STALE","EXPECTED_REVISION_CONFLICT" -> "The campaign changed. Refresh and review the current values."
     "CLOUD_RATE_LIMITED" -> (e as? OwnerSyncFailure)?.retryAfterSeconds?.let { "Cloud requests are paused. Retry in $it seconds using the original request." }
@@ -98,6 +100,12 @@ private val categoryScopes = mapOf(
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val clipboard = LocalClipboardManager.current
+    val syncPreferences=remember(context) { CampaignSyncPreferences(context) }
+    var automaticPaused by remember(syncPreferences) { mutableStateOf(syncPreferences.paused) }
+    DisposableEffect(syncPreferences) {
+        val listener=syncPreferences.observeControls { automaticPaused=syncPreferences.paused }
+        onDispose { listener.close() }
+    }
     var tab by rememberSaveable { mutableStateOf("Character") }
     var inboxFromTools by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -111,6 +119,7 @@ private val categoryScopes = mapOf(
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var verified by remember { mutableStateOf(false) }
+    var connectionFailure by remember(snapshot.binding) { mutableStateOf<String?>(null) }
     var count by remember { mutableStateOf<Int?>(null) }
     var caps by remember { mutableStateOf<JsonObject?>(null) }
     var records by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
@@ -143,16 +152,21 @@ private val categoryScopes = mapOf(
                 capabilities.getValue("grantRevision").jsonPrimitive.long == received.version.grantRevision)
             caps = capabilities
             verified = loadRecords()
+            if (verified) connectionFailure=null
             try { count = client.reviewCount() }
             catch (e: CancellationException) { throw e }
             catch (_: Exception) { count = null }
         } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { caps = null; error = cloudError(e); loadRecords() }
+        catch (e: Exception) {
+            caps = null; connectionFailure=(e as? OwnerSyncFailure)?.code ?: "UNKNOWN"
+            error = cloudError(e); loadRecords()
+        }
         finally { busy = false }
     }
-    LaunchedEffect(snapshot.binding, lifecycle) {
+    LaunchedEffect(snapshot.binding, lifecycle, automaticPaused) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             loadRecords()
+            if (automaticPaused) { verified=false; count=null; return@repeatOnLifecycle }
             refresh()
             while (true) { delay(30_000); if (!busy) refresh() }
         }
@@ -193,18 +207,20 @@ private val categoryScopes = mapOf(
         reviewed = snapshot; initialFields = args; operation = item; tool = null; error = null
     }
 
+    val showDice = tab == "Character" && !search && snapshot.visible && actorId != null
     Scaffold(containerColor = RebuildPalette.Canvas, topBar = {
         RebuildAppHeader(false, search = { search = !search; query = "" }, tools = { tool = "Tools" },
             notifications = { inboxFromTools = false; tool = "Inbox" }, actionable = count)
     }, bottomBar = { RebuildPrimaryNavigation(tab) { tab=it; inspected=null; search=false; query="" } },
         floatingActionButton = {
-            if (tab == "Character" && !search && snapshot.visible && actorId != null) FloatingActionButton(
+            if (showDice) FloatingActionButton(
                 onClick = { tool = "Dice" }, shape = CircleShape, containerColor = RebuildPalette.Panel,
                 modifier = Modifier.semantics { contentDescription = "Open Roll Manager" }
             ) { ArcaneIcon("D20",Modifier.size(30.dp),RebuildPalette.GoldBright) }
         }
     ) { insets ->
-        Column(Modifier.fillMaxSize().padding(insets).padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.fillMaxSize().padding(insets).padding(bottom=if(showDice) 72.dp else 0.dp)
+            .padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
             PlayerHeading(if (search) "Find" else tab) {
                 PlayerTextButton({ scope.launch { refresh() } }, enabled=!busy) { Text("Refresh") }
             }
@@ -235,32 +251,17 @@ private val categoryScopes = mapOf(
             }
         }
     }
-    val inspectId=inspected
-    if (inspectId!=null && snapshot.visible && historicalId == null) key(inspectId) {
-        var row by remember { mutableStateOf<JsonObject?>(null) }
-        LaunchedEffect(snapshot) { row=client.record(inspectId) }
-        PlayerSheet(row?.cloudText("title") ?: "Record", { inspected=null }) {
-            row?.let {
-                if (it.cloudText("kind") in cloudMediaTargets)
-                    CloudEntityImage(client,snapshot,verified,it.cloudText("id"),it.cloudText("kind"),it.cloudText("title"))
-                RecordFields(it.getValue("data"))
-                val data = it.getValue("data").jsonObject
-                val commandId = (data["commandId"] as? JsonPrimitive)?.contentOrNull
-                    ?: (data["sourceCommandId"] as? JsonPrimitive)?.contentOrNull
-                if (commandId != null && cloudIdentifier.matches(commandId)) {
-                    PlayerTextButton({ historicalId = commandId }, enabled = verified) { Text("View transaction receipt") }
-                }
-                PlayerDisclosure("Record details") { Text(it.cloudText("id")); Text("Revision ${it["revision"]}") }
-            } ?: Text("This record is unavailable in your active view.")
-        }
+    val inspectId = inspected
+    if (inspectId != null && snapshot.visible) {
+        CloudCanonicalRecordInspector(client, snapshot, inspectId, verified, historicalId == null, { inspected = null }, { historicalId = it })
     }
     if (snapshot.visible) historicalId?.let { id ->
         CloudHistoricalReceipt(client, snapshot, id) { historicalId = null }
     }
     when(tool) {
         "Tools" -> PlayerSheet("Owner connection", { tool=null }) {
-            Text("Cloud campaign · ${snapshot.binding.continuity}")
-            Text("Last cached revision ${snapshot.version.revision}")
+            CloudConnectionStatus(snapshot,verified,automaticPaused,connectionFailure,count,result?.cloudText("status"))
+            PlayerTextButton({ scope.launch { refresh() } },enabled=!busy) { Text("Check connection now") }
             PlayerOutlinedButton({ inboxFromTools = true; tool = "Inbox" }) { Text("Pending owner reviews") }
             PlayerButton({ ownerPage(access=true) }) { Text("Manage campaign access") }
             PlayerTextButton({tool="Settings"}) {Text("Campaign settings")}
@@ -358,7 +359,7 @@ private val categoryScopes = mapOf(
 internal fun namedCloudResults(outcome:JsonObject):List<String> {
     val direct=(outcome["text"] as? JsonPrimitive)?.contentOrNull
     if(!direct.isNullOrBlank())return listOf(direct)
-    return listOf("hit","damage","healing","rolls","results","components").flatMap { key->
+    return listOf("hit","damage","healing","rolls","result","results","components").flatMap { key->
         when(val values=outcome[key]){
             is JsonObject -> namedCloudResults(values)
             is JsonArray -> values.mapNotNull { it as? JsonObject }.flatMap(::namedCloudResults)

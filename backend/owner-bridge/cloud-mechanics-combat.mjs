@@ -267,7 +267,7 @@ async function startEncounter(ctx,x){
   rolling.sort((a,b)=>b.initiative-a.initiative);
   const list=rolling.flatMap(p=>[p,...attached.filter(x=>x.anchor===p.a.id).map(x=>({...x,rollId:null,initiative:p.initiative}))]);
   must(list.length===x.participants.length,'INITIATIVE_ANCHOR_INVALID');
-  const data={active:true,participants:list.map(p=>p.a.id),initiative:list.map(p=>({actorId:p.a.id,total:p.initiative,rollId:p.rollId,...(p.anchor?{afterActorId:p.anchor}:{})})),
+  const data={active:true,turnWindow:crypto.randomUUID(),participants:list.map(p=>p.a.id),initiative:list.map(p=>({actorId:p.a.id,total:p.initiative,rollId:p.rollId,...(p.anchor?{afterActorId:p.anchor}:{})})),
     economy:Object.fromEntries(list.map(p=>[p.a.id,freshTurn(p.a)])),index:0,round:1};
   // Group encounter history is continuity-wide; a partial actor grant cannot read it.
   await ctx.require('combat',null);
@@ -293,7 +293,7 @@ async function progress(ctx,x,end){
     await save(ctx,e,{...d,active:false,outcome:x.outcome});return {encounterId:e.id,active:false,outcome:x.outcome};
   }
   const index=(d.index+1)%d.participants.length,round=d.round+(index===0?1:0),a=await actor(ctx,d.participants[index]);
-  await save(ctx,e,{...d,index,round,actedThisTurn:false,slotSpentActorIds:[],economy:{...d.economy,[a.id]:freshTurn(a)}});
+  await save(ctx,e,{...d,index,round,turnWindow:crypto.randomUUID(),actedThisTurn:false,slotSpentActorIds:[],economy:{...d.economy,[a.id]:freshTurn(a)}});
   return {encounterId:e.id,round,currentActorId:a.id};
 }
 export const combatOperations=Object.freeze({

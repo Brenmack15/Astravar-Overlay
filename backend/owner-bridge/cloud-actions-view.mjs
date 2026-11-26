@@ -1,8 +1,7 @@
-import {matchesForm} from './cloud-mechanics-core.mjs';
 import { CloudPlan } from './cloud-plan.mjs';
 import { BridgeError } from './core.mjs';
 import { cloudFail, validCloudId } from './cloud-validation.mjs';
-import { sheet, gearEligible, rollPolicy, checkTiming, availableUses } from './cloud-mechanics-core.mjs';
+import { sheet, gearEligible, rollPolicy, checkTiming, availableUses, matchesForm, reactionRollWindow } from './cloud-mechanics-core.mjs';
 import { checkArsenal } from './cloud-mechanics-arsenal.mjs';
 import { attackModeFor } from './cloud-mechanics-linked.mjs';
 import { offeredCharges } from './cloud-effect-costs.mjs';
@@ -50,8 +49,9 @@ export async function cloudActions(service,principal,id,actorId,options={}) {
       optionalCharges:offeredCharges(p,'attack',entity.id,entity.id,components,d.resolution),
       modes:Object.fromEntries(['normal','advantage','disadvantage'].map(m=>[m,rollPolicy(p.effects,'attack:'+entity.id,m)]))});
   }
+  const reactionWindow=await reactionRollWindow(ctx,a);
   const end=await service.access(principal,id);
   if(end.continuity.epoch!==c.epoch||end.continuity.revision!==c.revision||end.grant.revision!==grant.revision)cloudFail(409,'SNAPSHOT_CHANGED');
-  return {epoch:c.epoch,revision:c.revision,grantRevision:grant.revision,actorId,formId:p.formId,rows,
+  return {epoch:c.epoch,revision:c.revision,grantRevision:grant.revision,actorId,formId:p.formId,reactionWindow,rows,
     nextAfter:candidates.length>24?candidates[23].id:null};
 }

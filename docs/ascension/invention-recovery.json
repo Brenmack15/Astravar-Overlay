@@ -1,0 +1,82 @@
+{
+  "status": "VERIFIED",
+  "requirement": "D41-28-7",
+  "scope": "Synthetic source destroyed and restored into a separate local workerd D1/R2 root",
+  "observedAt": "2026-11-26T22:11:13.272Z",
+  "node": "v24.22.3",
+  "miniflare": "5.20261123.1-beta",
+  "sourceEpoch": 1,
+  "restoredEpoch": 2,
+  "sourceRevision": 23,
+  "restoredRevision": 23,
+  "records": 20,
+  "distinctDirectedRelationships": 41,
+  "immutableReceipts": 23,
+  "exactSubmissionRetries": 23,
+  "priorStandingGrants": 0,
+  "priorDeviceCredentials": 0,
+  "stageCount": 2,
+  "stageHistory": [
+    "planned",
+    "failed",
+    "partial",
+    "completed"
+  ],
+  "blueprintVersions": 2,
+  "originalNamedRollCount": 4,
+  "originalFixtureFaces": [
+    14,
+    4,
+    9,
+    13
+  ],
+  "consumedQuantity": 2,
+  "stockBefore": 7,
+  "stockAfter": 5,
+  "outputQuantity": 1,
+  "payment": {
+    "cp": 0,
+    "sp": 2,
+    "ep": 0,
+    "gp": 3,
+    "pp": 0
+  },
+  "walletAfter": {
+    "cp": 0,
+    "sp": 2,
+    "ep": 0,
+    "gp": 3,
+    "pp": 0
+  },
+  "twoDirectionalGenealogy": true,
+  "archiveBytes": 22835,
+  "portableArchiveSha256": "50d21ac5962cb4408aadebb41dbfb36ab8a19ed5c40a036970637188a9b9435c",
+  "manifestSha256": "09a3aaf2055b7518e26b2343b19e28d5fefe0456d8b904e8b78b882e55bc0c2b",
+  "canonicalSha256": {
+    "records": {
+      "before": "17f4f731e3bd7be3ed16569bcee4538f6925c7f7d9722419e0d7a31ed62e7de2",
+      "restored": "17f4f731e3bd7be3ed16569bcee4538f6925c7f7d9722419e0d7a31ed62e7de2"
+    },
+    "links": {
+      "before": "a3fb34321bd483c93fd513e89e2217aef046e8beff8b66ddfa2213675884fded",
+      "restored": "a3fb34321bd483c93fd513e89e2217aef046e8beff8b66ddfa2213675884fded"
+    },
+    "genealogy": {
+      "before": "891dd7a594fbad8a7afcdde059345a370c34a67a0a399b573dbaee817b38d8f8",
+      "restored": "891dd7a594fbad8a7afcdde059345a370c34a67a0a399b573dbaee817b38d8f8"
+    },
+    "receipts": {
+      "before": "1ddaa5722130c6b995ca6cec4adcf6a8785e18b199b750fe43201ed8263765b9",
+      "restored": "1ddaa5722130c6b995ca6cec4adcf6a8785e18b199b750fe43201ed8263765b9"
+    }
+  },
+  "sourceFiles": {
+    "tools/ascension_provider.cjs": "2b0701b44a35cc34a5480d340b89cbd9d3073add696643692bd85d705011db0f",
+    "tools/ascension_provider_package.py": "c18766b6585fb462addcb903dbb43ac679780d3f296d773a7e307f36d7a13fbb",
+    "backend/owner-bridge/cloud-crafting.mjs": "f147ea98b3a214fad57c6a1e61d7f0b56e91b2a74481f4e8e9f0be49efb3d342",
+    "backend/owner-bridge/cloud-records-query.mjs": "124e3f181bc945c94d750c31bd119ea19a0ea7353491ebba69e6c317f81c47c1",
+    "app/src/test/java/com/yazsras/astravar/ui/CloudGameplayWorkflowsInteropTest.kt": "7ae2b6be70b835c233869fcbbc0bbf9811111f88da4ae1c874f6ac07c2a58ad8"
+  },
+  "rateWaits": 0,
+  "productionCampaignOrHostingTouched": false
+}

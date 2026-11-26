@@ -1,4 +1,4 @@
-import {matchesForm} from './cloud-mechanics-core.mjs';
+import {matchesForm,reactionRollWindow} from './cloud-mechanics-core.mjs';
 import { interruptIfPending } from './cloud-form-deployment.mjs';
 import { arsenalDefinitions, loadChoice, useArsenal, validateArsenal } from './cloud-mechanics-arsenal.mjs';
 import { snapshotComponents } from './cloud-mechanics-combat.mjs';
@@ -121,6 +121,9 @@ async function execute(ctx,x){
     const r=x.reaction,roll=await owned(ctx,'roll',r.rollId,r.targetActorId);
     must(['skill','ability','save'].includes(roll.data.kind) && roll.data.status==='resolved' &&
       !roll.data.appliedUseId && !roll.data.adjudicated && r.visible && r.distanceFeet<=d.range,'ROLL_REACTION_INELIGIBLE');
+    const target=await actor(ctx,r.targetActorId);
+    must((a.data.encounterId??null)===(target.data.encounterId??null) &&
+      (roll.data.reactionWindow??null)===await reactionRollWindow(ctx,target),'ROLL_REACTION_WINDOW_CLOSED');
     const bonus=d.bonusAbility?p.abilities[d.bonusAbility].modifier:d.fixedBonus;
     must(bonus!=null,'REACTION_BONUS_UNKNOWN');
     const before=roll.data.total,after=before+bonus;

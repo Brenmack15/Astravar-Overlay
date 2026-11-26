@@ -378,6 +378,42 @@ class ReviewedGraphTest(unittest.TestCase):
         self.assertEqual(2,self.package()["counts"]["cloud_entities"])
         self.assertEqual("session_in_arc",mig.read_bundle(self.dst)["rows"]["cloud_links"][0]["relation"])
 
+    def test_pinned_multiclass_baseline_requires_exact_external_tracks_and_the_registered_total(self):
+        tracks = [{"classId":"survey","name":"Surveyor","edition":"custom","level":3,"source":"Pinned fixture rules"},
+                  {"classId":"guide","name":"Guide","edition":"legacy_2014","level":1,"source":"Recorded fixture class",
+                   "subclass":{"name":"Test scout","source":"Approved subclass source"}}]
+        recorded = {"externalId":ACTOR,"category":"character","visibility":"player","body":"Reviewed character progression",
+                    "contentSha256":mig.sha(b"Reviewed character progression"),"propertiesJson":json.dumps({"classTracks":tracks}),
+                    "relationIds":[],"sourceUrl":"https://example.test/actor"}
+        payload = json.dumps({"campaignId":TENANT[1],"title":"Source for pinned class levels","sourceRootUrl":"https://example.test/fixture",
+                              "sourceRootRevision":"1","records":[recorded]})
+        raw = encode({"format":"astravar-campaign-archive","schema":1,"payloadSha256":mig.sha(payload.encode()),"payload":payload})
+        target = next(t for t in self.plan["targets"] if t["kind"] == "actor")
+        target["data"]["classTracks"] = tracks
+        with self.assertRaisesRegex(ValueError, "Missing required mechanical parity witness"):
+            self.package()
+        path = self.root / "class-sources.json"; path.write_bytes(raw); self.files.append(path)
+        extra = template([raw], *TENANT)
+        self.plan["sources"].update(extra["sources"])
+        for row in extra["decisions"]:
+            if row["family"] == "reference.metadata":
+                row.update(disposition="historical",reason="Original separately-reviewed source header")
+            else:
+                row.update(disposition="map",reason="Verified class identities for this actor",playerKnown=True,targets=[ACTOR])
+                self.plan["parity"].append({**{k:row[k] for k in ("source","family","identity")},
+                    "sourcePath":["propertiesJson","$json","classTracks"],"target":ACTOR,"targetPath":["data","classTracks"],"transform":"exact"})
+            self.plan["decisions"].append(row)
+        self.package()
+        mig.apply(self.lab, self.dst, mig.inspect(self.lab, self.dst)["approvalSha256"])
+        restored = self.root / "class-restore.zip"; mig.export(self.lab, restored)
+        result = mig.read_bundle(restored)
+        data = json.loads(next(r["data_json"] for r in result["rows"]["cloud_entities"] if r["id"] == ACTOR))
+        self.assertEqual(tracks, data["classTracks"]); self.assertFalse(result["rows"]["cloud_receipts"])
+        for bad in ([tracks[0],tracks[0]], [tracks[1]]):
+            target["data"]["classTracks"] = bad
+            validation = subprocess.run(["node",str(mig.ROOT/"tools/ascension_migrate_contracts.mjs")],input=encode([target]),capture_output=True)
+            self.assertNotEqual(0,validation.returncode)
+
     def test_older_source_requires_explicit_proven_supersession(self):
         earlier=copy.deepcopy(self.complete["campaign"])
         earlier["records"]["wallets"][0]["revision"]=1

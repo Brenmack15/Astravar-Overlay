@@ -29,7 +29,9 @@ const grantSchema=fields({
   ability:option(...stats),fixedHit:whole(-100,100),fixedDc:whole(1,100),resourceId:identifier,cost:whole(1),
   sourceItemId:identifier,requiresAttunement:boolean,requiresOperating:boolean,prerequisites:named(500)
 },['actorId','spellId','grantId','source','route','levels','preparation']);
-async function grantSpell(ctx,x){
+async function grantSpell(ctx,x,edit=false){
+  const prior=edit?await owned(ctx,'spell_grant',x.grantId,x.actorId):null;
+  if(prior)must(prior.data.spellId===x.spellId,'SPELL_GRANT_IDENTITY_CHANGED');
   const d=(await owned(ctx,'spell',x.spellId,x.actorId)).data;
   must(x.levels.length>0 && new Set(x.levels).size===x.levels.length && x.levels.every(l=>l>=d.baseLevel),'INVALID_CASTING_LEVELS');
   if(d.baseLevel===0)must(x.levels.length===1&&x.levels[0]===0&&x.route!=='slot','CANTRIP_ROUTE_INVALID');
@@ -44,7 +46,12 @@ async function grantSpell(ctx,x){
   if(d.resolution==='attack')must(x.fixedHit!=null||x.ability,'SPELL_ACCURACY_REQUIRED');
   if(d.resolution==='save')must(x.fixedDc!=null||x.ability,'SPELL_DC_REQUIRED');
   const {actorId,grantId,...data}=x;
-  await insert(ctx,'spell_grant',grantId,actorId,x.source,data);
+  if(prior){
+    await ctx.put({...prior,title:x.source,data});
+    for(const [key,relation] of [['resourceId','uses_pool'],['sourceItemId','requires_item']]){
+      if(prior.data[key] && prior.data[key]!==x[key])await ctx.unlink(grantId,relation,prior.data[key]);
+    }
+  }else await insert(ctx,'spell_grant',grantId,actorId,x.source,data);
   await ctx.link(grantId,'grants_spell',x.spellId);
   if(x.resourceId)await ctx.link(grantId,'uses_pool',x.resourceId);
   if(x.sourceItemId)await ctx.link(grantId,'requires_item',x.sourceItemId);
@@ -135,6 +142,7 @@ export const spellOperations=Object.freeze({
   define_spell:op('spells',spellSchema,(ctx,x)=>defineSpell(ctx,x,false)),
   revise_spell:op('spells',spellSchema,(ctx,x)=>defineSpell(ctx,x,true)),
   grant_spell:op('spells',grantSchema,grantSpell),
+  revise_spell_grant:op('spells',grantSchema,(ctx,x)=>grantSpell(ctx,x,true)),
   prepare_spell:op('spells',fields({actorId:identifier,grantId:identifier,prepared:boolean},['actorId','grantId','prepared']),async(ctx,x)=>{
     const g=await owned(ctx,'spell_grant',x.grantId,x.actorId);
     must(['known','prepared'].includes(g.data.preparation),'GRANT_PREPARATION_FIXED');

@@ -4,6 +4,7 @@ import {MECHANIC_KINDS, MECHANIC_OPERATIONS} from '../backend/owner-bridge/cloud
 import {RECORD_KINDS, RECORD_OPERATIONS} from '../backend/owner-bridge/cloud-records.mjs';
 import {CONTINUITY_KINDS} from '../backend/owner-bridge/cloud-continuity.mjs';
 import {cloudMatches} from '../backend/owner-bridge/cloud-validation.mjs';
+import {checkedClassTracks} from '../backend/owner-bridge/cloud-class-progression.mjs';
 
 const kinds = {...MECHANIC_KINDS, ...RECORD_KINDS, ...CONTINUITY_KINDS};
 const operations = {...MECHANIC_OPERATIONS, ...RECORD_OPERATIONS};
@@ -20,6 +21,10 @@ function invalid(kind, reason) {
 }
 function validate(row) {
   if (!Object.hasOwn(kinds,row.kind)) invalid(row.kind,'unregistered gameplay family');
+  if (row.kind === 'known_fact' && row.data.referenceKind != null &&
+      !cloudMatches(row.data.referenceKind,operations.record_known_fact.schema.properties.referenceKind)) {
+    invalid(row.kind,'unrecognized player-known reference kind');
+  }
   const entry = definitions[row.kind];
   if (!entry) return;
   const [name,id] = entry, schema = operations[name]?.schema;
@@ -33,6 +38,7 @@ function validate(row) {
     }
   }
   if (!cloudMatches(fields,schema)) invalid(row.kind,'stored definition fails the shared service contract');
+  if (row.kind === 'actor' && row.data.classTracks != null) checkedClassTracks(row.data.level,row.data.classTracks);
 }
 try {
   for (const row of JSON.parse(readFileSync(0, 'utf8'))) validate(row);

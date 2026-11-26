@@ -193,6 +193,31 @@ test('upcast commits only chosen slot and grant; independent cast rolls preserve
   assert.equal((await f.read(who)).data.concentrationCastId,null);
   await assert.rejects(f.command('resolve_concentration_check',checkArgs),/CONCENTRATION_CHECK_UNAVAILABLE/);
 });
+test('editing a casting source preserves the grant, past cast and exact balances and replaces only its source links',async t=>{
+  const f=await setup(t);await f.defined();
+  await f.pool('old-fuel','charge',2,2,'none');await f.pool('new-fuel','charge',1,3,'none');
+  const spell={actorId:who,spellId:'beacon',name:'Fixture beacon',source:'fixture catalog',baseLevel:6,concentration:false,
+    ritual:false,resolution:'automatic',timing:'action',components:[]};
+  await f.command('define_spell',spell);
+  await f.command('define_spell',{...spell,spellId:'different-spell'});
+  const grant={actorId:who,spellId:spell.spellId,grantId:'special-grant',source:'Emergency beacon',route:'limited',levels:[6],preparation:'not_required',resourceId:'old-fuel',cost:1};
+  await f.command('grant_spell',grant);
+  for(const id of ['beacon-1','beacon-2'])await f.command('cast_spell',{actorId:who,grantId:grant.grantId,castId:id,level:6});
+  const prior=(await f.read('beacon-1')).data;
+  await assert.rejects(f.command('revise_spell_grant',{...grant,spellId:'different-spell'}),/SPELL_GRANT_IDENTITY_CHANGED/);
+  await assert.rejects(f.command('revise_spell_grant',{...grant,levels:[1]}),/INVALID_CASTING_LEVELS/);
+  const revised=await f.command('revise_spell_grant',{...grant,source:'Replacement beacon',resourceId:'new-fuel'});
+  assert.equal(revised.out.grantId,grant.grantId);
+  assert.equal((await f.read(grant.grantId)).data.resourceId,'new-fuel');
+  const edges=await f.db.prepare('SELECT to_id FROM cloud_links WHERE owner_id=? AND continuity_id=? AND from_id=? AND relation=?')
+    .bind(ownerId,cid,grant.grantId,'uses_pool').all();
+  assert.deepEqual(edges.results.map(r=>r.to_id),['new-fuel']);
+  assert.deepEqual([(await f.read('old-fuel')).data.current,(await f.read('new-fuel')).data.current],[0,1]);
+  const newCast=await f.command('cast_spell',{actorId:who,grantId:grant.grantId,castId:'beacon-3',level:6});
+  assert.equal(newCast.out.costs[0].poolId,'new-fuel');assert.equal((await f.read('new-fuel')).data.current,0);
+  assert.deepEqual((await f.read('beacon-1')).data,prior);
+  assert.equal(prior.costs[0].poolId,'old-fuel');assert.equal(prior.source,'Emergency beacon');
+});
 test('encounter initiatives are actual roll references; extra attacks have a shared budget and no free turn',async t=>{
   const f=await setup(t);await f.defined();await f.defined({actorId:'actor-two',name:'Fixture opponent',role:'creature',proficiency:3});
   for(const [id,face] of [[who,16],['actor-two',4]])await f.command('record_check',{actorId:id,rollId:'initiative-'+id,check:check('initiative','initiative'),evidence:dice(face)});
@@ -246,6 +271,36 @@ test('authorized interrupt preserves original faces, consumes reaction and pool 
   assert.equal(result.originalTotal,9);assert.equal(result.total,14);assert.equal(result.faces[0].value,4);
   await assert.rejects(f.command('use_action',{...use,useId:'reaction-002'}),/ROLL_REACTION_INELIGIBLE/);
   assert.equal((await f.read('insight-charge')).data.current,1);
+});
+
+test('an optional interrupt remains bound to the original encounter and turn through reads, replays and later rounds',async t=>{
+  const f=await setup(t);await f.defined();await f.defined({actorId:'observer',role:'companion',name:'Fixture observer'});
+  await f.pool('limited-support','charge',2,2,'short_rest');
+  await f.command('define_action',{actorId:who,actionId:'support',name:'Support',source:'Test rule',type:'roll_bonus',timing:'reaction',fixedBonus:3,range:30,cost:{poolId:'limited-support',amount:1}});
+  const roll=id=>f.command('record_check',{actorId:'observer',rollId:id,check:check('skill','perception'),evidence:dice(8)});
+  const respond=(rollId,useId)=>f.command('use_action',{actorId:who,actionId:'support',useId,declared:true,
+    reaction:{rollId,targetActorId:'observer',distanceFeet:10,visible:true,windowOpen:true}});
+  await roll('before-encounter');
+  await fixtureEncounter(f,'first-encounter',[[who,17],['observer',8]]);
+  await assert.rejects(respond('before-encounter','late-outside'),/ROLL_REACTION_WINDOW_CLOSED/);
+  const prior=await roll('turn-one');await f.command('advance_encounter_turn',{encounterId:'first-encounter',currentActorId:who});
+  await assert.rejects(respond('turn-one','late-first-turn'),/ROLL_REACTION_WINDOW_CLOSED/);
+  assert.equal((await f.read('limited-support')).data.current,2);
+  const current=await roll('turn-two');
+  assert.notEqual(prior.out.reactionWindow,current.out.reactionWindow);
+  const chosen=await respond('turn-two','explicit-use');
+  assert.deepEqual([chosen.out.originalTotal,chosen.out.finalTotal],[8,11]);
+  assert.equal((await f.retry(chosen.command)).receipt.transactionId,chosen.result.receipt.transactionId);
+  assert.deepEqual((await f.read('turn-two')).data.faces,current.out.faces);
+  assert.equal((await f.read('limited-support')).data.current,1);
+  const other=await roll('unanswered');
+  await f.command('end_encounter',{encounterId:'first-encounter',currentActorId:'observer',outcome:'Fictional encounter completed'});
+  await assert.rejects(respond('unanswered','late-after-end'),/ROLL_REACTION_WINDOW_CLOSED/);
+  await fixtureEncounter(f,'next-encounter',[[who,17],['observer',8]]);
+  await f.command('advance_encounter_turn',{encounterId:'next-encounter',currentActorId:who});
+  await assert.rejects(respond('unanswered','later-series'),/ROLL_REACTION_WINDOW_CLOSED/);
+  assert.equal((await f.read('unanswered')).data.total,other.out.total);
+  assert.equal((await f.read('limited-support')).data.current,1);
 });
 
 test('reviewed attack edits preserve form variants, previous attempts, component identity and resource links',async t=>{
@@ -1022,4 +1077,33 @@ test('form management duplicates the configuration, retains source mechanics and
   assert.equal((await f.read('copy-c')).data.orderKey,'base-b');
   assert.equal((await f.sheet()).formId,'base-b');assert.equal((await f.read('kit-integrity')).data.current,7);
   assert.equal((await f.read('form-kit')).data.quantity,1);assert.equal((await f.read('copy-attack')).data.formId,'copy-c');
+});
+
+test('pinned multiclass advancement records one selected class and subclass, keeps distinct spent dice and refuses drift',async t=>{
+  const f=await setup(t);await f.defined({level:4});
+  const classes=[{classId:'trail',name:'Wayfinder',edition:'legacy_2014',source:'Trail edition A',level:3},
+    {classId:'rune',name:'Runescribe',edition:'custom',source:'Rune edition B',level:1}];
+  await assert.rejects(f.command('set_actor_profile',{actorId:who,source:'review',classTracks:[classes[0],classes[0]]}),/CLASS_IDENTITIES_INVALID/);
+  await assert.rejects(f.command('set_actor_profile',{actorId:who,source:'review',classTracks:[classes[0]]}),/CLASS_LEVELS_MUST_MATCH_ACTOR/);
+  await f.command('set_actor_profile',{actorId:who,source:'Recorded two-class baseline',classTracks:classes});
+  await assert.rejects(f.command('set_actor_profile',{actorId:who,source:'free allocation',classTracks:classes}),/CLASS_BASELINE_ALREADY_PINNED/);
+  await f.pool('trail-dice','hit_die',1,3,'edition_hit_dice',{dieSides:10,classId:'trail'});
+  await f.pool('rune-dice','hit_die',0,1,'edition_hit_dice',{dieSides:8,classId:'rune'});
+  const gain={actorId:who,eventId:'level-five',fromLevel:4,toLevel:5,source:'Earned milestone',hitPointGain:4};
+  await assert.rejects(f.command('advance_actor_level',gain),/CHOOSE_ADVANCING_CLASS/);
+  const rune={classId:'rune',fromClassLevel:1,subclass:{name:'Inscriber',source:'Subclass revision C'}};
+  await assert.rejects(f.command('advance_actor_level',{...gain,classGain:{...rune,fromClassLevel:0}}),/CLASS_LEVEL_CHANGED/);
+  await assert.rejects(f.command('advance_actor_level',{...gain,classGain:{...rune,newClass:{name:'Rewritten',edition:'revised_2024',source:'wrong'}}}),/EXISTING_CLASS_PIN_OR_NEW_CLASS_SOURCE_REQUIRED/);
+  await assert.rejects(f.command('advance_actor_level',{...gain,classGain:rune,capacities:[{poolId:'trail-dice',previous:3,maximum:4,granted:1}]}),/HIT_DIE_CLASS_MISMATCH/);
+  assert.equal((await f.read('trail-dice')).data.current,1);assert.deepEqual((await f.read(who)).data.classTracks,classes);
+  const first=await f.command('advance_actor_level',{...gain,classGain:rune,capacities:[{poolId:'rune-dice',previous:1,maximum:2,granted:1}]});
+  assert.deepEqual(first.out.classChange.before,classes[1]);assert.deepEqual(first.out.classChange.after,{...classes[1],level:2,subclass:rune.subclass});
+  await f.retry(first.command);
+  assert.equal((await f.read('level-five')).data.classChange.after.subclass.source,'Subclass revision C');
+  assert.deepEqual((await f.sheet()).classTracks,[classes[0],first.out.classChange.after]);
+  const more=await f.command('advance_actor_level',{actorId:who,eventId:'level-six',fromLevel:5,toLevel:6,source:'Reviewed new class',
+    classGain:{classId:'song',fromClassLevel:0,newClass:{name:'Chanter',edition:'revised_2024',source:'Chant revision D'}}});
+  assert.equal(more.out.classChange.before,null);assert.equal(more.out.classChange.after.level,1);
+  assert.deepEqual((await f.read(who)).data.classTracks.map(v=>v.level),[3,2,1]);assert.equal((await f.read(who)).data.currentHp,42);
+  await assert.rejects(f.command('advance_actor_level',{actorId:who,eventId:'repin',fromLevel:6,toLevel:7,source:'Fixture',classGain:{...rune,fromClassLevel:2}}),/SUBCLASS_ALREADY_PINNED/);
 });
