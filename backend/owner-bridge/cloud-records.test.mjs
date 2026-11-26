@@ -103,6 +103,49 @@ test('a transferred item carries only its granted rules and actual remaining cha
   assert.equal((await f.record('lens')).data.custodianId,'hero');
   assert.equal((await f.record('lens-pulse')).actorId,'hero');
 });
+test('packing passive gear preserves its condition and packing a manually activated item requires another activation',async t=>{
+  const f=await fixture(t,true);
+  const equip=(itemId,equipment)=>f.run('equip_item',{itemId,equipment,source});
+  for(const [id,activation] of [['normal','passive'],['switch','manual']]){
+    await f.run('define_item_definition',{...definition(id+'-def',false),activation});
+    await f.run('acquire_item',{itemId:id,ownerId:'hero',definitionId:id+'-def',quantity:1,source});
+    assert.equal((await f.record(id)).data.operating,false);
+    await equip(id,'held');
+  }
+  assert.equal((await f.record('normal')).data.operating,true);
+  assert.equal((await f.record('switch')).data.operating,false);
+  await f.run('set_item_operating',{itemId:'switch',operating:true,source});
+  for(const id of ['normal','switch']){await equip(id,'packed');assert.equal((await f.record(id)).data.operating,false);await equip(id,'worn');}
+  assert.equal((await f.record('switch')).data.operating,false);
+  assert.equal((await f.record('normal')).data.operating,true);
+  const broken={itemId:'normal',name:'Marked unit',description:'Fixture condition update',condition:'Disabled',passiveOperating:false,source};
+  await assert.rejects(f.run('customize_item',{...broken,itemId:'switch'}),/PASSIVE_EQUIPMENT_REQUIRED/);
+  await f.run('customize_item',broken);
+  await equip('normal','packed');await equip('normal','held');
+  assert.equal((await f.record('normal')).data.operating,false);
+  await f.run('transfer_item',{itemId:'normal',quantity:1,splitId:null,source,reason:'Transfer of disabled fixture unit',
+    destination:{type:'party_actor',actorId:'ally',recipientName:null,recipientId:null,locationId:null}});
+  await equip('normal','held');assert.equal((await f.record('normal')).data.operating,false);
+});
+test('a second physical holding requires the actual reviewed common charge source to share a pool',async t=>{
+  const f=await fixture(t,true);
+  await f.run('define_item_definition',definition('charge-spec',false));
+  for(const itemId of ['one','two','separate'])await f.run('acquire_item',{itemId,definitionId:'charge-spec',ownerId:'hero',quantity:1,source});
+  for(const poolId of ['first-pool','separate-pool'])await f.run('define_resource',{actorId:'hero',poolId,name:poolId,type:'charge',current:2,maximum:5,recovery:'none',source});
+  await f.run('bind_item_charge_pool',{itemId:'one',poolId:'first-pool',source});
+  await f.run('bind_item_charge_pool',{itemId:'separate',poolId:'separate-pool',source});
+  const share={itemId:'two',poolId:'first-pool',source};
+  await assert.rejects(f.run('bind_item_charge_pool',share),/PHYSICAL_CHARGE_SHARING_REVIEW_REQUIRED/);
+  await assert.rejects(f.run('bind_item_charge_pool',{...share,sharedWithItemId:'separate'}),/SHARED_PHYSICAL_CHARGE_SOURCE_MISMATCH/);
+  assert.equal((await f.record('two')).data.resourcePoolId,null);
+  await f.run('bind_item_charge_pool',{...share,sharedWithItemId:'one'});
+  assert.equal((await f.record('two')).data.resourcePoolId,'first-pool');
+  assert.equal((await f.record('first-pool')).data.current,2);
+  await assert.rejects(f.run('transfer_item',{itemId:'one',quantity:1,splitId:null,source,reason:'Confirmed fixture transfer',
+    destination:{type:'party_actor',actorId:'ally',recipientName:null,recipientId:null,locationId:null}}),/SHARED_CHARGE_POOL_TRANSFER_REVIEW_REQUIRED/);
+  assert.equal((await f.record('one')).data.custodianId,'hero');
+  assert.equal((await f.record('separate')).data.resourcePoolId,'separate-pool');
+});
 test('multi-actor coin transfers and atomic purchases conserve exact denominations across retries and reopen',async t=>{
   const f=await fixture(t);
   await f.run('define_wallet',{walletId:'purse-a',title:'Carried coin',holderId:'hero',shared:false,coins:amounts({gp:40,ep:null}),source});

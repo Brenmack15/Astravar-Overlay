@@ -58,8 +58,9 @@ async function verify(){
   try{
     await unresolvedMappingBlocksProviderCutover(tmp);
     await recovery.create(root,owner,id,mod);
-    const {encodeMediaPng,mediaDigest}=await import(pathToFileURL(path.join(project,'backend/owner-bridge/cloud-media-codec.mjs')));
-    const bytes=await encodeMediaPng(2,2,new Uint8Array([1,9,70,255,2,50,190,255,3,20,210,255,4,99,60,255]));
+    const {mediaDigest}=await import(pathToFileURL(path.join(project,'backend/owner-bridge/cloud-media-codec.mjs')));
+    // Synthetic 18 × 12 RGB PNG emitted by Android's bitmap encoder, including its significant-bits metadata.
+    const bytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAABIAAAAMCAIAAADgcHrrAAAAAXNSR0IArs4c6QAAAANzQklUCAgI2+FP4AAAABhJREFUKJFj3KbmyUA6YCJDz6i2UW1EAQATOAE9sOf9HQAAAABJRU5ErkJggg==','base64');
     const imageHash=await mediaDigest(bytes), actorId='synthetic-actor';
     let actorProof,pending;
     await recovery.withGameplay(root,async r=>{

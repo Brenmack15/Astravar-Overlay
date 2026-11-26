@@ -184,7 +184,7 @@ export const actionOperations=Object.freeze({
     if(prone)await applyCondition(ctx,target.id,'prone',true,attempt.id,null);
     const result={saved,dc:push.dc,acceptedFeet:x.feet,destination:x.destination??null,prone,rollId:roll.id,source:x.source};
     await save(ctx,roll,{...roll.data,adjudicated:true});
-    await save(ctx,attempt,{...d,targetResults:d.targetResults.map(r=>r.targetActorId===target.id?{...r,pushResult:result}:r)});
+    await save(ctx,attempt,{...d,targetResults:d.targetResults.map(r=>r.targetActorId===target.id?{...r,riderStatus:'resolved',pushResult:result}:r)});
     await ctx.link(attempt.id,'resolved_rider',roll.id);return result;
   }),
   set_condition:op('combat',fields({actorId:identifier,key:identifier,enabled:boolean,sourceId:identifier,level:whole(0,6),

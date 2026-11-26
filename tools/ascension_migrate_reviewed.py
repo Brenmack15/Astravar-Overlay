@@ -516,6 +516,27 @@ def project(raw_by_hash, plan, tenant):
             original=path_value(entries[key],w["sourcePath"])
             verify(ident==scoped_identity(tenant,key[1],key[2],entities[ident]["kind"],original), "Source-derived alias differs from reviewed identity")
             aliases[ident]=original
+    for key, decision in decisions.items():
+        family, ids = key[1:]
+        if decision["disposition"] != "map" or family not in ("playable.characters.itemDefinitions.effects",
+                "authority.items.definitionJson.effects", "authority.items.instanceJson.effects"):
+            continue
+        native_source = entries[key].get("source")
+        for target_id in decision["targets"]:
+            target = entities[target_id]
+            if target["kind"] != "effect":
+                continue
+            source_id = target["data"].get("sourceItemId")
+            holding = entities.get(source_id, {})
+            verify(holding.get("kind") == "item_instance", "A native equipment effect needs its original physical source")
+            if family == "playable.characters.itemDefinitions.effects":
+                definition_id = holding["data"]["definitionId"]
+                verify(ids[0] in (target["actorId"], aliases.get(target["actorId"])) and
+                       ids[1] in (definition_id, aliases.get(definition_id)), "Native effect belongs to a different actor or physical definition")
+            else:
+                verify(ids[0] in (source_id, aliases.get(source_id)), "Native effect belongs to a different physical source")
+            if isinstance(native_source, dict) and native_source.get("id"):
+                verify(exact(target["data"].get("sourceRecord"),native_source), "The native equipment rule source identity must be preserved")
     witnesses={}
     for w in plan["parity"]:
         verify(isinstance(w,dict) and set(w)=={"source","family","identity","sourcePath","target","targetPath","transform"} and
@@ -549,6 +570,7 @@ def project(raw_by_hash, plan, tenant):
                            "POISON","PSYCHIC","RADIANT","SLASHING","THUNDER") and
                        payload.get("kind") in ("RESISTANCE","IMMUNITY","VULNERABILITY") and
                        target_data.get("key") == payload["damageType"].lower() and target_data.get("operation") == payload["kind"].lower()
+                       and exact(target_data.get("sourceRecord"), native.get("source"))
                        and not payload.get("nonmagicalOnly") and not native.get("conditions") and not native.get("chargeResourceId")
                        and native.get("source",{}).get("acceptance") in ("OFFICIAL","ACCEPTED_HOMEBREW") and
                        native.get("expiresOn","NONE") == "NONE" and native.get("expiresAtGameSeconds") is None,

@@ -103,6 +103,11 @@ async function recordCheck(ctx,x){
   if(x.forRiderAttemptId){
     const attempt=await ctx.get('attack_attempt',x.forRiderAttemptId),push=attempt?.data.preparedPush;
     must(push && attempt.data.targetResults?.some(r=>r.targetActorId===x.actorId && r.decision==='hit' && !r.pushResult) && x.check.kind==='save' && x.check.key===push.ability,'NO_MATCHING_RIDER');
+    const recorded=await ctx.service.s(`SELECT 1 FROM cloud_links l JOIN cloud_entities r
+      ON r.owner_id=l.owner_id AND r.continuity_id=l.continuity_id AND r.id=l.from_id
+      WHERE l.owner_id=? AND l.continuity_id=? AND l.to_id=? AND l.relation='rider_save'
+      AND r.kind='roll' AND r.actor_id=? LIMIT 1`,...ctx.binding,attempt.id,x.actorId).first();
+    must(!recorded,'ATTACK_RIDER_SAVE_ALREADY_RECORDED');
     result.forRiderAttemptId=attempt.id;
   }
   if(x.forAttemptId){

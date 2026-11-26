@@ -14,8 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -39,7 +37,32 @@ import java.util.UUID
     var asset by remember(targetId) { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var pending by remember(targetId,snapshot.version) { mutableStateOf(false) }
+    var pendingId by rememberSaveable(snapshot.binding,targetId) { mutableStateOf<String?>(null) }
+    var removalCommand by rememberSaveable(snapshot.binding,targetId) { mutableStateOf(UUID.randomUUID().toString()) }
+    val pending = pendingId != null
+    suspend fun inspectDecision(id: String) {
+        val observed = client.verify(id)
+        when (val status = observed.cloudText("status")) {
+            "PENDING_APPROVAL" -> Unit
+            else -> {
+                pendingId = null
+                removalCommand = UUID.randomUUID().toString()
+                if (status == "COMMITTED") {
+                    dialog = false
+                } else {
+                    error = "Image change · " + cloudLabel(status.lowercase()) + "."
+                }
+            }
+        }
+    }
+    LaunchedEffect(dialog,pendingId,online) {
+        val id = pendingId
+        if (dialog && online && id != null) {
+            try { inspectDecision(id) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error=cloudError(e) }
+        }
+    }
     LaunchedEffect(snapshot.version,snapshot.visible,online,targetId) {
         if(!snapshot.visible){primary=null;candidate=null;return@LaunchedEffect}
         try {
@@ -51,7 +74,6 @@ import java.util.UUID
     }
     var removal by remember(snapshot.binding,snapshot.version,targetId,dialog) { mutableStateOf<JsonObject?>(null) }
     var confirmRemoval by remember(snapshot.binding,snapshot.version,targetId,dialog) { mutableStateOf(false) }
-    val removalCommand=remember(snapshot.binding,snapshot.version,targetId) { UUID.randomUUID().toString() }
     LaunchedEffect(dialog,primary,online,snapshot.version) {
         removal=null
         val shown=primary
@@ -83,12 +105,24 @@ import java.util.UUID
         if(bitmap!=null)Image(bitmap,label,Modifier.fillMaxSize(),contentScale=ContentScale.Fit)
         else ArcaneIcon("Emblem",Modifier.size(42.dp).semantics { contentDescription = "Image placeholder for $label" },RebuildPalette.Gold)
     }
-    if(dialog && snapshot.visible) PlayerSheet("$label image",{if(!busy){dialog=false;candidate=null}},dirty=candidate!=null,dismissEnabled=!busy){
+    if(dialog && snapshot.visible) PlayerSheet("$label image",{if(!busy){dialog=false;candidate=null}},dirty=candidate!=null,showCancel=false,dismissEnabled=!busy){
         val chosen=candidate ?: primary
         val visible=remember(chosen){chosen?.let{BitmapFactory.decodeByteArray(it,0,it.size)?.asImageBitmap()}}
         visible?.let{Image(it,"Image preview for $label",Modifier.fillMaxWidth().heightIn(max=260.dp),contentScale=ContentScale.Fit)}
-        PlayerOutlinedButton({picker.launch(arrayOf("image/*"))},enabled=online && !busy){Text(if(primary==null)"Choose image" else "Replace image")}
-        if(pending)Text("Image change submitted for owner review.")
+        PlayerOutlinedButton({picker.launch(arrayOf("image/*"))},enabled=online && !busy && !pending){Text(if(primary==null)"Choose image" else "Replace image")}
+        if (pending) {
+            Text("Image change submitted for owner review.")
+            PlayerTextButton({
+                val id = pendingId ?: return@PlayerTextButton
+                busy = true
+                scope.launch {
+                    try { inspectDecision(id) }
+                    catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { error=cloudError(e) }
+                    finally { busy=false }
+                }
+            },enabled=online && !busy) { Text("Check image decision") }
+        }
         removal?.let { reviewed ->
             if(candidate==null && !pending) {
                 if(confirmRemoval) {
@@ -99,7 +133,7 @@ import java.util.UUID
                             try {
                                 val result=client.submit("remove_primary_image",reviewed,snapshot,removalCommand)
                                 when(result.cloudText("status")) {
-                                    "PENDING_APPROVAL" -> { pending=true;confirmRemoval=false }
+                                    "PENDING_APPROVAL" -> { pendingId=result.cloudText("commandId");confirmRemoval=false }
                                     "COMMITTED" -> { primary=null;dialog=false }
                                     else -> error="Image removal · "+cloudLabel(result.cloudText("status").lowercase())
                                 }
@@ -128,15 +162,15 @@ import java.util.UUID
                         put("uploadId",id);put("assetId",assetId);put("targetId",targetId);put("targetKind",targetKind);put("sha256",hash)
                     },snapshot,"assign-$id")
                     when (val status = result.cloudText("status")) {
-                        "COMMITTED" -> { candidate = null; pending = false; dialog = false }
-                        "PENDING_APPROVAL" -> { candidate = null; pending = true }
+                        "COMMITTED" -> { candidate = null; pendingId = null; dialog = false }
+                        "PENDING_APPROVAL" -> { candidate = null; pendingId = result.cloudText("commandId") }
                         else -> error = "Image assignment · ${cloudLabel(status.lowercase())}. The previous image is still selected."
                     }
                 }catch(e:CancellationException){throw e}
                 catch(e:Exception){error=cloudError(e)}
                 finally{busy=false}
             }
-        },enabled=candidate!=null && online && !busy){Text("Save image")}
+        },enabled=candidate!=null && online && !busy && !pending){Text("Save image")}
         PlayerTextButton({dialog=false;candidate=null},enabled=!busy){Text("Cancel")}
     }
 }

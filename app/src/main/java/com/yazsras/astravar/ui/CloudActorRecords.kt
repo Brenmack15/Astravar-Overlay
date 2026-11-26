@@ -64,6 +64,7 @@ private fun formula(c:JsonObject):String{
             }else{
                 if(section=="Forms"){
                     val actorData=client.record(actorId)?.get("data") as? JsonObject
+                    currentForm=actorData?.textValue("activeFormId")
                     pendingDeploymentId=actorData?.textValue("activeDeploymentId")
                     val deployment=pendingDeploymentId?.let{client.record(it)}
                     val target=(deployment?.get("data") as? JsonObject)?.textValue("formId")
@@ -75,8 +76,9 @@ private fun formula(c:JsonObject):String{
                 }
                 val page=if(section=="History")client.actorHistory(actorId,kinds,50,
                     if(after==null)null else records.lastOrNull()?.let(::cloudHistoryCursor),snapshot)
+                    else if(section=="Forms")client.actorForms(actorId,snapshot)
                     else client.records(after.orEmpty(),kinds,actorId)
-                more=if(page.size==50)page.last().cloudText("id") else null;page
+                more=if(section!="Forms"&&page.size==50)page.last().cloudText("id") else null;page
             }
             records=if(after==null)rows else records+rows
             error=null
@@ -200,6 +202,7 @@ private fun formula(c:JsonObject):String{
             val data=row.getValue("data").jsonObject;val id=row.cloudText("id")
             PlayerEntry(row.cloudText("title"),cloudLabel(row.cloudText("kind")),"Journal",{if(section=="Forms"){selection=id;details="Preview form"}else inspect(id)})
             if(section=="History"){
+                if(row.cloudText("kind")=="attack_attempt")CloudAttackRiderStatus(data)
                 data.textValue("text")?.let{line->PlayerTextButton({clipboard.setText(AnnotatedString(line))}){Text(line)}}
                 if(row.cloudText("kind")=="attack_attempt"&&data["damage"]==JsonNull)
                     PlayerTextButton({commit("roll_attack_damage",buildJsonObject{put("actorId",actorId);put("attemptId",id);put("damage",damageEvidence(data.rowsAt("components"),data["critical"]?.jsonPrimitive?.booleanOrNull==true))})},enabled=online){Text("Roll linked damage")}
@@ -240,9 +243,13 @@ private fun formula(c:JsonObject):String{
                 var evaluated by remember(snapshot.version,row.cloudText("id")){mutableStateOf<JsonObject?>(null)}
                 var previewError by remember { mutableStateOf<String?>(null) }
                 LaunchedEffect(online,actorId,row.cloudText("id"),snapshot.version){
-                    if(online)try{evaluated=client.projection(snapshot,"forms/$actorId/${row.cloudText("id")}")}catch(e:CancellationException){throw e}catch(e:Exception){previewError=cloudError(e)}
+                    if(online)try{evaluated=client.projection(snapshot,"forms/$actorId/${row.cloudText("id")}").getValue("preview").jsonObject}catch(e:CancellationException){throw e}catch(e:Exception){previewError=cloudError(e)}
                 }
                 CloudFormDeploymentControls(actorId,row.cloudText("id"),evaluated,online,::open,commit)
+                CloudFormManagementControls(row, records, online, currentForm, pendingForm?.cloudText("id"),
+                    {name,args->details=null;selection=null;openOperation(name,args)},
+                    {name,args->details=null;selection=null;commit(name,args)})
+                evaluated?.let { CloudFormSourceBreakdown(row.getValue("data").jsonObject,it) }
                 evaluated?.let{projection->PlayerDisclosure("Effective and retained values",initiallyOpen=true){
                     projection.filterKeys{it !in setOf("epoch","revision","grantRevision","actorId","deployment","trackedEncounter")}.forEach{(name,v)->
                         Text(cloudLabel(name),style=MaterialTheme.typography.titleSmall);RecordFields(v)
@@ -250,9 +257,7 @@ private fun formula(c:JsonObject):String{
                 }}
                 previewError?.let{Text(it,color=MaterialTheme.colorScheme.error)}
                 CloudEntityImage(client,snapshot,online,row.cloudText("id"),"form",row.cloudText("title"));RecordFields(row.getValue("data"))
-                PlayerOutlinedButton({open("revise_form",buildJsonObject{
-                    put("formId",row.cloudText("id"));put("name",row.cloudText("title"))
-                })},enabled=online){Text("Edit form")}
+
             }
             "Attack options"->{val d=row.getValue("configuration").jsonObject
                 if(d.textValue("resolution")=="attack"){PlayerTabs(listOf("Normal","Advantage","Disadvantage"),cloudLabel(mode),{mode=it.lowercase()})
@@ -264,8 +269,9 @@ private fun formula(c:JsonObject):String{
                 var targets by remember(selection,snapshot.version){mutableStateOf<List<JsonObject>>(emptyList())}
                 val needsTarget=offered.any{it.textValue("id") in selectedCharges && (it["charge"] as? JsonObject)?.textValue("trigger")=="confirmed_hit"}
                 CloudChargeSelection(offered,selectedCharges)
-                LaunchedEffect(needsTarget,snapshot.version){
-                    if(needsTarget)try{
+                var menu by remember(selection,snapshot.version){mutableStateOf(false)}
+                LaunchedEffect(menu,snapshot.version){
+                    if(menu)try{
                         val loaded=mutableListOf<JsonObject>();var after=""
                         do {
                             val page=client.records(after=after,kinds=setOf("actor"));loaded.addAll(page)
@@ -274,13 +280,13 @@ private fun formula(c:JsonObject):String{
                         targets=loaded
                     }catch(e:CancellationException){throw e}catch(e:Exception){error=cloudError(e)}
                 }
-                if(needsTarget){
-                    var menu by remember {mutableStateOf(false)}
-                    Box{
-                        PlayerOutlinedButton({menu=true}){Text(targets.firstOrNull{it.textValue("id")==targetId}?.textValue("title")?:"Choose target")}
-                        DropdownMenu(menu,{menu=false}){targets.forEach{target->
+                Box{
+                    PlayerOutlinedButton({menu=true},enabled=online){Text(targets.firstOrNull{it.textValue("id")==targetId}?.textValue("title")?:"Choose target")}
+                    DropdownMenu(menu,{menu=false}){
+                        if(!needsTarget)DropdownMenuItem(text={Text("Leave target unresolved")},onClick={targetId=null;menu=false})
+                        targets.forEach{target->
                             DropdownMenuItem(text={Text(target.cloudText("title"))},onClick={targetId=target.textValue("id");menu=false})
-                        }}
+                        }
                     }
                 }
                 val ready=online && (!needsTarget||targetId!=null)
@@ -295,5 +301,22 @@ private fun formula(c:JsonObject):String{
                 })},enabled=online){Text(cloudLabel(v.jsonPrimitive.content))}}
             }}
         }
+    }
+}
+
+@Composable internal fun CloudAttackRiderStatus(outcome:JsonObject) {
+    val push=outcome["preparedPush"] as? JsonObject
+    val targetResults=outcome.rowsAt("targetResults")
+    if(push!=null && targetResults.isEmpty() && outcome.textValue("outcome")=="pending")
+        Text("On a confirmed hit · ${push.textValue("ability")} save DC ${push.textValue("dc")}")
+    val entries=if("riderStatus" in outcome)listOf(outcome) else targetResults
+    for(entry in entries){
+        val rule=entry["riderSave"] as? JsonObject ?: push ?: continue
+        val status=entry.textValue("riderStatus") ?: when {
+            entry["pushResult"] is JsonObject -> "resolved"
+            entry.textValue("decision")=="hit" -> "pending"
+            else -> "not_triggered"
+        }
+        if(status=="pending")Text("Secondary save pending · ${rule.textValue("ability")} DC ${rule.textValue("dc")}")
     }
 }

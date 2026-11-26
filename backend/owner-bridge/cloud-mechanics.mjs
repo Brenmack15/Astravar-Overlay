@@ -346,7 +346,8 @@ async function applyAttemptTarget(ctx,x,isCast=false){
   must(!total || !healing,'MIXED_HEALING_AND_DAMAGE_REQUIRES_ADJUDICATION');
   const applied=total||healing?await hp(ctx,{actorId:target.id,kind:healing?'heal':'damage',amount:healing||total}):null;
   const result={targetActorId:target.id,decision,evasion,ac:d.resolution==='attack'?p.ac.value:null,saveRollId:x.saveRollId??null,
-    amount:total,healing,actualHealing:healing?applied.afterHp-applied.beforeHp:0,components,hp:applied,source:x.source,commandId:ctx.commandId};
+    amount:total,healing,actualHealing:healing?applied.afterHp-applied.beforeHp:0,components,hp:applied,source:x.source,commandId:ctx.commandId,
+    ...(d.preparedPush?{riderStatus:decision==='hit'?'pending':'not_triggered',riderSave:{ability:d.preparedPush.ability,dc:d.preparedPush.dc}}:{})};
   const targetResults=[...prior,result], complete=targetResults.length===d.targets.length;
   const settled=await settleEffectCosts(ctx,attempt.actorId,attempt.id,d.effectCharges,decision==='hit'?'confirmed_hit':complete?'miss':'pending');
   if(settled.costs.length)result.effectCosts=settled.costs;

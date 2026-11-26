@@ -71,6 +71,11 @@ internal class AscensionWorkerFixture private constructor(private val context: C
     fun record(id: String): JsonObject? = dm("get_cloud_state", buildJsonObject { put("id", id) })
         .getValue("records").jsonArray.singleOrNull()?.jsonObject
     suspend fun refresh(): CloudSnapshot = client.refresh(openExisting = true)
+    fun reopenCache() {
+        cache.close()
+        cache = CloudSnapshotCache(context, database)
+        client = makeClient()
+    }
     fun resetCache() {
         cache.close()
         check(context.deleteDatabase(database))
@@ -83,10 +88,12 @@ internal class AscensionWorkerFixture private constructor(private val context: C
         input.close(); cache.close(); context.deleteDatabase(database)
     }
     companion object {
-        fun open(context: Context): AscensionWorkerFixture {
+        fun open(context: Context, lifecycleMedia: Boolean = false): AscensionWorkerFixture {
             val entry = generateSequence(File(requireNotNull(System.getProperty("user.dir"))).absoluteFile) { it.parentFile }
                 .map { File(it, "backend/owner-bridge/fixtures/native-cloud-wire.mjs") }.first(File::isFile)
-            val process = ProcessBuilder("node", entry.absolutePath, "--exercise-gameplay")
+            val arguments = mutableListOf("node", entry.absolutePath, "--exercise-gameplay")
+            if (lifecycleMedia) arguments += "--lifecycle-media"
+            val process = ProcessBuilder(arguments)
                 .redirectError(ProcessBuilder.Redirect.INHERIT).start()
             try { return AscensionWorkerFixture(context, process) }
             catch (failure: Throwable) { process.destroyForcibly(); throw failure }

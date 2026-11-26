@@ -112,7 +112,7 @@ class CloudFormDeploymentTest {
             val response=when {
                 path.endsWith("/capabilities")->common
                 path.contains("/state?")->JsonObject(common+buildJsonObject {put("nextAfter",JsonNull);put("records",JsonArray(rows))})
-                path.endsWith("/forms/subject/frame")->JsonObject(common+preview(54))
+                path.endsWith("/forms/subject/frame")->JsonObject(common+("preview" to preview(54)))
                 else->error("Unexpected synthetic request $path")
             }
             OwnerSyncResponse(200,response)
@@ -129,6 +129,50 @@ class CloudFormDeploymentTest {
             compose.onNodeWithText("Confirm uninterrupted deployment").assertIsNotEnabled()
             assertTrue(routes.any{it.endsWith("/forms/subject/frame")})
         } finally { activity.pause().stop().destroy();cache.close() }
+    }
+
+    @Test fun collectionControlsPreservePhysicalReferencesAndSelectOnlyTheSpecificFormForRetirement() {
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        val online = mutableStateOf(true)
+        val active = mutableStateOf<String?>("third")
+        fun form(id: String) = buildJsonObject {
+            put("id",id); put("title",id); put("actorId","actor"); put("revision",4)
+            putJsonObject("data") { put("source","Fixture");put("sourceItemId","one-rig");put("integrityPoolId","one-integrity")
+                put("timing","other");put("activationSeconds",60);put("orderKey","rank-$id");put("configurationRevision",3) }
+        }
+        val forms = listOf(form("first"),form("second"),form("third"))
+        val opened = mutableListOf<Pair<String,JsonObject>>()
+        val commits = mutableListOf<Pair<String,JsonObject>>()
+        try {
+            activity.get().setContent { AstravarTheme { Column(Modifier.verticalScroll(rememberScrollState())) {
+                CloudFormManagementControls(forms[1],forms,online.value,active.value,null,
+                    {op,args->opened.add(op to args)},{op,args->commits.add(op to args)})
+            } } }
+            compose.onNodeWithText("Manage configuration").performClick()
+            compose.onNodeWithText("Duplicate configuration").performClick()
+            val duplicate=opened.single()
+            assertEquals("duplicate_form",duplicate.first)
+            assertEquals("actor",duplicate.second.cloudText("actorId"))
+            assertEquals("second",duplicate.second.cloudText("sourceFormId"))
+            assertNotEquals("second",duplicate.second.cloudText("formId"))
+            assertTrue(commits.isEmpty())
+            compose.onNodeWithText("Move down").performClick();compose.onNodeWithText("Move up").performClick()
+            assertEquals(listOf("third","first"),commits.map { (op,args)->assertEquals("move_form",op);args.cloudText("adjacentFormId") })
+            compose.onNodeWithText("Edit form").performClick()
+            val edit=opened.last().second
+            assertEquals("one-rig",edit.cloudText("sourceItemId"));assertEquals("one-integrity",edit.cloudText("integrityPoolId"))
+            assertFalse("orderKey" in edit);assertFalse("configurationRevision" in edit)
+            compose.onNodeWithText("Review retirement").performClick()
+            val (op,retirement)=opened.last()
+            assertEquals("archive_records",op)
+            val exact=retirement.getValue("records").jsonArray.single().jsonObject
+            assertEquals("second",exact.cloudText("id"));assertEquals(4,exact.getValue("revision").jsonPrimitive.int)
+            compose.runOnIdle {active.value="second"}
+            compose.onNodeWithText("Review retirement").assertIsNotEnabled()
+            compose.runOnIdle {online.value=false}
+            compose.onNodeWithText("Duplicate configuration").assertIsNotEnabled()
+            compose.onNodeWithText("Move up").assertIsNotEnabled()
+        } finally {activity.pause().stop().destroy()}
     }
 
 }

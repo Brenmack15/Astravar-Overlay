@@ -103,6 +103,13 @@ export async function inspectMediaPng(bytes) {
       case 'IEND':
         if(size!==0 || !idats.length || next!==bytes.length)invalid();
         end=true; break;
+      case 'sBIT': {
+        // Android's PNG encoder records the original precision in this metadata.
+        // Indexed images describe three palette channels even though pixels store one index.
+        const count = color===3 ? 3 : channels.get(color);
+        if (size!==count || palette || idats.length || payload.some(precision=>precision<1 || precision>8)) invalid();
+        break;
+      }
       case 'sRGB': if (size!==1||payload[0]>3||idats.length) invalid(); break;
       case 'gAMA': if(size!==4||idats.length)invalid(); break;
       case 'pHYs': if(size!==9||payload[8]>1||idats.length)invalid(); break;

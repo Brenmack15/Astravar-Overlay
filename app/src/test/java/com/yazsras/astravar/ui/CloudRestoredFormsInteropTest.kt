@@ -140,6 +140,21 @@ class CloudRestoredFormsInteropTest {
                     assertEquals(current.version.revision, unchanged.getValue("revision").jsonPrimitive.long)
                 }
                 assertTrue(seenDigests.size >= 5)
+                val event = client.records(kinds = setOf("item_event")).first()
+                val historicId = event.getValue("data").jsonObject.cloudText("commandId")
+                val old = call(buildJsonObject {
+                    put("call", "dm"); put("name", "get_cloud_receipt")
+                    putJsonObject("args") { put("commandId", historicId) }
+                })
+                assertTrue(old.getValue("epoch").jsonPrimitive.long < current.version.epoch)
+                assertEquals(old, client.historicalReceipt(current, historicId))
+                compose.onNodeWithText("Tools").performClick()
+                compose.onNodeWithText("Check submitted commands").performScrollTo().performClick()
+                compose.onNodeWithText("Command ID").performTextInput(historicId)
+                compose.onNodeWithText("View historical receipt").performScrollTo().performClick()
+                awaitText("Recorded at authority epoch ${old.getValue("epoch")} · revision ${old.getValue("revision")}")
+                awaitText("Current authority epoch ${current.version.epoch}")
+                assertTrue(client.pending().isEmpty())
             } finally { activity.pause().stop().destroy() }
         } finally {
             output.close()

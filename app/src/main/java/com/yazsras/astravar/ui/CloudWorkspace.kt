@@ -81,6 +81,7 @@ internal fun cloudError(e: Exception): String = when ((e as? OwnerSyncFailure)?.
         ?: "Cloud requests are paused. Retry the original request after a short wait."
     "CLOUD_UNSUBMITTED_STALE" -> "The server confirmed no receipt for the original request at its closed revision. Review a new request against the current records."
     "CLOUD_PRIOR_COMMAND_UNVERIFIED" -> "A previous request is awaiting verification. Retry its original command to retrieve the outcome."
+    "CLOUD_NO_TERMINAL_RECEIPT" -> "This request is pending. Its final receipt will be available after an authoritative decision."
     "COMMAND_UNKNOWN" -> "The server has no receipt for this command."
     "NETWORK_UNAVAILABLE","NETWORK_TIMEOUT","TLS_FAILURE" -> "Cloud unavailable. Any previously downloaded records may be stale."
     else -> (e as? OwnerSyncFailure)?.code?.let { "Cloud request incomplete · ${cloudLabel(it.lowercase())}" }
@@ -106,6 +107,7 @@ private val categoryScopes = mapOf(
     var initialFields by remember { mutableStateOf(buildJsonObject {}) }
     var menuScope by remember { mutableStateOf<Set<String>?>(null) }
     var inspected by rememberSaveable { mutableStateOf<String?>(null) }
+    var historicalId by rememberSaveable(snapshot.binding) { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var verified by remember { mutableStateOf(false) }
@@ -234,7 +236,7 @@ private val categoryScopes = mapOf(
         }
     }
     val inspectId=inspected
-    if (inspectId!=null && snapshot.visible) key(inspectId) {
+    if (inspectId!=null && snapshot.visible && historicalId == null) key(inspectId) {
         var row by remember { mutableStateOf<JsonObject?>(null) }
         LaunchedEffect(snapshot) { row=client.record(inspectId) }
         PlayerSheet(row?.cloudText("title") ?: "Record", { inspected=null }) {
@@ -242,9 +244,18 @@ private val categoryScopes = mapOf(
                 if (it.cloudText("kind") in cloudMediaTargets)
                     CloudEntityImage(client,snapshot,verified,it.cloudText("id"),it.cloudText("kind"),it.cloudText("title"))
                 RecordFields(it.getValue("data"))
+                val data = it.getValue("data").jsonObject
+                val commandId = (data["commandId"] as? JsonPrimitive)?.contentOrNull
+                    ?: (data["sourceCommandId"] as? JsonPrimitive)?.contentOrNull
+                if (commandId != null && cloudIdentifier.matches(commandId)) {
+                    PlayerTextButton({ historicalId = commandId }, enabled = verified) { Text("View transaction receipt") }
+                }
                 PlayerDisclosure("Record details") { Text(it.cloudText("id")); Text("Revision ${it["revision"]}") }
             } ?: Text("This record is unavailable in your active view.")
         }
+    }
+    if (snapshot.visible) historicalId?.let { id ->
+        CloudHistoricalReceipt(client, snapshot, id) { historicalId = null }
     }
     when(tool) {
         "Tools" -> PlayerSheet("Owner connection", { tool=null }) {
@@ -257,9 +268,13 @@ private val categoryScopes = mapOf(
             PlayerTextButton({ tool="Device" }) { Text("Manage device connection") }
             PlayerTextButton({ tool="Archive" },enabled=verified && !busy) { Text("Archive manager") }
             PlayerTextButton({ tool="Recovery" }) { Text("Local backup and recovery") }
+            for (utility in listOf("ChatGPT Prompts", "Appearance & feedback", "Help & diagnostics")) {
+                PlayerTextButton({ tool = utility }) { Text(utility) }
+            }
             PlayerTextButton({ tool="History" }) { Text("Check submitted commands") }
             PlayerTextButton({ menuScope=null; tool="Operations" },enabled=verified && !busy) { Text("All permitted operations") }
         }
+        "ChatGPT Prompts", "Appearance & feedback", "Help & diagnostics" -> CloudDeviceTools(requireNotNull(tool)) { tool = "Tools" }
         "Roster" -> if (snapshot.visible) CloudRoster(client,snapshot,verified && !busy,::openOperation){tool=null}
         "Settings" -> PlayerSheet("Campaign settings",{tool=null}) {
             var metadata by remember { mutableStateOf<JsonObject?>(null) }
@@ -284,11 +299,7 @@ private val categoryScopes = mapOf(
         "Archive" -> if(snapshot.visible)CloudArchiveManager(client,snapshot,verified,::openOperation){tool=null}
         "Device" -> RebuildToolSheet("Device connection",{tool=null}) { CampaignConnectionPage() }
         "Recovery" -> RebuildToolSheet("Local recovery store",{tool=null}) {
-            Column {
-                Text("This backup contains pre-migration data stored on this device.",Modifier.padding(12.dp))
-                val app=context.applicationContext as? AstravarApp
-                if(app!=null) GenesisUnifiedBackupPage(app.genesisStorage.backup)
-            }
+            CloudRecoveryTools()
         }
         "Dice" -> actorId?.let { if (snapshot.visible) CloudRollManager(client,snapshot,it,verified) { tool=null } }
         "Inbox" -> CloudApprovalCenter(client,snapshot,verified, onCount = { count = it }) { tool = if (inboxFromTools) "Tools" else null }
@@ -299,7 +310,12 @@ private val categoryScopes = mapOf(
                 }
             }
         }
-        "History" -> PlayerSheet("Submitted commands",{tool=null}) {
+        "History" -> if (historicalId == null) PlayerSheet("Submitted commands",{tool=null}) {
+            var lookup by rememberSaveable { mutableStateOf("") }
+            OutlinedTextField(lookup, { lookup = it.take(128) }, label = { Text("Command ID") }, singleLine = true)
+            PlayerTextButton({ historicalId = lookup }, enabled = verified && cloudIdentifier.matches(lookup)) {
+                Text("View historical receipt")
+            }
             if (pending.isEmpty()) Text("No locally pending commands.")
             pending.forEach { entry ->
                 Text(cloudLabel(entry.cloudText("operation")))
@@ -324,6 +340,7 @@ private val categoryScopes = mapOf(
                     Text(line, modifier = copyResult, style = MaterialTheme.typography.titleMedium)
                 }
             }
+            outcome?.let { CloudAttackRiderStatus(it) }
             if(outcome!=null && "appliedDamage" in outcome && outcome["appliedDamage"]==JsonNull)
                 Text("Potential damage · awaiting target resolution")
             PlayerButton({ clipboard.setText(AnnotatedString(if(lines.isEmpty()) (outcome ?: r).toString() else lines.joinToString("\n"))) }) {

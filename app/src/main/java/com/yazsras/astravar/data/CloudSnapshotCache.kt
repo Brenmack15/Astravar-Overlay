@@ -46,7 +46,8 @@ internal fun cloudPage(body: JsonObject, binding: CloudBinding, after: String?, 
         val id = row.cloudText("id")
         require(cloudIdentifier.matches(id) && id > priorId && cloudIdentifier.matches(row.cloudText("kind")))
         require(row.getValue("actorId").let { it == JsonNull || (it is JsonPrimitive && it.isString && cloudIdentifier.matches(it.content)) })
-        require(row.cloudText("life") in setOf("active", "archived") && row.cloudNumber("revision") <= version.revision)
+        // A staged native import retains its per-record revision before the first continuity command.
+        require(row.cloudText("life") in setOf("active", "archived") && row.cloudNumber("revision") >= 1)
         row.cloudText("title")
         row.getValue("data").jsonObject
         priorId = id

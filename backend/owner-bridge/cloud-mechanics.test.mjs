@@ -822,6 +822,10 @@ test('long deployment follows actual encounter rounds, survives a service restar
   await fixtureEncounter(f,'timer-enc',[['other',18],[who,5]]);
   await assert.rejects(f.command('begin_form_deployment',begin),/TURN_UNAVAILABLE/);
   await next('other');const started=await f.command('begin_form_deployment',begin);await f.retry(started.command);
+  await f.command('duplicate_form',{actorId:who,sourceFormId:'timed',formId:'alternative-profile',name:'Unoccupied configuration'});
+  await f.command('move_form',{actorId:who,formId:'timed',adjacentFormId:'alternative-profile'});
+  assert.equal((await f.preview('timed')).deployment.blockedReason,null);
+  assert.equal((await f.read('tracked-work')).data.formRevision,(await f.read('timed')).data.configurationRevision);
   assert.equal((await f.read('timer-enc')).data.economy[who].action,false);assert.equal((await f.read('cry-use')).data.current,0);
   await assert.rejects(f.command('begin_form_deployment',{...begin,deploymentId:'duplicate-work'}),/DEPLOYMENT_ALREADY_PENDING/);
   await assert.rejects(f.command('change_form',{...finish,elapsedSeconds:60}),/RECORDED_DEPLOYMENT_TIME_REQUIRED/);
@@ -835,6 +839,7 @@ test('long deployment follows actual encounter rounds, survives a service restar
   const independentSnapshot=join(directory,'restored.sqlite');
   f.db.db.prepare('VACUUM INTO ?').run(independentSnapshot);
   f.reopen(independentSnapshot);
+  assert.equal((await f.read('timed')).data.orderKey,'alternative-profile');assert.equal((await f.read('alternative-profile')).data.orderKey,'timed');
   assert.equal((await f.preview('timed')).deployment.remainingSeconds,36);assert.equal((await f.sheet()).activeDeploymentId,'tracked-work');
   assert.equal((await f.read(who)).data.activeDeploymentId,'tracked-work');
   for(let i=0;i<5;i++){await next(who);await next('other');}
@@ -965,4 +970,56 @@ test('three pinned feat variants retain one identity each, verified prior gains 
   assert.deepEqual(await numbers(),[5,14,9,20,29,19,3,3,20]);
   await equipment('packed');assert.deepEqual(await numbers(),[4,13,8,19,28,18,2,2,20]);
   assert.equal((await f.read('combined-feat')).data.feat.includedAbility.increase,1);
+});
+
+test('form management duplicates the configuration, retains source mechanics and independently orders, archives and restores the exact identity',async t=>{
+  const f=await setup(t);await f.defined();await f.defined({actorId:'different',name:'Separate fixture'});
+  await wornFixture(f,'form-kit');await f.pool('kit-integrity','integrity',7,15,'none');
+  const config={actorId:who,source:'Fictional configuration',timing:'other',activationSeconds:0,speeds:{walk:40}};
+  await f.command('define_form',{...config,formId:'base-a',name:'First',sourceItemId:'form-kit',integrityPoolId:'kit-integrity',baseAc:18});
+  await f.command('define_form',{...config,formId:'base-b',name:'Second',baseAc:10});
+  await f.effect('source-boost','skill','perception','add',{amount:3,formId:'base-a'});
+  await f.command('define_attack',{actorId:who,attackId:'dual',name:'Dual ray',source:'Synthetic',timing:'attack',delivery:'ranged',
+    resolution:'attack',fixedHit:7,formId:'base-a',components:[component('ray','cold',1,6,0,{variants:['cold','fire']})]});
+  await f.command('define_action',{actorId:who,actionId:'source-action',name:'Source action',source:'Synthetic',type:'use',timing:'other',formId:'base-a'});
+  await f.command('define_action',{actorId:who,actionId:'other-action',name:'Other action',source:'Synthetic',type:'use',timing:'other',excludedForms:['base-a']});
+  const change=formId=>f.command('change_form',{actorId:who,formId,elapsedSeconds:0});
+  await change('base-a');
+  await f.command('select_damage_variant',{actorId:who,attackId:'dual',componentId:'ray',type:'fire'});
+  const args={actorId:who,sourceFormId:'base-a',formId:'copy-c',name:'Adjusted profile'};
+  await assert.rejects(f.command('duplicate_form',{...args,actorId:'different'}),/MECHANIC_REFERENCE_UNAVAILABLE/);
+  const copied=await f.command('duplicate_form',args);await f.retry(copied.command);
+  const a=await f.read(who),original=await f.read('base-a'),copy=await f.read('copy-c');
+  assert.equal(a.data.activeFormId,original.id);assert.equal(a.data.currentHp,42);
+  assert.equal(copy.actorId,who);assert.equal(copy.data.integrityPoolId,'kit-integrity');assert.equal(copy.data.sourceItemId,'form-kit');
+  assert.deepEqual(copy.data.inheritedRuleFormIds,[original.id]);assert.equal((await f.read('kit-integrity')).data.current,7);
+  assert.ok((await f.preview(copy.id)).projection.activeEffects.includes('source-boost'));
+  await assert.rejects(f.command('move_form',{actorId:who,formId:'copy-c',adjacentFormId:'base-a'}),/FORMS_MUST_BE_ADJACENT/);
+  const move=await f.command('move_form',{actorId:who,formId:'copy-c',adjacentFormId:'base-b'});
+  await f.retry(move.command);assert.equal((await f.read('copy-c')).data.orderKey,'base-b');assert.equal((await f.read('base-b')).data.orderKey,'copy-c');
+  await f.command('revise_form',{...config,formId:'copy-c',name:'Edited profile',sourceItemId:'form-kit',integrityPoolId:'kit-integrity',baseAc:21});
+  assert.equal((await f.read('copy-c')).data.orderKey,'base-b');assert.equal((await f.read('base-a')).data.baseAc,18);
+  await change('copy-c');
+  await f.command('use_action',{actorId:who,actionId:'source-action',useId:'copy-can-act',declared:true});
+  await assert.rejects(f.command('use_action',{actorId:who,actionId:'other-action',useId:'unavailable',declared:true}),/ACTION_FORM_INELIGIBLE/);
+  const attack=await f.command('resolve_attack',{actorId:who,attackId:'dual',attemptId:'copy-attack',mode:'normal',includeDamage:false,hit:dice(12)});
+  assert.equal(attack.out.components[0].type,'fire');
+  await f.command('select_damage_variant',{actorId:who,attackId:'dual',componentId:'ray',type:'cold'});
+  assert.deepEqual((await f.read('dual')).data.selections.map(v=>[v.formId,v.type]),[['base-a','fire'],['copy-c','cold']]);
+  const prior=await f.service.grantForSubject(cid,'sites-mcp');
+  await f.service.setGrant(owner,cid,'sites-mcp',{scopes:[...prior.scopes,'lifecycle.read','lifecycle.write'],auto:prior.auto,
+    actors:prior.actors,expiresAt:prior.expiresAt,revoked:false,expectedGrantRevision:prior.revision});
+  async function lifecycle(name,id){
+    const row=(await f.service.state(dm,cid,{id:'copy-c',activeOnly:false})).records[0];
+    const expectedRevision=(await f.service.continuity(cid)).revision;
+    return f.retry({version:1,epoch:1,commandId:id,expectedRevision,operation:name,args:{records:[{id:row.id,kind:'form',revision:row.revision}]}},{review:true});
+  }
+  await assert.rejects(lifecycle('archive_records','archive-equipped'),/GAMEPLAY_DEPENDENCY_ACTIVE/); // the occupied configuration remains current
+  await change('base-b');
+  await lifecycle('archive_records','retire-id');
+  assert.equal(await f.read('copy-c'),undefined);
+  await lifecycle('restore_records','restore-id');
+  assert.equal((await f.read('copy-c')).data.orderKey,'base-b');
+  assert.equal((await f.sheet()).formId,'base-b');assert.equal((await f.read('kit-integrity')).data.current,7);
+  assert.equal((await f.read('form-kit')).data.quantity,1);assert.equal((await f.read('copy-attack')).data.formId,'copy-c');
 });

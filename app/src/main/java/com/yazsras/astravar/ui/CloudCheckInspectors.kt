@@ -1,5 +1,6 @@
 package com.yazsras.astravar.ui
 
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,6 +10,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.*
@@ -70,10 +73,28 @@ internal fun cloudTrainingDraft(actorId: String, category: String, key: String?,
     var selected by rememberSaveable(actorId) { mutableStateOf<String?>(null) }
     var showAll by rememberSaveable(actorId) { mutableStateOf(false) }
     Text("Passive checks", style=MaterialTheme.typography.titleMedium)
-    Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(4.dp)) {
-        listOf("perception","investigation","insight").filter { it in passives }.forEach { skill ->
-            PlayerTextButton({selected=skill},modifier=Modifier.weight(1f)) {
-                Column { Text(cloudLabel(skill)); Text(passives.obj(skill).field("value") ?: "Unknown") }
+    val keys = listOf("perception","investigation","insight").filter { it in passives }
+    if(keys.isNotEmpty()) {
+        val measurer=rememberTextMeasurer()
+        val density=LocalDensity.current
+        val style=MaterialTheme.typography.labelLarge
+        val nameWidth=with(density) { keys.maxOf { measurer.measure(cloudLabel(it),style,softWrap=false).size.width }.toDp() }
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val enoughWidth=maxWidth >= (nameWidth + 28.dp) * keys.size + 4.dp * (keys.size-1)
+            if(enoughWidth) Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(4.dp)) {
+                keys.forEach { skill ->
+                    PlayerTextButton({selected=skill},modifier=Modifier.weight(1f)) {
+                        Column { Text(cloudLabel(skill),style=style); Text(passives.obj(skill).field("value") ?: "Unknown") }
+                    }
+                }
+            } else Column(Modifier.fillMaxWidth()) {
+                keys.forEach { skill ->
+                    PlayerTextButton({selected=skill},modifier=Modifier.fillMaxWidth()) {
+                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
+                            Text(cloudLabel(skill),style=style); Text(passives.obj(skill).field("value") ?: "Unknown")
+                        }
+                    }
+                }
             }
         }
     }

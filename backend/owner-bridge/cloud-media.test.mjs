@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { crc32, deflateSync } from 'node:zlib';
 import { fileBucket } from './fixtures/media-bucket.mjs';
 import { handleWorker } from './worker.mjs';
 import { SqliteAdapter } from './sqlite-adapter.mjs';
@@ -221,4 +222,108 @@ test('one uploader writes a reservation and failed partial writes allow a clean 
   bucket.put=put;
   assert.equal((await request(dm,'media/uploads/try-again','PUT',bytes,hash)).status,200);
   assert.equal(bucket.keys.size,4);
+});
+
+test('reviewed removal checks the selected target, actor grant, digest and revision and preserves a shared asset',async t=>{
+  const {service,db,request,submit}=await fixture(t), {bytes,hash}=await fixtureImage();
+  await request(dm,'media/uploads/shared','PUT',bytes,hash);
+  await request(owner,'media/uploads/shared/original');
+  const added=await submit('shared','shared-asset',hash);
+  await service.review(owner,id,added.commandId,added.digest,'verify');
+  // A recovered pre-existing second owner relationship must survive removing the first.
+  db.db.prepare("INSERT INTO cloud_links(owner_id,continuity_id,from_id,relation,to_id) VALUES(?,?,'actor-b','primary_image','shared-asset')").run(ownerId,id);
+  const plain=async(principal,target)=>(await request(principal,'media/primary/'+target+'/association')).json();
+  const relation=await plain(dm,'actor-a');
+  const args={assetId:relation.assetId,targetKind:'actor',targetId:'actor-a',targetRevision:relation.targetRevision,sha256:relation.sha256};
+  const remove=(commandId,extra={})=> service.submit(dm,id,{version:1,epoch:1,expectedRevision:1,commandId,operation:'remove_primary_image',args:{...args,...extra}});
+  await assert.rejects(plain(dm,'actor-b'),{code:'IMAGE_UNAVAILABLE'});
+  await assert.rejects(remove('wrong-actor',{targetId:'actor-b'}),{code:'CLOUD_GRANT_DENIED'});
+  await assert.rejects(remove('bad-revision',{targetRevision:args.targetRevision+1}),{code:'IMAGE_ASSOCIATION_CHANGED'});
+  await assert.rejects(remove('bad-digest',{sha256:'a'.repeat(64)}),{code:'IMAGE_ASSOCIATION_CHANGED'});
+  await assert.rejects(remove('bad-asset',{assetId:'other'}),{code:'IMAGE_ASSOCIATION_CHANGED'});
+  const rowsBefore=db.db.prepare("SELECT id,data_json FROM cloud_entities WHERE kind='actor' ORDER BY id").all();
+  const denied=await remove('refused-deletion');
+  assert.equal(denied.status,'PENDING_APPROVAL');
+  assert.equal((await service.review(owner,id,denied.commandId,denied.digest,'refuse')).status,'REFUSED');
+  assert.equal((await plain(dm,'actor-a')).assetId,'shared-asset');
+  const exact=await remove('remove-first');
+  assert.equal((await plain(dm,'actor-a')).assetId,'shared-asset');
+  const committed=await service.review(owner,id,exact.commandId,exact.digest,'verify');
+  assert.equal(committed.receipt.outcome.previousSha256,hash);
+  assert.equal(committed.receipt.outcome.assetId,null);
+  assert.deepEqual(await remove('remove-first'),committed);
+  assert.deepEqual(await service.receipt(dm,id,exact.commandId),committed);
+  assert.equal((await plain(dm,'actor-a')).assetId,null);
+  await assert.rejects(request(dm,'media/primary/actor-a/original'),{code:'IMAGE_UNAVAILABLE'});
+  assert.equal((await plain(owner,'actor-b')).assetId,'shared-asset');
+  assert.deepEqual(new Uint8Array(await (await request(owner,'media/primary/actor-b/original')).arrayBuffer()),bytes);
+  assert.deepEqual(db.db.prepare("SELECT id,data_json FROM cloud_entities WHERE kind='actor' ORDER BY id").all(),rowsBefore);
+  assert.equal(service.mediaBucket.keys.size,2);
+});
+
+test('staging optional artwork from a paid creation receipt cannot replay the acquisition or change its price',async t=>{
+  const {db,service}=await fixture(t),{bytes,hash}=await fixtureImage();
+  const categories=['character','inventory','economy','media'];
+  await service.setGrant(owner,id,'sites-mcp',{scopes:categories.flatMap(k=>[k+'.read',k+'.write']),actors:['*'],
+    auto:categories.map(k=>k+'.write'),expectedGrantRevision:1,expiresAt:Date.now()+3600000,revoked:false});
+  const env={DB:db,OWNER_SITE_USER_ID:ownerId,ASTRAVAR_CLOUD_ENABLED:'1',ASTRAVAR_CLOUD_ENV:'isolated',ASTRAVAR_MEDIA:service.mediaBucket};
+  const origin='https://creation-fixture.example',headers={'oai-authenticated-user-id':ownerId,Origin:origin,'Content-Type':'application/json'};
+  const rpc=async(name,args)=>{
+    const request=new Request(origin+'/mcp',{method:'POST',headers,body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:{continuityId:id,...args}}})});
+    const wire=await (await handleWorker(request,env)).json();
+    if(wire.result.isError)throw Object.assign(new Error('Scoped artwork validation'),{code:JSON.parse(wire.result.content[0].text).error});
+    return wire.result.structuredContent;
+  };
+  const command=(commandId,operation,args,expectedRevision)=>rpc('submit_cloud_command',{command:{commandId,operation,args,expectedRevision,epoch:1,version:1}});
+  const coins=gp=>({cp:0,sp:0,ep:0,gp,pp:0});
+  await command('define-buyer','define_actor',{actorId:'buyer',name:'Isolated buyer',role:'player',rulesProfile:'legacy_2014',level:3,abilities:{INT:12}},0);
+  await command('price-wallet','define_wallet',{walletId:'fixture-wallet',holderId:'buyer',shared:false,title:'Fixture coins',coins:coins(9),source:'Isolated fixture'},1);
+  await command('price-type','define_item_definition',{definitionId:'catalog',name:'Instrument',description:'Fixture',category:'tool',rarity:null,stackable:false,wearable:false,handheld:true,attunement:'none',source:'Isolated fixture'},2);
+  const paid={walletId:'fixture-wallet',price:coins(4),itemId:'paid-item',definitionId:'catalog',ownerId:'buyer',quantity:1,sellerId:null,source:'Fixture purchase'};
+  const receipt=await command('single-payment','purchase_item',paid,3);
+  assert.equal(receipt.status,'COMMITTED');
+  const args={uploadId:'paid-picture',targetId:'paid-item',targetKind:'item_instance',creationCommandId:'single-payment',bytesBase64:Buffer.from(bytes).toString('base64'),sha256:hash};
+  await assert.rejects(rpc('stage_cloud_image',{...args,creationCommandId:'price-type'}),{code:'CREATED_IMAGE_TARGET_UNVERIFIED'});
+  await assert.rejects(rpc('stage_cloud_image',{...args,sha256:'0'.repeat(64)}),{code:'IMAGE_DIGEST_MISMATCH'});
+  const staged=await rpc('stage_cloud_image',args);
+  assert.deepEqual(staged.creation,{commandId:'single-payment',transactionId:receipt.receipt.transactionId});
+  assert.deepEqual((await rpc('stage_cloud_image',args)).creation,staged.creation);
+  const item=await rpc('get_cloud_state',{id:'paid-item'}),wallet=await rpc('get_cloud_state',{id:'fixture-wallet'});
+  assert.equal(item.revision,4);assert.equal(item.records.length,1);assert.equal(item.records[0].data.quantity,1);
+  assert.deepEqual(wallet.records[0].data.coins,coins(5));
+  assert.equal((await rpc('get_cloud_primary_image',{id:'paid-item'})).assetId,null);
+  assert.deepEqual(await command('single-payment','purchase_item',paid,3),receipt);
+  assert.equal(db.db.prepare("SELECT count(*) AS n FROM cloud_receipts WHERE command_id='single-payment'").get().n,1);
+});
+
+
+test('8-bit PNG source precision from the Android encoder preserves pixels and obeys channel count and ordering',async()=>{
+  const signature=Buffer.from([137,80,78,71,13,10,26,10]);
+  function chunk(type,payload) {
+    const data=Buffer.from(payload),bytes=Buffer.alloc(data.length+12);
+    bytes.writeUInt32BE(data.length);bytes.write(type,4,'ascii');data.copy(bytes,8);
+    bytes.writeUInt32BE(crc32(bytes.subarray(4,-4)),8+data.length);
+    return bytes;
+  }
+  function encoded(color,precision,position='before') {
+    const header=Buffer.alloc(13);header.writeUInt32BE(1);header.writeUInt32BE(1,4);header[8]=8;header[9]=color;
+    const bits=chunk('sBIT',precision);
+    const channels=new Map([[0,1],[2,3],[3,1],[4,2],[6,4]]);
+    const data=[signature,chunk('IHDR',header)];
+    if(position==='before'||position==='duplicate')data.push(bits);
+    if(color===3)data.push(chunk('PLTE',[9,18,27]));
+    if(position==='after-palette'||position==='duplicate')data.push(bits);
+    data.push(chunk('IDAT',deflateSync(Buffer.alloc(1+channels.get(color)))));
+    if(position==='after-pixels')data.push(bits);
+    return Buffer.concat([...data,chunk('IEND',[])]);
+  }
+  for(const [color,bits] of [[0,[8]],[2,[8,8,8]],[3,[5,6,5]],[4,[8,4]],[6,[8,8,8,8]]]){
+    const {meta,thumbnail}=await inspectMediaPng(encoded(color,bits));
+    assert.deepEqual([meta.width,meta.height],[1,1]);
+    assert.equal((await inspectMediaPng(thumbnail)).meta.sha256,meta.thumbnailSha256);
+  }
+  for(const [color,bits,position] of [[2,[8,8]],[0,[0]],[6,[8,8,9,8]],[3,[8,8,8],'after-palette'],
+    [2,[8,8,8],'after-pixels'],[0,[8],'duplicate']]){
+    await assert.rejects(inspectMediaPng(encoded(color,bits,position)),{code:'INVALID_OR_UNSUPPORTED_PNG'});
+  }
 });

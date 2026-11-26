@@ -34,8 +34,11 @@ class AscensionLegacyDefenseInteropTest {
                 EffectPayload.Defense(DamageKind.FORCE, DefenseKind.RESISTANCE), requiresAttunement = false)
             val bonus = EffectDefinition("source-intelligence", "Equipment Intelligence", source,
                 EffectPayload.Number(NumericTarget.ABILITY, NumberOperation.ADD, 1, "INT"), requiresAttunement = false)
-            val ward = ItemDefinition("ward-def", "Fixture ward", effects = listOf(defense,bonus), description = "Reviewed fixture ward")
-            val lantern = ItemDefinition("lantern-def", "Fixture lamp", description = "Reviewed fixture lamp")
+            fun activation(id:String,pool:String) = ItemActivation(id,"Use "+id,"Action",mapOf(pool to 1))
+            val ward = ItemDefinition("ward-def", "Fixture ward", effects = listOf(defense,bonus), description = "Reviewed fixture ward",
+                activations=listOf(activation("use-ward","ward-charges")))
+            val lantern = ItemDefinition("lantern-def", "Fixture lamp", description = "Reviewed fixture lamp",
+                activations=listOf(activation("use-lamp","lamp-charges")))
             val char = ReforgeCharacter("recovery-actor","Historical fixture", rules = RuleVersion(RuleFamily.LEGACY_2014), level = 4,
                 baseAbilities = Stat.entries.associateWith { if (it==Stat.INT) 13 else null }, currentHp = 17, baseMaxHp = 20,
                 baseAc=12, reviewedProficiency=ReviewedProficiency(2,source), itemDefinitions=listOf(ward,lantern),

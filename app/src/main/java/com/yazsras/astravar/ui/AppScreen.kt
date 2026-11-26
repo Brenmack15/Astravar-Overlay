@@ -426,7 +426,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     }
 }
 
-@Composable fun HelpPage() {
+@Composable fun HelpPage(cloudAuthoritative: Boolean = false) {
     val c=LocalContext.current
     val certificates = remember(c) { installedCertificateFingerprints(c) }
     Page {
@@ -442,8 +442,14 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
             Text("${Build.MANUFACTURER} ${Build.MODEL}\nAndroid ${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}\nBuild ${Build.DISPLAY}\nPackage ${c.packageName}\nStandalone mode · overlay retired")
         }
         Section("Dice & your character sheet") {
-            Text("Your character sheet includes Combat, abilities, spells, and live equipment. Tap a score, skill, attack or spell to use its calculated modifiers; each saved roll retains its dice and explanation. Nothing rolls automatically. The DM determines ordinary hits. Damage previews are potential damage, and averages are estimates. Tools → Armor weapon retains the accepted specialized Astravar weapon engine. Complete backup preserves connected campaign and playable records together; partial backups remain available for unconnected records.")
+            if(cloudAuthoritative) {
+                Text("Your character, inventory and campaign share the same authoritative cloud state. An accepted change has an immutable receipt. Open Owner connection to check a submitted command or review a pending change.")
+                Text("Tap an eligible modifier to roll, hold it for options, or open the dice control to queue checks. Damage rolls remain potential damage until the target outcome is confirmed.")
+                Text("When the connection is unavailable, previously authorized cache records are marked with their last revision. Reconnect and refresh before committing gameplay.")
+            } else {
+            Text("Your character sheet includes Actions, abilities, spells, and live equipment. Tap a score, skill, attack or spell to use its calculated modifiers; each saved roll retains its dice and explanation. Nothing rolls automatically. The DM determines ordinary hits. Damage previews are potential damage, and averages are estimates. Tools → Armor weapon retains the accepted specialized Astravar weapon engine. Complete backup preserves connected campaign and playable records together; partial backups remain available for unconnected records.")
             Text("Astravar does not read, control, or synchronize D&D Beyond. Imported source records remain available for review and reconciliation. Playable character changes are saved on this device; their presence does not establish authoritative campaign synchronization. The optional public connectivity lab sends fixed fictional test messages only.")
+            }
             Text("Astravar runs as a standalone application. Overlay permissions, floating controls and the persistent overlay service are retired.")
             Text("Unofficial tabletop companion. Not affiliated with or endorsed by Wizards of the Coast, D&D Beyond, or Samsung.")
         }

@@ -404,9 +404,97 @@ class OfflineMigrationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "remain held"):
             migration.convert(self.source, self.bundle, self.tenant, [])
 
+    def test_detached_native_history_binds_an_oversized_original_to_the_exact_canonical_report(self):
+        import ascension_migrate_detached as detached
+        from ascension_migrate_weapon import entry
+
+        self.convert()
+        working = encode({"format":"astravar-backup", "schema":1, "campaign":{"slots":{"2":1}}, "history":[]})
+        opaque = bytes(range(256)) * 321
+        record = {"id":"opaque-history", "entry":entry("opaque-history"), "bytes":len(opaque), "sha256":sha(opaque)}
+        index = encode(record) + b"\n"
+        header = {"format":"astravar-complete-history", "version":1, "archiveCount":1, "archiveBytes":len(opaque),
+                  "originalFileCount":0, "originalBytes":0, "indexSha256":sha(index), "workingSha256":sha(working)}
+        original = self.base / "native.zip"
+        with zipfile.ZipFile(original, "x", compression=zipfile.ZIP_STORED) as out:
+            out.comment = b"old"
+            for key, raw in (("manifest.json", encode(header)), ("backup.json", working), ("archives.ndjson", index), (record["entry"],opaque)):
+                out.writestr(key, raw)
+        original_size = original.stat().st_size
+        initial = migration.inspect(self.lab)
+        expected_money = migration.read_bundle(self.bundle)["rows"]["cloud_entities"]
+        folder, recovered = self.base / "detached", self.base / "recovered.zip"
+        with patch.object(migration, "MAX_BYTES", 8192), patch.object(detached, "MAX_NATIVE_BYTES", original_size), patch.object(detached, "BUFFER_BYTES", 2048):
+            with self.assertRaisesRegex(ValueError, "64 MiB"):
+                body = original.read_bytes()
+                migration.bundle_contents(self.tenant, {}, {t:[] for t in migration.TABLES}, {sha(body):(body,{"sha256":sha(body)})}, {})
+            with patch.object(detached, "MAX_NATIVE_BYTES", original_size - 1), self.assertRaisesRegex(ValueError, "supported size"):
+                detached.preview(self.bundle, original)
+            review = detached.preview(self.bundle, original)
+            pin = review["reviewSha256"]
+            self.assertEqual({"weapon.working":1,"weapon.working.slots":1}, review["manifest"]["original"]["workingRows"])
+            self.assertEqual(header, review["manifest"]["original"]["nativeManifest"])
+            self.assertEqual(migration.file_hash(original), review["manifest"]["original"]["sha256"])
+            for field in ("manifestSha256", "counts", "media", "originalSources"):
+                self.assertEqual(migration.summary(migration.read_bundle(self.bundle))[field], review["manifest"]["canonical"][field])
+            with self.assertRaisesRegex(ValueError, "reviewed proposal"):
+                detached.save(self.bundle, original, folder, "0" * 64)
+            self.assertFalse(folder.exists())
+            foreign = self.base / "foreign"
+            migration.init(foreign, self.tenant[0], "separate-continuity")
+            foreign_package = self.base / "foreign.zip"
+            migration.export(foreign, foreign_package)
+            with self.assertRaisesRegex(ValueError, "reviewed proposal"):
+                detached.save(foreign_package, original, folder, pin)
+            real_copy = detached.copy_new
+            def interrupted(source, target, expected, maximum):
+                if source == original:
+                    raise OSError("synthetic interrupted source read")
+                real_copy(source, target, expected, maximum)
+            with patch.object(detached, "copy_new", side_effect=interrupted), self.assertRaisesRegex(OSError, "interrupted"):
+                detached.save(self.bundle, original, folder, pin)
+            self.assertFalse(folder.exists())
+            detached.save(self.bundle, original, folder, pin)
+            with self.assertRaises(FileExistsError):
+                detached.save(self.bundle, original, folder, pin)
+            self.assertEqual(0, folder.stat().st_mode & 0o077)
+            for file in folder.iterdir(): self.assertEqual(0, file.stat().st_mode & 0o077)
+            proof = detached.recover(folder, recovered, pin)
+            self.assertEqual("RECOVERED_DETACHED_ORIGINAL", proof["status"])
+            self.assertEqual(0, proof["gameplayChanges"])
+            self.assertEqual(original.read_bytes(), recovered.read_bytes())
+            self.assertEqual(0, recovered.stat().st_mode & 0o077)
+            with self.assertRaises(FileExistsError):
+                detached.recover(folder, recovered, pin)
+            with zipfile.ZipFile(folder / detached.ORIGINAL, "a") as identical_records:
+                identical_records.comment = b"new"
+            with self.assertRaisesRegex(ValueError, "differs from the detached manifest"):
+                detached.check_set(folder, pin)
+            (folder / detached.ORIGINAL).write_bytes(original.read_bytes())
+            # Even two internally valid canonical packages cannot be swapped under the same approved manifest.
+            substituted = self.base / "other.zip"
+            migration.export(self.lab, substituted)
+            (folder / detached.CANONICAL).write_bytes(substituted.read_bytes())
+            with self.assertRaisesRegex(ValueError, "differs from the detached manifest"):
+                detached.check_set(folder, pin)
+            (folder / detached.CANONICAL).write_bytes(self.bundle.read_bytes())
+            (folder / detached.ORIGINAL).unlink()
+            with self.assertRaisesRegex(ValueError, "Incomplete"):
+                detached.check_set(folder, pin)
+            (folder / detached.ORIGINAL).symlink_to(original)
+            with self.assertRaises(OSError): detached.check_set(folder, pin)
+            (folder / detached.ORIGINAL).unlink()
+            (folder / detached.ORIGINAL).write_bytes(original.read_bytes())
+            (folder / detached.MANIFEST).write_bytes(encode({"format":"different"}))
+            with self.assertRaisesRegex(ValueError,"reviewed digest"):
+                detached.check_set(folder, pin)
+        self.assertEqual(initial, migration.inspect(self.lab))
+        self.assertEqual(expected_money, migration.read_bundle(self.bundle)["rows"]["cloud_entities"])
+
     def test_recovery_encryption_wrong_key_damage_and_exact_package_restore(self):
         from cryptography.fernet import Fernet
         self.convert()
+        self.assertEqual(0, self.bundle.stat().st_mode & 0o077)
         key, other = self.base / "key", self.base / "different-key"
         for file in (key, other):
             file.write_bytes(Fernet.generate_key())

@@ -354,6 +354,7 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                             Text("Previous Owner · ${if(component)recordName(client,snapshot,event.s("actorId"),"Unknown")else ownerCaption(client,snapshot,body.obj("before"))}")
                             Text("New Owner · ${if(component)"Unchanged"else ownerCaption(client,snapshot,body.obj("after"))}")
                             Text("Reason · ${if(component)cloudLabel(event.cloudText("title"))else event.cloudText("title")}",style=MaterialTheme.typography.titleSmall)
+                            CloudReceiptLink(client,snapshot,online,body.s("commandId"))
                             if(body.s("historical")=="true") Text(listOfNotNull(body.s("evidence")?.let(::cloudLabel),body.s("worldTime")).joinToString(" · "),color=RebuildPalette.Muted)
                         }
                     }
@@ -546,7 +547,11 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
             }
             if(online)PlayerDisclosure("Transaction history") {
                 RemoteRecordPage(client,snapshot,"timeline",id=walletId){page->
-                    page.rows("events").forEach{ e->Text(e.s("title")?:"Transaction"); e.data().s("source")?.let{Text(it,color=RebuildPalette.Muted)} }
+                    page.rows("events").forEach{ event->
+                        Text(event.s("title")?:"Transaction")
+                        event.data().s("source")?.let{Text(it,color=RebuildPalette.Muted)}
+                        CloudReceiptLink(client,snapshot,online,event.data().s("commandId"))
+                    }
                     if(page.rows("events").isEmpty())Text("No recorded transactions.")
                 }
             }

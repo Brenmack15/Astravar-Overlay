@@ -34,6 +34,30 @@ class CloudCheckInspectorsTest {
         assertFalse("trained" in unknown);assertFalse("source" in unknown);assertFalse("saveProficiencies" in save)
         assertEquals(2,state.getValue("saveProficiencies").jsonArray.size)
     }
+    @Test fun unifiedInspectorOffersSaveExpertiseAndExistingToolWithoutReplacingTheRoster() {
+        val data=json("""{"saveProficiencies":["INT","CON"],"training":[{"category":"save","key":"INT","source":"Class record"},{"category":"tool","key":"Cartography","source":"Field training"}]}""")
+        val sheet=json("""{"skillDefinitions":{"history":{"name":"History","ability":"INT","rank":2},"athletics":{"name":"Athletics","ability":"STR","rank":1}}}""")
+        val choices=mutableListOf<Pair<String,JsonObject>>()
+        val a=Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            a.get().setContent {AstravarTheme {Column(Modifier.verticalScroll(rememberScrollState())) {
+                CloudAbilityTraining("actor","INT",data,sheet,true){name,fields->choices+=name to fields}
+            }}}
+            compose.onNodeWithText("Saving throw proficiency · trained").performClick()
+            assertEquals("set_actor_training",choices.single().first)
+            assertEquals("INT",choices.single().second.getValue("key").jsonPrimitive.content)
+            compose.onNodeWithText("Skills and expertise").performClick()
+            compose.onNodeWithText("History · expertise").performScrollTo().performClick()
+            assertEquals("set_skill_training",choices.last().first)
+            assertEquals(2,choices.last().second.getValue("rank").jsonPrimitive.int)
+            compose.onNodeWithText("Tools and other training").performScrollTo().performClick()
+            compose.onNodeWithText("Tool · Cartography").performScrollTo().performClick()
+            assertEquals("Field training",choices.last().second.getValue("source").jsonPrimitive.content)
+            assertEquals("tool",choices.last().second.getValue("category").jsonPrimitive.content)
+            assertTrue(choices.none{(_,args)->"training" in args || "saveProficiencies" in args})
+        } finally { a.pause().stop().destroy() }
+    }
+
     @Test fun actualPassiveUsesSeparateActiveValueAndShowsInactiveSourcesWithoutCommitting() {
         val sheet=json("""{"passives":{"perception":{"value":20,"adjustment":0,"mode":"normal","sources":[{"id":"feat","source":"Fixture feat","value":5}]},"investigation":{"value":29},"insight":{"value":19}},"skills":{"perception":{"value":5,"ability":"WIS","rank":1}},"abilities":{"WIS":{"modifier":0}},"proficiency":4,"activeEffects":["feat"],"suppressedEffects":["old"]}""")
         val sources=mapOf("feat" to json("""{"id":"feat","title":"Known feat","data":{"target":"passive","key":"perception","source":"Fixture feature"}}"""),

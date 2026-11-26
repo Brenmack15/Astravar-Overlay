@@ -80,18 +80,26 @@ def generation():
     return uuid.uuid4().hex + ".sqlite"
 
 
-def store_marker(folder, marker):
-    temp = folder / (uuid.uuid4().hex + ".tmp")
-    with temp.open("xb") as out:
-        out.write(encode(marker))
-        out.flush()
-        os.fsync(out.fileno())
-    os.replace(temp, folder / "rehearsal.json")
+def create_private(path):
+    return os.fdopen(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600), "wb")
+
+
+def sync_directory(folder):
     directory = os.open(folder, os.O_RDONLY)
     try:
         os.fsync(directory)
     finally:
         os.close(directory)
+
+
+def store_marker(folder, marker):
+    temp = folder / (uuid.uuid4().hex + ".tmp")
+    with create_private(temp) as out:
+        out.write(encode(marker))
+        out.flush()
+        os.fsync(out.fileno())
+    os.replace(temp, folder / "rehearsal.json")
+    sync_directory(folder)
 
 
 def init(folder, owner, continuity):
@@ -237,7 +245,7 @@ def write_bundle(path, payloads):
     # Publish only a verified completed file. Never replace an existing backup.
     temp = path.with_name("." + uuid.uuid4().hex + ".partial")
     try:
-        with temp.open("xb") as output:
+        with create_private(temp) as output:
             with ZipFile(output, "w", compression=ZIP_DEFLATED) as archive:
                 for key in sorted(payloads):
                     archive.writestr(key, payloads[key])
@@ -246,6 +254,7 @@ def write_bundle(path, payloads):
         bundle = read_bundle(temp)
         check_database(bundle)
         os.link(temp, path)
+        sync_directory(path.parent)
     finally:
         temp.unlink(missing_ok=True)
     return summary(bundle)
@@ -255,13 +264,13 @@ def save_private_copy(destination, output):
     """Publish a new 0600 file after independent byte verification."""
     temporary = destination.with_name(uuid.uuid4().hex + ".partial")
     try:
-        fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        with os.fdopen(fd, "wb") as stream:
+        with create_private(temporary) as stream:
             stream.write(output)
             stream.flush()
             os.fsync(stream.fileno())
         verify(file_hash(temporary) == sha(output), "Recovery file failed independent byte readback")
         os.link(temporary, destination)
+        sync_directory(destination.parent)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -360,6 +369,9 @@ def read_bundle(path):
     if isinstance(path, bytes):
         verify(len(path) <= LIMIT + (2 << 20), "Oversized local package")
         source = io.BytesIO(path)
+    elif isinstance(path, io.BufferedReader):
+        verify(0 < os.fstat(path.fileno()).st_size <= LIMIT + (2 << 20), "Oversized local package")
+        source = path
     else:
         verify(path.is_file() and not path.is_symlink() and path.stat().st_size <= LIMIT + (2 << 20),
                "Missing, symbolic or oversized local package")
@@ -583,7 +595,7 @@ def install_objects(folder, bundle):
         if not path.exists():
             partial = path.with_name(uuid.uuid4().hex + ".partial")
             try:
-                with partial.open("xb") as out:
+                with create_private(partial) as out:
                     out.write(body)
                     out.flush()
                     os.fsync(out.fileno())
@@ -733,6 +745,16 @@ def main():
     original.add_argument("package", type=Path)
     original.add_argument("output", type=Path)
     original.add_argument("--sha256", required=True)
+    for op in ("detached-preview", "detached-save", "detached-verify", "detached-recover"):
+        p = sub.add_parser(op, help="Review, preserve or verify a canonical package and separate full native weapon archive")
+        if op in ("detached-preview", "detached-save"):
+            p.add_argument("package", type=Path)
+            p.add_argument("native", type=Path)
+        if op != "detached-preview":
+            p.add_argument("directory", type=Path)
+            p.add_argument("--review-sha256", required=True)
+        if op == "detached-recover":
+            p.add_argument("output", type=Path)
     for op in ("seal", "unseal"):
         p = sub.add_parser(op)
         p.add_argument("file", type=Path)
@@ -773,6 +795,15 @@ def main():
         return compare_legacy(args.earlier, args.later, args.owner, args.continuity)
     if args.operation == "extract-source":
         return extract_source(args.package, args.output, args.sha256)
+    if args.operation.startswith("detached-"):
+        import ascension_migrate_detached as detached
+        if args.operation == "detached-preview":
+            return detached.preview(args.package, args.native)
+        if args.operation == "detached-save":
+            return detached.save(args.package, args.native, args.directory, args.review_sha256)
+        if args.operation == "detached-verify":
+            return detached.check_set(args.directory, args.review_sha256)
+        return detached.recover(args.directory, args.output, args.review_sha256)
     if args.operation in ("seal", "unseal"):
         return protect(args.file, args.output, args.key_file, args.operation == "unseal")
     if args.operation == "init": return init(args.directory, args.owner, args.continuity)

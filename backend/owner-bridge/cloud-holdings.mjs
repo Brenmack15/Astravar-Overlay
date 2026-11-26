@@ -76,7 +76,14 @@ function usable(item) {
 function compareStack(first, second) {
   const fields = ['definitionId','ownerId','custodianId','locationId','holding','equipment','attuned','operating','condition','customized','resourcePoolId'];
   if((first.data.ownerType??(first.data.ownerId?'actor':'unknown'))!==(second.data.ownerType??(second.data.ownerId?'actor':'unknown')))return false;
+  if((first.data.passiveOperating??first.data.operating)!==(second.data.passiveOperating??second.data.operating))return false;
   return fields.every(key => first.data[key] === second.data[key]);
+}
+// Parking passive gear suspends its contribution while keeping the physical operating state.
+function equipmentOperation(data,definition,equipment) {
+  if((definition.data.activation??'passive')!=='passive')return {operating:equipment==='packed'?false:data.operating};
+  const passiveOperating=data.equipment==='packed'?(data.passiveOperating??data.operating):data.operating;
+  return {passiveOperating,operating:equipment==='packed'?false:passiveOperating};
 }
 function portable(item, def) {
   usable(item);
@@ -186,6 +193,7 @@ async function outputItem(ctx, args) {
   const item = { kind:'item_instance', id:args.itemId, actorId:args.ownerId, title:def.title, life:'active',
     data: { definitionId:def.id, ownerId:args.ownerId, ownerType:args.ownerId===null?'party':'actor',custodianId:args.ownerId, locationId:args.storageId??null, quantity:args.quantity,
       holding:args.ownerId!==null?'carried':args.storageId?'storage':'unassigned', partyAccess:true, equipment:'packed', attuned:false, operating:false, resourcePoolId:null,
+      ...((def.data.activation??'passive')==='passive' && (def.data.wearable||def.data.handheld) ? {passiveOperating:true}:{}),
       customized:false, favorite:false, condition:'standard', source:args.source } };
   await ctx.put(item);
   await ctx.link(item.id,'definition',def.id);
@@ -330,8 +338,9 @@ async function moveItem(ctx,args,eventType = 'transfer',leg = null) {
   const scopeActor = external ? null : (custodianId ?? ownerId);
   if (d.actorId !== null) await ctx.require('inventory',d.actorId,true);
   const ownerType=d.partyOwned?'party':conveysOutside?'external':d.type==='party_actor'?'actor':sourceItem.data.ownerType??(ownerId?'actor':'unknown');
+  const definition=await definitionForHolding(ctx,sourceItem);
   const data = { ...sourceItem.data, ownerId, ownerType, custodianId, locationId:d.locationId, holding,
-    partyAccess:!external, equipment:'packed', attuned:false, operating:false, source:args.source,
+    partyAccess:!external, equipment:'packed', attuned:false, ...equipmentOperation(sourceItem.data,definition,'packed'), source:args.source,
     externalRecipientId:d.recipientId, externalRecipientName:d.recipientName,
     lastPossessorId:sourceItem.data.custodianId, disposition:d.type };
   const moved = recordEdit(sourceItem,data,{ actorId:scopeActor,life:external?'archived':'active' });
@@ -467,12 +476,21 @@ export const HOLDING_OPERATIONS = Object.freeze({
     // Instances resolve display from the shared definition unless explicitly customized.
     return {definitionId,appliesTo:'shared_definition'};
   }),
-  customize_item: recordsOperation('inventory',recordObject({itemId:recordId,name:recordTitle,description:recordText,condition:recordTitle,source:recordSource}),async(ctx,args)=>{
+  customize_item: recordsOperation('inventory',recordObject({itemId:recordId,name:recordTitle,description:recordText,condition:recordTitle,
+    passiveOperating:recordBool,source:recordSource},['itemId','name','description','condition','source']),async(ctx,args)=>{
     const item=await recordRead(ctx,'item_instance',args.itemId);
     usable(item);
     ctx.require('inventory',item.data.ownerId,true);
     if(item.data.quantity!==1) recordsFail('CUSTOMIZE_SINGLE_INSTANCE_REQUIRED',409);
-    const changed=recordEdit(item,{...item.data,customized:true,description:args.description,condition:args.condition,source:args.source},{title:args.name});
+    let passiveState={};
+    if(args.passiveOperating!==undefined){
+      const definition=await definitionForHolding(ctx,item);
+      if((definition.data.activation??'passive')!=='passive' || !(definition.data.handheld||definition.data.wearable))
+        recordsFail('PASSIVE_EQUIPMENT_REQUIRED',409);
+      passiveState={passiveOperating:args.passiveOperating,operating:item.data.equipment==='packed'?false:args.passiveOperating};
+    }
+    const changed=recordEdit(item,{...item.data,...passiveState,customized:true,description:args.description,condition:args.condition,source:args.source},{title:args.name});
+    if(args.passiveOperating!==undefined)await guardForm(ctx,item,changed);
     await ctx.put(changed);
     return {itemId:item.id,itemEventId:await itemEvent(ctx,'customization',item,changed,'Customization',args.source)};
   }),
@@ -550,7 +568,7 @@ export const HOLDING_OPERATIONS = Object.freeze({
         AND json_extract(data_json,'$.partyAccess')=1 AND json_extract(data_json,'$.attuned')=1`,...ctx.binding,actor.id).first();
       if(count>=actor.data.attunementCapacity) recordsFail('ATTUNEMENT_CAPACITY',409);
     }
-    const result=recordEdit(item,{...item.data,attuned:args.attuned,operating:args.attuned?item.data.operating:false,source:args.source});
+    const result=recordEdit(item,{...item.data,attuned:args.attuned,operating:args.attuned || (def.data.activation??'passive')==='passive'?item.data.operating:false,source:args.source});
     await guardForm(ctx,item,result);await ctx.put(result);
     return {itemId:item.id,attuned:args.attuned,itemEventId:await itemEvent(ctx,'attunement',item,result,'Attunement change',args.source)};
   }),
@@ -565,14 +583,25 @@ export const HOLDING_OPERATIONS = Object.freeze({
     await guardForm(ctx,item,result);await ctx.put(result);
     return {itemId:item.id,operating:args.operating,itemEventId:await itemEvent(ctx,'activation',item,result,'Operating state',args.source)};
   }),
-  bind_item_charge_pool: recordsOperation('inventory',recordObject({itemId:recordId,poolId:recordId,source:recordSource}),async(ctx,args)=>{
+  bind_item_charge_pool: recordsOperation('inventory',recordObject({itemId:recordId,poolId:recordId,source:recordSource,
+    sharedWithItemId:recordId},['itemId','poolId','source']),async(ctx,args)=>{
     const item=await recordRead(ctx,'item_instance',args.itemId);usable(item);
     const pool=await recordRead(ctx,'resource_pool',args.poolId);
     if(item.data.quantity!==1 || item.data.holding!=='carried' || item.data.resourcePoolId || pool.actorId!==item.data.custodianId ||
         pool.data.type!=='charge') recordsFail('CHARGE_POOL_REVIEW_REQUIRED',409);
+    const bound=await ctx.service.s(`SELECT 1 FROM cloud_entities WHERE owner_id=? AND continuity_id=?
+      AND kind='item_instance' AND id<>? AND json_extract(data_json,'$.resourcePoolId')=? LIMIT 1`,
+      ...ctx.binding,item.id,pool.id).first();
+    if(Boolean(bound)!==Boolean(args.sharedWithItemId))recordsFail('PHYSICAL_CHARGE_SHARING_REVIEW_REQUIRED',409);
+    if(args.sharedWithItemId){
+      const other=await recordRead(ctx,'item_instance',args.sharedWithItemId);
+      usable(other);
+      if(other.id===item.id||other.data.custodianId!==pool.actorId||other.data.resourcePoolId!==pool.id)
+        recordsFail('SHARED_PHYSICAL_CHARGE_SOURCE_MISMATCH',409);
+    }
     const result=recordEdit(item,{...item.data,resourcePoolId:pool.id,source:args.source});
     await ctx.put(result);await ctx.link(item.id,'charge_pool',pool.id);
-    return {itemId:item.id,poolId:pool.id};
+    return {itemId:item.id,poolId:pool.id,...(args.sharedWithItemId?{sharedWithItemId:args.sharedWithItemId}:{})};
   }),
   equip_item: recordsOperation('inventory',equipItem,async (ctx,args) => {
     const item = await recordRead(ctx,'item_instance',args.itemId);
@@ -582,7 +611,7 @@ export const HOLDING_OPERATIONS = Object.freeze({
     if ((args.equipment === 'held' && !def.data.handheld) || (args.equipment === 'worn' && !def.data.wearable) ||
         def.data.attunement === 'configured_review') recordsFail('EQUIPMENT_REVIEW_REQUIRED',409);
     if (item.data.equipment === args.equipment) recordsFail('EQUIPMENT_ALREADY_SET',409);
-    const result = recordEdit(item,{...item.data,equipment:args.equipment,operating:args.equipment==='packed'?false:item.data.operating,source:args.source});
+    const result = recordEdit(item,{...item.data,equipment:args.equipment,...equipmentOperation(item.data,def,args.equipment),source:args.source});
     await guardForm(ctx,item,result);
     await ctx.put(result);
     return {itemId:item.id,equipment:args.equipment,itemEventId:await itemEvent(ctx,'equipment',item,result,'Equipment change',args.source)};

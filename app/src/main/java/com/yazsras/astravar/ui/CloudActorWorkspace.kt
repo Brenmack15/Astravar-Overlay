@@ -1,6 +1,7 @@
 package com.yazsras.astravar.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -16,11 +17,15 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.yazsras.astravar.data.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -137,7 +142,13 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
                 val hp=(sheet?:data).value("currentHp")?.toIntOrNull()
                 val max=(sheet?:data).value("maxHp")?.toIntOrNull()
                 val temp=(sheet?:data).value("temporaryHp")?.toIntOrNull()
-                Column(Modifier.fillMaxWidth().clickable(role=Role.Button){overlay="HP"}.padding(4.dp)) {
+                val spokenHealth = buildString {
+                    append("Hit points, ${hp ?: "unknown"} of ${max ?: "unknown"}")
+                    if (temp == null) append(", temporary hit points unknown")
+                    else if (temp > 0) append(", $temp temporary hit points")
+                }
+                Column(Modifier.fillMaxWidth().heightIn(min=48.dp).clickable(role=Role.Button,onClickLabel="Manage hit points"){overlay="HP"}
+                    .semantics { contentDescription=spokenHealth }.padding(4.dp)) {
                     Text("HP",style=MaterialTheme.typography.labelSmall)
                     Text("${hp ?: "—"} / ${max ?: "—"}",style=MaterialTheme.typography.titleMedium)
                     if(temp!=null && temp>0) Text("($temp)",color=RebuildPalette.Cyan)
@@ -156,14 +167,14 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
                         for (group in abilityNames.entries.chunked(3)) Row(horizontalArrangement=Arrangement.spacedBy(4.dp)) {
                             group.forEach { (stat,name)->
                                 Column(Modifier.weight(1f).background(RebuildPalette.Panel,RoundedCornerShape(8.dp))
-                                    .clickable(role=Role.Button){selectedAbility=stat}.padding(3.dp), horizontalAlignment=Alignment.CenterHorizontally) {
-                                    Text(name.uppercase(),style=MaterialTheme.typography.labelSmall,textAlign=TextAlign.Center)
+                                    .clickable(role=Role.Button,onClickLabel="Inspect and train $name"){selectedAbility=stat}.testTag("ability-card-$stat").padding(3.dp), horizontalAlignment=Alignment.CenterHorizontally) {
+                                    CloudAbilityTitle(name)
                                     val proficient=(data?.get("saveProficiencies") as? JsonArray)?.contains(JsonPrimitive(stat))==true
-                                    QuickControl("$name saving throw", (if (proficient) "● " else "○ ")+signed(sheet.obj("saves").obj(stat).value("value")),
-                                        online && sheet!=null,{roll("save",stat)},{rollOption="save:$stat"})
+                                    QuickControl("$name saving throw",signed(sheet.obj("saves").obj(stat).value("value")),
+                                        online && sheet!=null,{roll("save",stat)},{rollOption="save:$stat"},saveProficient=proficient)
                                     QuickControl("$name ability check",signed(sheet.obj("abilities").obj(stat).value("modifier")),online && sheet!=null,
                                         {roll("ability",stat)},{rollOption="ability:$stat"},large=true)
-                                    Text(sheet.obj("abilities").obj(stat).value("effective") ?: "—", Modifier.background(RebuildPalette.Void,CircleShape).padding(horizontal=9.dp,vertical=2.dp))
+                                    Text(sheet.obj("abilities").obj(stat).value("effective") ?: "—", Modifier.background(RebuildPalette.Void,CircleShape).border(1.dp,RebuildPalette.Outline,CircleShape).padding(horizontal=9.dp,vertical=2.dp))
                                 }
                             }
                         }
@@ -173,9 +184,10 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
                             sheet.obj("skillDefinitions").obj(it.key).value("pinned")=="true"
                         }.thenBy { it.key })?.forEach { (key,entry)->
                             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-                                Text(data.obj("skills").obj(key).value("name") ?: cloudLabel(key),Modifier.weight(1f)
-                                    .clickable(role=Role.Button){rollOption="skill:$key"}.padding(8.dp))
-                                QuickControl("Roll ${cloudLabel(key)}",signed(entry.jsonObject.value("value")),online,
+                                val skillName=sheet.obj("skillDefinitions").obj(key).value("name")?.takeUnless { it == key } ?: cloudLabel(key)
+                                Box(Modifier.weight(1f).heightIn(min=48.dp).testTag("skill-name-$key").clickable(role=Role.Button){rollOption="skill:$key"}
+                                    .padding(horizontal=8.dp,vertical=4.dp),contentAlignment=Alignment.CenterStart) { Text(skillName) }
+                                QuickControl("Roll $skillName",signed(entry.jsonObject.value("value")),online,
                                     {roll("skill",key)},{rollOption="skill:$key"})
                             }
                         }
@@ -260,7 +272,8 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
     rollOption?.let { ref->key(ref) {
         val kind=ref.substringBefore(':'); val key=ref.substringAfter(':')
         var mode by remember { mutableStateOf("normal") }; var faces by rememberSaveable { mutableStateOf("") }
-        PlayerSheet("Roll options · ${cloudLabel(key)}",{rollOption=null}) {
+        val displayName=if(kind=="skill") sheet.obj("skillDefinitions").obj(key).value("name")?.takeUnless { it == key } ?: cloudLabel(key) else cloudLabel(key)
+        PlayerSheet("Roll options · $displayName",{rollOption=null}) {
             PlayerTabs(listOf("Normal","Advantage","Disadvantage"),cloudLabel(mode),{mode=it.lowercase()})
             val expected=sheet.obj("rollModes").obj(ref).obj(mode)
             Text(expected.value("count")?.let { "$it d20 · ${cloudLabel(expected.value("mode").orEmpty())}" } ?: "Roll configuration unavailable")
@@ -283,11 +296,47 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
     } }
 }
 
+/** Keep the six full labels aligned. Very large text may occupy a common second line. */
+@Composable private fun CloudAbilityTitle(name: String) {
+    val style = MaterialTheme.typography.labelSmall.copy(letterSpacing=0.sp)
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val widest = remember(measurer,style,density) {
+        abilityNames.values.maxOf { measurer.measure(it.uppercase(),style,softWrap=false).size.width }.coerceAtLeast(1)
+    }
+    BoxWithConstraints(Modifier.fillMaxWidth(),contentAlignment=Alignment.Center) {
+        val available = with(density) { maxWidth.toPx() } - 2f
+        val scale = (available / widest).coerceIn(.80f,1f)
+        val lines = if(widest * scale > available + .1f) 2 else 1
+        Text(name.uppercase(),style=style.copy(fontSize=style.fontSize * scale),minLines=lines,
+            textAlign=TextAlign.Center)
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
-@Composable private fun QuickControl(label:String,text:String,enabled:Boolean,tap:()->Unit,options:()->Unit,large:Boolean=false) {
+@Composable private fun QuickControl(label:String,text:String,enabled:Boolean,tap:()->Unit,options:()->Unit,large:Boolean=false,saveProficient:Boolean?=null) {
     Box(Modifier.heightIn(min=48.dp).widthIn(min=48.dp).combinedClickable(enabled=enabled,role=Role.Button,
         onClickLabel="Roll $label",onLongClickLabel="Roll options",onClick=tap,onLongClick=options)
-        .semantics { contentDescription="$label $text" },contentAlignment=Alignment.Center) {
-        Text(text,style=if(large) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.labelMedium,color=RebuildPalette.GoldBright)
+        .semantics { contentDescription=when(saveProficient) {
+            true -> "$label $text, proficient"
+            false -> "$label $text, not proficient"
+            null -> "$label $text"
+        } },contentAlignment=Alignment.Center) {
+        if(large || saveProficient!=null) {
+            val shape=RoundedCornerShape(if(large) 7.dp else 4.dp)
+            Box(Modifier.testTag("$label tile").widthIn(max=if(large) 106.dp else 84.dp).fillMaxWidth(if(large) .94f else .75f)
+                .heightIn(min=if(large) 42.dp else 24.dp)
+                .background(RebuildPalette.Void,shape).border(1.dp,if(large)RebuildPalette.Gold else RebuildPalette.Outline,shape)
+                .padding(horizontal=4.dp),contentAlignment=Alignment.Center) {
+                Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(3.dp)) {
+                    if(saveProficient!=null) {
+                        val marker=Modifier.size(6.dp).border(1.dp,RebuildPalette.Gold,CircleShape)
+                        Spacer(if(saveProficient) marker.background(RebuildPalette.Gold,CircleShape) else marker)
+                    }
+                    Text(text,style=if(large) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.labelMedium,
+                        color=RebuildPalette.GoldBright,textAlign=TextAlign.Center,maxLines=1,softWrap=false)
+                }
+            }
+        } else Text(text,style=MaterialTheme.typography.labelMedium,color=RebuildPalette.GoldBright)
     }
 }

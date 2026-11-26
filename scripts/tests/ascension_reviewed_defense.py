@@ -1,4 +1,5 @@
 """Review an actual Kotlin Character Backup against this isolated fixture's separately approved item registry."""
+import copy
 import json
 import sys
 from pathlib import Path
@@ -6,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 import ascension_migrate as mig
 from ascension_migrate_legacy import encode, sha
-from ascension_migrate_reviewed import indexed, template
+from ascension_migrate_reviewed import indexed, project, template
 
 ACTOR = "recovery-actor"
 OWNER, CONTINUITY = "native-test-owner", "qa-native-fixture"
@@ -18,7 +19,7 @@ def item_registry():
     # These are explicitly recorded synthetic custody and classification facts independent of sheet export.
     properties = {"role":"player", "source":SOURCE, "ownerId":ACTOR, "custodianId":ACTOR, "partyAccess":True,
                   "locationId":None, "holding":"carried", "stackable":False, "wearable":True, "handheld":False,
-                  "category":"equipment", "rarity":None, "attunement":"none", "requiresOperating":True, "poolType":"charge"}
+                  "category":"equipment", "rarity":None, "attunement":"none", "activation":"passive", "requiresOperating":True, "poolType":"charge", "activationType":"use"}
     doc = {"externalId":"registry", "category":"equipment","visibility":"player","body":SOURCE,
            "contentSha256":sha(SOURCE.encode()), "propertiesJson":encode(properties).decode(),
            "relationIds":[], "sourceUrl":"https://example.test/synthetic-ward-registry"}
@@ -63,13 +64,15 @@ def stage(source, destination):
     pool_ids = [item["pools"][0]["id"] for item in char["items"]]
     effects = [e["id"] for d in char["itemDefinitions"] for e in d["effects"]]
     actor = {"role":"player","rulesProfile":char["rules"]["core"].lower(),"level":char["level"],
-             "abilities":char["baseAbilities"],"baseAc":char["baseAc"],"currentHp":char["currentHp"],
+             "abilities":char["baseAbilities"],"gameSeconds":char["gameSeconds"],
+             "baselineConstitutionModifier":char["baselineConstitutionModifier"],"baseAc":char["baseAc"],"currentHp":char["currentHp"],
              "temporaryHp":char["temporaryHp"],"maxHp":char["baseMaxHp"],"proficiency":char["reviewedProficiency"]["bonus"],
              "skills":char["skills"],"conditions":char["conditions"],"effectIds":effects,"poolIds":pool_ids}
     target(ACTOR,"actor",ACTOR,char["name"],actor)
     witness(actor_row,ACTOR,["profileId"],["id"])
     prop(ACTOR,"role")
     for key, native_key in {"level":"level","abilities":"baseAbilities","baseAc":"baseAc","currentHp":"currentHp",
+                            "gameSeconds":"gameSeconds","baselineConstitutionModifier":"baselineConstitutionModifier",
                             "temporaryHp":"temporaryHp","maxHp":"baseMaxHp","skills":"skills","conditions":"conditions"}.items():
         witness(actor_row,ACTOR,prefix+[native_key],["data",key])
     witness(actor_row,ACTOR,prefix+["rules","core"],["data","rulesProfile"],"lowercase")
@@ -79,13 +82,29 @@ def stage(source, destination):
     for index,d in enumerate(char["itemDefinitions"]):
         did = d["id"]
         source_row = row("playable.characters.itemDefinitions",ACTOR,did)
-        data = {k:source_props[k] for k in ("category","rarity","stackable","wearable","handheld","attunement","source")}
+        data = {k:source_props[k] for k in ("category","rarity","stackable","wearable","handheld","attunement","activation","source")}
         data["description"] = d["description"]
         target(did,"item_definition",None,d["name"],data)
         witness(source_row,did,["id"],["id"])
         witness(source_row,did,["description"],["data","description"])
         for field in data:
             if field != "description": prop(did,field)
+        for action in d["activations"]:
+            aid = action["id"]
+            item = instance[did]
+            item_row = row("playable.characters.items",ACTOR,item)
+            native_action = row("playable.characters.itemDefinitions.activations",ACTOR,did,aid)
+            rid, amount = next(iter(action["costs"].items()))
+            assert len(action["costs"]) == 1 and not action["durations"] and not action["ends"] and action["temporaryHp"] is None
+            target(aid,"action_definition",ACTOR,action["name"],{"type":"use","timing":action["actionType"].lower(),"source":SOURCE,
+                   "sourceItemId":item,"requiresOperating":True,"cost":{"poolId":rid,"amount":amount}})
+            witness(native_action,aid,["id"],["id"])
+            witness(native_action,aid,["actionType"],["data","timing"],"lowercase")
+            prop(aid,"type","activationType"); prop(aid,"source"); prop(aid,"requiresOperating")
+            witness(item_row,aid,["id"],["data","sourceItemId"])
+            witness(item_row,aid,["pools",0,"id"],["data","cost","poolId"])
+            witness(native_action,aid,["costs",rid],["data","cost","amount"])
+            link(item_row,aid,"requires_item",item,["id"]);link(item_row,aid,"uses_pool",rid,["pools",0,"id"])
         for pos,effect in enumerate(d["effects"]):
             item = instance[did]
             src = row("playable.characters.itemDefinitions.effects",ACTOR,did,effect["id"])
@@ -136,14 +155,25 @@ def stage(source, destination):
         prop(rid,"type","poolType"); prop(rid,"source")
         witness(pool_row,rid,["recharge"],["data","recovery"],"lowercase")
         witness(actor_row,ACTOR,prefix+["items",pos,"pools",0,"id"],["data","poolIds",pos])
+    for field,value in (("sourceItemId","lantern"),("sourceRecord",{"id":"foreign-rule"}),("key","cold")):
+        altered = copy.deepcopy(plan)
+        record = next(t for t in altered["targets"] if t["id"]=="source-force-ward")
+        record["data"][field] = value
+        try:
+            project({sha(raw):raw,sha(aux):aux},altered,(OWNER,CONTINUITY))
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Reviewed native source drift was accepted: "+field)
     directory = source.parent
     mapping = directory/"reviewed.json"; mapping.write_bytes(encode(plan))
     registry_path = directory/"approved-registry.json"; registry_path.write_bytes(aux)
     package = directory/"source.zip"
     summary = mig.convert_reviewed([source,registry_path],mapping,package,(OWNER,CONTINUITY))
-    assert summary["counts"]["cloud_entities"] == 9 and summary["counts"]["cloud_receipts"] == 0
+    assert summary["counts"]["cloud_entities"] == 11 and summary["counts"]["cloud_receipts"] == 0
     compared = mig.mechanical_parity(source, mig.read_bundle(package))
-    assert not compared["counts"]["different"] and not compared["counts"]["absent"]
+    differences = [(c["kind"],c["field"],c["status"]) for c in compared["checks"] if c["status"] in ("absent","different")]
+    assert not differences, differences
     charge_checks = {(v["id"],v["field"]):v["status"] for v in compared["checks"] if v["kind"] == "item_resource"}
     assert charge_checks["ward-charges","current"] == "equal" and charge_checks["lamp-charges","current"] == "bothUnknown"
     mig.init(destination,OWNER,CONTINUITY)

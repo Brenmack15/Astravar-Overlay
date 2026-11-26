@@ -5,6 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 import ascension_migrate as migration
+import ascension_migrate_detached as detached
 from ascension_migrate_legacy import encode
 from ascension_migrate_reviewed import template
 
@@ -45,7 +46,13 @@ def rehearse(source, destination):
         state = migration.read_bundle(restored)
         parity = migration.mechanical_parity(source, state)
         assert parity["counts"]["equal"] >= 2 and not parity["holds"] and not parity["counts"]["different"]
-        return migration.extract_source(restored, destination, migration.sha(raw))
+        extracted = migration.extract_source(restored, folder / "inline-original.zip", migration.sha(raw))
+        review_hash = detached.preview(restored, source)["reviewSha256"]
+        portable = folder / "detached-recovery"
+        detached.save(restored, source, portable, review_hash)
+        recovered = detached.recover(portable, destination, review_hash)
+        assert recovered["sourceSha256"] == extracted["sourceSha256"] and recovered["gameplayChanges"] == 0
+        return {**extracted, "detachedManifestSha256": review_hash}
 
 
 if __name__ == "__main__":

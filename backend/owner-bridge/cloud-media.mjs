@@ -4,7 +4,7 @@ import { cloudAllowed } from './cloud-plan.mjs';
 import { MEDIA_MAX_BYTES, boundedMediaBody, inspectMediaPng, mediaDigest, mediaHex } from './cloud-media-codec.mjs';
 
 export const CLOUD_MEDIA_KINDS = Object.freeze({media_asset:'media'});
-const targetKinds = new Set(['actor','form','world_entity','item_definition','item_instance','invention_project','attack','attack_definition','blueprint_version']);
+const targetKinds = new Set(['actor','form','world_entity','item_definition','item_instance','invention_project','attack','blueprint_version']);
 const shaPattern = /^[a-f0-9]{64}$/;
 const ageLimit = 7 * 24 * 60 * 60 * 1000;
 const headers = {

@@ -38,26 +38,21 @@ const device = 'native-device';
 const bearer = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '');
 const ratePaging = process.argv.includes('--rate-pagination');
 const artLifecycle = process.argv.includes('--lifecycle-media');
-const cleanups = [];
-const extraScopes = artLifecycle ? ['media','lifecycle'] : [];
 const gameplayCategories = process.argv.includes('--exercise-gameplay')
     ? CLOUD_SCOPES.filter(scope => scope !== 'campaign')
-    : ['character','resources','inventory','economy','combat','chronicle','rolls'];
+    : ['character','resources','inventory','economy','combat','chronicle','rolls',...(artLifecycle ? ['media','lifecycle'] : [])];
+const recordedDeviceCommands = new Map();
 let fixtureClock = Date.now();
 let successfulPages = 0, limitedPages = 0;
 // This switch exists only in the standalone synthetic stdio process.
 if (ratePaging) Date.now = () => fixtureClock;
 const cleanup = [];
-const media = process.argv.includes('--exercise-gameplay') ? await fileBucket({after: handler=>cleanup.push(handler)}) : undefined;
+const media = (artLifecycle || process.argv.includes('--exercise-gameplay')) ? await fileBucket({after: handler=>cleanup.push(handler)}) : undefined;
 const expiresAt = Date.now() + 3_600_000;
 const path = '/v3/continuities/' + continuity;
 const env = {DB: db, ASTRAVAR_MEDIA:media, OWNER_SITE_USER_ID: owner, ASTRAVAR_CLOUD_ENABLED: '1', ASTRAVAR_CLOUD_ENV: 'isolated',
     ...(ratePaging ? {ASTRAVAR_CLOUD_RATE_CAPACITY:'120', ASTRAVAR_CLOUD_RATE_REFILL_MS:'500'} : {})};
 
-if (artLifecycle) {
-    const {fileBucket}=await import('./media-bucket.mjs');
-    env.ASTRAVAR_MEDIA=await fileBucket({after:callback=>cleanups.push(callback)});
-}
 async function request(route, body, headers) {
     const response = await handleWorker(new Request(origin + route, {
         method: body == null ? 'GET' : 'POST',
@@ -99,6 +94,8 @@ try {
             const {call, route, body, credentialId, token, name, args} = JSON.parse(line);
             if (call === 'request') {
                 assert.ok(route.startsWith(path+'/'));
+                if(process.argv.includes('--exercise-gameplay') && route===path+'/commands' && credentialId===device && token===bearer)
+                    recordedDeviceCommands.set(body.commandId,structuredClone(body));
                 const out = await request(route, body, {Authorization:'Bearer '+token,'X-Astravar-Credential':credentialId});
                 if (ratePaging && route.startsWith(path+'/state?')) {
                     if(out.status===200) successfulPages++;
@@ -113,8 +110,6 @@ try {
                 const response = await handleWorker(new Request(origin+route,{headers,method:bytes?'PUT':'GET',body:bytes}),env);
                 emit({status:response.status,contentType:response.headers.get('content-type'),
                     sha256:response.headers.get('x-astravar-content-sha256'),bytes:Buffer.from(await response.arrayBuffer()).toString('base64')});
-            } else if (artLifecycle && call === 'dmWire') {
-                emit(await request('/mcp',{jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:{continuityId:continuity,...args}}},ownerHeaders));
             } else if (call === 'dm') {
                 const result = await setup('/mcp', {jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:{continuityId:continuity,...args}}});
                 if (result.result?.isError) {
@@ -126,27 +121,19 @@ try {
                 emit(result.result.structuredContent);
             } else if (call === 'requireReview') emit(await grant('sites-mcp',1,false,false));
             else if (call === 'deviceTradeReview' && process.argv.includes('--exercise-gameplay')) emit(await grant('device:'+device,1,false,true,['economy']));
-            else if (call === 'ownerVerify') {
+            else if (call === 'redeliverDeviceCommand' && process.argv.includes('--exercise-gameplay')) {
+                const command=recordedDeviceCommands.get(args.commandId);assert.ok(command);
+                const response=await request(path+'/commands',command,{Authorization:'Bearer '+bearer,'X-Astravar-Credential':device});
+                assert.equal(response.status,200);emit(response.json);
+            } else if (call === 'ownerVerify' || (artLifecycle && call === 'ownerRefuse')) {
                 assert.match(args.commandId,/^[A-Za-z0-9-]+$/);
-                emit(await setup(path+'/approvals/'+args.commandId+'/verify',{digest:args.digest}));
+                const disposition=call==='ownerVerify'?'verify':'refuse';
+                emit(await setup(path+'/approvals/'+args.commandId+'/'+disposition,{digest:args.digest}));
             } else if (artLifecycle && call === 'sample') {
                 const {encodeMediaPng}=await import('../cloud-media-codec.mjs');
                 assert.ok([20,180].includes(args.shade));
                 const raw=await encodeMediaPng(2,1,new Uint8Array([args.shade,12,8,255,7,args.shade,33,255]));
                 emit({bytes:Buffer.from(raw).toString('base64')});
-            } else if (artLifecycle && call === 'transfer') {
-                for(const key of ['targetId','kind'])assert.match(args[key],/^[A-Za-z0-9_-]+$/);
-                const head={Authorization:'Bearer '+token,'X-Astravar-Credential':credentialId};
-                let route=path+'/media/primary/'+args.targetId+'/thumbnail', opts={headers:head};
-                if(args.uploadId){
-                    assert.match(args.uploadId,/^[A-Za-z0-9_-]+$/);
-                    route=path+'/media/uploads/'+args.uploadId+'?targetKind='+args.kind+'&targetId='+args.targetId;
-                    opts={method:'PUT',headers:{...head,'Content-Type':'image/png','X-Astravar-Content-SHA256':args.sha256},
-                        body:Buffer.from(args.bytes,'base64')};
-                }
-                const response=await handleWorker(new Request(origin+route,opts),env);
-                emit({status:response.status,bytes:Buffer.from(await response.arrayBuffer()).toString('base64'),
-                    sha256:response.headers.get('X-Astravar-Content-SHA256')});
             } else if (artLifecycle && call === 'ownerPreview') {
                 assert.match(args.uploadId,/^[A-Za-z0-9_-]+$/);
                 const response=await handleWorker(new Request(origin+path+'/media/uploads/'+args.uploadId+'/original',{headers:ownerHeaders}),env);

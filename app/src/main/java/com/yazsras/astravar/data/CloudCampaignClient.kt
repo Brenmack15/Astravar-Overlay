@@ -204,6 +204,24 @@ internal class CloudCampaignClient(
         }
     }
 
+    suspend fun actorForms(actorId: String, reviewed: CloudSnapshot): List<JsonObject> = withContext(Dispatchers.IO) {
+        lock.withLock {
+            val session = current()
+            val state = cache.workspace() ?: throw OwnerSyncFailure("CLOUD_NOT_SELECTED")
+            if (!state.visible || state.version.grantExpiresAt <= now()) throw OwnerSyncFailure("CLOUD_GRANT_UNVERIFIED")
+            if (reviewed.binding != state.binding || reviewed.version != state.version) throw OwnerSyncFailure("CLOUD_REVIEW_STALE")
+            val forms = mutableListOf<JsonObject>()
+            var cursor = ""
+            do {
+                val page = cache.records(session.binding, now(), cursor, 100, setOf("form"), actorId)
+                forms.addAll(page)
+                if (page.size < 100) break
+                cursor = page.last().cloudText("id")
+            } while (true)
+            forms.sortedBy { (it["data"] as? JsonObject)?.get("orderKey")?.jsonPrimitive?.contentOrNull ?: it.cloudText("id") }
+        }
+    }
+
     suspend fun actorHistory(actorId: String, kinds: Set<String>, limit: Int = 50, before: CloudHistoryCursor? = null,
         reviewed: CloudSnapshot? = null): List<JsonObject> = withContext(Dispatchers.IO) {
         lock.withLock {
@@ -308,6 +326,32 @@ internal class CloudCampaignClient(
         val actual = (observed["digest"] as? JsonPrimitive)?.contentOrNull
         val expected = OwnerSyncProtocol.hash(OwnerSyncProtocol.canonical(command))
         if (actual != expected) throw OwnerSyncFailure("CLOUD_RECEIPT_DIGEST_UNVERIFIED")
+    }
+
+    /** Read retained evidence using the current grant. Looking at an earlier epoch cannot resolve a current outbox entry. */
+    suspend fun historicalReceipt(snapshot: CloudSnapshot, id: String): JsonObject = withContext(Dispatchers.IO) {
+        lock.withLock {
+            require(cloudIdentifier.matches(id))
+            val s = current()
+            val w = cache.workspace()
+            if (w?.visible != true || w.binding != snapshot.binding || w.version != snapshot.version ||
+                w.version.grantExpiresAt <= now()) throw OwnerSyncFailure("CLOUD_REVIEW_STALE")
+            val observed = request(s, "receipts/$id")
+            val receipt = observed["receipt"] as? JsonObject ?: throw OwnerSyncFailure("CLOUD_NO_TERMINAL_RECEIPT")
+            val epoch = receipt.getValue("epoch").jsonPrimitive.long
+            val revision = receipt.getValue("revision").jsonPrimitive.long
+            require(receipt.cloudText("commandId") == id && observed.cloudText("commandId") == id &&
+                receipt.cloudText("transactionId").isNotBlank() && observed["status"] == receipt["status"] &&
+                observed["epoch"] == receipt["epoch"] && observed["revision"] == receipt["revision"] &&
+                observed.cloudText("digest").matches(Regex("[0-9a-f]{64}")))
+            cache.command(s.binding, id)?.let { verifyOriginalEnvelope(it, observed) }
+            val grant = request(s, "capabilities")
+            validateGrant(s, grant)
+            val activeEpoch = grant.getValue("epoch").jsonPrimitive.long
+            val activeRevision = grant.getValue("revision").jsonPrimitive.long
+            require(epoch in 1..activeEpoch && revision >= 0 && (epoch < activeEpoch || revision <= activeRevision))
+            observed
+        }
     }
 
     suspend fun verify(id: String): JsonObject = withContext(Dispatchers.IO) {
