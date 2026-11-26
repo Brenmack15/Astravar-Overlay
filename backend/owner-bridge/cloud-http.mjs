@@ -1,3 +1,4 @@
+import { cloudReviewInbox } from './cloud-approval-view.mjs';
 import { cloudContinuitySettings } from './cloud-continuity.mjs';
 import { cloudAccessAdmin } from './cloud-admin.mjs';
 import { cloudActions } from './cloud-actions-view.mjs';
@@ -8,7 +9,7 @@ import { cloudRecordView } from './cloud-records-query.mjs';
 import { BridgeError } from './core.mjs';
 import { cloudFail, validCloudId } from './cloud-validation.mjs';
 import { CloudPlan } from './cloud-plan.mjs';
-import { cloudContext, cloudChanges, cloudRelationships } from './cloud-query.mjs';
+import { cloudContext, cloudChanges, cloudRelationships, cloudPoolHistory } from './cloud-query.mjs';
 import { mechanicActorSheet, mechanicFormPreview } from './cloud-mechanics.mjs';
 
 export async function cloudBody(request) {
@@ -51,6 +52,15 @@ export async function cloudHttp(request,bridge,service,ownerPrincipal) {
     }
     if(action==='settings' && !item && method==='GET')return cloudResponse(await cloudContinuitySettings(service,principal,id));
     if(action==='media')return await handleCloudMedia(request,service,principal,id,parts.slice(1).join('/'));
+    if(action==='review-inbox'){
+      if(method!=='GET'||decision)cloudFail(404,'UNKNOWN_ROUTE');
+      const pairs=[...url.searchParams], allowed=item?['digest']:['limit','after'];
+      if(pairs.some(([k])=>!allowed.includes(k)) || new Set(pairs.map(([k])=>k)).size!==pairs.length)cloudFail(400,'INVALID_REVIEW_VIEW');
+      if(item)return cloudResponse(await cloudReviewInbox(service,principal,id,'detail',{commandId:item,digest:url.searchParams.get('digest')}));
+      const limit=url.searchParams.get('limit');
+      if(limit!==null && !/^[1-9][0-9]?$/.test(limit))cloudFail(400,'INVALID_PAGE');
+      return cloudResponse(await cloudReviewInbox(service,principal,id,'list',{limit:limit===null?20:Number(limit),after:url.searchParams.get('after')??''}));
+    }
     const options={};
     for(const [key,value] of url.searchParams){
       if(Object.hasOwn(options,key))cloudFail(400,'DUPLICATE_PARAMETER');
@@ -72,6 +82,7 @@ export async function cloudHttp(request,bridge,service,ownerPrincipal) {
     else if(method==='GET'&&action==='records'&&item&&!decision)result=await cloudRecordView(service,principal,id,item,options);
     else if(method==='GET'&&action==='archive'&&!item)result=await cloudArchiveView(service,principal,id,options);
     else if(method==='GET'&&action==='changes'&&!item)result=await cloudChanges(service,principal,id,options);
+    else if(method==='GET'&&action==='pool-history'&&item&&!decision)result=await cloudPoolHistory(service,principal,id,item,options);
     else if(method==='GET'&&action==='context'&&!item)result=await cloudContext(service,principal,id,options);
     else if(method==='GET'&&action==='spellbook'&&item&&!decision)result=await cloudSpellbook(service,principal,id,item,options);
     else if(method==='GET'&&action==='actions'&&item&&!decision)result=await cloudActions(service,principal,id,item,options);

@@ -5,7 +5,7 @@ import { cloudSpellbook } from './cloud-spellbook.mjs';
 import { CLOUD_MEDIA_MCP_TOOL, stageCloudMcpImage } from './cloud-media.mjs';
 import { cloudRecordView } from './cloud-records-query.mjs';
 import { CLOUD_ID, CLOUD_ENVELOPE, CLOUD_REVISION, cloudObject, cloudMatches, cloudFail } from './cloud-validation.mjs';
-import { cloudContext, cloudChanges, cloudRelationships } from './cloud-query.mjs';
+import { cloudContext, cloudChanges, cloudRelationships, cloudPoolHistory } from './cloud-query.mjs';
 import { cloudSheet } from './cloud-http.mjs';
 
 const page=cloudObject({continuityId:CLOUD_ID,kind:CLOUD_ID,id:CLOUD_ID,after:CLOUD_ID,limit:{type:'integer',minimum:1,maximum:100},query:{type:'string',maxLength:120},atRevision:CLOUD_REVISION,atEpoch:CLOUD_REVISION,grantRevision:CLOUD_REVISION},['continuityId']);
@@ -21,6 +21,7 @@ export const CLOUD_TOOLS=Object.freeze([
   read('get_cloud_checkpoint_context','Read the latest known checkpoint, relevant actors, objectives and bounded changes since it.',cloudObject({continuityId:CLOUD_ID,actorId:CLOUD_ID,sinceRevision:CLOUD_REVISION},['continuityId'])),
   read('get_cloud_record_view','Read the scoped party inventory, wallets, timeline, item history or invention genealogy.',cloudObject({continuityId:CLOUD_ID,view:{enum:['inventory','wallets','timeline','item_history','genealogy']},id:CLOUD_ID,query:{type:'string',maxLength:120},after:{type:'string',maxLength:180},limit:{type:'integer',minimum:1,maximum:100},atRevision:CLOUD_REVISION,atEpoch:CLOUD_REVISION,grantRevision:CLOUD_REVISION},['continuityId','view'])),
   read('get_cloud_archive','Inspect the scoped record archive with explicit lifecycle permissions.',page),
+  read('get_cloud_pool_history','Read exact scoped balance changes and permitted receipt references for one resource pool.',cloudObject({continuityId:CLOUD_ID,id:CLOUD_ID,...cursorPage},['continuityId','id'])),
   read('get_cloud_record_links','Page through visible canonical relationships for one entity at a fixed revision.',cloudObject({continuityId:CLOUD_ID,id:CLOUD_ID,...cursorPage},['continuityId','id'])),
   read('get_cloud_changes','Page through authorized changes since the checkpoint or a known revision, newest first.',cloudObject({continuityId:CLOUD_ID,actorId:CLOUD_ID,sinceRevision:CLOUD_REVISION,...cursorPage},['continuityId'])),
   read('get_cloud_actions','Inspect eligible source-linked actions, attack families, variants and costs for a scoped actor.',cloudObject({continuityId:CLOUD_ID,id:CLOUD_ID,after:CLOUD_ID,limit:{type:'integer',minimum:1,maximum:50},atRevision:CLOUD_REVISION,atEpoch:CLOUD_REVISION,grantRevision:CLOUD_REVISION},['continuityId','id'])),
@@ -48,6 +49,7 @@ export async function cloudMcpCall(tool,args,service,principal){
     case 'get_cloud_checkpoint_context':return cloudContext(service,principal,continuityId,opts);
     case 'get_cloud_record_view':{const {view,...options}=opts;return cloudRecordView(service,principal,continuityId,view,options);}
     case 'get_cloud_archive':return cloudArchiveView(service,principal,continuityId,opts);
+    case 'get_cloud_pool_history':return cloudPoolHistory(service,principal,continuityId,opts.id,opts);
     case 'get_cloud_record_links':return cloudRelationships(service,principal,continuityId,opts.id,opts);
     case 'get_cloud_changes':return cloudChanges(service,principal,continuityId,opts);
     case 'get_cloud_actions':return cloudActions(service,principal,continuityId,opts.id,opts);

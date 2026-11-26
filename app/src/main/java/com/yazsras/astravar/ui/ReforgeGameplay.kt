@@ -197,7 +197,6 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
     val save = projection.saves[stat]
     val dirty = score != originalScore || training != character.skills || saves != character.saveProficiencies || toolSet != character.toolProficiencies
     PlayerSheet("Ability Inspector & Training", onDismiss, dirty = dirty, actions = {
-        PlayerTextButton(enabled = !stale && !dirty && check != null, onClick = { check?.let { onRoll("${stat.fullLabel} check", it) } }) { Text("Roll check") }
         PlayerButton(enabled = !stale && trainingDraft.canSave && savesDraft.canSave, onClick = {
             try {
                 val updated = character.copy(baseAbilities = character.baseAbilities + (stat to optionalInt(score, stat.name, 0, 100)),
@@ -207,6 +206,7 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
         }) { Text("Save changes") }
     }) {
         Text(stat.fullLabel, style = MaterialTheme.typography.titleLarge)
+        PlayerTextButton(enabled = !stale && !dirty && check != null, onClick = { check?.let { onRoll("${stat.fullLabel} check", it) } }) { Text("Roll check") }
         Text("Permanent ${value.permanent ?: "unknown"} → effective ${value.effective.value ?: "unknown"}", style = MaterialTheme.typography.titleMedium)
         Text("Ability modifier ${reforgeSigned(value.modifier)} · Check ${reforgeSigned(check)} · Save ${reforgeSigned(save?.value)}")
         Field("Permanent base score", score, { score = it }, enabled = !stale)

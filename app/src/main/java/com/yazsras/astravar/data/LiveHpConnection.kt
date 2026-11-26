@@ -199,6 +199,7 @@ class LiveHpConnectionClient internal constructor(private val context: Context, 
         vault.enroll(OwnerSyncCredential(id, value.campaignId, value.origin, response.getValue("expiresAt").jsonPrimitive.long, pending.bearer))
         dao.settings(value.copy(deviceId = id, accountLabel = response.getValue("ownerLabel").jsonPrimitive.content, scopesJson = scopes.toString(),
             deviceCode = "", userCode = "", verificationUri = "", pairingExpiresAt = 0, initialPublicationPending = true, status = "Paired · synchronizing selected character HP"))
+        CampaignSyncPreferences(context).resumeLegacyPublishing(value.origin, value.campaignId, id)
         LiveHpConnectionSyncJob.schedule(context)
         try { syncUnlocked() } catch (e: CancellationException) { throw e } catch (_: Exception) { dao.settings(setting().copy(status = "Paired · initial HP publication awaiting connection")) }
         snapshotUnlocked()

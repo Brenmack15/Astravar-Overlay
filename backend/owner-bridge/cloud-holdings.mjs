@@ -165,8 +165,10 @@ async function itemEvent(ctx, type, before, after, reason, source, relatedIds = 
     await ctx.link(id,'from_stack',originalId);
     await ctx.link(id,'into_stack',after.id);
   }
-  for (const [relation,actorId] of [['previous_owner',before?.data.ownerId],['new_owner',after.data.ownerId],
-      ['previous_custodian',before?.data.custodianId],['new_custodian',after.data.custodianId]]) {
+  const ownershipChanged=before?.data.ownerId!==after.data.ownerId;
+  const participants=[['previous_custodian',before?.data.custodianId],['new_custodian',after.data.custodianId]];
+  if(ownershipChanged)participants.push(['previous_owner',before?.data.ownerId],['new_owner',after.data.ownerId]);
+  for (const [relation,actorId] of participants) {
     if (actorId) await ctx.link(id,relation,actorId);
   }
   return id;
@@ -224,7 +226,7 @@ async function divide(ctx, original, quantity, newId) {
   const child = { ...recordEdit(original,{...original.data,quantity}), id:newId };
   await ctx.put(child);
   await ctx.link(child.id,'split_from',original.id);
-  await ctx.link(child.id,'definition',def.id);
+  await ctx.linkInheritedItemDefinition(child.id,original.id);
   for(const [relation,field] of [['owned_by','ownerId'],['held_by','custodianId'],['located_at','locationId']])
     if(child.data[field] !== null) await ctx.link(child.id,relation,child.data[field]);
   return child;
@@ -306,6 +308,7 @@ async function moveItem(ctx,args,eventType = 'transfer',leg = null) {
   validateDestination(args.destination);
   const item = await recordRead(ctx,'item_instance',args.itemId);
   usable(item);
+  if(item.data.ownerId!==item.data.custodianId)ctx.require('inventory',item.data.ownerId,true);
   if (item.data.quantity === null || item.data.quantity < args.quantity) recordsFail('INSUFFICIENT_KNOWN_QUANTITY',409);
   const partial = args.quantity < item.data.quantity;
   if (partial !== (args.splitId !== null)) recordsFail('PARTIAL_TRANSFER_REQUIRES_NEW_ID');
@@ -322,7 +325,7 @@ async function moveItem(ctx,args,eventType = 'transfer',leg = null) {
   const conveysOutside=['external_gift','external_sale'].includes(d.type);
   const ownerId = d.type === 'party_actor' ? d.actorId : (d.partyOwned || conveysOutside) ? null : sourceItem.data.ownerId;
   const custodianId = ['party_actor','loan'].includes(d.type) ? d.actorId : null;
-  const scopeActor = external || (custodianId && ownerId && custodianId !== ownerId) ? null : (custodianId ?? ownerId);
+  const scopeActor = external ? null : (custodianId ?? ownerId);
   if (d.actorId !== null) await ctx.require('inventory',d.actorId,true);
   const ownerType=d.partyOwned?'party':conveysOutside?'external':d.type==='party_actor'?'actor':sourceItem.data.ownerType??(ownerId?'actor':'unknown');
   const data = { ...sourceItem.data, ownerId, ownerType, custodianId, locationId:d.locationId, holding,
@@ -343,8 +346,13 @@ async function guardForm(ctx, item, next) {
   const actor = await partyActor(ctx,item.data.custodianId);
   if (!actor.data.activeFormId) return;
   const form = await recordRead(ctx,'form',actor.data.activeFormId);
-  if (form.data.sourceItemId === item.id && (item.data.custodianId !== next.data.custodianId || next.data.equipment === 'packed' ||
-      (item.data.operating && !next.data.operating) || (form.data.requiresAttunement && !next.data.attuned))) recordsFail('FORM_REVERSION_REQUIRED',409);
+  if(form.data.sourceItemId!==item.id)return;
+  const lost=item.data.custodianId!==next.data.custodianId || next.data.equipment==='packed' || !next.data.partyAccess ||
+    (form.data.requiresOperating && !next.data.operating) || (form.data.requiresAttunement && !next.data.attuned);
+  if(!lost)return;
+  if(form.data.revertOnSourceLoss!==true)recordsFail('FORM_REVERSION_REQUIRED',409);
+  await ctx.put(recordEdit(actor,{...actor.data,activeFormId:null,formExpiresAt:null}));
+  await ctx.unlink(actor.id,'active_form',form.id);
 }
 async function exchangePartyAssets(ctx,args){
   const sides=[args.left,args.right];
@@ -454,6 +462,7 @@ export const HOLDING_OPERATIONS = Object.freeze({
   customize_item: recordsOperation('inventory',recordObject({itemId:recordId,name:recordTitle,description:recordText,condition:recordTitle,source:recordSource}),async(ctx,args)=>{
     const item=await recordRead(ctx,'item_instance',args.itemId);
     usable(item);
+    ctx.require('inventory',item.data.ownerId,true);
     if(item.data.quantity!==1) recordsFail('CUSTOMIZE_SINGLE_INSTANCE_REQUIRED',409);
     const changed=recordEdit(item,{...item.data,customized:true,description:args.description,condition:args.condition,source:args.source},{title:args.name});
     await ctx.put(changed);

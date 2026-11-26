@@ -31,7 +31,7 @@ export async function requestEvidence(service,b,command,grantRevision,plan,direc
   if(command.operation==='assign_primary_image')skeleton.args={
     uploadId:args.uploadId,targetKind:args.targetKind,targetId:args.targetId,sha256:args.sha256,
   };
-  return {stored:canonical({evidenceVersion:1,command:skeleton,grantRevision,argsHash:await sha256(canonical(args)),parts}),writes};
+  return {stored:canonical({evidenceVersion:1,reviewRequired:!direct,command:skeleton,grantRevision,argsHash:await sha256(canonical(args)),parts}),writes};
 }
 
 export async function resultEvidence(service,b,commandId,result,access,plan) {

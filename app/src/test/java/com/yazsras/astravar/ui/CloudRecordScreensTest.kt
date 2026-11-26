@@ -149,16 +149,18 @@ class CloudRecordScreensTest {
             compose.onNodeWithText("Current catalog name").performClick()
             awaitText("Known physical source")
             compose.onNodeWithText("Manage in Inventory").assertDoesNotExist()
-            compose.onNodeWithText("Hold").performClick()
+            compose.onNodeWithText("Hold").performScrollTo().assertIsEnabled().performClick()
+            compose.waitUntil(5000){drafts.isNotEmpty()}
             assertEquals("equip_item",drafts.single().first)
             assertEquals("held-one",drafts.single().second.cloudText("itemId"))
             compose.onNodeWithText("Close").performClick()
             compose.runOnIdle{tab.value="Chronicle"}
-            compose.onNodeWithText("Lore").performClick()
+            compose.onNodeWithText("Lore").performScrollTo().performClick()
             awaitText("Recorded inscription")
             compose.onNodeWithText("Recorded inscription").performClick()
             awaitText("An observed sequence of marks")
-            compose.onNodeWithText("Revise known lore").performClick()
+            compose.onNodeWithText("Revise known lore").performScrollTo().assertIsEnabled().performClick()
+            compose.waitUntil(5000){drafts.size==2}
             assertEquals("revise_known_fact",drafts.last().first)
             assertEquals("known-one",drafts.last().second.cloudText("factId"))
             assertEquals(2,drafts.last().second.getValue("expectedRevision").jsonPrimitive.int)

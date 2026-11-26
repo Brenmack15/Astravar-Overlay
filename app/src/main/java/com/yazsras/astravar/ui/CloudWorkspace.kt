@@ -162,8 +162,9 @@ private val categoryScopes = mapOf(
             loadRecords()
         }
     }
-    fun ownerPage() {
-        val url = verifiedOwnerPage("${snapshot.binding.origin}/owner/ascension/${snapshot.binding.continuity}", snapshot.binding.origin)
+    fun ownerPage(access:Boolean=false) {
+        val route="/owner/ascension/${snapshot.binding.continuity}"+if(access)"/access" else ""
+        val url = verifiedOwnerPage(snapshot.binding.origin+route,snapshot.binding.origin)
         try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url.toString()))) }
         catch (_: android.content.ActivityNotFoundException) { error = "A browser is required for owner review." }
     }
@@ -240,12 +241,33 @@ private val categoryScopes = mapOf(
         "Tools" -> PlayerSheet("Owner connection", { tool=null }) {
             Text("Cloud campaign · ${snapshot.binding.continuity}")
             Text("Last cached revision ${snapshot.version.revision}")
-            PlayerButton({ ownerPage() }) { Text("Open owner administration") }
+            PlayerButton({ ownerPage(access=true) }) { Text("Manage campaign access") }
+            PlayerTextButton({tool="Settings"}) {Text("Campaign settings")}
             PlayerTextButton({ tool="Device" }) { Text("Manage device connection") }
             PlayerTextButton({ tool="Archive" },enabled=verified && !busy) { Text("Archive manager") }
             PlayerTextButton({ tool="Recovery" }) { Text("Local backup and recovery") }
             PlayerTextButton({ tool="History" }) { Text("Check submitted commands") }
             PlayerTextButton({ menuScope=null; tool="Operations" },enabled=verified && !busy) { Text("All permitted operations") }
+        }
+        "Settings" -> PlayerSheet("Campaign settings",{tool=null}) {
+            var metadata by remember { mutableStateOf<JsonObject?>(null) }
+            var loaded by remember { mutableStateOf(false) }
+            var issue by remember { mutableStateOf<String?>(null) }
+            LaunchedEffect(snapshot.version,verified,snapshot.visible) {
+                metadata=null;loaded=false;issue=null
+                try {
+                    val record=if(verified)client.projection(snapshot,"settings")["profile"] as? JsonObject else client.record(snapshot.binding.continuity)
+                    metadata=record?.takeIf { it.cloudText("kind")=="continuity_profile" };loaded=true
+                }catch(e:CancellationException){throw e}catch(e:Exception){issue=cloudError(e)}
+            }
+            val value=metadata
+            if(value!=null){
+                Text(value.cloudText("title"),style=MaterialTheme.typography.titleMedium)
+                Text(value["data"]?.jsonObject?.get("notes")?.jsonPrimitive?.contentOrNull ?: "Notes unknown")
+                PlayerDisclosure("Source"){RecordFields(value.getValue("data"))}
+            }else if(loaded)Text("No campaign settings available in this view.")
+            issue?.let{Text(it,color=MaterialTheme.colorScheme.error)}
+            PlayerButton({ownerPage(access=true)}){Text("Manage settings in owner account")}
         }
         "Archive" -> if(snapshot.visible)CloudArchiveManager(client,snapshot,verified,::openOperation){tool=null}
         "Device" -> RebuildToolSheet("Device connection",{tool=null}) { CampaignConnectionPage() }
@@ -257,11 +279,7 @@ private val categoryScopes = mapOf(
             }
         }
         "Dice" -> actorId?.let { if (snapshot.visible) CloudRollManager(client,snapshot,it,verified) { tool=null } }
-        "Inbox" -> PlayerSheet("Notification center",{tool=null}) {
-            Text(count?.let { if(it==1) "1 request awaiting owner review" else "$it requests awaiting owner review" }
-                ?: "Sign in to see current owner requests.")
-            PlayerButton({ ownerPage() }) { Text("Review in owner account") }
-        }
+        "Inbox" -> CloudApprovalCenter(client,snapshot,verified) { tool=null }
         "Operations" -> PlayerSheet("Campaign operations",{tool=null}) {
             operations.filter { menuScope==null || it.cloudText("scope") in menuScope.orEmpty() }.sortedBy { it.cloudText("name") }.forEach { op ->
                 PlayerTextButton({ openOperation(op.cloudText("name"),buildJsonObject {}) },enabled=verified && !busy) {

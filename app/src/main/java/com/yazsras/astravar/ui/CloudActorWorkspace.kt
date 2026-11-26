@@ -159,7 +159,9 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
                             }
                         }
                         Text("Skills",Modifier.clickable(role=Role.Button){openOperation("set_skill_training",args("actorId" to actorId))}.padding(8.dp),style=MaterialTheme.typography.titleMedium)
-                        sheet.obj("skills")?.forEach { (key,entry)->
+                        sheet.obj("skills")?.entries?.sortedWith(compareByDescending<Map.Entry<String,JsonElement>> {
+                            sheet.obj("skillDefinitions").obj(it.key).value("pinned")=="true"
+                        }.thenBy { it.key })?.forEach { (key,entry)->
                             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                                 Text(data.obj("skills").obj(key).value("name") ?: cloudLabel(key),Modifier.weight(1f)
                                     .clickable(role=Role.Button){rollOption="skill:$key"}.padding(8.dp))
@@ -225,7 +227,16 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
             OutlinedTextField(faces,{faces=it},label={Text("Physical d20 faces, in order")})
             val values=faces.split(Regex("[,\\s]+")).filter(String::isNotBlank).mapNotNull { it.toIntOrNull() }
             PlayerOutlinedButton({roll(kind,key,mode,values)},enabled=online && expected!=null && Regex("[0-9]+(?:[,\\s]+[0-9]+)*").matches(faces.trim())){Text("Record physical dice")}
-            if(kind=="skill"&&actorId!=null)PlayerTextButton({rollOption=null;openOperation("set_skill_training",args("actorId" to actorId,"skillId" to key))},enabled=online){Text("Edit skill training")}
+            if(kind=="skill"&&actorId!=null){
+                val definition=sheet.obj("skillDefinitions").obj(key)
+                val pinned=definition.value("pinned")=="true"
+                PlayerTextButton({rollOption=null;openOperation("set_skill_training",args("actorId" to actorId,"skillId" to key))},enabled=online){Text("Edit skill training")}
+                PlayerTextButton({rollOption=null;commit("set_skill_pin",buildJsonObject{
+                    put("actorId",actorId);put("skillId",key);put("pinned",!pinned)})},enabled=online){Text(if(pinned)"Unpin skill" else "Pin skill")}
+                if(definition.value("standard")=="false")PlayerTextButton({
+                    rollOption=null;openOperation("remove_custom_skill",args("actorId" to actorId,"skillId" to key))
+                },enabled=online){Text("Remove custom skill")}
+            }
             notice?.let {Text(it,color=MaterialTheme.colorScheme.error)}
         }
     } }

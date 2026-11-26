@@ -100,15 +100,7 @@ private fun connectionTime(value: Long?) = value?.let {
     Page {
         if (view.deviceId.isNotBlank()) {
             OpenCloudWorkspace()
-            val context=androidx.compose.ui.platform.LocalContext.current.applicationContext
-            val sync=remember(context){com.yazsras.astravar.data.CampaignSyncPreferences(context)}
-            var resume by remember(view.deviceId){mutableStateOf(!sync.allowsLegacyPublishing(view.origin,view.campaignId,view.deviceId))}
-            if(resume)PlayerCard {
-                Text("Automatic device publishing is paused after the upgrade.")
-                PlayerOutlinedButton({sync.resumeLegacyPublishing(view.origin,view.campaignId,view.deviceId);resume=false}){
-                    Text("Resume existing device connection")
-                }
-            }
+            LegacyPublishingConsent(view.origin, view.campaignId, view.deviceId)
         }
         if(openTool!=null) PlayerDisclosure("Backups and recovery") {
             listOf("Complete backup","Character backup","Campaign backup","Campaign import","Original armor archive").forEach { label->
@@ -466,4 +458,20 @@ internal fun campaignConnectionView(snapshot: JsonObject, now: Long = System.cur
         receipts = snapshot.connectionRows("history").map { row -> CampaignReceiptView(row.connectionText("commandId"), row.connectionText("state"), row.connectionText("message"),
             row["receiptJson"] != null && row["receiptJson"] !is JsonNull && row.connectionText("state") in setOf("COMMITTED", "VERIFIED", "REJECTED", "CONFLICT")) }
     )
+}
+
+@Composable internal fun LegacyPublishingConsent(origin: String, continuity: String, credential: String) {
+    if (continuity.isBlank() || credential.isBlank()) return
+    val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    val controls = remember(context) { com.yazsras.astravar.data.CampaignSyncPreferences(context) }
+    var pausedAfterUpgrade by remember(origin, continuity, credential) {
+        mutableStateOf(!controls.allowsLegacyPublishing(origin, continuity, credential))
+    }
+    if (pausedAfterUpgrade) PlayerCard {
+        Text("Automatic device publishing is paused after the upgrade.")
+        PlayerOutlinedButton({
+            controls.resumeLegacyPublishing(origin, continuity, credential)
+            pausedAfterUpgrade = false
+        }) { Text("Resume existing device connection") }
+    }
 }

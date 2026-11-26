@@ -1,3 +1,4 @@
+import { cloudReviewInbox } from './cloud-approval-view.mjs';
 import { canonical, sha256, BridgeError } from './core.mjs';
 import { CLOUD_SCOPES, CLOUD_ID, cloudObject, cloudMatches, validCloudId, cloudFail, validateCloudCommand } from './cloud-validation.mjs';
 import { CloudPlan, cloudAllowed, cloudEntity } from './cloud-plan.mjs';
@@ -291,13 +292,7 @@ export class CloudService {
       WHERE q.owner_id=? AND q.continuity_id=? AND q.status='PENDING_APPROVAL'`;
   }
   async reviewStatus(principal,id) {
-    const {grant}=await this.access(principal,id);
-    if(principal.role==='connector'||!grant.scopes.includes('approval.read')||!grant.actors.includes('*'))cloudFail(403,'OWNER_INBOX_DENIED');
-    const sql=this.pendingRequests(),now=this.now();
-    const total=await this.s("SELECT count(*) AS n FROM ("+sql+") WHERE readiness='READY'",now,now,...this.key(id)).first();
-    const current=await this.access(principal,id);
-    if(current.grant.revision!==grant.revision)cloudFail(409,'SNAPSHOT_CHANGED');
-    return {actionableCount:total.n};
+    return cloudReviewInbox(this,principal,id,'count');
   }
   async approvals(principal,id,opts={}) {
     this.owner(principal,id);await this.continuity(id);

@@ -18,6 +18,8 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
+from ascension_migrate_reviewed import FORMAT as REVIEW_FORMAT, project as reviewed_graph, template as mapping_template
+from ascension_migrate_parity import mechanical_parity
 from ascension_migrate_legacy import (HASH, MAX_BYTES, compare_legacy, encode, file_hash, legacy_review, loads,
                                      read_limited, review_bytes, sha, verify, weapon_review)
 
@@ -322,6 +324,19 @@ def convert(path, output, tenant, shared_ids, known_records=()):
     return write_bundle(output, bundle_contents(tenant, origin, rows, {report["sha256"]: (original, report)}, {}))
 
 
+def convert_reviewed(paths, plan_path, output, tenant):
+    originals = [read_limited(p) for p in paths]
+    raw = {sha(body): body for body in originals}
+    verify(len(raw) == len(originals), "Duplicate original export")
+    plan = loads(read_limited(plan_path))
+    reports, entities, links, objects = reviewed_graph(raw, plan, tenant)
+    rows = {table: [] for table in TABLES}
+    rows["cloud_entities"], rows["cloud_links"] = entities, links
+    evidence = {digest: (body, reports[digest]) for digest, body in raw.items()}
+    origin = {"authority": "legacy", "epoch": 1, "revision": 0, "schema": 1}
+    return write_bundle(output, bundle_contents(tenant, origin, rows, evidence, objects))
+
+
 def read_bundle(path):
     if isinstance(path, bytes):
         verify(len(path) <= LIMIT + (2 << 20), "Oversized local package")
@@ -471,12 +486,26 @@ def stage(db, bundle):
 
 def check_database(bundle):
     mapped, links = [], []
-    for original, report in bundle["sources"].values():
+    reviewed = {}
+    converted_objects = {}
+    for digest, (original, report) in bundle["sources"].items():
+        if report.get("mappingFormat") == REVIEW_FORMAT:
+            reviewed.setdefault(report["mappingSha256"], {})[digest] = original
+            continue
         actual, entities, _ = review_bytes(original, *bundle["tenant"], report.get("sharedWallets", []), report.get("knownRecords", []))
         verify(actual == report and not actual["blockers"], "Source disposition or scope does not match original bytes")
         mapped.extend(entities)
         links.extend(actual["links"])
+    for group in reviewed.values():
+        plan = bundle["sources"][next(iter(group))][1]["reviewedMapping"]
+        reports, graph, edges, objects = reviewed_graph(group, plan, bundle["tenant"])
+        converted_objects.update(objects)
+        verify(all(exact_report == bundle["sources"][digest][1] for digest, exact_report in reports.items()),
+               "Reviewed mapping changed after source reconciliation")
+        mapped.extend(graph)
+        links.extend(edges)
     if bundle["manifest"]["source"]["authority"] == "legacy":
+        verify(bundle["objects"] == converted_objects, "Private media does not match the reviewed native sources")
         verify(bundle["sources"] and all(not values for table, values in bundle["rows"].items()
                                         if table not in ("cloud_entities", "cloud_links")) and
                sorted(links, key=lambda r: (r["from_id"], r["relation"], r["to_id"])) == bundle["rows"]["cloud_links"] and
@@ -621,6 +650,8 @@ def control(folder, action, approval=None, carry_pending=False):
         verify(not carry_pending or (action == "cutover" and marker["receipt"].get("sourceAuthority") == "cloud" and pending),
                "Carrying pending approvals requires a verified prior cloud snapshot with outstanding requests")
         if action == "cutover":
+            verify(not any(report.get("cutoverHolds", 0) for _, report in sources(db).values()),
+                   "Unresolved source records prevent authority cutover")
             verify(not any(r["kind"] == "continuity_profile" and r["id"] == tenant[1] and r["life"] == "archived"
                            for r in rows["cloud_entities"]), "Archived continuity requires separate owner restoration before cutover")
             verify(not pending or carry_pending, "Resolve pending cloud requests or review carrying prior cloud requests into a new epoch")
@@ -659,6 +690,17 @@ def control(folder, action, approval=None, carry_pending=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="operation", required=True)
+    for op in ("mapping-template", "convert-reviewed"):
+        p = sub.add_parser(op)
+        p.add_argument("--source", type=Path, required=True, action="append", help="Exact native export, repeat for independent sources")
+        p.add_argument("--owner", required=True)
+        p.add_argument("--continuity", required=True)
+        if op == "convert-reviewed":
+            p.add_argument("mapping", type=Path)
+            p.add_argument("output", type=Path)
+    parity = sub.add_parser("parity", help="Compare recorded native mechanics to a reviewed cloud bundle")
+    parity.add_argument("native", type=Path)
+    parity.add_argument("package", type=Path)
     compare = sub.add_parser("compare-legacy", help="Reconcile two native snapshots by stable identity and exact row digest")
     compare.add_argument("earlier", type=Path)
     compare.add_argument("later", type=Path)
@@ -690,6 +732,14 @@ def main():
             p.add_argument("--carry-pending-for-review", action="store_true",
                            help="Preserve exact pending cloud approvals for separate review under the recovered epoch")
     args = parser.parse_args()
+    if args.operation == "mapping-template":
+        return mapping_template([read_limited(p) for p in args.source], args.owner, args.continuity)
+    if args.operation == "convert-reviewed":
+        return convert_reviewed(args.source, args.mapping, args.output, (args.owner, args.continuity))
+    if args.operation == "parity":
+        snapshot = read_bundle(args.package)
+        check_database(snapshot)
+        return mechanical_parity(args.native, snapshot)
     if args.operation == "compare-legacy":
         return compare_legacy(args.earlier, args.later, args.owner, args.continuity)
     if args.operation in ("seal", "unseal"):

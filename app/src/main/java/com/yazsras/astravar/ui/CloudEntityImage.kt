@@ -82,9 +82,11 @@ import java.util.UUID
                     val result=client.submit("assign_primary_image",buildJsonObject{
                         put("uploadId",id);put("assetId",assetId);put("targetId",targetId);put("targetKind",targetKind);put("sha256",hash)
                     },snapshot,"assign-$id")
-                    pending=result.cloudText("status")=="PENDING_APPROVAL"
-                    candidate=null
-                    if(!pending)dialog=false
+                    when (val status = result.cloudText("status")) {
+                        "COMMITTED" -> { candidate = null; pending = false; dialog = false }
+                        "PENDING_APPROVAL" -> { candidate = null; pending = true }
+                        else -> error = "Image assignment · ${cloudLabel(status.lowercase())}. The previous image is still selected."
+                    }
                 }catch(e:CancellationException){throw e}
                 catch(e:Exception){error=cloudError(e)}
                 finally{busy=false}

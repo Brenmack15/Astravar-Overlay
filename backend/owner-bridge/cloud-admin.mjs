@@ -12,8 +12,8 @@ export async function cloudAccessAdmin(service,principal,id) {
 export function cloudAccessPage(){
   const nonce=crypto.randomUUID().replaceAll('-','');
   return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Astravar · Campaign permissions</title><style nonce="${nonce}">body{background:#101724;color:#f0e7d1;font:1rem/1.5 system-ui;max-width:48rem;margin:auto;padding:1rem}label,section{display:block;margin:.8rem 0}button,select,input{min-height:42px}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:.35rem}fieldset{border:1px solid #586071}h1{color:#eed18c}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:#eed18c}</style>
-<a id="back">Owner review</a><h1>Campaign permissions</h1><p id="status" role="status">Loading…</p><section id="form"></section><section id="review"></section><details><summary>Permission history</summary><div id="history"></div></details>
+<title>Astravar · Campaign permissions</title><style nonce="${nonce}">body{background:#101724;color:#f0e7d1;font:1rem/1.5 system-ui;max-width:48rem;margin:auto;padding:1rem}label,section{display:block;margin:.8rem 0}button,select,input,textarea{min-height:44px}textarea{display:block;width:95%;min-height:5rem}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:.35rem}fieldset{border:1px solid #586071}h1{color:#eed18c}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:#eed18c}</style>
+<a id="back">Owner review</a><h1>Campaign administration</h1><details><summary>Campaign settings</summary><section id="metadata"></section></details><h2>Permissions</h2><p id="status" role="status">Loading…</p><section id="form"></section><section id="review"></section><details><summary>Permission history</summary><div id="history"></div></details>
 <script nonce="${nonce}">
 const continuity=location.pathname.split('/').at(-2),base='/v3/continuities/'+encodeURIComponent(continuity),status=document.getElementById('status'),form=document.getElementById('form'),review=document.getElementById('review');let model;
 document.getElementById('back').href=location.pathname.slice(0,-7);
@@ -29,5 +29,75 @@ const inbox=el(form,'label'),inboxCheck=el(inbox,'input');inboxCheck.type='check
 for(const revoked of [false,true]){if(revoked&&!g)continue;const b=el(form,'button',revoked?'Review revocation':'Review permission changes');b.onclick=()=>{const scopes=[],auto=[];for(const [cat,r,w,c] of fields){if(r.checked)scopes.push(cat+'.read');if(w.checked)scopes.push(cat+'.write');if(c.checked)auto.push(cat+'.write');}if(inboxCheck.checked)scopes.push('approval.read');const values=actors.value.split(',').map(x=>x.trim()).filter(Boolean);const proposed={scopes,actors:values,auto,expiresAt:new Date(expiry.value).getTime(),revoked,expectedGrantRevision:g?.revision??0};
 review.replaceChildren();el(review,'h2',revoked?'Revoke access':'Verify permissions');el(review,'p','Client: '+select.selectedOptions[0].textContent);el(review,'pre',JSON.stringify(proposed,null,2));const commit=el(review,'button',revoked?'Confirm revocation':'Save reviewed permissions');commit.onclick=async()=>{commit.disabled=true;try{const r=await fetch(base+'/grants/'+encodeURIComponent(subject),{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(proposed)});const v=await r.json();if(!r.ok)throw Error(v.error?.code||'Permission update unverified');await load();view(subject);status.textContent='Saved permission revision '+v.revision}catch(e){status.textContent=e.message;commit.disabled=false}}}}
 }
+(${ownerSettingsPanel.toString()})(document.getElementById('metadata'),base);
 load().catch(e=>status.textContent=e.message);</script></html>`,{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; script-src 'nonce-"+nonce+"'; style-src 'nonce-"+nonce+"'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"}});
+}
+
+/** Executed only in the authenticated owner's same-origin page. Its source is embedded under a fresh CSP nonce. */
+export function ownerSettingsPanel(section,base,request=fetch) {
+  const doc=section.ownerDocument;
+  const element=(parent,tag,text)=>{
+    const el=doc.createElement(tag);
+    if(text!==undefined)el.textContent=text;
+    parent.appendChild(el);
+    return el;
+  };
+  async function read(path,init={}) {
+    const response=await request(base+path,{credentials:'same-origin',cache:'no-store',...init});
+    const result=await response.json();
+    if(!response.ok)throw Error(result.error?.code||'Request could not be verified');
+    return result;
+  }
+  async function display() {
+    section.replaceChildren();
+    const status=element(section,'p','Loading campaign settings…');
+    status.setAttribute('role','status');
+    try {
+      const prior=await read('/settings');
+      const old=prior.profile;
+      if(prior.authority!=='cloud' || prior.subject!=='sites-owner')throw Error('Owner authentication required');
+      status.textContent=old?'':'No campaign name or notes have been recorded.';
+      const name=element(element(section,'label','Campaign name'),'input'); name.maxLength=180;name.value=old?.title??'';
+      const notes=element(element(section,'label','Campaign notes'),'textarea');notes.maxLength=4000;notes.value=old?.data.notes??'';
+      const unknown=element(element(section,'label','Notes unknown'),'input');unknown.type='checkbox';unknown.checked=old?.data.notes==null;
+      notes.disabled=unknown.checked;
+      const start=element(section,'button','Review settings');
+      const review=element(section,'div');
+      function invalidate(){review.replaceChildren();notes.disabled=unknown.checked;}
+      name.oninput=invalidate;notes.oninput=invalidate;unknown.onchange=invalidate;
+      start.onclick=()=>{
+        const values={name:name.value,notes:unknown.checked?null:notes.value};
+        invalidate();
+        if(!values.name.trim()){status.textContent='Enter a campaign name.';return;}
+        const command={version:1,commandId:crypto.randomUUID(),epoch:prior.epoch,expectedRevision:prior.revision,operation:'update_continuity_settings',args:values};
+        element(review,'h3','Review campaign settings');
+        for(const [label,value] of [['Current name',old?.title],['Proposed name',values.name],['Current notes',old?.data.notes],['Proposed notes',values.notes]]){
+          element(review,'p',label);element(review,'pre',value==null?'Unknown':(value===''?'(empty)':value));
+        }
+        const save=element(review,'button','Save reviewed settings');
+        save.onclick=async()=>{
+          save.disabled=true;start.disabled=true;name.disabled=true;notes.disabled=true;unknown.disabled=true;
+          try{
+            const sent=await read('/commands',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(command)});
+            const proof=await read('/receipts/'+encodeURIComponent(command.commandId));
+            if(sent.status!=='COMMITTED'||proof.receipt?.commandId!==command.commandId||proof.receipt.status!=='COMMITTED'||proof.epoch!==prior.epoch)
+              throw Error('Settings change has no confirmed receipt');
+            const after=await read('/settings');
+            if(after.epoch!==prior.epoch||after.revision<proof.revision||after.profile?.title!==values.name||after.profile?.data.notes!==values.notes)
+              throw Error('Settings changed again. Review current values.');
+            await display();
+            section.querySelector('[role="status"]').textContent='Campaign settings saved at revision '+proof.revision+'.';
+          }catch(error){
+            status.textContent=error.message;
+            save.disabled=false;save.textContent='Retry same reviewed request';
+            if(!review.querySelector('[data-reload]')){
+              const reload=element(review,'button','Reload campaign settings');
+              reload.setAttribute('data-reload','1');reload.onclick=display;
+            }
+          }
+        };
+      };
+    }catch(error){status.textContent=error.message;const retry=element(section,'button','Reload campaign settings');retry.onclick=display;}
+  }
+  return display();
 }

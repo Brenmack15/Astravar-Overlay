@@ -68,6 +68,9 @@ class ReforgeCharacterUiTest {
         campaignSetup(ledger)
         val previous = System.getProperty("robolectric.windowManager.useRequestedSize")
         System.setProperty("robolectric.windowManager.useRequestedSize", "true")
+        val previousConfig = android.content.res.Configuration(context.resources.configuration)
+        val resources = context.resources
+        resources.updateConfiguration(android.content.res.Configuration(previousConfig).also { it.fontScale = fontScale }, resources.displayMetrics)
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             captureActivity = controller.get()
@@ -82,6 +85,7 @@ class ReforgeCharacterUiTest {
             block(repository)
         } finally {
             captureActivity = null
+            resources.updateConfiguration(previousConfig, resources.displayMetrics)
             controller.pause().stop().destroy(); localDb.close(); legacyDb.close()
             if (previous == null) System.clearProperty("robolectric.windowManager.useRequestedSize") else System.setProperty("robolectric.windowManager.useRequestedSize", previous)
         }
@@ -510,7 +514,7 @@ class ReforgeCharacterUiTest {
             compose.onNodeWithText("Effective mode", substring = true).assertExists()
             compose.onNodeWithTag("reforge-roll-result").assertDoesNotExist()
             compose.onNodeWithText("Close").performClick()
-            compose.onNodeWithTag("reforge-STR").performClick()
+            compose.onNodeWithTag("reforge-STR").performTouchInput { click(androidx.compose.ui.geometry.Offset(width / 2f, 4f)) }
             compose.onNodeWithText("Ability Inspector & Training").assertExists()
             compose.onNodeWithText("Ability modifier -1 · Check +0 · Save -1").assertExists()
             assertEquals(1, runBlocking { repository.rollHistory(actor.id).first() }.size)
@@ -579,8 +583,7 @@ class ReforgeCharacterUiTest {
 
     @Test fun openingDiceDoesNotRollAndOnlyExplicitSavedRollPersists() = withSheet { repository ->
         compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithTag("reforge-STR").performClick()
-        compose.onNodeWithText("Roll check").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("reforge-check-STR").performSemanticsAction(SemanticsActions.OnLongClick)
         compose.onNodeWithTag("reforge-roll-now").assertExists()
         assertTrue(runBlocking { repository.rollHistory("synthetic-player").first() }.isEmpty())
         compose.onNodeWithTag("reforge-roll-now").performClick()

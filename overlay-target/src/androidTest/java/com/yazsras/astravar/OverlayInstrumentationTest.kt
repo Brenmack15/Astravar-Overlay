@@ -159,7 +159,11 @@ class OverlayInstrumentationTest {
         assertEquals(1, history.count { it.contains("advantage") })
         screenshot("standalone-restored-history")
         tap("Close")
-        for (destination in listOf("Character", "Inventory", "Companions", "Campaign")) {
+        @Suppress("DEPRECATION")
+        val installed = instrumentation.context.packageManager.getPackageInfo(product, 0)
+        val destinations = if (installed.longVersionCode >= 59) listOf("Character", "Inventory", "Connections", "Chronicle")
+            else listOf("Character", "Inventory", "Companions", "Campaign")
+        for (destination in destinations) {
             ui.ensurePrimaryTab(product, destination)
             screenshot("primary-${destination.lowercase()}")
         }

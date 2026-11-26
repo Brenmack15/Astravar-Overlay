@@ -277,6 +277,7 @@ if [[ "$astravar_bootstrap_gate" == true ]]; then
   run_test 'com.yazsras.astravar.data.OwnerBootstrapNativeTest#invalidBundlesAndInterruptedPersistenceRemainRetryable' bootstrap-negative.txt
   run_test 'com.yazsras.astravar.data.NotionNativeImportTest#publicContextApplyBackupReimportAndRollbackPreserveIdentity' notion-public-import.txt 360
   run_test 'com.yazsras.astravar.data.CampaignNativeHttpsTest#authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts' native-campaign-https.txt 360
+  run_test 'com.yazsras.astravar.data.AscensionNotificationNativeTest#actualSmallEmblemInStatusBarAndShadeAcrossLightAndDarkThemes' notification-emblem.txt 360
   git rev-parse HEAD >"$astravar_output/SOURCE_COMMIT.txt"
   bash scripts/ci-ascension-api37.sh
   python3 - "$astravar_output/SCOPE.json" <<'PY_SCOPE'

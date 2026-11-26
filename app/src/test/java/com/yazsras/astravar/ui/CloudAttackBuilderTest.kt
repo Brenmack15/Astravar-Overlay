@@ -44,4 +44,23 @@ class CloudAttackBuilderTest {
         assertFalse("saveDc" in manual); assertEquals("edge",manual.getValue("riders").jsonArray.single().jsonObject.getValue("componentId").jsonPrimitive.content)
         assertThrows(IllegalArgumentException::class.java) { base.copy(attuned=true).payload("synthetic") }
     }
+
+    @Test fun sourcedItemTextPrefillsOnlyUnconditionalTypedDamageAndBindsTheExactSource() {
+        fun record(kind:String,id:String,revision:Long,title:String,data:JsonObject)=buildJsonObject {
+            put("kind",kind);put("id",id);put("revision",revision);put("title",title);put("data",data) }
+        val def=record("item_definition","blade-def",5,"Test blade",buildJsonObject {
+            put("description","This blade deals 1d8 + 4 radiant damage. If you expend a charge it deals 2d6 fire damage. Includes a ward.") })
+        val item=record("item_instance","blade-instance",7,"Test blade",buildJsonObject {
+            put("definitionId","blade-def");put("description","Deals 3 cold damage.") })
+        val suggestion=reviewedItemAttack(item,def,false)
+        val c=suggestion.components.single()
+        assertEquals(listOf("1","8","4","radiant"),listOf(c.dice,c.sides,c.flat,c.type))
+        assertTrue(listOf(suggestion.timing,suggestion.delivery,suggestion.resolution,suggestion.hit,suggestion.range,suggestion.reach).all(String::isBlank))
+        assertThrows(IllegalArgumentException::class.java){suggestion.copy(name="Blade").payload("actor")}
+        val cmd=suggestion.copy(name="Reviewed",timing="action",delivery="ranged",resolution="manual").payload("actor")
+        assertEquals("blade-instance",cmd.getValue("sourceItemId").jsonPrimitive.content)
+        assertEquals(5,cmd.getValue("sourceReview").jsonObject.getValue("definitionRevision").jsonPrimitive.int)
+        val flat=reviewedItemAttack(item,def,true).components.single()
+        assertEquals(listOf("0","3","cold"),listOf(flat.dice,flat.flat,flat.type))
+    }
 }

@@ -37,10 +37,10 @@ async function validateContext(ctx,actorId,s) {
   const a=await actor(ctx,actorId);
   for(const tag of s.contextTags??[])must(a.data.contextTags?.includes(tag),'ROLL_CONTEXT_UNVERIFIED');
 }
-async function calculate(ctx,actorId,s,e){
+async function calculate(ctx,actorId,s,e,verifiedTags=[]){
   assertSpecification(s);
   await validateContext(ctx,actorId,s);
-  const a=await actor(ctx,actorId),projection=await sheet(ctx,actorId,s.contextTags??[]);
+  const a=await actor(ctx,actorId),projection=await sheet(ctx,actorId,[...new Set([...(s.contextTags??[]),...verifiedTags])]);
   checkDiceOwner(ctx,a,s.kind,e.origin);
   const restriction=projection.rollRestrictions[s.kind+':'+s.key];must(!restriction,restriction);
   const policy=rollPolicy(projection.effects,s.kind+':'+s.key,s.mode);
@@ -71,8 +71,15 @@ async function calculate(ctx,actorId,s,e){
     sourceRevision:a.revision,recordedAt:ctx.now,commandId:ctx.commandId};
 }
 async function recordCheck(ctx,x){
-  const result=await calculate(ctx,x.actorId,x.check,x.evidence);
-  must([x.forUseId,x.forAttemptId,x.forCastId,x.forConcentrationId].filter(Boolean).length<=1,'INCOMPATIBLE_ROLL_REQUESTS');
+  const tags=[];
+  if(x.forSenseId){
+    const use=await owned(ctx,'action_use',x.forSenseId,x.actorId),sensor=use.data.sensor;
+    must(sensor?.eligible && sensor.status==='pending_check' && x.check.kind==='skill'&&x.check.key===sensor.skillId,'SENSOR_CHECK_UNAVAILABLE');
+    tags.push(sensor.tag);await save(ctx,use,{...use.data,sensor:{...sensor,status:'check_recorded',rollId:x.rollId}});
+  }
+  const result=await calculate(ctx,x.actorId,x.check,x.evidence,tags);
+  if(x.forSenseId)result.forSenseId=x.forSenseId;
+  must([x.forUseId,x.forAttemptId,x.forCastId,x.forConcentrationId,x.forSenseId].filter(Boolean).length<=1,'INCOMPATIBLE_ROLL_REQUESTS');
   if(x.forConcentrationId){
     const pending=await owned(ctx,'concentration_check',x.forConcentrationId,x.actorId),a=await actor(ctx,x.actorId);
     must(pending.data.status==='pending' && a.data.concentrationCastId===pending.data.castId && x.check.kind==='save' && x.check.key==='CON','NO_MATCHING_CONCENTRATION_SAVE');
@@ -96,6 +103,7 @@ async function recordCheck(ctx,x){
     result.forAttemptId=x.forAttemptId;
   }
   await insert(ctx,'roll',x.rollId,x.actorId,result.name,result);
+  if(x.forSenseId)await ctx.link(x.rollId,'sensor_observation',x.forSenseId);
   if(x.forConcentrationId)await ctx.link(x.rollId,'for_concentration',x.forConcentrationId);
   if(x.forUseId)await ctx.link(x.rollId,'for_use',x.forUseId);
   if(x.forCastId)await ctx.link(x.rollId,'for_cast',x.forCastId);
@@ -153,7 +161,7 @@ export const rollOperations=Object.freeze({
     const results=b.data.results.map(e=>e.rollId===r.id?result:e),status=results.every(e=>e.status==='resolved')?'resolved':'pending';
     await save(ctx,b,{...b.data,results,status});return {batchId:b.id,status,result};
   }),
-  record_check:op('rolls',fields({actorId:identifier,rollId:identifier,check:checkSpec,evidence,forUseId:identifier,forAttemptId:identifier,forCastId:identifier,forConcentrationId:identifier},['actorId','rollId','check','evidence']),recordCheck),
+  record_check:op('rolls',fields({actorId:identifier,rollId:identifier,check:checkSpec,evidence,forUseId:identifier,forSenseId:identifier,forAttemptId:identifier,forCastId:identifier,forConcentrationId:identifier},['actorId','rollId','check','evidence']),recordCheck),
   record_roll_batch:op('rolls',fields({actorId:identifier,batchId:identifier,entries:arrayOf(fields({rollId:identifier,check:checkSpec,evidence},['rollId','check']),24)},['actorId','batchId','entries']),batch),
   save_roll_preset:op('rolls',fields({actorId:identifier,presetId:identifier,name:named(120),entries:arrayOf(checkSpec,24),update:boolean},['actorId','presetId','name','entries','update']),savePreset),
   execute_roll_preset:op('rolls',fields({actorId:identifier,presetId:identifier,batchId:identifier,rolls:arrayOf(fields({rollId:identifier,evidence},['rollId']),24)},['actorId','presetId','batchId','rolls']),async(ctx,x)=>{

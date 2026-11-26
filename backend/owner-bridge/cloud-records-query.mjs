@@ -84,9 +84,10 @@ async function inventoryOverview(service,b,grant,opts) {
     if(authorized.kind!=='item_definition')cloudFail(404,'RECORD_UNAVAILABLE');
     fullParty(grant,'inventory');
     const definition=authorized;
+    const actorLife=grant.scopes.includes('lifecycle.read')?'1=1':"a.life='active'";
     const rows=(await service.s(itemBase+`SELECT i.id,i.title,i.group_key AS groupId,i.data_json AS data,
-      (SELECT title FROM cloud_entities a WHERE a.owner_id=? AND a.continuity_id=? AND a.kind='actor' AND a.id=json_extract(i.data_json,'$.ownerId')) AS ownerName,
-      (SELECT title FROM cloud_entities a WHERE a.owner_id=? AND a.continuity_id=? AND a.kind='actor' AND a.id=json_extract(i.data_json,'$.custodianId')) AS custodianName
+      (SELECT title FROM cloud_entities a WHERE a.owner_id=? AND a.continuity_id=? AND a.kind='actor' AND ${actorLife} AND a.id=json_extract(i.data_json,'$.ownerId')) AS ownerName,
+      (SELECT title FROM cloud_entities a WHERE a.owner_id=? AND a.continuity_id=? AND a.kind='actor' AND ${actorLife} AND a.id=json_extract(i.data_json,'$.custodianId')) AS custodianName
       FROM items i WHERE definition_id=? AND i.id>? ORDER BY i.id LIMIT ?`,
       ...b,...b,...b,...b,definition.id,opts.after,opts.limit+1).all()).results;
     const items=rows.slice(0,opts.limit).map(row=>({id:row.id,title:row.title,groupId:row.groupId,ownerName:row.ownerName,custodianName:row.custodianName,...JSON.parse(row.data)}));

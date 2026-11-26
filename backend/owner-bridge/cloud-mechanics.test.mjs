@@ -203,6 +203,8 @@ test('encounter initiatives are actual roll references; extra attacks have a sha
   await f.command('advance_encounter_turn',{encounterId:'combat-one',currentActorId:'actor-two'});
   await f.command('resolve_attack',{...attack,attemptId:'three'});
   await f.command('end_encounter',{encounterId:'combat-one',currentActorId:who,outcome:'synthetic fixture complete'});
+  await assert.rejects(f.command('start_encounter',{encounterId:'combat-reused',name:'Different event',participants:[{actorId:who,initiativeRollId:'initiative-'+who}]}),/INITIATIVE_ALREADY_USED/);
+  assert.equal(await f.read('combat-reused'),undefined);
   assert.equal((await f.read(who)).data.encounterId,null);
 });
 
@@ -500,4 +502,285 @@ test('registered updates, separate damage and shared pool expenditure are indepe
   const damage=await f.command('roll_damage_only',{actorId:who,attackId:'standalone-weapon',rollId:'standalone-damage',damage:[{id:'impact',evidence:dice(4)}]});
   assert.equal(damage.out.components[0].total,6);assert.equal((await f.read('standalone-damage')).data.appliedDamage,null);
   assert.equal((await f.read('battery')).data.current,2);assert.equal((await f.read(who)).data.currentHp,base.currentHp);
+});
+
+test('custom skill removal clears its pin, preserves ruled history and refuses removal of a standard skill',async t=>{
+  const f=await setup(t);await f.defined();
+  const skillId='fixture-tool',args={actorId:who,skillId};
+  await f.command('set_skill_training',{...args,name:'Fixture tool',ability:'INT',rank:2});
+  await f.command('set_skill_pin',{...args,pinned:true});
+  assert.deepEqual((await f.sheet()).skillDefinitions[skillId],{name:'Fixture tool',ability:'INT',rank:2,standard:false,pinned:true});
+  await f.command('record_check',{actorId:who,rollId:'tool-roll',check:{kind:'skill',key:skillId,mode:'normal'},evidence:{origin:'player_physical',faces:[11]}});
+  const before=await f.read('tool-roll');
+  await f.command('remove_custom_skill',args);
+  assert.equal((await f.sheet()).skills[skillId],undefined);
+  assert.deepEqual((await f.read(who)).data.pinnedSkillIds,[]);
+  assert.deepEqual(await f.read('tool-roll'),before);
+  await assert.rejects(f.command('remove_custom_skill',{actorId:who,skillId:'athletics'}),/ACTIVE_CUSTOM_SKILL_REQUIRED/);
+});
+
+test('separate active repair, disabled reconstruction and dormant transitions verify elapsed time, tool, actual cast and distinct recovery owner',async t=>{
+  const f=await setup(t);await f.defined({role:'companion',proficiency:4,currentHp:44,temporaryHp:0,speeds:{walk:5,fly:60}});
+  const operatorId='engineer-fixture';await f.defined({actorId:operatorId,name:'Caretaker'});
+  await f.pool('active-repair','ordinary',1,1,'short_rest');await f.pool('reconstruction','ordinary',1,1,'long_rest',{recoveryActorId:operatorId});
+  await f.command('define_item_definition',{definitionId:'kit-def',name:'Workshop implements',category:'tool',description:'Fictional kit',rarity:null,stackable:false,wearable:false,handheld:true,attunement:'none',source:'fixture'});
+  await f.command('acquire_item',{itemId:'kit-instance',definitionId:'kit-def',ownerId:operatorId,quantity:1,source:'fixture'});
+  await f.command('define_spell',{actorId:operatorId,spellId:'care-spell',name:'Repair cantrip',source:'fixture',baseLevel:0,concentration:false,ritual:false,timing:'other',resolution:'automatic',components:[]});
+  await f.command('grant_spell',{actorId:operatorId,spellId:'care-spell',grantId:'care-grant',source:'fixture',route:'at_will',levels:[0],preparation:'not_required'});
+  await f.command('define_care_protocol',{actorId:who,operatorId,protocolId:'care-protocol',spellId:'care-spell',toolDefinitionId:'kit-def',repairPoolId:'active-repair',reconstructionPoolId:'reconstruction',repairDice:2,repairSides:6,repairSeconds:60,reconstructionSeconds:600,dormancySeconds:60,source:'fixture care'});
+  const cast=id=>f.command('cast_spell',{actorId:operatorId,grantId:'care-grant',castId:id,level:0,targets:[who]});
+  await cast('active-care-1');const common={actorId:who,operatorId,protocolId:'care-protocol',uninterrupted:true};
+  const repair={...common,castId:'active-care-1',kind:'repair',elapsedSeconds:60,dice:dice(4,3)};
+  await assert.rejects(f.command('complete_actor_care',{...repair,elapsedSeconds:59}),/CARE_DURATION_INCOMPLETE/);
+  const fixed=await f.command('complete_actor_care',repair);assert.deepEqual([fixed.out.afterHp,fixed.out.roll.faces.map(d=>d.value)],[51,[4,3]]);
+  await assert.rejects(f.command('complete_actor_care',repair),/ACTUAL_UNUSED_CARE_CAST_REQUIRED/);
+  await f.command('set_actor_dormancy',{...common,state:'dormant',elapsedSeconds:60});assert.equal((await f.sheet()).movement.fly,0);
+  await assert.rejects(f.command('complete_rest',{actorId:who,kind:'short_rest',elapsedSeconds:3600,hitDice:[],confirmed:true}),/INACTIVE_ACTOR_CANNOT_REST/);
+  await f.command('set_actor_dormancy',{...common,state:'active',elapsedSeconds:60});assert.equal((await f.read(who)).data.currentHp,51);assert.equal((await f.read('active-repair')).data.current,0);
+  await f.command('apply_hp_change',{actorId:who,kind:'damage',amount:75});assert.equal((await f.read(who)).data.activityState,'disabled');
+  await assert.rejects(f.command('apply_hp_change',{actorId:who,kind:'heal',amount:60}),/DISABLED_ACTOR_REQUIRES_RECONSTRUCTION/);
+  await cast('rebuild-1');const rebuild={...common,castId:'rebuild-1',kind:'reconstruct',elapsedSeconds:600,toolItemId:'kit-instance'};
+  await assert.rejects(f.command('complete_actor_care',{...rebuild,toolItemId:'missing-tool'}),/RECONSTRUCTION_TOOL_UNAVAILABLE/);
+  const restored=await f.command('complete_actor_care',rebuild);assert.equal(restored.out.afterHp,60);
+  assert.equal((await f.read('active-repair')).data.current,0);assert.equal((await f.read('reconstruction')).data.current,0);
+  await f.command('complete_rest',{actorId:who,kind:'long_rest',elapsedSeconds:28800,confirmed:true,hitDice:[]});assert.equal((await f.read('reconstruction')).data.current,0);
+  await f.command('complete_rest',{actorId:operatorId,kind:'long_rest',elapsedSeconds:28800,confirmed:true,hitDice:[]});assert.equal((await f.read('reconstruction')).data.current,1);
+});
+
+test('reviewed item text binds the physical holding and definition revisions without inferring attack accuracy',async t=>{
+  const f=await setup(t);await f.defined();
+  const def={definitionId:'text-def',name:'Fixture lantern',category:'item',description:'Deals 1d8 + 4 radiant damage.',
+    rarity:null,stackable:false,wearable:true,handheld:false,attunement:'none',source:'synthetic source'};
+  await f.command('define_item_definition',def);
+  await f.command('acquire_item',{itemId:'text-item',definitionId:def.definitionId,ownerId:who,quantity:1,source:'fixture'});
+  const proof={definitionId:def.definitionId,itemRevision:(await f.read('text-item')).revision,definitionRevision:(await f.read(def.definitionId)).revision};
+  const cmd={attackId:'text-attack',actorId:who,name:'Reviewed lantern',source:'Fictional owner review',delivery:'other',resolution:'manual',timing:'action',
+    components:[component('ray','radiant',1,8,4)],sourceItemId:'text-item',sourceReview:proof};
+  await f.command('edit_item_definition',{definitionId:def.definitionId,name:def.name,description:'Deals 2d8 cold damage.',category:def.category,rarity:null,source:'fixture correction'});
+  await assert.rejects(f.command('define_attack',cmd),/ATTACK_ITEM_REVIEW_CHANGED/);
+  assert.equal(await f.read('text-attack'),undefined);
+  const definitionRevision=(await f.read(def.definitionId)).revision;
+  const saved=await f.command('define_attack',{...cmd,sourceReview:{...proof,definitionRevision},components:[component('ray','cold',2,8,0)]});
+  const row=await f.read(saved.out.attackId);
+  assert.equal(row.data.sourceReview.definitionRevision,definitionRevision);assert.equal(row.data.fixedHit,undefined);
+  assert.equal(row.data.sourceItemId,'text-item');assert.equal(row.data.components[0].type,'cold');
+});
+
+async function wornFixture(f,id,{attuned=false,packed=false,manual=false,ownerId=who}={}) {
+  await f.command('define_item_definition',{definitionId:id+'-def',name:'Fixture '+id,category:'gear',
+    description:'Synthetic configured fixture',rarity:null,stackable:false,wearable:!packed,handheld:false,
+    attunement:attuned?'required':'none',...(attuned?{attunementSeconds:0}:{}),...(manual?{activation:'manual'}:{}),source:'fixture'});
+  await f.command('acquire_item',{itemId:id,definitionId:id+'-def',ownerId,quantity:1,source:'fixture'});
+  if(!packed)await f.command('equip_item',{itemId:id,equipment:'worn',source:'fixture'});
+  if(attuned)await f.command('set_item_attunement',{itemId:id,attuned:true,elapsedSeconds:0,confirmed:true,source:'fixture'});
+  if(manual)await f.command('set_item_operating',{itemId:id,operating:true,source:'fixture'});
+}
+async function fixtureEncounter(f,id,participants) {
+  for(const [actorId,face] of participants)await f.command('record_check',{actorId,rollId:id+'-initiative-'+actorId,check:check('initiative','initiative'),evidence:dice(face)});
+  return f.command('start_encounter',{encounterId:id,name:'Fictional encounter',participants:participants.map(([actorId])=>({actorId,initiativeRollId:id+'-initiative-'+actorId}))});
+}
+const declaredAction=(actionId,useId,fields={})=>({actorId:who,actionId,useId,declared:true,...fields});
+const declaredAttack=(attackId,attemptId,fields={})=>({actorId:who,attackId,attemptId,mode:'normal',includeDamage:false,...fields});
+
+test('shared breath recharge checks the current turn, actual face, failed checks, retry and later success',async t=>{
+  const f=await setup(t);await f.defined({role:'companion'});await f.defined({actorId:'opponent',name:'Fixture opponent',role:'creature'});
+  await f.pool('breath-cycle','ordinary',0,1,'recharge_roll',{rechargeSides:6,rechargeMinimum:5});
+  const request={actorId:who,poolId:'breath-cycle',origin:'player_physical',atStartOfTurn:true};
+  await assert.rejects(f.command('resolve_pool_recharge',{...request,face:6}),/RECHARGE_WINDOW_UNAVAILABLE/);
+  await fixtureEncounter(f,'recharge-enc',[[who,18],['opponent',2]]);
+  await assert.rejects(f.command('resolve_pool_recharge',{...request,origin:'dm',face:6}),/PLAYER_DICE_REQUIRE_PLAYER_OR_DELEGATION/);
+  const miss=await f.command('resolve_pool_recharge',{...request,face:4});
+  assert.equal(miss.out.after,0);assert.equal(miss.out.face,4);
+  await assert.rejects(f.command('resolve_pool_recharge',{...request,face:6}),/RECHARGE_ALREADY_CHECKED/);
+  await f.command('advance_encounter_turn',{encounterId:'recharge-enc',currentActorId:who});
+  await assert.rejects(f.command('resolve_pool_recharge',{...request,face:6}),/RECHARGE_WINDOW_UNAVAILABLE/);
+  await f.command('advance_encounter_turn',{encounterId:'recharge-enc',currentActorId:'opponent'});
+  const hit=await f.command('resolve_pool_recharge',{...request,face:5});
+  assert.equal(hit.out.after,1);assert.notEqual(hit.out.window,miss.out.window);await f.retry(hit.command);
+  assert.equal((await f.read('breath-cycle')).data.current,1);
+});
+
+test('one small actor retains eight physical holdings, ordinary attacks, graded senses and a shared grounded deployment',async t=>{
+  const f=await setup(t);await f.defined({role:'companion',proficiency:4,currentHp:60,baseAc:16,attunementCapacity:1,
+    abilities:{STR:8,DEX:18,CON:10,INT:10,WIS:12,CHA:12},speeds:{walk:5,fly:60},senses:{darkvision:180},
+    size:'tiny',creatureType:'construct',saveProficiencies:['DEX']});
+  await f.defined({actorId:'listener',name:'Fixture listener',role:'creature'});await f.defined({actorId:'ally',name:'Fixture ally'});
+  const ids=['stabilizer','vocoder','ward','dial','optic','step','keepsake','shell-rig'];
+  for(const id of ids)await wornFixture(f,id,{attuned:id==='ward',packed:id==='keepsake'});
+  await f.pool('blink','charge',3,3,'long_rest');await f.pool('dial-pool','charge',1,1,'dawn');
+  await f.pool('deploy','charge',1,1,'long_rest');await f.pool('roar','charge',1,1,'deployment');await f.pool('rig-integrity','integrity',75,75,'none');
+  await f.command('define_form',{actorId:who,formId:'rig-form',name:'Heavy frame',source:'fixture',size:'large',creatureType:'construct',
+    sourceItemId:'shell-rig',grounded:true,baseAc:18,abilityOverrides:{STR:20},speeds:{walk:40},timing:'other',activationSeconds:60,
+    durationSeconds:3600,deploymentPoolId:'deploy',integrityPoolId:'rig-integrity',resetPoolId:'roar',requiresWilling:true});
+  for(const [id,stat,rank] of [['stealth','DEX',2],['perception','WIS',1]])await f.command('set_skill_training',{actorId:who,skillId:id,ability:stat,rank,name:id});
+  await f.effect('precision','skill','stealth','add',{amount:1,sourceItemId:'stabilizer'});await f.effect('perception-base','skill','perception','add',{amount:2});
+  await f.effect('visual','skill','perception','add',{amount:2,contextTag:'heat',sourceItemId:'optic'});
+  await f.effect('heat-edge','roll_edge','skill:perception','advantage',{sourceItemId:'optic',contextTag:'heat'});
+  for(const key of ['skill:stealth','save:DEX'])await f.effect('edge-'+key.split(':')[1],'roll_edge',key,'keep_highest_three',{sourceItemId:'stabilizer'});
+  for(const key of ['acid','necrotic','poison','psychic'])await f.effect('plate-'+key,'damage_defense',key,'immunity');
+  for(const key of ['blinded','charmed','exhaustion','frightened','incapacitated','paralyzed','petrified','poisoned','prone','stunned','unconscious'])
+    await f.effect('condition-'+key,'condition_immunity',key,'immunity');
+  await f.effect('force-ward','damage_defense','force','resistance',{sourceItemId:'ward',requiresAttunement:true});
+  await f.effect('evasion','save_mitigation','DEX','evade');
+  await f.command('define_spell',{actorId:'ally',spellId:'guided-bolts',name:'Fictional guided spell',source:'fixture',baseLevel:1,concentration:false,
+    ritual:false,resolution:'automatic',timing:'action',components:[component('dart','force',1,4,1)]});
+  await f.effect('spell-ward','spell_damage_immunity','guided-bolts','immunity',{sourceItemId:'ward',requiresAttunement:true});
+  const basic={actorId:who,source:'fixture',timing:'attack',resolution:'attack',classification:'magical'};
+  for(const [id,type,num,sides,flat,hit,extra] of [
+    ['rake','slashing',3,4,4,8,{delivery:'melee',reach:5,excludedForms:['rig-form']}],
+    ['nip','piercing',3,4,4,8,{delivery:'melee',reach:5,excludedForms:['rig-form']}],
+    ['pulse','force',3,6,4,9,{delivery:'ranged',range:30,excludedForms:['rig-form']}],
+    ['large-bite','piercing',2,10,5,9,{delivery:'melee',reach:5,formId:'rig-form'}],
+    ['large-rake','slashing',3,8,5,9,{delivery:'melee',reach:5,formId:'rig-form'}]])
+    await f.command('define_attack',{...basic,attackId:id,name:id,fixedHit:hit,components:[component('impact',type,num,sides,flat)],...extra});
+  const action={actorId:who,source:'fixture'};
+  await f.command('define_action',{...action,actionId:'basic-pair',name:'Normal pair',type:'multiattack',timing:'action',excludedForms:['rig-form'],
+    attackSequence:['rake','nip'],substitutions:[{attackId:'pulse',replaces:['rake','nip'],maximum:1}]});
+  await f.command('define_action',{...action,actionId:'large-pair',name:'Large pair',type:'multiattack',timing:'action',formId:'rig-form',attackSequence:['large-bite','large-rake']});
+  await f.command('define_action',{...action,actionId:'scan',name:'Thermal inspection',type:'thermal_scan',timing:'other',sourceItemId:'optic',thermal:{normal:150,faint:60,skillId:'perception',tag:'heat'}});
+  await f.command('define_action',{...action,actionId:'fixed',name:'Fixed face',type:'fixed_attack_die',timing:'other',sourceItemId:'dial',fixedDieValue:10,cost:{poolId:'dial-pool',amount:1}});
+  await f.command('define_action',{...action,actionId:'shift',name:'Short displacement',type:'teleport',timing:'bonus_action',range:30,sourceItemId:'step',cost:{poolId:'blink',amount:1}});
+  await f.command('define_action',{...action,actionId:'cry',name:'Selective cry',type:'frighten',timing:'bonus_action',range:30,sourceItemId:'shell-rig',formId:'rig-form',
+    saveDc:15,saveAbility:'WIS',durationSeconds:60,cost:{poolId:'roar',amount:1}});
+  const ordinary=await f.sheet();assert.deepEqual([ordinary.size,ordinary.ac.value,ordinary.skills.stealth.value,ordinary.saves.DEX.value,ordinary.skills.perception.value,ordinary.senses.darkvision],['tiny',16,13,8,7,180]);
+  assert.equal(ordinary.rollModes['save:DEX'].normal.count,3);assert.equal(ordinary.rollModes['skill:stealth'].normal.count,3);
+  const scan=(id,distanceFeet,faint,obstacle)=>f.command('use_action',declaredAction('scan',id,{thermalReading:{distanceFeet,faint,obstacle}}));
+  assert.equal((await scan('warm',150,false,'none')).out.sensor.eligible,true);
+  const seen=await f.command('record_check',{actorId:who,rollId:'scan-roll',check:check('skill','perception'),evidence:dice(9,15),forSenseId:'warm'});
+  assert.equal(seen.out.total,24);await assert.rejects(f.command('record_check',{actorId:who,rollId:'duplicate-scan',check:check('skill','perception'),evidence:dice(15,15),forSenseId:'warm'}),/SENSOR_CHECK_UNAVAILABLE/);
+  assert.equal((await scan('faint',60,true,'none')).out.sensor.eligible,true);assert.equal((await scan('distant',61,true,'none')).out.sensor.eligible,false);
+  assert.equal((await scan('wall',2,false,'solid')).out.sensor.eligible,false);
+  await f.command('use_action',declaredAction('basic-pair','ordinary-turn'));
+  await f.command('resolve_attack',declaredAttack('pulse','pulse-attempt',{actionUseId:'ordinary-turn',replacesAttackId:'rake',hit:dice(11)}));
+  await assert.rejects(f.command('resolve_attack',declaredAttack('pulse','pulse-again',{actionUseId:'ordinary-turn',replacesAttackId:'nip',hit:dice(12)})),/SUBSTITUTION_UNAVAILABLE/);
+  const fixed=await f.command('resolve_attack',declaredAttack('nip','nip-attempt',{actionUseId:'ordinary-turn',substitutionId:'fixed'}));
+  assert.deepEqual([fixed.out.hit.total,fixed.out.hit.faces.length,fixed.out.critical],[18,0,false]);
+  const dest={label:'test surface',distanceFeet:30,unoccupied:true,visible:true,grounded:false,availableSize:'tiny',passengers:0,permittedByBarriers:true};
+  await f.command('use_action',declaredAction('shift','ordinary-shift',{destination:dest}));
+  assert.equal((await f.preview('rig-form')).projection.abilities.STR.effective,20);assert.equal((await f.read('deploy')).data.current,1);
+  await f.command('change_form',{actorId:who,formId:'rig-form',elapsedSeconds:60,uninterrupted:true,willing:true});
+  const large=await f.sheet();assert.deepEqual([large.size,large.ac.value,large.movement.walk,large.movement.fly,large.currentHp],['large',18,40,0,60]);
+  await assert.rejects(f.command('use_action',declaredAction('basic-pair','invalid-pair')),/ACTION_FORM_INELIGIBLE/);
+  await assert.rejects(f.command('resolve_attack',declaredAttack('rake','invalid-rake',{hit:dice(10)})),/ATTACK_FORM_INELIGIBLE/);
+  await assert.rejects(f.command('use_action',declaredAction('shift','bad-destination',{destination:dest})),/GROUNDED_DESTINATION_REQUIRED/);
+  await f.command('use_action',declaredAction('shift','large-shift',{destination:{...dest,grounded:true,availableSize:'large'}}));
+  assert.equal((await f.read('blink')).data.current,1);
+  await fixtureEncounter(f,'cry-enc',[[who,18],['listener',8]]);
+  await f.command('use_action',declaredAction('cry','selective',{targets:[{actorId:'listener',hears:true,distanceFeet:30}]}));
+  await f.command('use_action',declaredAction('large-pair','paired'));
+  for(const id of ['large-bite','large-rake'])await f.command('resolve_attack',declaredAttack(id,'strike-'+id,{actionUseId:'paired',hit:dice(13)}));
+  await f.command('record_check',{actorId:'listener',rollId:'first-save',check:check('save','WIS'),evidence:dice(2),forUseId:'selective'});
+  await f.command('resolve_action_save',{actorId:who,useId:'selective',targetActorId:'listener',rollId:'first-save'});
+  assert.deepEqual((await f.read('ally')).data.conditions,[]);assert.deepEqual((await f.read('listener')).data.conditions,['frightened']);
+  await f.command('advance_encounter_turn',{encounterId:'cry-enc',currentActorId:who});
+  await f.command('record_check',{actorId:'listener',rollId:'repeat-save',check:check('save','WIS'),evidence:dice(17),forUseId:'selective'});
+  await f.command('resolve_action_save',{actorId:who,useId:'selective',targetActorId:'listener',rollId:'repeat-save',endOfTurnConfirmed:true});
+  assert.deepEqual((await f.read('listener')).data.conditions,[]);assert.equal((await f.read('roar')).data.current,0);
+  await f.command('end_encounter',{encounterId:'cry-enc',currentActorId:'listener',outcome:'synthetic completion'});
+  const hit=await f.command('apply_hp_change',{actorId:who,kind:'damage',amount:80});await f.retry(hit.command);
+  assert.equal((await f.read('rig-integrity')).data.current,0);assert.equal((await f.read(who)).data.currentHp,55);assert.equal((await f.sheet()).formId,null);
+  const items=await Promise.all(ids.map(id=>f.read(id)));assert.deepEqual(items.map(i=>i.id),ids);assert.deepEqual(items.filter(i=>i.data.attuned).map(i=>i.id),['ward']);
+  assert.deepEqual(items.filter(i=>i.data.equipment==='packed').map(i=>i.id),['keepsake']);
+});
+
+test('three anatomies share four holdings, one rechargeable breath and one timed melee enhancement',async t=>{
+  const f=await setup(t);await f.defined({role:'companion',proficiency:4,currentHp:154,maxHp:154,baseAc:19,attunementCapacity:1,
+    abilities:{STR:20,DEX:18,CON:18},size:'large',creatureType:'dragon',speeds:{walk:40,fly:80,swim:40}});
+  await wornFixture(f,'primary-focus',{manual:true});await wornFixture(f,'reserve-focus',{packed:true});await wornFixture(f,'tattoo',{attuned:true});await wornFixture(f,'harness');
+  for(const [key,op] of [['acid','immunity'],['cold','resistance'],['poison','resistance']])await f.effect('biological-'+key,'damage_defense',key,op);
+  await f.pool('shared-breath','ordinary',1,1,'recharge_roll',{rechargeSides:6,rechargeMinimum:5});await f.pool('shared-mode','charge',1,1,'dawn');
+  for(const [id,size,walk,fly,swim] of [['original','large',40,80,40],['civilian','medium',30,0,null],['winged-hybrid','medium',30,40,null]]){
+    await f.command('define_form',{actorId:who,formId:id,name:id,source:'fixture',sourceItemId:'primary-focus',requiresOperating:true,revertOnSourceLoss:true,
+      timing:'action',activationSeconds:0,requiresWilling:true,size,speeds:{walk,fly,swim}});
+  }
+  const atk={actorId:who,source:'synthetic combat profile',timing:'attack',delivery:'melee',resolution:'attack',ability:'STR',proficient:true};
+  for(const [suffix,extra] of [['base',{excludedForms:['civilian','winged-hybrid']}],['hybrid',{formId:'winged-hybrid'}]]){
+    for(const [id,type,die] of [['bite','piercing',10],['claw','slashing',6]])await f.command('define_attack',{...atk,...extra,attackId:id+'-'+suffix,
+      name:id,reach:suffix==='base'?10:5,components:[component('natural',type,2,die,6),...(id==='bite'?[component('acid','acid',2,6,0)]:[])]});
+    await f.command('define_action',{actorId:who,...extra,actionId:'three-'+suffix,name:'Natural sequence',type:'multiattack',timing:'action',source:'fixture',
+      attackSequence:['bite-'+suffix,'claw-'+suffix,'claw-'+suffix]});
+  }
+  await f.command('define_action',{actorId:who,actionId:'extended',name:'Timed reach',source:'fixture',sourceItemId:'tattoo',requiresAttunement:true,
+    type:'timed_attack_mode',timing:'bonus_action',durationSeconds:60,modeReach:15,cost:{poolId:'shared-mode',amount:1},
+    modeAttacks:['bite-base','claw-base','bite-hybrid','claw-hybrid'],modeComponent:component('surge','force',1,6,0)});
+  const breath={actorId:who,source:'synthetic source-backed geometry',timing:'action',delivery:'area',resolution:'save',saveSuccess:'half',fixedHit:undefined,cost:{poolId:'shared-breath',amount:1}};
+  delete breath.fixedHit;
+  for(const [id,type,save,die,sides,extra] of [
+    ['stream','acid','DEX',8,8,{range:60,area:'60 by 5 line',excludedForms:['civilian']}],['focused','acid','DEX',8,8,{range:60,area:'one target',sourceItemId:'harness',excludedForms:['civilian']}],
+    ['fan','acid','DEX',8,8,{range:30,area:'cone',sourceItemId:'harness',excludedForms:['civilian']}],['frost','cold','CON',8,8,{area:'synthetic cold geometry',excludedForms:['civilian','winged-hybrid']}],
+    ['gas','poison','CON',8,6,{range:30,area:'30-foot area',excludedForms:['civilian','winged-hybrid']}]])
+    await f.command('define_attack',{...breath,...extra,attackId:id,name:id,saveAbility:save,saveDc:16,components:[component('breath',type,die,sides,0)]});
+  const change=id=>f.command('change_form',{actorId:who,formId:id,elapsedSeconds:0,willing:true});
+  await change('civilian');const human=await f.sheet();assert.deepEqual([human.currentHp,human.ac.value,human.proficiency,human.initiative.value,human.movement.walk,human.movement.fly],[154,19,4,4,30,0]);
+  for(const id of ['claw-base','bite-hybrid','stream','frost'])await assert.rejects(f.command('resolve_attack',declaredAttack(id,'bad-'+id)),/ATTACK_FORM_INELIGIBLE/);
+  assert.equal((await f.preview('winged-hybrid')).projection.movement.swim,null);
+  assert.equal((await f.read('shared-breath')).data.current,1);await change('winged-hybrid');
+  for(const id of ['frost','gas'])await assert.rejects(f.command('resolve_attack',declaredAttack(id,'bad-'+id)),/ATTACK_FORM_INELIGIBLE/);
+  const natural=await f.command('resolve_attack',declaredAttack('claw-hybrid','unenhanced',{hit:dice(11)}));assert.equal(natural.out.reach,5);
+  await f.command('use_action',declaredAction('extended','mode-start'));
+  const empowered=await f.command('resolve_attack',declaredAttack('claw-hybrid','melee-mode',{hit:dice(12),includeDamage:true,
+    damage:[{id:'natural',evidence:dice(4,6)},{id:'surge',evidence:dice(5)}]}));
+  assert.equal(empowered.out.reach,15);assert.deepEqual(empowered.out.damage.map(p=>p.type),['slashing','force']);
+  const shaped=await f.command('resolve_attack',declaredAttack('focused','one-geometry'));assert.equal(shaped.out.hit,null);
+  assert.deepEqual(shaped.out.components.map(c=>c.type),['acid']);assert.equal((await f.read('shared-breath')).data.current,0);
+  await assert.rejects(f.command('resolve_attack',declaredAttack('fan','second-geometry')),/RESOURCE_EMPTY_OR_UNKNOWN/);
+  await change('original');const full=await f.sheet();assert.deepEqual([full.movement.walk,full.movement.fly,full.movement.swim],[40,80,40]);
+  assert.deepEqual(full.defenses.map(d=>[d.type,d.kind]),[['acid','immunity'],['cold','resistance'],['poison','resistance']]);
+  const stillActive=await f.command('resolve_attack',declaredAttack('bite-base','full-mode',{hit:dice(10)}));assert.equal(stillActive.out.reach,15);
+  await f.command('advance_actor_time',{actorId:who,elapsedSeconds:60,confirmed:true});
+  const ended=await f.command('resolve_attack',declaredAttack('bite-base','ended-mode',{hit:dice(12)}));assert.equal(ended.out.reach,10);assert.equal(ended.out.components.length,2);
+  await f.command('apply_hp_change',{actorId:who,kind:'damage',amount:10});await change('civilian');
+  await f.command('set_item_operating',{itemId:'primary-focus',operating:false,source:'fixture suppression'});
+  assert.deepEqual([(await f.sheet()).formId,(await f.sheet()).currentHp,(await f.read('shared-mode')).data.current,(await f.read('shared-breath')).data.current],[null,144,0,0]);
+  assert.equal((await f.read('reserve-focus')).data.equipment,'packed');await assert.rejects(change('winged-hybrid'),/FORM_SOURCE_UNAVAILABLE|FORM_SOURCE_INELIGIBLE/);
+});
+
+test('separate actor turn, gate, Evasion and two competing reactions resolve against the original cast or incoming hit',async t=>{
+  const f=await setup(t);const bond='bond',enemy='other';await f.defined({actorId:bond,currentHp:30,maxHp:30,baseAc:12});
+  await f.defined({role:'companion',initiativeAfterActorId:bond,proficiency:4});await f.defined({actorId:enemy,role:'creature'});
+  await f.effect('dodge','save_mitigation','DEX','evade');
+  const action={actorId:who,source:'fixture'};
+  await f.command('define_action',{...action,actionId:'gate',name:'Test gate',type:'gate',timing:'action'});
+  const info={location:'fixture location',permittedHere:true,teleportAllowed:true};
+  await assert.rejects(f.command('use_action',declaredAction('gate','invalid-gate',{gate:{...info,open:true,teleportAllowed:false}})),/GATE_STATE_OR_LOCATION_INELIGIBLE/);
+  const opened=await f.command('use_action',declaredAction('gate','opened',{gate:{...info,open:true}}));
+  assert.deepEqual(opened.out.gate.current.timeRatio,{inside:1,outside:1});
+  await f.command('use_action',declaredAction('gate','closed',{gate:{...info,open:false}}));
+  await f.command('define_action',{...action,actionId:'channel',name:'Touch channel',type:'touch_delivery',timing:'reaction',bondedActorId:bond,range:120});
+  await f.command('define_action',{...action,actionId:'intercept',name:'Deflect',type:'deflection',timing:'reaction',bondedActorId:bond,range:5,reduction:{dice:3,sides:4}});
+  await f.command('define_spell',{actorId:bond,spellId:'contact',name:'Contact',source:'fixture',baseLevel:0,concentration:false,
+    ritual:false,resolution:'automatic',timing:'action',rangeKind:'touch',components:[component('renew','healing',0,6,1)]});
+  await f.command('grant_spell',{actorId:bond,spellId:'contact',grantId:'contact-grant',source:'fixture',route:'at_will',levels:[0],preparation:'not_required'});
+  await f.command('define_attack',{actorId:enemy,attackId:'incoming',name:'Incoming strike',source:'fixture',timing:'attack',delivery:'melee',resolution:'attack',fixedHit:5,components:[component('impact','slashing',0,6,14)]});
+  await f.command('define_attack',{actorId:enemy,attackId:'burst',name:'Area',source:'fixture',timing:'action',delivery:'area',resolution:'save',saveAbility:'DEX',saveDc:14,saveSuccess:'half',components:[component('heat','fire',0,6,14)]});
+  // The encounter accepts an actual independent actor initiative and the configured dependent's own turn.
+  for(const [id,face] of [[bond,18],[enemy,10]])await f.command('record_check',{actorId:id,rollId:'order-'+id,check:check('initiative','initiative'),evidence:dice(face)});
+  await f.command('start_encounter',{encounterId:'two-reactions',name:'Two reactions',participants:[{actorId:enemy,initiativeRollId:'order-'+enemy},{actorId:who},{actorId:bond,initiativeRollId:'order-'+bond}]});
+  const order=(await f.read('two-reactions')).data;assert.deepEqual(order.participants,[bond,who,enemy]);assert.deepEqual(order.initiative[1],{actorId:who,total:20,rollId:null,afterActorId:bond});
+  await f.command('cast_spell',{actorId:bond,castId:'contact-instance',grantId:'contact-grant',level:0,deliveryActorId:who,targets:[enemy]});
+  await f.command('link_cast_roll',{actorId:bond,castId:'contact-instance',damage:[{id:'renew',evidence:dice()}]});
+  const contact={actorId:bond,castId:'contact-instance',targetActorId:enemy,source:'confirmed fixture target'};
+  await assert.rejects(f.command('resolve_cast_target',contact),/SPELL_AWAITS_DELIVERY_REACTION/);
+  await f.command('advance_encounter_turn',{encounterId:'two-reactions',currentActorId:bond});
+  const delivery={castId:'contact-instance',targetActorId:enemy,distanceToCaster:120,targetWithinReach:true};
+  await assert.rejects(f.command('use_action',declaredAction('channel','out-of-range',{delivery:{...delivery,distanceToCaster:121}})),/TOUCH_DELIVERY_INELIGIBLE/);
+  await f.command('use_action',declaredAction('channel','delivery',{delivery}));
+  await f.command('resolve_cast_target',contact);
+  await f.command('advance_encounter_turn',{encounterId:'two-reactions',currentActorId:who});
+  const strike=id=>f.command('resolve_attack',declaredAttack('incoming',id,{actorId:enemy,hit:dice(16),includeDamage:true,targets:[bond],damage:[{id:'impact',evidence:dice()}]}));
+  await strike('hit-a');
+  const deflect=id=>f.command('use_action',declaredAction('intercept','deflect-'+id,{deflection:{attemptId:id,targetActorId:bond,distanceFeet:5,visible:true,dice:dice(3,4,2)}}));
+  await assert.rejects(deflect('hit-a'),/ACTION_UNAVAILABLE/);
+  const turn=actorId=>f.command('advance_encounter_turn',{encounterId:'two-reactions',currentActorId:actorId});
+  await turn(enemy);await turn(bond);await turn(who);await strike('hit-b');
+  const reaction=await deflect('hit-b');assert.equal(reaction.out.deflection.roll.total,9);
+  const result=await f.command('resolve_attack_target',{actorId:enemy,attemptId:'hit-b',targetActorId:bond,source:'fixture resolved target'});
+  assert.equal(result.out.amount,5);await f.retry(result.command);assert.equal((await f.read(bond)).data.currentHp,25);
+  await f.command('end_encounter',{encounterId:'two-reactions',currentActorId:enemy,outcome:'fixture conclusion'});
+  for(const [id,face,amount] of [['passed',18,0],['failed',2,7]]){
+    await f.command('resolve_attack',declaredAttack('burst',id,{actorId:enemy,includeDamage:true,targets:[who],damage:[{id:'heat',evidence:dice()}]}));
+    await f.command('record_check',{actorId:who,rollId:'save-'+id,check:check('save','DEX'),evidence:dice(face),forAttemptId:id});
+    const resolution=await f.command('resolve_attack_target',{actorId:enemy,attemptId:id,targetActorId:who,saveRollId:'save-'+id,source:'confirmed target resolution'});
+    assert.equal(resolution.out.amount,amount);
+  }
 });

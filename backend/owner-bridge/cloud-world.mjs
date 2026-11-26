@@ -40,9 +40,14 @@ async function worldRecord(ctx,args,updating) {
   const before = updating ? await recordRead(ctx,'world_entity',args.entityId) : null;
   if (!updating) await recordNew(ctx,'world_entity',args.entityId);
   if (before && (before.actorId !== args.actorId || before.data.category !== args.category)) recordsFail('WORLD_IDENTITY_CONFLICT',409);
-  if (before?.data.partyStorage && args.partyStorage !== true) recordsFail('STORAGE_DEPENDENCY_REVIEW_REQUIRED',409);
+  const partyStorage=args.partyStorage??before?.data.partyStorage??false;
+  if(before?.data.partyStorage && !partyStorage){
+    const occupied=await ctx.service.s(`SELECT 1 AS present FROM cloud_entities WHERE owner_id=? AND continuity_id=? AND kind='item_instance'
+      AND json_extract(data_json,'$.holding')='storage' AND json_extract(data_json,'$.locationId')=? LIMIT 1`,...ctx.binding,before.id).first();
+    if(occupied)recordsFail('STORAGE_DEPENDENCY_REVIEW_REQUIRED',409);
+  }
   await ctx.put({id:args.entityId,kind:'world_entity',actorId:args.actorId,title:args.name,
-    data:{category:args.category,knownDescription:args.knownDescription,partyStorage:args.partyStorage??false,source:args.source}});
+    data:{category:args.category,knownDescription:args.knownDescription,partyStorage,source:args.source}});
   if(args.actorId !== null) await ctx.link(args.entityId,'represents_actor',args.actorId);
   return {worldEntityId:args.entityId};
 }

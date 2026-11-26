@@ -2,11 +2,11 @@
   "version": 1,
   "scope": "Registered MCP and authenticated Android HTTP wire protocols, synthetic SQL fixtures",
   "summary": {
-    "declaredOperations": 99,
-    "bidirectionallyExercised": 98,
+    "declaredOperations": 105,
+    "bidirectionallyExercised": 104,
     "exactRetryAndIndependentReceiptChecked": true,
-    "commandsPerDirection": 383,
-    "independentRowsPerDirection": 624,
+    "commandsPerDirection": 534,
+    "independentRowsPerDirection": 887,
     "ownerOnly": [
       "update_continuity_settings"
     ]
@@ -17,12 +17,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 25,
-        "readbacks": 50
+        "commands": 38,
+        "readbacks": 76
       },
       "device": {
-        "commands": 25,
-        "readbacks": 50
+        "commands": 38,
+        "readbacks": 76
       }
     },
     "adjust_coins": {
@@ -69,12 +69,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 2,
-        "readbacks": 2
+        "commands": 5,
+        "readbacks": 5
       },
       "device": {
-        "commands": 2,
-        "readbacks": 2
+        "commands": 5,
+        "readbacks": 5
       }
     },
     "apply_hp_change": {
@@ -82,12 +82,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 4,
-        "readbacks": 8
+        "commands": 7,
+        "readbacks": 13
       },
       "device": {
-        "commands": 4,
-        "readbacks": 8
+        "commands": 7,
+        "readbacks": 13
       }
     },
     "archive_records": {
@@ -121,12 +121,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 1,
-        "readbacks": 1
+        "commands": 2,
+        "readbacks": 2
       },
       "device": {
-        "commands": 1,
-        "readbacks": 1
+        "commands": 2,
+        "readbacks": 2
       }
     },
     "cast_spell": {
@@ -134,12 +134,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 4,
-        "readbacks": 8
+        "commands": 6,
+        "readbacks": 10
       },
       "device": {
-        "commands": 4,
-        "readbacks": 8
+        "commands": 6,
+        "readbacks": 10
       }
     },
     "change_form": {
@@ -147,11 +147,24 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 7,
+        "commands": 8,
+        "readbacks": 13
+      },
+      "device": {
+        "commands": 8,
+        "readbacks": 13
+      }
+    },
+    "complete_actor_care": {
+      "scope": "resources",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
         "readbacks": 10
       },
       "device": {
-        "commands": 7,
+        "commands": 2,
         "readbacks": 10
       }
     },
@@ -186,12 +199,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 6,
-        "readbacks": 23
+        "commands": 8,
+        "readbacks": 29
       },
       "device": {
-        "commands": 6,
-        "readbacks": 23
+        "commands": 8,
+        "readbacks": 29
       }
     },
     "correct_resource_balance": {
@@ -225,12 +238,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 7,
-        "readbacks": 7
+        "commands": 14,
+        "readbacks": 14
       },
       "device": {
-        "commands": 7,
-        "readbacks": 7
+        "commands": 14,
+        "readbacks": 14
       }
     },
     "define_actor": {
@@ -238,12 +251,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 34,
-        "readbacks": 34
+        "commands": 45,
+        "readbacks": 45
       },
       "device": {
-        "commands": 34,
-        "readbacks": 34
+        "commands": 45,
+        "readbacks": 45
       }
     },
     "define_attack": {
@@ -251,12 +264,25 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 12,
-        "readbacks": 12
+        "commands": 18,
+        "readbacks": 18
       },
       "device": {
-        "commands": 12,
-        "readbacks": 12
+        "commands": 18,
+        "readbacks": 18
+      }
+    },
+    "define_care_protocol": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 2
       }
     },
     "define_connection": {
@@ -290,12 +316,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 20,
-        "readbacks": 40
+        "commands": 44,
+        "readbacks": 88
       },
       "device": {
-        "commands": 20,
-        "readbacks": 40
+        "commands": 44,
+        "readbacks": 88
       }
     },
     "define_feature": {
@@ -316,12 +342,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 7,
-        "readbacks": 7
+        "commands": 8,
+        "readbacks": 8
       },
       "device": {
-        "commands": 7,
-        "readbacks": 7
+        "commands": 8,
+        "readbacks": 8
       }
     },
     "define_item_definition": {
@@ -329,12 +355,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 22,
-        "readbacks": 22
+        "commands": 34,
+        "readbacks": 34
       },
       "device": {
-        "commands": 22,
-        "readbacks": 22
+        "commands": 34,
+        "readbacks": 34
       }
     },
     "define_objective": {
@@ -355,12 +381,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 30,
-        "readbacks": 60
+        "commands": 39,
+        "readbacks": 79
       },
       "device": {
-        "commands": 30,
-        "readbacks": 60
+        "commands": 39,
+        "readbacks": 79
       }
     },
     "define_spell": {
@@ -368,12 +394,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 4,
-        "readbacks": 4
+        "commands": 6,
+        "readbacks": 6
       },
       "device": {
-        "commands": 4,
-        "readbacks": 4
+        "commands": 6,
+        "readbacks": 6
       }
     },
     "define_wallet": {
@@ -407,12 +433,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 1,
-        "readbacks": 1
+        "commands": 2,
+        "readbacks": 2
       },
       "device": {
-        "commands": 1,
-        "readbacks": 1
+        "commands": 2,
+        "readbacks": 2
       }
     },
     "enable_effect": {
@@ -433,12 +459,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 1,
-        "readbacks": 3
+        "commands": 2,
+        "readbacks": 6
       },
       "device": {
-        "commands": 1,
-        "readbacks": 3
+        "commands": 2,
+        "readbacks": 6
       }
     },
     "equip_item": {
@@ -446,12 +472,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 8,
-        "readbacks": 16
+        "commands": 16,
+        "readbacks": 32
       },
       "device": {
-        "commands": 8,
-        "readbacks": 16
+        "commands": 16,
+        "readbacks": 32
       }
     },
     "exchange_coins": {
@@ -498,12 +524,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 4,
-        "readbacks": 4
+        "commands": 5,
+        "readbacks": 5
       },
       "device": {
-        "commands": 4,
-        "readbacks": 4
+        "commands": 5,
+        "readbacks": 5
       }
     },
     "integrate_component": {
@@ -667,12 +693,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 9,
-        "readbacks": 9
+        "commands": 17,
+        "readbacks": 18
       },
       "device": {
-        "commands": 9,
-        "readbacks": 9
+        "commands": 17,
+        "readbacks": 18
       }
     },
     "record_chronicle_event": {
@@ -779,17 +805,30 @@
         "readbacks": 2
       }
     },
+    "remove_custom_skill": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
     "resolve_action_save": {
       "scope": "combat",
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 1,
-        "readbacks": 3
+        "commands": 3,
+        "readbacks": 9
       },
       "device": {
-        "commands": 1,
-        "readbacks": 3
+        "commands": 3,
+        "readbacks": 9
       }
     },
     "resolve_attack": {
@@ -797,12 +836,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 13,
-        "readbacks": 24
+        "commands": 17,
+        "readbacks": 35
       },
       "device": {
-        "commands": 13,
-        "readbacks": 24
+        "commands": 17,
+        "readbacks": 35
       }
     },
     "resolve_attack_target": {
@@ -855,6 +894,19 @@
       "device": {
         "commands": 6,
         "readbacks": 11
+      }
+    },
+    "resolve_pool_recharge": {
+      "scope": "resources",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 3,
+        "readbacks": 3
+      },
+      "device": {
+        "commands": 3,
+        "readbacks": 3
       }
     },
     "restore_records": {
@@ -1065,6 +1117,19 @@
         "readbacks": 2
       }
     },
+    "set_actor_dormancy": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 4
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 4
+      }
+    },
     "set_actor_profile": {
       "scope": "character",
       "ownerReview": false,
@@ -1122,12 +1187,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 1,
-        "readbacks": 2
+        "commands": 2,
+        "readbacks": 4
       },
       "device": {
-        "commands": 1,
-        "readbacks": 2
+        "commands": 2,
+        "readbacks": 4
       }
     },
     "set_item_favorite": {
@@ -1148,12 +1213,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 1,
-        "readbacks": 2
+        "commands": 2,
+        "readbacks": 5
       },
       "device": {
-        "commands": 1,
-        "readbacks": 2
+        "commands": 2,
+        "readbacks": 5
       }
     },
     "set_roll_context": {
@@ -1169,17 +1234,30 @@
         "readbacks": 1
       }
     },
+    "set_skill_pin": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
     "set_skill_training": {
       "scope": "character",
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 3,
-        "readbacks": 3
+        "commands": 6,
+        "readbacks": 6
       },
       "device": {
-        "commands": 3,
-        "readbacks": 3
+        "commands": 6,
+        "readbacks": 6
       }
     },
     "spend_resource": {
@@ -1200,12 +1278,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 2,
-        "readbacks": 6
+        "commands": 3,
+        "readbacks": 9
       },
       "device": {
-        "commands": 2,
-        "readbacks": 6
+        "commands": 3,
+        "readbacks": 9
       }
     },
     "start_encounter": {
@@ -1213,12 +1291,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 1,
-        "readbacks": 3
+        "commands": 3,
+        "readbacks": 9
       },
       "device": {
-        "commands": 1,
-        "readbacks": 3
+        "commands": 3,
+        "readbacks": 9
       }
     },
     "transfer_coins": {
@@ -1239,12 +1317,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 5,
-        "readbacks": 26
+        "commands": 6,
+        "readbacks": 32
       },
       "device": {
-        "commands": 5,
-        "readbacks": 26
+        "commands": 6,
+        "readbacks": 32
       }
     },
     "update_attack": {
@@ -1291,12 +1369,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 7,
-        "readbacks": 17
+        "commands": 17,
+        "readbacks": 37
       },
       "device": {
-        "commands": 7,
-        "readbacks": 17
+        "commands": 17,
+        "readbacks": 37
       }
     }
   }

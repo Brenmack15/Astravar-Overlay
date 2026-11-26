@@ -247,3 +247,30 @@ test('equipment review is safely superseded, whereas an independent same-price p
   assert.equal((await l.request(path+'/state?id=purse')).value.records[0].data.coins.gp,20);
   assert.deepEqual((await l.request(path+'/state?id=fixture-clip-two')).value.records,[]);
 });
+
+test('pool ledger preserves exact scoped balances, receipt confidentiality and a fixed page revision', async t => {
+  const l = await lab(t);
+  await l.connect();
+  for (const [i,[name,args]] of [
+    ['define_actor',player],
+    ['define_resource',{actorId:player.actorId,poolId:'relay',name:'Relay',type:'charge',maximum:3,current:3,recovery:'none',source:'fixture'}],
+    ['spend_resource',{actorId:player.actorId,poolId:'relay',amount:2}],
+  ].entries()) assert.equal((await l.post(path+'/commands',command(i,name,args))).value.status,'COMMITTED');
+  const page = await l.rpc('get_cloud_pool_history',{id:'relay',limit:1});
+  assert.deepEqual(page.events.map(e=>[e.before,e.after,e.operation,e.evidenceAvailable]),[[3,1,'spend_resource',true]]);
+  const independently = await l.request(path+'/pool-history/relay?limit=1',{as:'device'});
+  assert.deepEqual(independently.value,page);
+  assert.equal((await l.rpc('get_cloud_receipt',{commandId:page.events[0].commandId})).receipt.transactionId,page.events[0].transactionId);
+  const next = {id:'relay',limit:1,after:page.nextAfter,atRevision:page.revision,atEpoch:page.epoch,grantRevision:page.grantRevision};
+  const earlier = await l.rpc('get_cloud_pool_history',next);
+  assert.deepEqual(earlier.events.map(e=>[e.before,e.after,e.operation]),[[null,3,'define_resource']]);
+  assert.equal(earlier.nextAfter,null);
+  await l.grant('sites-mcp',['resources.read'],[],[player.actorId],1);
+  assert.equal((await l.rpc('get_cloud_pool_history',next)).error,'SNAPSHOT_CHANGED');
+  const limited = await l.rpc('get_cloud_pool_history',{id:'relay'});
+  assert.equal(limited.events.length,2);
+  assert.deepEqual(limited.events.map(e=>e.after),[1,3]);
+  assert.equal(Object.hasOwn(limited.events[1],'commandId'),false);
+  await l.grant('sites-mcp',['resources.read'],[],['other-fixture'],2);
+  assert.equal((await l.rpc('get_cloud_pool_history',{id:'relay'})).error,'POOL_UNAVAILABLE');
+});

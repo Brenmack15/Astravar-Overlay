@@ -7,6 +7,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.data.CloudCampaignClient
+import com.yazsras.astravar.data.CloudSnapshot
+import com.yazsras.astravar.data.recordViewSuffix
+import com.yazsras.astravar.rules.reforge.SecureDice
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
@@ -79,11 +82,19 @@ private fun JsonObjectBuilder.optionalId(key: String, id: String) {
     val exclude: String = "", val pool: String = "", val cost: String = "",
     val components: List<AttackDamageDraft> = emptyList(), val riders: List<AttackRiderDraft> = emptyList(),
     val calculatedDc: Boolean = false, val dcAbility: String = "", val dcBase: String = "8",
-    val dcProficient: Boolean = false, val dcBonus: String = "") {
+    val dcProficient: Boolean = false, val dcBonus: String = "", val reviewedHolding: String = "",
+    val reviewedDefinition: String = "", val itemRevision: Long? = null, val definitionRevision: Long? = null) {
     fun payload(actorId: String, revision: Long? = null, discardSelections: Boolean = false): JsonObject = buildJsonObject {
         require(name.trim().length in 1..160 && source.trim().length in 1..300) { "Enter the attack name and source." }
         put("actorId", actorId); put("attackId", id); put("name", name.trim()); put("source", source.trim())
+        require(timing in listOf("action","attack","bonus_action","reaction","other") && delivery in listOf("melee","ranged","area","other")
+            && resolution in listOf("attack","save","automatic","manual")) { "Review the action cost, delivery and resolution." }
+        if (reviewedHolding.isNotBlank()) {
+            require(item == reviewedHolding && revision == null && itemRevision != null && definitionRevision != null) { "Reopen the selected item to review its source." }
+            putJsonObject("sourceReview") { put("definitionId",reviewedDefinition);put("itemRevision",itemRevision);put("definitionRevision",definitionRevision) }
+        }
         put("timing", timing); put("delivery", delivery); put("resolution", resolution)
+        require(description.length <= 2000) { "Edit the attack description to 2,000 characters or fewer. Its full item source stays linked." }
         optional("classification", classification); optional("description", description)
         when (resolution) {
             "attack" -> if (fixed) put("fixedHit", number(hit, "Fixed hit modifier", -200..200)) else {
@@ -169,10 +180,10 @@ private fun JsonObjectBuilder.optionalId(key: String, id: String) {
 }
 private fun <T> List<T>.move(index: Int, target: Int): List<T> = toMutableList().apply { add(target, removeAt(index)) }
 @Composable internal fun CloudAttackBuilder(actorId: String, attack: JsonObject?, online: Boolean, onDismiss: () -> Unit,
-    commit: (String, JsonObject) -> Unit, client: CloudCampaignClient? = null) {
+    commit: (String, JsonObject) -> Unit, client: CloudCampaignClient? = null, reviewedSource: CloudAttackDraft? = null) {
     val recordId = attack.str("id")
-    val initial = rememberSaveable(actorId,recordId) { Json.encodeToString(CloudAttackDraft.serializer(),
-        attack?.let(CloudAttackDraft::read) ?: CloudAttackDraft(newId())) }
+    val initial = rememberSaveable(actorId,recordId,reviewedSource?.id) { Json.encodeToString(CloudAttackDraft.serializer(),
+        attack?.let(CloudAttackDraft::read) ?: reviewedSource ?: CloudAttackDraft(newId())) }
     val startingRevision = rememberSaveable(actorId,recordId) { attack.str("revision") }.toLongOrNull()
     val draftState = rememberReforgeDraft(Json.decodeFromString(CloudAttackDraft.serializer(), initial), CloudAttackDraft.serializer())
     var d by draftState
@@ -280,7 +291,8 @@ private fun <T> List<T>.move(index: Int, target: Int): List<T> = toMutableList()
                 if(d.components.isNotEmpty()) Text(d.components.joinToString(" + ") { it.preview })
             }
             3 -> {
-                BuilderReference("Source item",d.item,references["item_instance"].orEmpty()){d=d.copy(item=it)}
+                if(d.reviewedHolding.isNotBlank()) Text("Reviewed source item · ${d.item}")
+                else BuilderReference("Source item",d.item,references["item_instance"].orEmpty()){d=d.copy(item=it)}
                 Toggle("Requires attunement",d.attuned){d=d.copy(attuned=it)}
                 Toggle("Requires operating equipment",d.operating){d=d.copy(operating=it)}
                 BuilderReference("Required form",d.form,references["form"].orEmpty()){d=d.copy(form=it)}
@@ -332,4 +344,79 @@ private fun <T> List<T>.move(index: Int, target: Int): List<T> = toMutableList()
             }
         }
     }
+}
+
+private val sourceDamageLine = Regex(
+    """(?:[\p{L} '’\-]{0,100}\b(?:deals?|inflicts?|causes?)\s+)?((?:\d{0,3}d\d{1,4}(?:\s*[+\-]\s*\d{1,4})?|\d{1,4}))\s+([a-z]+)\s+damage""",
+    RegexOption.IGNORE_CASE
+)
+private val conditionalSource = Regex("""\b(if|unless|when|while|whenever|additional|critical|instead|can|may|optional)\b""", RegexOption.IGNORE_CASE)
+
+/** Only unqualified, explicitly typed components become suggestions. Original prose remains visible for adjudication. */
+internal fun reviewedItemAttack(holding: JsonObject, definition: JsonObject, useInstance: Boolean): CloudAttackDraft {
+    val instance = holding["data"]?.jsonObject
+    require(holding.str("kind") == "item_instance" && definition.str("kind") == "item_definition" &&
+        instance.str("definitionId") == definition.str("id"))
+    val text = (if(useInstance) instance else definition["data"] as? JsonObject).str("description")
+    val components = text.split(Regex("""[.\n;]""")).mapNotNull { sentence ->
+        if(conditionalSource.containsMatchIn(sentence)) return@mapNotNull null
+        val m=sourceDamageLine.matchEntire(sentence.trim()) ?: return@mapNotNull null
+        val type=m.groupValues[2].lowercase().takeIf { it in damageKinds } ?: return@mapNotNull null
+        val formula=runCatching { SecureDice.parse(m.groupValues[1]) }.getOrNull() ?: return@mapNotNull null
+        val term=formula.dice.singleOrNull()
+        if((term?.count ?: 0)>100 || formula.flat !in -1000..1000 || (term==null && formula.flat==0))return@mapNotNull null
+        AttackDamageDraft(newId(),cloudLabel(type),type,(term?.count ?: 0).toString(),term?.sides?.toString().orEmpty(),formula.flat.toString(),
+            critical=false)
+    }.take(24)
+    return CloudAttackDraft(newId(),source="Reviewed ${if(useInstance)"holding" else "item definition"} ${if(useInstance)holding.str("id") else definition.str("id")}",
+        description=text,delivery="",timing="",resolution="",item=holding.str("id"),components=components,
+        reviewedHolding=holding.str("id"),reviewedDefinition=definition.str("id"),itemRevision=holding.str("revision").toLong(),
+        definitionRevision=definition.str("revision").toLong())
+}
+
+@Composable internal fun CloudItemAttackSourceReview(actorId:String,client:CloudCampaignClient,snapshot:CloudSnapshot,
+    select:(CloudAttackDraft)->Unit) {
+    var expanded by rememberSaveable(actorId) { mutableStateOf(false) }
+    PlayerOutlinedButton({expanded=!expanded}) { Text("Review item mechanics") }
+    if(!expanded)return
+    var cursor by rememberSaveable(actorId) { mutableStateOf<String?>(null) }
+    var chosen by rememberSaveable(actorId) { mutableStateOf<String?>(null) }
+    var page by remember(snapshot,actorId,cursor) { mutableStateOf<JsonObject?>(null) }
+    var detail by remember(snapshot,chosen) { mutableStateOf<JsonObject?>(null) }
+    var error by remember(snapshot,chosen,cursor) { mutableStateOf<String?>(null) }
+    LaunchedEffect(snapshot,actorId,cursor,chosen) {
+        try {
+            if(chosen==null)page=client.projection(snapshot,recordViewSuffix("inventory",snapshot.version,id=actorId,after=cursor))
+            else detail=client.projection(snapshot,recordViewSuffix("inventory",snapshot.version,id=chosen))
+        } catch(e:CancellationException){throw e} catch(e:Exception){error=cloudError(e)}
+    }
+    if(chosen==null) {
+        page?.let { list ->
+            val items=list.rows("items")
+            if(items.isEmpty())Text("No carried items in this view.")
+            items.forEach { item -> PlayerTextButton({chosen=item.str("id")}) { Text(item.str("title")) } }
+            list.str("nextAfter").takeIf(String::isNotBlank)?.let { next -> PlayerTextButton({cursor=next}){Text("More items")} }
+            if(cursor!=null)PlayerTextButton({cursor=null}){Text("First page")}
+        }
+    } else {
+        PlayerTextButton({chosen=null}) {Text("Choose another item")}
+        detail?.let { result ->
+            val item=result.getValue("holding").jsonObject
+            val def=result.getValue("definition").jsonObject
+            Text(item.str("title"),style=MaterialTheme.typography.titleMedium)
+            listOf(false,true).forEach { physical ->
+                val owner=if(physical)item else def
+                val source=(owner["data"] as? JsonObject).str("description")
+                if(source.isNotBlank()){
+                    Text(if(physical)"Physical item description" else "Shared definition")
+                    Text(source)
+                    PlayerTextButton({select(reviewedItemAttack(item,def,physical))}){Text(if(physical)"Use item text" else "Use definition text")}
+                }
+            }
+            if(listOf(item,def).all{(it["data"] as? JsonObject).str("description").isBlank()})
+                Text("No mechanical description is recorded for this item.")
+        }
+    }
+    if(page==null && detail==null && error==null)Text("Reading item sources…")
+    error?.let{Text(it,color=MaterialTheme.colorScheme.error)}
 }

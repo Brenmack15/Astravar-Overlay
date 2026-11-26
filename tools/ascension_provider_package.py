@@ -37,7 +37,8 @@ def prepare(folder, package):
         migration.verify(len(raw) == size, "Incomplete private asset")
         with path.open("xb") as f:
             f.write(raw)
-    return {"objects": sorted(locations), **migration.summary(bundle)}
+    return {"objects": sorted(locations), "cutoverHolds": sum(report.get("cutoverHolds", 0) for _, report in bundle["sources"].values()),
+            **migration.summary(bundle)}
 
 
 def process(args):

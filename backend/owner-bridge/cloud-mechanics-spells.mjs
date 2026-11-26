@@ -52,6 +52,7 @@ async function cast(ctx,x){
   const a=await actor(ctx,x.actorId),g=await owned(ctx,'spell_grant',x.grantId,a.id),grant=g.data;
   const spell=await owned(ctx,'spell',grant.spellId,a.id),d=spell.data,p=await sheet(ctx,a.id);
   must(grant.levels.includes(x.level) && grant.preparation!=='known','CASTING_ROUTE_UNAVAILABLE');
+  must(!['disabled','dormant'].includes(a.data.activityState),'ACTOR_INACTIVE');
   must(!p.conditions.some(c=>['incapacitated','unconscious','stunned','paralyzed','petrified'].includes(c)),'CASTER_INCAPACITATED');
   must(d.resolution!=='manual'&&!grant.prerequisites,'MANUAL_ADJUDICATION_REQUIRED');
   must(await gearEligible(ctx,grant.sourceItemId,a.id,grant.requiresAttunement,grant.requiresOperating),'SPELL_SOURCE_ITEM_UNAVAILABLE');
@@ -81,7 +82,8 @@ async function cast(ctx,x){
   must(d.resolution!=='save'||dc!=null,'SPELL_DC_UNKNOWN');
   const scaling=scaledSpellEffects(d,x.level),targets=x.targets??[];
   must(new Set(targets).size===targets.length && (scaling.targets==null||targets.length<=scaling.targets),'SPELL_TARGET_COUNT_INVALID');
-  const data={actorId:a.id,formId:p.formId,spellId:spell.id,grantId:g.id,baseLevel:d.baseLevel,level:x.level,
+  if(x.deliveryActorId){must(d.rangeKind==='touch' && targets.length===1 && x.deliveryActorId!==a.id,'SPELL_DELIVERY_INELIGIBLE');await actor(ctx,x.deliveryActorId);}
+  const data={actorId:a.id,rangeKind:d.rangeKind??null,deliveryActorId:x.deliveryActorId??null,formId:p.formId,spellId:spell.id,grantId:g.id,baseLevel:d.baseLevel,level:x.level,
     route:grant.route,source:grant.source,sourceItemId:grant.sourceItemId??null,costs,timing:grant.route==='ritual'?'ritual':d.timing,
     resolution:d.resolution,hitModifier:hit,save:d.resolution==='save'?{ability:d.saveAbility,dc,success:d.saveSuccess??null}:null,components:snapshotComponents(d.components,p,{},x.level-d.baseLevel),
     concentration:d.concentration,duration:d.duration??null,scaling,targets,targetResults:[],outcome:'pending',hit:null,damage:null,
@@ -128,6 +130,6 @@ export const spellOperations=Object.freeze({
     const preparation=x.prepared?'prepared':'known';
     await save(ctx,g,{...g.data,preparation});return {grantId:g.id,preparation};
   }),
-  cast_spell:op('spells',fields({actorId:identifier,grantId:identifier,castId:identifier,level:whole(0,9),slotPoolId:identifier,replaceConcentration:boolean,confirmedRitualTime:boolean,targets:arrayOf(identifier,12)},['actorId','grantId','castId','level']),cast),
+  cast_spell:op('spells',fields({actorId:identifier,grantId:identifier,castId:identifier,level:whole(0,9),slotPoolId:identifier,replaceConcentration:boolean,confirmedRitualTime:boolean,deliveryActorId:identifier,targets:arrayOf(identifier,12)},['actorId','grantId','castId','level']),cast),
   link_cast_roll:op('spells',fields({actorId:identifier,castId:identifier,hit:evidence,mode,damage:damageEvidence},['actorId','castId']),castRoll)
 });

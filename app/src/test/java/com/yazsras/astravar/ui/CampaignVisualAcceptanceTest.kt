@@ -123,7 +123,7 @@ class CampaignVisualAcceptanceTest {
                     AstravarTheme {
                         Scaffold(containerColor = RebuildPalette.Canvas,
                             topBar = { RebuildAppHeader(false) },
-                            bottomBar = { RebuildPrimaryNavigation(destination) {} }) { insets ->
+                            bottomBar = { RebuildPrimaryNavigation(if (destination == "Campaign") "Chronicle" else destination) {} }) { insets ->
                             Column(Modifier.fillMaxSize().padding(insets)) {
                                 if (destination == "Campaign") Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
                                     TextButton(onClick = {}) { Text("‹ Campaign") }
@@ -187,7 +187,7 @@ class CampaignVisualAcceptanceTest {
         compose.mainClock.advanceTimeByFrame()
         shadowOf(Looper.getMainLooper()).idle()
         compose.waitForIdle()
-        val labelBounds = listOf("ASTRAVAR", "Character", "Inventory", "Companions", "Campaign", "Add", "Add Item", "Add Invention").associateWith { label ->
+        val labelBounds = listOf("ASTRAVAR", "Character", "Inventory", "Connections", "Chronicle", "Add", "Add Item", "Add Invention").associateWith { label ->
             compose.onAllNodesWithText(label, useUnmergedTree = true).fetchSemanticsNodes().map { it.boundsInRoot }
         }
         val geometry = labelBounds.map { (label, bounds) -> "$label: ${bounds.joinToString()}" }
@@ -220,7 +220,7 @@ class CampaignVisualAcceptanceTest {
                 // Preserve the exact failing native draw too, so a pixel assertion never
                 // hides the diagnostic evidence needed to distinguish cache from layout.
                 savePresentationCapture(bitmap, name)
-                if (!modal) listOf("ASTRAVAR", "Character", "Inventory", "Companions", "Campaign").forEach { label ->
+                if (!modal) listOf("ASTRAVAR", "Character", "Inventory", "Connections", "Chronicle").forEach { label ->
                     val bounds = requireNotNull(labelBounds.getValue(label).maxByOrNull { it.top }) { "Shell label missing from semantics: $label" }
                     var visibleInk = 0
                     val left = bounds.left.toInt().coerceIn(0, bitmap.width)
@@ -298,7 +298,7 @@ class CampaignVisualAcceptanceTest {
             settle { compose.onAllNodesWithText(connectionName).fetchSemanticsNodes().isNotEmpty() }
             primary("Add")
             textFullyVisible("ASTRAVAR", singleLine = true)
-            listOf("Character", "Inventory", "Companions", "Campaign").forEach { textFullyVisible(it, singleLine = true) }
+            listOf("Character", "Inventory", "Connections", "Chronicle").forEach { textFullyVisible(it, singleLine = true) }
             compose.onNodeWithText("Returned the map").assertIsDisplayed()
             capture("rebuild-connections-400", fixture.activity.get())
             val before = runBlocking { fixture.db.recordsDao().allEntities() }

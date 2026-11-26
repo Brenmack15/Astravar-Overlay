@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 100
     env:
       GENESIS_GATE: 'true'
-      EXPECTED_VERSION_NAME: '4.1.0-ascension-dev'
+      EXPECTED_VERSION_NAME: '4.1.0'
       EXPECTED_VERSION_CODE: '59'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

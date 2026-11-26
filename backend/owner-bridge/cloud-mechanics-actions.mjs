@@ -1,23 +1,29 @@
+import { linkedTypes, linkedDefinitions, linkedArguments, validateLinkedAction, executeLinkedAction } from './cloud-mechanics-linked.mjs';
 import { stats, identifier, named, whole, nullable, arrayOf, option, boolean, fields, actionCost, costSchema, must, op, actor, owned, insert, save, transferableSource, gearEligible, sheet, spend, useTiming } from './cloud-mechanics-core.mjs';
 
 const sizeOrder=['tiny','small','medium','large','huge','gargantuan'];
 const actionSchema=fields({
-  actorId:identifier,actionId:identifier,name:named(120),source:named(300),
-  type:option('use','teleport','frighten','roll_bonus','multiattack','fixed_attack_die'),fixedDieValue:whole(1,20),attackSequence:arrayOf(identifier,12),timing:actionCost,formId:identifier,sourceItemId:identifier,transfersWithItem:boolean,
+  ...linkedDefinitions,actorId:identifier,actionId:identifier,name:named(120),source:named(300),
+  type:option('use','teleport','frighten','roll_bonus','multiattack','fixed_attack_die',...linkedTypes),fixedDieValue:whole(1,20),attackSequence:arrayOf(identifier,12),substitutions:arrayOf(fields({attackId:identifier,replaces:arrayOf(identifier,12),maximum:whole(1,12)},['attackId','replaces','maximum']),12),timing:actionCost,formId:identifier,excludedForms:arrayOf(identifier,16),sourceItemId:identifier,transfersWithItem:boolean,
   requiresOperating:boolean,requiresAttunement:boolean,cost:costSchema,range:whole(0,1200),saveDc:whole(1,100),
   saveAbility:option(...stats),durationSeconds:whole(1,86400),bonusAbility:option(...stats),fixedBonus:whole(-100,100)
 },['actorId','actionId','name','source','type','timing']);
 async function define(ctx,x){
   const a=await actor(ctx,x.actorId);
+  await validateLinkedAction(ctx,x);
   must((!x.requiresOperating&&!x.requiresAttunement)||x.sourceItemId,'ACTION_SOURCE_REQUIRED');
   if(x.sourceItemId)must(await ctx.get('item_instance',x.sourceItemId),'ACTION_SOURCE_MISSING');
   await transferableSource(ctx,x);
   if(x.formId)await owned(ctx,'form',x.formId,x.actorId);
+  must(!x.formId||!x.excludedForms?.includes(x.formId),'INVALID_FORM_REQUIREMENT');
+  for(const id of new Set(x.excludedForms??[]))await owned(ctx,'form',id,x.actorId);
   if(x.cost)await owned(ctx,'resource_pool',x.cost.poolId,x.actorId);
   must((x.type==='multiattack')===(x.attackSequence!==undefined),'MULTIATTACK_SEQUENCE_REQUIRED');
   if(x.type==='multiattack'){
     must(x.timing==='action' && x.attackSequence.length>=2 && !x.transfersWithItem,'MULTIATTACK_CONFIGURATION_INVALID');
-    for(const id of new Set(x.attackSequence)){
+    const alternatives=x.substitutions??[];
+    must(new Set(alternatives.map(s=>s.attackId)).size===alternatives.length && alternatives.every(s=>!x.attackSequence.includes(s.attackId) && s.replaces.length && s.replaces.every(id=>x.attackSequence.includes(id)) && s.maximum<=x.attackSequence.length),'MULTIATTACK_SUBSTITUTIONS_INVALID');
+    for(const id of new Set([...x.attackSequence,...alternatives.map(s=>s.attackId)])){
       const attack=await owned(ctx,'attack',id,a.id);
       must(attack.data.resolution==='attack' && ['attack','action'].includes(attack.data.timing) &&
         (!attack.data.formId||attack.data.formId===x.formId),'MULTIATTACK_COMPONENT_UNAVAILABLE');
@@ -31,9 +37,11 @@ async function define(ctx,x){
   const {actorId,actionId,name,...data}=x;
   await insert(ctx,'action_definition',actionId,actorId,name,data);
   if(x.formId)await ctx.link(actionId,'requires_form',x.formId);
+  for(const id of new Set(x.excludedForms??[]))await ctx.link(actionId,'excludes_form',id);
   if(x.sourceItemId)await ctx.link(actionId,'requires_item',x.sourceItemId);
   if(x.cost)await ctx.link(actionId,'uses_pool',x.cost.poolId);
-  for(const id of new Set(x.attackSequence??[]))await ctx.link(actionId,'includes_attack',id);
+  must(!x.substitutions||x.type==='multiattack','SUBSTITUTIONS_REQUIRE_MULTIATTACK');
+  for(const id of new Set([...(x.attackSequence??[]),...(x.substitutions??[]).map(s=>s.attackId)]))await ctx.link(actionId,'includes_attack',id);
   return {actionId};
 }
 export async function applyCondition(ctx,actorId,key,enabled,sourceId,expiresAt=null){
@@ -57,9 +65,10 @@ const reaction=fields({rollId:identifier,targetActorId:identifier,distanceFeet:w
   ['rollId','targetActorId','distanceFeet','visible','windowOpen']);
 async function execute(ctx,x){
   const a=await actor(ctx,x.actorId),action=await owned(ctx,'action_definition',x.actionId,a.id),d=action.data,p=await sheet(ctx,a.id);
+  must(!['disabled','dormant'].includes(a.data.activityState),'ACTOR_INACTIVE');
   must(!p.conditions.some(c=>['incapacitated','unconscious','stunned','paralyzed','petrified'].includes(c)),'ACTOR_CANNOT_ACT');
   must(d.type!=='fixed_attack_die','DECLARE_SUBSTITUTION_WITH_ATTACK');
-  must(!d.formId||p.formId===d.formId,'ACTION_FORM_INELIGIBLE');
+  must((!d.formId||p.formId===d.formId)&&!d.excludedForms?.includes(p.formId),'ACTION_FORM_INELIGIBLE');
   must(await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating),'ACTION_ITEM_INELIGIBLE');
   must((x.destination!=null)===(d.type==='teleport') && (x.targets!=null)===(d.type==='frighten') && (x.reaction!=null)===(d.type==='roll_bonus'),'ACTION_ARGUMENT_MISMATCH');
   const data={actionId:action.id,actorId:a.id,formId:p.formId,type:d.type,timing:d.timing,sourceItemId:d.sourceItemId??null,
@@ -67,7 +76,7 @@ async function execute(ctx,x){
   if(d.type==='multiattack'){
     const encounter=a.data.encounterId?await ctx.get('encounter',a.data.encounterId):null;
     must(encounter||a.data.gameSeconds!=null,'GAME_CLOCK_UNKNOWN');
-    data.remainingAttacks=[...d.attackSequence];data.attemptIds=[];data.encounterId=encounter?.id??null;
+    data.remainingAttacks=[...d.attackSequence];data.substitutions=(d.substitutions??[]).map(s=>({...s,remaining:s.maximum}));data.attemptIds=[];data.encounterId=encounter?.id??null;
     data.turn=encounter?[encounter.data.round,encounter.data.index]:null;data.startedAt=a.data.gameSeconds;
     await save(ctx,a,{...a.data,activeMultiattackId:x.useId});
   }else if(d.type==='teleport'){
@@ -99,10 +108,13 @@ async function execute(ctx,x){
       text:roll.data.text+'; '+action.title+' '+(bonus>=0?'+':'')+bonus+' = '+after});
     data.rollId=roll.id;data.targetActorId=r.targetActorId;data.modifier=bonus;data.originalTotal=before;data.finalTotal=after;
   }
+  await executeLinkedAction(ctx,a,action,x,data);
   await useTiming(ctx,a,d.timing);
   if(d.cost)data.costs.push(await spend(ctx,a.id,d.cost.poolId,d.cost.amount));
   await insert(ctx,'action_use',x.useId,a.id,action.title,data);
   await ctx.link(x.useId,'used_action',action.id);
+  if(data.castId)await ctx.link(x.useId,'delivered_cast',data.castId);
+  if(data.deflection)await ctx.link(x.useId,'deflected_attempt',data.deflection.attemptId);
   if(data.rollId)await ctx.link(x.useId,'adjusted_roll',data.rollId);
   for(const t of data.targets??[])await ctx.link(x.useId,'target',t.actorId);
   return {useId:x.useId,...data};
@@ -135,7 +147,7 @@ async function saveAgainst(ctx,x){
 }
 export const actionOperations=Object.freeze({
   define_action:op('combat',actionSchema,define),
-  use_action:op('combat',fields({actorId:identifier,actionId:identifier,useId:identifier,declared:{const:true},destination,targets,reaction},['actorId','actionId','useId','declared']),execute),
+  use_action:op('combat',fields({...linkedArguments,actorId:identifier,actionId:identifier,useId:identifier,declared:{const:true},destination,targets,reaction},['actorId','actionId','useId','declared']),execute),
   resolve_action_save:op('combat',fields({actorId:identifier,useId:identifier,targetActorId:identifier,rollId:identifier,endOfTurnConfirmed:boolean},['actorId','useId','targetActorId','rollId']),saveAgainst),
   set_condition:op('combat',fields({actorId:identifier,key:identifier,enabled:boolean,sourceId:identifier},['actorId','key','enabled','sourceId']),async(ctx,x)=>{
     ctx.require('combat',x.actorId);

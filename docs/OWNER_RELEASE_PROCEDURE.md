@@ -12,7 +12,7 @@ The verified predecessor for Ascension is `4.0.0-convergence5`, code 58, from
 `883198a3140ae2b707b31f81829c94cd821189b9`. The owner APK SHA-256 is
 `ce78eadc25e5f8d982788605a70aba8caaa59f4dc7ffac5c7a7171f30bf34d91`.
 The signing preflight checks that exact file and its owner certificate.
-The Ascension development candidate is `4.1.0-ascension-dev`, code 59.
+The Ascension development candidate is `4.1.0`, code 59.
 Its source checkout and both CI gates must pass private release review.
 
 Previously verified predecessors include code 57 with SHA-256

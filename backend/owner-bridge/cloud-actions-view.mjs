@@ -2,6 +2,7 @@ import { CloudPlan } from './cloud-plan.mjs';
 import { BridgeError } from './core.mjs';
 import { cloudFail, validCloudId } from './cloud-validation.mjs';
 import { sheet, gearEligible, rollPolicy, checkTiming } from './cloud-mechanics-core.mjs';
+import { attackModeFor } from './cloud-mechanics-linked.mjs';
 import { attackModifier, attackSaveDc, snapshotComponents } from './cloud-mechanics-combat.mjs';
 
 export async function cloudActions(service,principal,id,actorId,options={}) {
@@ -29,14 +30,16 @@ export async function cloudActions(service,principal,id,actorId,options={}) {
     const damageReasons=[...reasons];
     try { await checkTiming(ctx,a,d.timing); }
     catch(e){if(!(e instanceof BridgeError)||e.status===403)throw e;reasons.push(e.code);}
-    let components=[],hit=null,resolvedSaveDc=null;
+    let components=[],hit=null,resolvedSaveDc=null,configuration=d;
     if(entity.kind==='attack'){
       const chosen=Object.fromEntries((d.selections??[]).filter(s=>(s.actorId??entity.actorId)===a.id && s.formId===p.formId).map(s=>[s.componentId,s.type]));
-      try { components=snapshotComponents(d.components,p,chosen);if(d.resolution==='attack')hit=attackModifier(entity,p);
+      try { const mode=await attackModeFor(ctx,a,entity);
+        components=snapshotComponents([...d.components,...mode.components],p,chosen);
+        configuration={...d,reach:mode.reach,modeUseIds:mode.useIds};if(d.resolution==='attack')hit=attackModifier(entity,p);
         if(d.resolution==='save')resolvedSaveDc=attackSaveDc(d,p); }
       catch(e){if(!(e instanceof BridgeError))throw e;reasons.push(e.code);damageReasons.push(e.code);}
     }
-    rows.push({id:entity.id,title:entity.title,kind:entity.kind,configuration:d,components,hit,resolvedSaveDc,reasons,damageReasons,
+    rows.push({id:entity.id,title:entity.title,kind:entity.kind,configuration,components,hit,resolvedSaveDc,reasons,damageReasons,
       modes:Object.fromEntries(['normal','advantage','disadvantage'].map(m=>[m,rollPolicy(p.effects,'attack:'+entity.id,m)]))});
   }
   const end=await service.access(principal,id);

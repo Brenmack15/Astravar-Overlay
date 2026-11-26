@@ -82,8 +82,13 @@ async function verify(){
     const preview=await recovery.cutover(root,null,true,mod);assert.equal(preview.pending,1);
     await assert.rejects(recovery.cutover(root,preview.approvalSha256,true,mod,()=>{throw Error('simulated maintenance interruption');}),/simulated maintenance/);
     await assert.rejects(recovery.withGameplay(root,()=>{},mod),/interrupted cutover/);
+    const interrupted=await recovery.inspect(root,mod);
+    assert.equal(interrupted.status,'CUTOVER_IN_PROGRESS');
+    assert.deepEqual([interrupted.current.authority,interrupted.current.epoch,interrupted.stage.authority,interrupted.stage.epoch],
+      ['staged',2,'staged',1]);
     const committed=await recovery.cutover(root,preview.approvalSha256,true,mod);assert.equal(committed.epoch,2);
     assert.equal((await recovery.cutover(root,preview.approvalSha256,true,mod)).status,'ALREADY_COMMITTED');
+    const routed=await recovery.inspect(root,mod);assert.equal(routed.current.authority,'cloud');assert.equal(routed.previous.authority,'staged');
     const newer=path.join(tmp,'next.zip');
     await recovery.withGameplay(root,async r=>{
       const state=await required(r,route+'/state');assert.equal(state.epoch,2);assert.equal(state.revision,2);

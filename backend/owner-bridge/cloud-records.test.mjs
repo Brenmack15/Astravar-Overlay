@@ -173,6 +173,8 @@ test('a personal inventory grant inspects and equips a possession without exposi
   await f.run('define_item_definition',{...definition('other-definition',false),name:'Unrelated catalog item'});
   await f.run('acquire_item',{itemId:'mine',definitionId:'publicly-held',ownerId:'hero',quantity:1,source});
   await f.run('acquire_item',{itemId:'theirs',definitionId:'other-definition',ownerId:'ally',quantity:1,source});
+  await f.run('define_item_definition',definition('same-kind',true));
+  for(const [itemId,ownerId] of [['my-stock','hero'],['other-stock','ally']])await f.run('acquire_item',{itemId,definitionId:'same-kind',ownerId,quantity:4,source});
   await f.run('edit_item_definition',{definitionId:'publicly-held',name:'Current shared name',description:'Current description',category:'gear',rarity:null,source});
   await f.grant(['character.read','inventory.read','inventory.write'],['hero']);
   const view=options=>cloudRecordView(f.service,dm,continuity,'inventory',options);
@@ -186,11 +188,49 @@ test('a personal inventory grant inspects and equips a possession without exposi
   for(const id of ['ally','theirs','other-definition','publicly-held']) await assert.rejects(view({id}),/RECORD_UNAVAILABLE/);
   await assert.rejects(view({}),/PARTY_AGGREGATE_SCOPE_REQUIRED/);
   await f.run('equip_item',{itemId:'mine',equipment:'held',source});
+  const split=await f.run('split_stack',{itemId:'my-stock',splitId:'my-child',quantity:1,source});
+  assert.equal((await view({id:split.childId})).definition.id,'same-kind');
+  assert.equal((await f.record('my-stock')).data.quantity,3);
+  const inherited=await f.db.prepare("SELECT to_id FROM cloud_links WHERE from_id='my-child' AND relation='definition'").bind().first();
+  assert.equal(inherited.to_id,'same-kind');
+  await assert.rejects(f.run('split_stack',{itemId:'other-stock',splitId:'forbidden-child',quantity:1,source}),/CLOUD_GRANT_DENIED/);
+  const plan=new CloudPlan(f.service,f.service.key(continuity),await f.service.grantForSubject(continuity,'sites-mcp'),{commandId:'inherited-proof'},Date.now());
+  await assert.rejects(plan.linkInheritedItemDefinition('mine','my-stock'),/HOLDING_DEFINITION_PROOF_REQUIRED/);
+  const original=await plan.get('item_instance','my-stock');
+  await plan.put({...original,id:'forged-child',data:{...original.data,definitionId:'other-definition'}});
+  await plan.link('forged-child','split_from',original.id);
+  await assert.rejects(plan.linkInheritedItemDefinition('forged-child',original.id),/HOLDING_DEFINITION_PROOF_REQUIRED/);
+  await assert.rejects(plan.linkInheritedItemDefinition('forged-child','other-stock'),/CLOUD_GRANT_DENIED/);
   await assert.rejects(f.run('equip_item',{itemId:'theirs',equipment:'held',source}),/CLOUD_GRANT_DENIED/);
   await assert.rejects(f.run('edit_item_definition',{definitionId:'publicly-held',name:'Invalid',description:'Invalid',category:'gear',rarity:null,source}),/CLOUD_GRANT_DENIED/);
   assert.equal((await f.record('mine')).data.equipment,'held');
   assert.equal((await f.record('theirs')).data.equipment,'packed');
   assert.equal((await f.record('publicly-held')).title,'Current shared name');
+});
+test('the limited borrower can operate actual lent gear and charges without taking the lender’s ownership',async t=>{
+  const f=await fixture(t,true);
+  await f.run('define_item_definition',definition('tool-def',false));
+  await f.run('acquire_item',{itemId:'loan-unit',definitionId:'tool-def',ownerId:'hero',quantity:1,source});
+  await f.run('define_resource',{actorId:'hero',poolId:'loan-charge',name:'Remaining charges',type:'charge',maximum:4,current:2,recovery:'none',source});
+  await f.run('bind_item_charge_pool',{itemId:'loan-unit',poolId:'loan-charge',source});
+  await f.run('define_action',{actorId:'hero',actionId:'tool-use',name:'Use instrument',type:'use',timing:'other',sourceItemId:'loan-unit',
+    transfersWithItem:true,cost:{poolId:'loan-charge',amount:1},source});
+  const transfer={itemId:'loan-unit',quantity:1,splitId:null,destination:{type:'loan',actorId:'ally',locationId:null,recipientId:null,recipientName:null},reason:'Confirmed loan',source};
+  await f.run('transfer_item',transfer);
+  await f.grant(['character.read','character.write','inventory.read','inventory.write','resources.read','resources.write','combat.read','combat.write'],['ally']);
+  const lent=await cloudRecordView(f.service,dm,continuity,'inventory',{id:'loan-unit'});
+  assert.equal(lent.holding.data.ownerId,'hero');
+  assert.equal(lent.holding.data.custodianId,'ally');
+  assert.equal(lent.definition.id,'tool-def');
+  await f.run('equip_item',{itemId:'loan-unit',equipment:'held',source});
+  await f.run('use_action',{actorId:'ally',actionId:'tool-use',useId:'loan-use',declared:true});
+  await assert.rejects(f.run('transfer_item',{...transfer,destination:{...transfer.destination,type:'party_actor'}}),/CLOUD_GRANT_DENIED/);
+  await assert.rejects(f.run('customize_item',{itemId:'loan-unit',name:'Changed',description:'Changed',condition:'altered',source}),/CLOUD_GRANT_DENIED/);
+  assert.equal((await f.record('loan-charge')).data.current,1);
+  assert.equal((await f.record('loan-charge')).actorId,'ally');
+  assert.equal((await f.record('loan-unit')).data.ownerId,'hero');
+  assert.equal(await f.record('hero',dm),undefined);
+  assert.equal(await f.record('tool-def',dm),undefined);
 });
 test('a failed commit rolls back the real SQL item, accounting, history and request, then the same request succeeds',async t=>{
   const f=await fixture(t);
@@ -471,11 +511,20 @@ test('attunement and operating state respect configured elapsed time, known capa
   await f.run('acquire_item',{itemId:'second',definitionId:item.definitionId,quantity:1,ownerId:'hero',source});
   await assert.rejects(f.run('set_item_attunement',{...attune,itemId:'second'}),/ATTUNEMENT_CAPACITY/);
   await f.db.prepare("INSERT INTO cloud_entities(owner_id,continuity_id,id,kind,actor_id,title,data_json,life,revision) VALUES(?,?,?,'form','hero','Source form',?,'active',1)")
-    .bind(owner.ownerId,continuity,'mode',JSON.stringify({sourceItemId:'first',requiresAttunement:true})).run();
+    .bind(owner.ownerId,continuity,'mode',JSON.stringify({sourceItemId:'first',requiresAttunement:true,requiresOperating:true})).run();
   await f.db.prepare("UPDATE cloud_entities SET data_json=json_set(data_json,'$.activeFormId','mode'),revision=revision+1 WHERE id='hero'").bind().run();
   await assert.rejects(f.run('set_item_operating',{itemId:'first',operating:false,source}),/FORM_REVERSION_REQUIRED/);
   await assert.rejects(f.run('set_item_attunement',{...attune,attuned:false}),/FORM_REVERSION_REQUIRED/);
   assert.equal((await f.record('first')).data.operating,true);
+  await f.db.prepare("UPDATE cloud_entities SET data_json=json_set(data_json,'$.revertOnSourceLoss',json('true')),revision=revision+1 WHERE id='mode'").bind().run();
+  await f.db.prepare("UPDATE cloud_entities SET data_json=json_set(data_json,'$.currentHp',9,'$.temporaryHp',2,'$.formExpiresAt',130),revision=revision+1 WHERE id='hero'").bind().run();
+  await f.db.prepare("INSERT INTO cloud_links(owner_id,continuity_id,from_id,relation,to_id) VALUES(?,?,'hero','active_form','mode')").bind(owner.ownerId,continuity).run();
+  await f.run('set_item_operating',{itemId:'first',operating:false,source});
+  const reverted=(await f.record('hero')).data;
+  assert.equal(reverted.activeFormId,null);assert.equal(reverted.formExpiresAt,null);
+  assert.equal(reverted.currentHp,9);assert.equal(reverted.temporaryHp,2);
+  assert.equal((await f.record('first')).data.attuned,true);
+  assert.equal(await f.db.prepare("SELECT 1 FROM cloud_links WHERE from_id='hero' AND relation='active_form'").bind().first(),null);
 });
 
 test('successor assembly preserves earlier component identity and no nested item remains separately usable',async t=>{

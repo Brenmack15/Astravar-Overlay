@@ -116,7 +116,7 @@ class GenesisCampaignResponsiveTest {
                     bottomBar = { RebuildPrimaryNavigation(tab) { tab=it } }) { insets ->
                     Box(Modifier.fillMaxSize().padding(insets)) {
                         if(tab=="Chronicle" && detail==null) states.SaveableStateProvider("campaign-administration") {
-                            GenesisCampaignHub(environment,{ detail=it },{_,_->})
+                            androidx.compose.runtime.CompositionLocalProvider(LocalGenesisConnectedEnvironment provides environment) { GenesisCampaignHub(environment,{ detail=it },{_,_->}) }
                         } else if(tab=="Chronicle" && detail=="Connections") ConnectionsPageV2(app.campaignLedger)
                     }
                 }

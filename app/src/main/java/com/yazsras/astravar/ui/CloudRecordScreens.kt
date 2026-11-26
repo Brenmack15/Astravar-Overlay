@@ -1,11 +1,15 @@
 package com.yazsras.astravar.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.data.*
 import kotlinx.coroutines.CancellationException
@@ -68,6 +72,7 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
             } else {
                 PlayerSearch(query,{ query=it.take(120) },"Search ${panel.lowercase()}")
                 when (panel) {
+                    "Encounters" -> CloudEncounterPanel(client,snapshot,online,query,openOperation)
                     "Items" -> {
                         PlayerTextButton({ openOperation("define_item_definition",args("definitionId" to id(),"source" to manual)) }, enabled=online) { Text("Create item definition") }
                         if (online) RemoteRecordPage(client,snapshot,"inventory",query=query) { page ->
@@ -201,7 +206,7 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
     }
 }
 
-@Composable private fun CachedRecordList(client: CloudCampaignClient,snapshot: CloudSnapshot,kinds:Set<String>,
+@Composable internal fun CachedRecordList(client: CloudCampaignClient,snapshot: CloudSnapshot,kinds:Set<String>,
     actorId:String?,query:String,allowed:(JsonObject)->Boolean={true},onClick:(JsonObject)->Unit) {
     key(snapshot.binding,snapshot.version,kinds,actorId,query) {
         var cursors by remember {mutableStateOf(listOf(""))}
@@ -438,6 +443,7 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
     if(stock>1) {
         Field("Quantity",entered,{entered=it.take(9)})
         Slider(value=(quantity?:1).coerceIn(1,stock).toFloat(),onValueChange={entered=it.roundToInt().toString()},
+            modifier=Modifier.semantics{contentDescription="Transfer quantity"},
             valueRange=1f..stock.toFloat(),enabled=online)
     }
     Text("Selected · ${quantity?:"?"}    Remaining · ${quantity?.takeIf{it in 1..stock}?.let{stock-it}?:"?"}")
@@ -455,8 +461,8 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
         PlayerOutlinedButton({open("split_stack",args("itemId" to word(itemId),"splitId" to word(splitId),"quantity" to JsonPrimitive(quantity),"source" to manual))},
             enabled=online && selectable && quantity!=stock){Text("Split stack")}
     }
-    if(type=="Storage" || type=="Unassigned")Row(verticalAlignment=Alignment.CenterVertically){
-        Checkbox(checked=shared,onCheckedChange={shared=it},enabled=online)
+    if(type=="Storage" || type=="Unassigned")Row(Modifier.toggleable(value=shared,enabled=online,role=Role.Checkbox,onValueChange={shared=it}),verticalAlignment=Alignment.CenterVertically){
+        Checkbox(checked=shared,onCheckedChange=null,enabled=online)
         Text("Party-owned after transfer")
     }
     PlayerDisclosure("Merge compatible stack") {

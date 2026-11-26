@@ -18,9 +18,12 @@ def load(name):
 def verify_protocol_coverage(capabilities, refresh, errors):
     report = json.loads((DOCS / 'protocol-parity.json').read_text(encoding='utf-8'))
     operations = report['operations']
+    owner_only = set(report['summary'].get('ownerOnly', []))
     assigned = set()
     changed = False
     for row in capabilities:
+        if not (ROOT / row['candidate_owner_implementation']).is_file() or not row['candidate_owner_entry']:
+            errors.append(f"{row['id']} has no current native route")
         commands = row['related_registered_commands'].split()
         assigned.update(commands)
         unknown = set(commands).difference(operations)
@@ -28,11 +31,12 @@ def verify_protocol_coverage(capabilities, refresh, errors):
             errors.append(f"{row['id']} names unregistered commands {sorted(unknown)}")
         passed = []
         pending = []
+        restricted = []
         for command in commands:
             result = operations.get(command, {})
             both = all(result.get(client, {}).get('commands', 0) > 0 for client in ('mcp', 'device'))
-            (passed if both else pending).append(command)
-        for key, values in [('wire_verified_commands', passed), ('wire_unverified_commands', pending)]:
+            (restricted if command in owner_only else passed if both else pending).append(command)
+        for key, values in [('wire_verified_commands', passed), ('wire_unverified_commands', pending), ('wire_owner_only_commands', restricted)]:
             value = ' '.join(values)
             if row[key] != value:
                 if refresh:

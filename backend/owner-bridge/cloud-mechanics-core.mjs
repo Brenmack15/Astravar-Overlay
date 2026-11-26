@@ -28,8 +28,8 @@ export const component = fields({
 }, ['id','name','type','dice','sides','flat']);
 export const actorSchema = fields({
   actorId:identifier, name:named(160), role:option('player','companion','npc','creature'),
-  rulesProfile:option('legacy_2014','revised_2024','custom'), level:whole(1,20),
-  proficiency:nullable(whole(0,30)), maxHp:nullable(whole()), currentHp:nullable(whole()), temporaryHp:nullable(whole()),
+  rulesProfile:option('legacy_2014','revised_2024','custom'), level:whole(1,20),initiativeAfterActorId:identifier,
+  proficiency:nullable(whole(0,30)), maxHp:nullable(whole()), baselineConstitutionModifier:nullable(whole(-10,50)),currentHp:nullable(whole()), temporaryHp:nullable(whole()),
   baseAc:nullable(whole(0,100)), abilities:abilityMap, speeds:movementMap, senses:sensesMap, size:option('tiny','small','medium','large','huge','gargantuan'),creatureType:named(60), saveProficiencies:arrayOf(option(...stats),6),
   attacksPerAction:whole(1,12), attunementCapacity:nullable(whole(0,12)), gameSeconds:nullable(whole(0,100000000000)),
   source:named(300)
@@ -37,22 +37,23 @@ export const actorSchema = fields({
 export const resourceSchema = fields({
   actorId:identifier, poolId:identifier, name:named(160),
   type:option('ordinary','hit_die','spell_slot','integrity','lifetime','charge'), maximum:nullable(whole()),
-  current:nullable(whole()), recovery:option('none','short_rest','long_rest','either_rest','dawn','deployment','edition_hit_dice'),
-  recoveryAmount:nullable(whole(1)), dieSides:nullable(whole(2,1000)), slotLevel:nullable(whole(1,9)), source:named(300)
+  current:nullable(whole()), recovery:option('none','short_rest','long_rest','either_rest','dawn','deployment','edition_hit_dice','recharge_roll'),rechargeSides:whole(2,100),rechargeMinimum:whole(1,100),
+  recoveryActorId:identifier,recoveryAmount:nullable(whole(1)), dieSides:nullable(whole(2,1000)), slotLevel:nullable(whole(1,9)), source:named(300)
 }, ['actorId','poolId','name','type','maximum','current','recovery','source']);
 export const formSchema = fields({
   actorId:identifier, formId:identifier, name:named(160), source:named(300), description:named(2000),
   size:option('tiny','small','medium','large','huge','gargantuan'), creatureType:named(60),
   sourceItemId:identifier, requiresAttunement:boolean, requiresOperating:boolean, abilityOverrides:abilityMap, speeds:movementMap,
-  suppressedItemIds:arrayOf(identifier,24),requiresWilling:boolean,senses:sensesMap,grounded:boolean, baseAc:nullable(whole(0,100)), activationSeconds:whole(0,86400), durationSeconds:nullable(whole(1,31536000)),
+  suppressedItemIds:arrayOf(identifier,24),requiresWilling:boolean,revertOnSourceLoss:boolean,senses:sensesMap,grounded:boolean, baseAc:nullable(whole(0,100)), activationSeconds:whole(0,86400), durationSeconds:nullable(whole(1,31536000)),
   timing:actionCost, deploymentPoolId:identifier, integrityPoolId:identifier, resetPoolId:identifier
 }, ['actorId','formId','name','source','timing','activationSeconds']);
 export const effectSchema = fields({
   actorId:identifier, effectId:identifier, name:named(160), source:named(300),
-  target:option('ability_score','ability_check','skill','save','passive','initiative','ac','attack','spell_attack','spell_dc','speed','sense','damage_defense','condition_immunity','spell_damage_immunity','roll_edge'),
-  key:identifier, operation:option('add','set','minimum','maximum','resistance','immunity','vulnerability','advantage','disadvantage','keep_highest_three'),
+  target:option('ability_score','ability_check','skill','save','passive','initiative','ac','max_hp','attack','damage','spell_attack','spell_dc','speed','sense','damage_defense','condition_immunity','spell_damage_immunity','save_mitigation','roll_edge'),
+  key:identifier, operation:option('add','set','minimum','maximum','resistance','immunity','vulnerability','advantage','disadvantage','keep_highest_three','evade'),
   amount:whole(-1000,1000), priority:whole(-100,100), stackingKey:identifier,
   sourceItemId:identifier, transfersWithItem:boolean, requiresAttunement:boolean, requiresOperating:boolean, formId:identifier, contextTag:identifier,
+  damageRoute:option('attack','spell','both'),damageComponentId:identifier,damageType:option(...damageTypes),eachMatchingComponent:boolean,
   expiresAt:nullable(whole(0,100000000000)), enabled:boolean
 }, ['actorId','effectId','name','source','target','key','operation']);
 export const costSchema = fields({poolId:identifier,amount:whole(1)},['poolId','amount']);
@@ -84,7 +85,7 @@ export const spellSchema = fields({
   timing:actionCost, ritual:boolean, resolution:option('attack','save','automatic','manual'), saveAbility:option(...stats),saveSuccess:option('none','half','full'),
   scaling:fields({targets:whole(1,10000),targetsPerLevel:whole(0,1000),durationSeconds:whole(0,31536000),durationPerLevel:whole(0,31536000),
     areaFeet:whole(0,10000),areaPerLevel:whole(0,10000),source:named(300)},['source']),
-  description:named(2400), range:named(120), duration:named(120), components:arrayOf(component,16)
+  description:named(2400),rangeKind:option('touch','self','distance','other'), range:named(120), duration:named(120), components:arrayOf(component,16)
 },['actorId','spellId','name','source','baseLevel','concentration','timing','ritual','resolution','components']);
 
 export function must(condition, code, status=409) {
@@ -123,8 +124,10 @@ export async function transferableSource(ctx,config){
 }
 export async function gearEligible(ctx,itemId,actorId,attunement=false,requiresOperating=false,formOverride=undefined) {
   if (!itemId) return !attunement && !requiresOperating;
-  const item=await ctx.get('item_instance',itemId);
-  const data=item?.data;
+  const item=await ctx.current(itemId);
+  if(item?.kind!=='item_instance' || item.data.custodianId!==actorId)return false;
+  ctx.require('inventory',actorId,false);
+  const data=item.data;
   const equipped=!!data && item.life==='active' && data.custodianId===actorId && data.partyAccess===true &&
     data.holding==='carried' && ['held','worn'].includes(data.equipment) && (!requiresOperating || data.operating===true) &&
     data.quantity===1 && (!attunement || data.attuned===true);
@@ -140,6 +143,10 @@ export async function activeForm(ctx,a) {
   if (d.formExpiresAt!=null && (d.gameSeconds==null || d.gameSeconds>=d.formExpiresAt)) return null;
   return await gearEligible(ctx,f.data.sourceItemId,a.id,f.data.requiresAttunement,f.data.requiresOperating,null) ? f:null;
 }
+export function preferredEffect(candidate,prior) {
+  return !prior || candidate.data.priority>prior.data.priority || (candidate.data.priority===prior.data.priority &&
+    ((candidate.data.amount??0)>(prior.data.amount??0) || ((candidate.data.amount??0)===(prior.data.amount??0) && candidate.id<prior.id)));
+}
 export async function activeEffects(ctx,a,form,contextTags=[]) {
   const winners=new Map(), suppressed=[];
   for (const id of a.data.effectIds) {
@@ -152,10 +159,11 @@ export async function activeEffects(ctx,a,form,contextTags=[]) {
       await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating,form);
     if (!eligible) {suppressed.push(id); continue;}
     // A shared anti-stacking key affects only the same mechanical target and subject.
-    const key=JSON.stringify([d.stackingKey??id,d.target,d.key,d.target==='roll_edge'||d.target==='damage_defense'?d.operation:null]);
+    const qualifier=d.target==='damage'?[d.damageRoute??'attack',d.damageComponentId??null,d.damageType??null,!!d.eachMatchingComponent]:
+      d.target==='roll_edge'||d.target==='damage_defense'?d.operation:null;
+    const key=JSON.stringify([d.stackingKey??id,d.target,d.key,qualifier]);
     const prior=winners.get(key);
-    if (!prior || d.priority>prior.data.priority || (d.priority===prior.data.priority &&
-        ((d.amount??0)>(prior.data.amount??0) || ((d.amount??0)===(prior.data.amount??0) && row.id<prior.id)))) {
+    if (preferredEffect(row,prior)) {
       if(prior) suppressed.push(prior.id);
       winners.set(key,row);
     } else suppressed.push(id);
@@ -200,10 +208,13 @@ export function rollPolicy(active,key,requested='normal') {
   if(high===low)return {mode:'normal',count:1};
   return {mode:high?'advantage':'disadvantage',count:high && modes.includes('keep_highest_three')?3:2};
 }
+export function healedHp(current,maximum,amount){
+  return current+Math.min(Math.max(0,maximum-current),amount);
+}
 export async function sheet(ctx,id,contextTags=[],previewFormId=undefined) {
   const a=await actor(ctx,id), form=previewFormId===undefined?await activeForm(ctx,a):previewFormId?await owned(ctx,'form',previewFormId,id):null;
   const {active,suppressed}=await activeEffects(ctx,a,form,contextTags);
-  const abilities={},checks={},saves={},skills={},passives={};
+  const abilities={},checks={},saves={},skills={},passives={},skillDefinitions={};
   for(const stat of stats){
     const base=a.data.abilities[stat]??null;
     const effective=numeric(form && Object.hasOwn(form.data.abilityOverrides,stat)?form.data.abilityOverrides[stat]:base,active,'ability_score',stat);
@@ -219,6 +230,7 @@ export async function sheet(ctx,id,contextTags=[],previewFormId=undefined) {
     const configured=Object.hasOwn(a.data.skills,key)?a.data.skills[key]:{};
     const stat=configured.ability??standardSkills[key], base=checks[stat].value, pb=a.data.proficiency;
     const rank=configured.rank??0;
+    skillDefinitions[key]={name:configured.name??key,ability:stat,rank,standard:Object.hasOwn(standardSkills,key),pinned:(a.data.pinnedSkillIds??[]).includes(key)};
     const trained=base==null || (rank && pb==null)?null:base+(rank?rank*pb:0);
     skills[key]={...numeric(trained,active,'skill',key),name:configured.name??key.split('_').map(w=>w[0].toUpperCase()+w.slice(1)).join(' '),ability:stat,rank};
     const mode=rollPolicy(active,'skill:'+key).mode;
@@ -232,7 +244,13 @@ export async function sheet(ctx,id,contextTags=[],previewFormId=undefined) {
     for(const k of modes){const value=numeric(output[k]??null,active,target,k).value;output[k]=value==null?null:Math.max(0,value);}
   }
   if(form?.data.grounded){movement.fly=0; movement.hover=0;}
+  if(['disabled','dormant'].includes(a.data.activityState))for(const k of Object.keys(movement))movement[k]=0;
   const ac=numeric(form?.data.baseAc??a.data.baseAc,active,'ac','all');
+  const baselineCon=a.data.baselineConstitutionModifier??null;
+  const conDelta=baselineCon===null?0:abilities.CON.modifier===null?null:a.data.level*(abilities.CON.modifier-baselineCon);
+  const hpBase=a.data.maxHp==null||conDelta===null?null:a.data.maxHp+conDelta;
+  const hpMaximum=numeric(hpBase,active,'max_hp','all');
+  if(hpMaximum.value!==null)hpMaximum.value=Math.max(0,hpMaximum.value);
   const subjects=[...stats.flatMap(k=>['ability:'+k,'save:'+k]),...Array.from(keys,k=>'skill:'+k),'initiative:initiative'];
   const rollRestrictions={};
   if(a.data.rulesProfile!=='custom'){
@@ -243,10 +261,11 @@ export async function sheet(ctx,id,contextTags=[],previewFormId=undefined) {
       for(const key of subjects.filter(k=>k.startsWith('ability:')||k.startsWith('skill:')))rollRestrictions[key]='REQUIRED_SENSE_UNAVAILABLE';
   }
   const rollModes=Object.fromEntries(subjects.map(key=>[key,Object.fromEntries(['normal','advantage','disadvantage'].map(mode=>[mode,rollPolicy(active,key,mode)]))]));
-  return {actorId:id,formId:form?.id??null,size:form?.data.size??a.data.size??null,creatureType:form?.data.creatureType??a.data.creatureType??null,
-    senses,abilities,checks,saves,skills,passives,ac,movement,
+  return {actorId:id,activityState:a.data.activityState??null,formId:form?.id??null,size:form?.data.size??a.data.size??null,creatureType:form?.data.creatureType??a.data.creatureType??null,
+    senses,abilities,checks,saves,skills,passives,skillDefinitions,ac,movement,
     initiative:numeric(abilities.DEX.modifier,active,'initiative','all'),proficiency:a.data.proficiency,
-    currentHp:a.data.currentHp,maxHp:a.data.maxHp,temporaryHp:a.data.temporaryHp,
+    currentHp:a.data.currentHp,maxHp:hpMaximum.value,temporaryHp:a.data.temporaryHp,
+    hpMaximum:{...hpMaximum,baseMaxHp:a.data.maxHp,baselineConstitutionModifier:baselineCon,constitutionAdjustment:conDelta},
     activeEffects:active.map(r=>r.id),suppressedEffects:suppressed,conditions:a.data.conditions,rollModes,rollRestrictions,contextTags:a.data.contextTags??[],
     defenses:active.filter(r=>r.data.target==='damage_defense').map(r=>({type:r.data.key,kind:r.data.operation,source:r.id})),
     effects:active};

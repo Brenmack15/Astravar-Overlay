@@ -111,6 +111,7 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
 ) {
     val scope = rememberCoroutineScope()
     var records by remember(actorId, snapshot.binding) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var possibleTargets by remember(actorId, snapshot.binding) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var book by remember(actorId, snapshot.binding) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var actor by remember(actorId, snapshot.binding) { mutableStateOf<JsonObject?>(null) }
     var sheet by remember(actorId, snapshot.binding) { mutableStateOf<JsonObject?>(null) }
@@ -118,7 +119,7 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
     var busy by remember(actorId) { mutableStateOf(false) }
     var result by remember(actorId) { mutableStateOf<JsonObject?>(null) }
     LaunchedEffect(tab, actorId, snapshot.version, snapshot.visible, online) {
-        error = null; records = emptyList(); book = emptyList(); sheet = null; actor = null
+        error = null; records = emptyList(); book = emptyList(); possibleTargets = emptyList(); sheet = null; actor = null
         if (!snapshot.visible) return@LaunchedEffect
         try {
             actor = client.record(actorId)
@@ -141,6 +142,14 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
                     after = page.str("nextAfter")
                 } while (after != null)
                 book = all
+                val targets = mutableListOf<JsonObject>()
+                var cursor = ""
+                do {
+                    val page = client.records(after=cursor,kinds=setOf("actor"))
+                    targets.addAll(page)
+                    cursor = page.lastOrNull()?.str("id").orEmpty()
+                } while(page.size==50)
+                possibleTargets = targets
             } else if (online && tab == "Rest") {
                 sheet = client.projection(snapshot,"sheet/$actorId")["sheet"] as? JsonObject
             }
@@ -159,22 +168,12 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
     }
     val pools = records.filter { it.str("kind") == "resource_pool" && it.str("life") == "active" }
     when (tab) {
-        "Spells" -> SpellRows(actorId, book, pools, records, online && !busy, openOperation, ::submit)
-        "Resources" -> {
-            pools.forEach { row ->
-                val d = row.details()
-                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column(Modifier.weight(1f)) {
-                        Text(row.str("title").orEmpty())
-                        Text(d.str("recovery").orEmpty().replace('_',' '), style = MaterialTheme.typography.labelSmall)
-                    }
-                    PoolCounter(d.num("current"),d.num("maximum"))
-                }
-                HorizontalDivider()
-            }
-            PlayerOutlinedButton({openOperation("define_resource",buildJsonObject { put("actorId",actorId) })},enabled=online) { Text("Add resource") }
+        "Spells" -> CloudSpellRows(actorId, book, pools, records, online && !busy, openOperation, ::submit, possibleTargets)
+        "Resources" -> CloudResourceManagement(actorId, pools, online && !busy, openOperation) { poolId, after ->
+            val page = after?.let { "?after=$it&atRevision=${snapshot.version.revision}&atEpoch=${snapshot.version.epoch}&grantRevision=${snapshot.version.grantRevision}" }.orEmpty()
+            client.projection(snapshot, "pool-history/$poolId$page")
         }
-        "Rest" -> RestPlan(actorId, actor?.details(), sheet, pools, online && !busy, ::submit)
+        "Rest" -> CloudRestPlan(actorId, actor?.details(), sheet, pools, online && !busy, ::submit)
     }
     val history = records.filter { it.str("kind") == if (tab == "Spells") "cast_instance" else "rest_report" }
         .sortedByDescending { it.details().get("recordedAt")?.jsonPrimitive?.longOrNull ?: 0L }
@@ -206,9 +205,20 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
         val clipboard = LocalClipboardManager.current
         var details by remember(value) { mutableStateOf(false) }
         val text = cloudGameplayReport(value,names)
+        val checkedReceipt=value["receipt"] as? JsonObject
+        val cast=value["savedReport"] as? JsonObject ?: checkedReceipt?.get("outcome") as? JsonObject ?: value
+        val castId=cast.str("castId") ?: cast.str("commandId")?.let { command ->
+            records.firstOrNull { it.str("kind")=="cast_instance" && it.details().str("commandId")==command }?.str("id")
+        }
         AlertDialog(onDismissRequest={result=null}, title={Text(if(tab=="Spells") "Casting result" else "Rest result")},
             text={Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(text)
+                if(tab=="Spells"&&castId!=null&&cast.containsKey("spellId")&&online) {
+                    PlayerTextButton({result=null;openOperation("link_cast_roll",buildJsonObject{put("actorId",actorId);put("castId",castId)})}){Text("Record casting rolls")}
+                    for(id in cast.strings("targets")){
+                        PlayerTextButton({result=null;openOperation("resolve_cast_target",buildJsonObject{put("actorId",actorId);put("castId",castId);put("targetActorId",id)})}){Text("Resolve target · "+(possibleTargets.find{it.str("id")==id}?.str("title")?:id))}
+                    }
+                }
                 PlayerTextButton({details=!details}) { Text(if(details) "Hide technical details" else "Technical details") }
                 if(details) Text(Json { prettyPrint=true }.encodeToString(JsonObject.serializer(),value))
             }},
@@ -217,9 +227,89 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
     }
 }
 
-@Composable private fun SpellRows(
+@Composable internal fun CloudResourceManagement(
+    actorId: String,
+    pools: List<JsonObject>,
+    online: Boolean,
+    openOperation: (String, JsonObject) -> Unit,
+    history: suspend (String, String?) -> JsonObject
+) {
+    var selected by rememberSaveable(actorId) { mutableStateOf<String?>(null) }
+    for (pool in pools) {
+        val data = pool.details()
+        Row(Modifier.fillMaxWidth().clickable { selected = pool.str("id") }.heightIn(min=48.dp).padding(vertical=6.dp),
+            horizontalArrangement=Arrangement.SpaceBetween, verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(pool.str("title").orEmpty())
+                Text(data.str("recovery").orEmpty().replace('_',' '), style=MaterialTheme.typography.labelSmall)
+            }
+            PoolCounter(data.num("current"),data.num("maximum"))
+        }
+        HorizontalDivider()
+    }
+    PlayerOutlinedButton({openOperation("define_resource",buildJsonObject { put("actorId",actorId) })},enabled=online) { Text("Add resource") }
+    val identified = pools.find { it.str("id") == selected } ?: return
+    val id = identified.str("id") ?: return
+    val data = identified.details()
+    var events by remember(id) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var next by remember(id) { mutableStateOf<String?>(null) }
+    var loading by remember(id) { mutableStateOf(false) }
+    var failure by remember(id) { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    suspend fun load(after: String?) {
+        if (loading) return
+        loading = true
+        try {
+            val page = history(id,after)
+            events = (if (after == null) emptyList() else events) + page.rows("events")
+            next = page.str("nextAfter")
+            failure = null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            failure = cloudError(error)
+        } finally { loading = false }
+    }
+    LaunchedEffect(id,online,identified["revision"]) {
+        events = emptyList(); next = null; failure = null
+        if (online) load(null)
+    }
+    fun edit(name: String, extra: JsonObjectBuilder.() -> Unit = {}) {
+        selected = null
+        openOperation(name,buildJsonObject { put("actorId",actorId); put("poolId",id); extra() })
+    }
+    AlertDialog(onDismissRequest={selected=null},title={Text(identified.str("title").orEmpty())},text={
+        Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+            PoolCounter(data.num("current"),data.num("maximum"))
+            data.str("source")?.let { Text(it) }
+            Text("Recovery · " + data.str("recovery").orEmpty().replace('_',' '))
+            data.num("recoveryAmount")?.let { Text("$it per eligible recovery") }
+            data.num("dieSides")?.let { Text("Hit Die · d$it") }
+            data.num("slotLevel")?.let { Text("Spell slot · level $it") }
+            if (data.num("rechargeMinimum") != null) Text("Recharge · roll ${data.num("rechargeMinimum")} or higher on d${data.num("rechargeSides")}")
+            PlayerOutlinedButton({edit("spend_resource")},enabled=online && (data.num("current") ?: 0)>0) { Text("Spend uses") }
+            if (data.str("recovery")=="recharge_roll")
+                PlayerOutlinedButton({edit("resolve_pool_recharge")},enabled=online && data.num("current")==0) { Text("Record recharge roll") }
+            PlayerTextButton({edit("correct_resource_balance"){ put("before",data["current"] ?: JsonNull) }},enabled=online) { Text("Review balance correction") }
+            Text("Balance history",style=MaterialTheme.typography.titleSmall)
+            failure?.let { Text(it); PlayerTextButton({scope.launch {load(null)}}) {Text("Retry history")} }
+            if (!online) Text("Connect to read the verified balance history.")
+            else if (events.isEmpty() && !loading && failure == null) Text("No balance events recorded.")
+            for (event in events) {
+                val description = event.str("operation")?.replace('_',' ') ?: "Balance change"
+                val before = event.num("before")?.toString() ?: "Unknown"
+                val after = event.num("after")?.toString() ?: "Unknown"
+                val values = if(event["evidenceAvailable"]?.jsonPrimitive?.booleanOrNull==true) "$before → $after" else "Details unavailable"
+                Text("$description · $values · revision ${event.num("revision")}")
+            }
+            next?.let { cursor -> PlayerTextButton({scope.launch {load(cursor)}},enabled=online && !loading) {Text("Earlier balance changes")} }
+        }
+    },confirmButton={TextButton({selected=null}){Text("Close")}})
+}
+
+@Composable internal fun CloudSpellRows(
     actorId:String, rows:List<JsonObject>, pools:List<JsonObject>, cached:List<JsonObject>, online:Boolean,
-    openOperation:(String,JsonObject)->Unit, submit:(String,JsonObject)->Unit
+    openOperation:(String,JsonObject)->Unit, submit:(String,JsonObject)->Unit, possibleTargets:List<JsonObject> = emptyList()
 ) {
     var query by rememberSaveable(actorId){mutableStateOf("")}
     var filter by rememberSaveable(actorId){mutableIntStateOf(-1)}
@@ -238,18 +328,23 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
         }
         PlayerOutlinedButton({manage=true},enabled=online){Text("Manage spells")}
     }
-    fun perform(row:JsonObject,slot:String?,replace:Boolean,ritual:Boolean) {
+    fun needsTargets(row:JsonObject):Boolean {
+        val scaling = row["scaling"] as? JsonObject
+        return row.str("resolution") in setOf("attack","save") || (scaling?.num("targets") ?: 0) > 0
+    }
+    fun perform(row:JsonObject,slot:String?,replace:Boolean,ritual:Boolean,targets:List<String> = emptyList()) {
         submit("cast_spell",buildJsonObject {
             put("actorId",actorId);put("grantId",row.str("grantId"));put("castId",UUID.randomUUID().toString());put("level",row.num("level"))
             if(slot!=null)put("slotPoolId",slot)
             if(replace)put("replaceConcentration",true)
             if(ritual)put("confirmedRitualTime",true)
+            if(targets.isNotEmpty())put("targets",JsonArray(targets.map(::JsonPrimitive)))
         })
         choice=null;inspect=null
     }
     fun cast(row:JsonObject) {
         val slots=row.strings("eligibleSlotIds")
-        if((row.str("route")=="slot"&&slots.size>1)||row.str("route")=="ritual"||row["requiresConcentrationDecision"]?.jsonPrimitive?.booleanOrNull==true)choice=row
+        if((row.str("route")=="slot"&&slots.size>1)||needsTargets(row)&&possibleTargets.isNotEmpty()||row.str("route")=="ritual"||row["requiresConcentrationDecision"]?.jsonPrimitive?.booleanOrNull==true)choice=row
         else perform(row,if(row.str("route")=="slot")slots.singleOrNull() else null,false,false)
     }
     if(!online && rows.isEmpty()) cached.filter { it.str("kind")=="spell"&&it.str("title").orEmpty().contains(query,true) }.forEach {
@@ -267,7 +362,9 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
                 Column(Modifier.weight(1f).clickable { inspect=row }.padding(vertical=6.dp)) {
                     Text(row.str("name").orEmpty())
                     Text(listOfNotNull(row.str("timing"),row.str("range"),row.num("hit")?.let{"${if(it>=0)"+" else ""}$it to hit"},row.num("dc")?.let{"${row.str("saveAbility")} DC $it"}).joinToString(" · "),style=MaterialTheme.typography.labelSmall)
-                    Text(row.rows("components").joinToString(" + ",transform=::formula).ifEmpty{row.str("source").orEmpty()},style=MaterialTheme.typography.labelMedium)
+                    val effects=row.rows("components").joinToString(" + ",transform=::formula)
+                    if(effects.isNotEmpty())Text(effects,style=MaterialTheme.typography.labelMedium)
+                    Text(listOfNotNull(row.str("source"),row.str("preparation")?.replace('_',' ')).joinToString(" · "),style=MaterialTheme.typography.labelSmall)
                 }
                 val verb=when(row.str("route")){"ritual"->"As ritual";"at_will"->"At will";"item","limited"->"Use";else->"Cast"}
                 PlayerTextButton({cast(row)},enabled=online && row.strings("unavailable").isEmpty()){Text(verb)}
@@ -283,6 +380,10 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
                 Text("${original.str("source")} · ${original.str("preparation")?.replace('_',' ')}")
                 var select by remember{mutableStateOf(false)}
                 Box{TextButton({select=true}){Text(levelName(original.num("level")?:0))};DropdownMenu(select,{select=false}){options.forEach{v->DropdownMenuItem({Text(levelName(v.num("level")?:0))},{inspect=v;select=false})}}}
+                val scaling = original["scaling"] as? JsonObject
+                scaling?.num("targets")?.let { Text("Up to $it targets") }
+                scaling?.num("durationSeconds")?.let { Text("Duration · $it seconds") }
+                scaling?.num("areaFeet")?.let { Text("Area · $it feet") }
                 original.rows("components").forEach{Text("${it.str("name")} · ${formula(it)}")}
                 original.strings("unavailable").forEach{Text(it.lowercase().replace('_',' '))}
             }
@@ -293,15 +394,27 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
         var slot by remember(row){mutableStateOf(if(valid.size==1)valid.single() else null)}
         val ritual=row.str("route")=="ritual"
         val concentration=row["requiresConcentrationDecision"]?.jsonPrimitive?.booleanOrNull==true
+        val chosen=remember(row){mutableStateListOf<String>()}
+        val targetCap=((row["scaling"] as? JsonObject)?.num("targets") ?: 12).coerceIn(0,12)
         AlertDialog(onDismissRequest={choice=null},title={Text(row.str("name").orEmpty())},text={
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                if(needsTargets(row)&&possibleTargets.isNotEmpty()){
+                    Text("Targets",style=MaterialTheme.typography.titleSmall)
+                    for(target in possibleTargets){
+                        val id=target.str("id") ?: continue
+                        Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
+                            Checkbox(id in chosen,{on->if(on)chosen.add(id)else chosen.remove(id)},enabled=id in chosen||chosen.size<targetCap)
+                            Text(target.str("title") ?: id)
+                        }
+                    }
+                }
                 if(row.str("route")=="slot"&&valid.size>1)valid.forEach{id->
                     Row(Modifier.clickable{slot=id}){RadioButton(slot==id,{slot=id});Text(pools.find{it.str("id")==id}?.str("title")?:id)}
                 }
                 if(concentration)Text("Casting ends the current concentration effect.")
                 if(ritual)Text("Confirm that the ritual casting time has elapsed.")
             }
-        },confirmButton={TextButton({perform(row,if(row.str("route")=="slot")slot else null,concentration,ritual)},enabled=online&&(row.str("route")!="slot"||slot!=null)){Text("Confirm cast")}},dismissButton={TextButton({choice=null}){Text("Cancel")}})
+        },confirmButton={TextButton({perform(row,if(row.str("route")=="slot")slot else null,concentration,ritual,chosen.toList())},enabled=online&&(row.str("route")!="slot"||slot!=null)){Text("Confirm cast")}},dismissButton={TextButton({choice=null}){Text("Cancel")}})
     }
     if(manage)AlertDialog(onDismissRequest={manage=false},title={Text("Manage spells")},text={
         Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -319,7 +432,7 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
     },confirmButton={TextButton({manage=false}){Text("Done")}})
 }
 
-@Composable private fun RestPlan(
+@Composable internal fun CloudRestPlan(
     actorId:String, actor:JsonObject?, sheet:JsonObject?, pools:List<JsonObject>, online:Boolean,
     submit:(String,JsonObject)->Unit
 ) {

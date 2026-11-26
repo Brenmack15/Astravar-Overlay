@@ -17,6 +17,8 @@ METHODS = [
     'invalidBundlesAndInterruptedPersistenceRemainRetryable',
     'publicContextApplyBackupReimportAndRollbackPreserveIdentity',
     'authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts',
+    'actualSmallEmblemInStatusBarAndShadeAcrossLightAndDarkThemes',
+    'ci-ascension-api37.sh',
 ]
 
 
@@ -34,9 +36,17 @@ run_test() {
   printf '%s\\n' "$1" >>"$astravar_output/executed.txt"
   [[ -z "$TEST_FAILURE" || "$1" != *"$TEST_FAILURE" ]]
 }
+bash() {
+  [[ "$1" == scripts/ci-ascension-api37.sh ]]
+  printf '%s\\n' "${1##*/}" >>"$astravar_output/executed.txt"
+  [[ "$TEST_FAILURE" != "${1##*/}" ]] || return 1
+  mkdir -p validation/ascension-api37
+  printf 37 >validation/ascension-api37/sdk.txt
+  printf 17 >validation/ascension-api37/release.txt
+}
 git() { printf '%s\\n' 0123456789012345678901234567890123456789; }
 ''' + GATE + '\nprintf continued >"$astravar_output/legacy-path.txt"\n'
-        result = subprocess.run(['bash', '-c', shell], env=env, capture_output=True, text=True)
+        result = subprocess.run(['bash', '-c', shell], env=env, cwd=root, capture_output=True, text=True)
         executed = (root/'executed.txt').read_text().splitlines() if (root/'executed.txt').exists() else []
         return result, root, [line.split('#')[-1] for line in executed]
 

@@ -1,4 +1,4 @@
-import { cloudEntity } from './cloud-plan.mjs';
+import { cloudAllowed, cloudEntity } from './cloud-plan.mjs';
 import { cloudFail, validCloudId } from './cloud-validation.mjs';
 
 function visible(service,grant,alias) {
@@ -73,4 +73,38 @@ export async function cloudRelationships(service,principal,id,entityId,options={
   const links=rows.slice(0,limit),tail=links.at(-1);
   return {epoch:c.epoch,revision:c.revision,grantRevision:grant.revision,links,truncated:rows.length>limit,
     nextAfter:rows.length>limit?[tail.from_id,tail.relation,tail.to_id].join('~'):null};
+}
+
+/** A pool ledger is readable at resource scope. Disclose transaction identity only
+ * when the reader also holds every scope on that receipt. */
+export async function cloudPoolHistory(service, principal, id, poolId, options = {}) {
+  if (!validCloudId(poolId)) cloudFail(400, 'INVALID_POOL_ID');
+  const opened = await service.access(principal, id);
+  const { grant, continuity } = opened, limit = checkPage(opened, options);
+  const cursor = options.after;
+  if (cursor && (!/^[1-9][0-9]{0,15}$/.test(cursor) || !Number.isSafeInteger(Number(cursor)))) cloudFail(400, 'INVALID_CURSOR');
+  const binding = service.key(id);
+  const pool = await service.s("SELECT actor_id FROM cloud_entities WHERE owner_id=? AND continuity_id=? AND id=? AND kind='resource_pool' AND life='active'", ...binding, poolId).first();
+  if (!pool || !cloudAllowed(grant, 'resources', pool.actor_id)) cloudFail(404, 'POOL_UNAVAILABLE');
+  const rows = (await service.s(`SELECT h.revision, r.command_id, r.transaction_id, r.created_at, r.access_json,
+      json_extract(q.request_json,'$.command.operation') AS operation,
+      (s.payload_json IS NOT NULL) AS has_evidence,
+      json_extract(s.payload_json,'$.before.data.current') AS before_balance,
+      json_extract(s.payload_json,'$.after.data.current') AS after_balance
+    FROM cloud_changes h JOIN cloud_receipts r ON (r.owner_id,r.continuity_id,r.revision)=(h.owner_id,h.continuity_id,h.revision)
+    JOIN cloud_requests q ON (q.owner_id,q.continuity_id,q.command_id)=(r.owner_id,r.continuity_id,r.command_id)
+    LEFT JOIN cloud_evidence_segments s ON (s.owner_id,s.continuity_id,s.command_id,s.part)=(r.owner_id,r.continuity_id,r.command_id,'c'||h.ordinal)
+    WHERE h.owner_id=? AND h.continuity_id=? AND h.entity_id=? AND h.actor_id=? AND r.status='COMMITTED'
+      AND h.kind='resource_pool' ${cursor ? 'AND h.revision<?' : ''}
+    ORDER BY h.revision DESC LIMIT ?`, ...binding, poolId, pool.actor_id, ...(cursor ? [Number(cursor)] : []), limit + 1).all()).results;
+  const events = rows.slice(0, limit).map(row => {
+    const access = JSON.parse(row.access_json);
+    const receiptVisible = access.length > 0 && access.every(e => cloudAllowed(grant, e.scope, e.actorId));
+    return { revision: row.revision, recordedAt: row.created_at, before: row.before_balance, after: row.after_balance,
+      evidenceAvailable: Boolean(row.has_evidence),
+      ...(receiptVisible ? { commandId: row.command_id, transactionId: row.transaction_id, operation: row.operation } : {}) };
+  });
+  await confirm(service, principal, id, opened);
+  return { continuityId: id, poolId, epoch: continuity.epoch, revision: continuity.revision,
+    grantRevision: grant.revision, events, nextAfter: rows.length > limit ? String(events.at(-1).revision) : null };
 }

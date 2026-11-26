@@ -15,7 +15,7 @@ android {
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(59)
-        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("4.1.0-ascension-dev")
+        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("4.1.0")
     }
     signingConfigs {
         create("owner") {

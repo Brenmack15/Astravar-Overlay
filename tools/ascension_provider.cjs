@@ -21,6 +21,19 @@ function stable(value){
 }
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const fingerprint=value=>sha(stable(value));
+function packageDigest(file){
+  const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW),hash=createHash('sha256'),buffer=Buffer.alloc(65536);
+  try{
+    const st=fs.fstatSync(fd);
+    check(st.isFile() && st.size<=258*1024*1024,'Expected a bounded regular recovery package');
+    let size=0,count;
+    while((count=fs.readSync(fd,buffer))>0){
+      size+=count;check(size<=st.size,'Package changed while reading');hash.update(buffer.subarray(0,count));
+    }
+    check(size===st.size,'Package size changed while reading');
+    return hash.digest('hex');
+  }finally{fs.closeSync(fd);}
+}
 function python(operation,...args){
   const bytes=execFileSync('python3',[packageBridge,operation,...args],{encoding:'utf8',maxBuffer:16<<20,stdio:['ignore','pipe','pipe']});
   return JSON.parse(bytes);
@@ -184,6 +197,8 @@ async function checkSingleScope(runtime,m,portable){
   const {db,bucket}=runtime;
   const siblings=await db.prepare('SELECT 1 AS found FROM cloud_continuities WHERE owner_id<>? OR continuity_id<>? LIMIT 1').bind(...scope(m)).first();
   check(!siblings,'A shared provider root requires a separate tenant-preserving deployment');
+  const unknown=await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT GLOB 'cloud_*' AND name NOT GLOB 'bridge_*' AND name NOT GLOB 'sqlite_*' AND name<>'_cf_METADATA' LIMIT 1").first();
+  if(unknown)throw Error('Unclassified local provider storage requires separate preservation ('+(/^[A-Za-z0-9_]+$/.test(unknown.name)?unknown.name:'unnamed')+')');
   const legacy=(await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name GLOB 'bridge_*' ORDER BY name").all()).results;
   const statements=legacy.map(t=>{
     check(/^bridge_[a-z_]+$/.test(t.name),'Unclassified legacy provider table');
@@ -249,6 +264,9 @@ async function insertReviewed(runtime,m,dir,portable,layout){
 async function verifiedGen(root,m,gen,expected,mod,allowedAuthorities){
   return scratch(dir=>resource(root,gen,null,async runtime=>{
     const actual=await capture(runtime,m,python('layout'),dir),v=actual.portable;
+    check(actual.guard===fingerprint([]) && !await runtime.db.prepare('SELECT 1 FROM bridge_credentials LIMIT 1').first(),
+      'Restored generation must begin without standing grants or credentials');
+    await checkSingleScope(runtime,m,v);
     check(fingerprint(covered(v))===fingerprint(covered(expected)) && allowedAuthorities.includes(v.state.authority) &&
       v.state.schema===expected.state.schema,'Restored D1 state differs from reviewed source');
     return v.state;
@@ -257,7 +275,7 @@ async function verifiedGen(root,m,gen,expected,mod,allowedAuthorities){
 async function prepare(root,file,approval,mod){
   return withLock(root,m=>scratch(async dir=>{
     check(!m.intent,'Recover the pending cutover first');
-    const fileDigest=sha(fs.readFileSync(file)),verified=python('unpack',dir,file),p=readPrivate(path.join(dir,'snapshot.json')),source=await baseline(root,m,mod);
+    const fileDigest=packageDigest(file),verified=python('unpack',dir,file),p=readPrivate(path.join(dir,'snapshot.json')),source=await baseline(root,m,mod);
     check(p.owner===m.owner && p.continuity===m.continuity,'Package owner or continuity differs');
     if(source.state){
       check(source.state.authority==='cloud' && source.state.epoch===p.state.epoch &&
@@ -278,7 +296,7 @@ async function prepare(root,file,approval,mod){
       check(state.epoch===p.state.epoch,'Staged epoch mismatch');
       fs.copyFileSync(file,path.join(where,'source.zip'),fs.constants.COPYFILE_EXCL);
       fs.chmodSync(path.join(where,'source.zip'),0o600);
-      check(sha(fs.readFileSync(path.join(where,'source.zip')))===fileDigest,'Independent package copy mismatch');
+      check(packageDigest(path.join(where,'source.zip'))===fileDigest,'Independent package copy mismatch');
       save(root,{...m,pending:{gen,approval,digest:verified.manifestSha256,source:source.digest,sourceState:source.state}});
       return {status:'STAGED',manifestSha256:verified.manifestSha256,revision:state.revision,media:verified.media};
     }catch(error){fs.rmSync(where,{recursive:true,force:true});throw error;}
@@ -305,6 +323,7 @@ async function cutover(root,approval,carry,mod,testHook){
     const p=m.pending,sourceFile=path.join(genPath(root,p.gen),'source.zip');
     const reviewed=python('unpack',dir,sourceFile),contents=readPrivate(path.join(dir,'snapshot.json'));
     check(reviewed.manifestSha256===p.digest,'Packaged source evidence changed');
+    check(reviewed.cutoverHolds===0,'Source records still require reviewed reconciliation before cutover');
     const candidates=contents.tables.cloud_requests.filter(r=>r.status==='PENDING_APPROVAL').map(r=>r.command_id);
     check(!candidates.length || (carry && contents.state.authority==='cloud'),'Pending work requires explicit prior-epoch review carry');
     check(!carry || candidates.length>0,'A carry decision requires existing pending requests');
@@ -343,16 +362,25 @@ async function withGameplay(root,fn,mod){
     return resource(root,m.active,m,r=>fn(r,m),mod);
   });
 }
-module.exports={create,backup,backupBindings,prepare,cutover,rollbackStage,withGameplay};
+async function inspect(root,mod){
+  return withLock(root,async m=>{
+    const read=gen=>resource(root,gen,null,({db})=>db.prepare('SELECT authority,epoch,revision FROM cloud_continuities'+scoped).bind(...scope(m)).first(),mod);
+    const current=await read(m.active),stage=m.pending?await read(m.pending.gen):null;
+    const previous=m.last?.action==='cutover'?await read(m.last.previous):null;
+    return {status:m.intent?'CUTOVER_IN_PROGRESS':m.pending?'STAGED':current?'READY':'EMPTY',current,stage,previous,production:false};
+  });
+}
+module.exports={create,backup,backupBindings,prepare,cutover,rollbackStage,withGameplay,inspect};
 if(require.main===module){
   process.umask(0o077);
   const argv=process.argv.slice(2),[op,target,...args]=argv;
   const flag=name=>{const i=args.indexOf(name);return i<0?undefined:args[i+1];};
   const mod=flag('--miniflare'),approval=flag('--approve');
-  const usage='init DIR --owner ID --continuity qa-ID | backup DIR ZIP | stage DIR ZIP [--approve DIGEST] | cutover DIR [--approve DIGEST] [--carry-pending] | rollback-stage DIR [--approve DIGEST]. Optional --miniflare ABS_PACKAGE.';
+  const usage='init DIR --owner ID --continuity qa-ID | status DIR | backup DIR ZIP | stage DIR ZIP [--approve DIGEST] | cutover DIR [--approve DIGEST] [--carry-pending] | rollback-stage DIR [--approve DIGEST]. Optional --miniflare ABS_PACKAGE.';
   async function run(){
     check(target && !target.startsWith('-'),usage);const root=path.resolve(target);
     if(op==='init')return create(root,flag('--owner'),flag('--continuity'),mod);
+    if(op==='status')return inspect(root,mod);
     if(op==='backup')return backup(root,path.resolve(args[0]),mod);
     if(op==='stage')return prepare(root,path.resolve(args[0]),approval,mod);
     if(op==='cutover')return cutover(root,approval,args.includes('--carry-pending'),mod);

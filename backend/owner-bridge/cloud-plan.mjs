@@ -89,6 +89,26 @@ export class CloudPlan {
   }
   async link(fromId,relation,toId){return this.edge(fromId,relation,toId,false);}
   async unlink(fromId,relation,toId){return this.edge(fromId,relation,toId,true);}
+  /** Splitting personally visible stock can inherit only its existing catalog
+   * edge. Neither the catalog nor a caller-supplied definition is enumerable. */
+  async linkInheritedItemDefinition(childId,parentId) {
+    const child=await this.get('item_instance',childId),parent=await this.get('item_instance',parentId);
+    const created=this.changes.get(childId),split=this.edges.get(JSON.stringify([childId,'split_from',parentId]));
+    if(!child || !parent || !created || created.before!==null || !split || split.remove ||
+        child.life!=='active' || parent.life!=='active' || child.actorId!==parent.actorId ||
+        !child.data.partyAccess || !parent.data.partyAccess || child.data.definitionId!==parent.data.definitionId ||
+        child.data.ownerId!==parent.data.ownerId || child.data.custodianId!==parent.data.custodianId)
+      cloudFail(409,'HOLDING_DEFINITION_PROOF_REQUIRED');
+    const def=await this.current(parent.data.definitionId);
+    const sourceEdge=await this.service.s(`SELECT 1 AS present FROM cloud_links WHERE owner_id=? AND continuity_id=?
+      AND from_id=? AND relation='definition' AND to_id=?`,...this.binding,parentId,parent.data.definitionId).first();
+    if(!sourceEdge || !def || def.kind!=='item_definition' || def.life!=='active' || def.actorId!==null)
+      cloudFail(409,'HOLDING_DEFINITION_PROOF_REQUIRED');
+    this.require(this.service.kinds.item_instance,child.actorId,true);
+    if(this.edges.size>=256)cloudFail(400,'INVALID_RELATIONSHIP');
+    const edge={fromId:childId,relation:'definition',toId:def.id,remove:false};
+    this.edges.set(JSON.stringify([childId,'definition',def.id]),edge);
+  }
   freeze(result) {
     const plan={result,readIds:[...this.reads.keys()],changes:[...this.changes.values()],edges:[...this.edges.values()],access:[...this.access.values()]};
     if(canonical(plan).length>240000) cloudFail(413,'PLAN_TOO_LARGE');

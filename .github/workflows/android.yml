@@ -32,7 +32,7 @@ jobs:
       # regression batch before the first touch on every 3.1 candidate.
       REFORGE_FULL_GATE: 'true'
       GENESIS_GATE: 'true'
-      EXPECTED_VERSION_NAME: '4.1.0-ascension-dev'
+      EXPECTED_VERSION_NAME: '4.1.0'
       EXPECTED_VERSION_CODE: '59'
       INVENTORY_BETA: 'false'
     steps:
