@@ -1,3 +1,9 @@
+import { CLOUD_MEDIA_KINDS, CLOUD_MEDIA_OPERATIONS } from './cloud-media.mjs';
+import { CloudService } from './cloud-service.mjs';
+import { MECHANIC_KINDS, MECHANIC_OPERATIONS } from './cloud-mechanics.mjs';
+import { RECORD_KINDS, RECORD_OPERATIONS } from './cloud-records.mjs';
+import { cloudHttp } from './cloud-http.mjs';
+import { cloudInboxPage } from './cloud-inbox.mjs';
 /** Sites-only entrypoint. Do not expose this handler behind an unauthenticated
  * proxy: Sites must verify/replace all oai-authenticated-* identity headers.
  */
@@ -78,12 +84,18 @@ async function handleWorkerRequest(request, env, context) {
     if(!campaignPush?.configured||!context?.waitUntil)return;
     context.waitUntil(campaignPush.notify(info).catch(()=>false));
   }}):null;
+  const cloudService=configured && env.ASTRAVAR_CLOUD_ENABLED==='1' ? new CloudService(
+    typeof env.DB.withSession==='function'?env.DB.withSession('first-primary'):env.DB,
+    {ownerId,kinds:{...MECHANIC_KINDS,...RECORD_KINDS,...CLOUD_MEDIA_KINDS},operations:{...MECHANIC_OPERATIONS,...RECORD_OPERATIONS,...CLOUD_MEDIA_OPERATIONS},isolated:env.ASTRAVAR_CLOUD_ENV==='isolated'}) : null;
+  if(cloudService)cloudService.mediaBucket=env.ASTRAVAR_MEDIA;
   // Tool schemas contain no private data and are needed for plugin provisioning.
   // Actual tools/call still requires the configured owner and verified identity.
-  if (url.pathname === '/mcp') return handleMcp(request, bridge, { ownerId, allowPublicDiscovery: true,liveHp,campaignBridge,campaignPush });
+  if (url.pathname === '/mcp') return handleMcp(request, bridge, { ownerId, allowPublicDiscovery: true,liveHp,campaignBridge,campaignPush,cloudService });
   if (!configured) return json({ mode: MODE, error: { code: 'OWNER_CONNECTION_NOT_CONFIGURED' } }, 503);
   const isOwner = request.headers.get('oai-authenticated-user-id') === ownerId;
   const ownerPrincipal = isOwner ? { ownerId, role: 'owner', credentialId: 'sites-owner', scopes: [] } : null;
+  if (url.pathname.startsWith('/v3/continuities/')) return cloudService ? cloudHttp(request,bridge,cloudService,ownerPrincipal) : json({error:{code:'CLOUD_PROTOCOL_DISABLED'}},404);
+  if (request.method==='GET' && /^\/owner\/ascension\/[A-Za-z0-9._:-]+$/.test(url.pathname)) return cloudService&&isOwner ? cloudInboxPage() : json({error:{code:'OWNER_AUTHENTICATION_REQUIRED'}},401);
   if (url.pathname.startsWith('/owner/bootstrap')) return handleBootstrap(request, env);
   if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/owner')) return isOwner ? ownerPage() : json({ mode: MODE, error: { code: 'OWNER_AUTHENTICATION_REQUIRED' } }, 401);
   if ((url.pathname.startsWith('/v1/')||url.pathname.startsWith('/v2/'))) return handleOwnerApi(request, bridge, { ownerPrincipal,liveHp,campaignBridge,campaignPush });

@@ -9,7 +9,14 @@ import { fileURLToPath } from 'node:url';
 const root = dirname(fileURLToPath(import.meta.url));
 const output = resolve(process.argv[2] || resolve(root, 'build'));
 const modules = [
-  ['core.mjs', 'CORE'], ['native-source.mjs', 'NATIVE_SOURCE'], ['campaign.mjs', 'CAMPAIGN_SYNC'], ['campaign-push.mjs', 'CAMPAIGN_PUSH'], ['campaign-tools.mjs','CAMPAIGN_TOOLS_MODULE'], ['live-hp.mjs', 'LIVE_HP'], ['http.mjs', 'HTTP'], ['mcp.mjs', 'MCP'],
+  ['core.mjs', 'CORE'], ['native-source.mjs', 'NATIVE_SOURCE'], ['campaign.mjs', 'CAMPAIGN_SYNC'], ['campaign-push.mjs', 'CAMPAIGN_PUSH'], ['campaign-tools.mjs','CAMPAIGN_TOOLS_MODULE'], ['live-hp.mjs', 'LIVE_HP'], ['http.mjs', 'HTTP'],
+  ['cloud-validation.mjs','CLOUD_VALIDATION'], ['cloud-plan.mjs','CLOUD_PLAN'], ['cloud-query.mjs','CLOUD_QUERY'], ['cloud-records-query.mjs','CLOUD_RECORDS_QUERY'],
+  ['cloud-records-contract.mjs','CLOUD_RECORDS_CONTRACT'], ['cloud-holdings.mjs','CLOUD_HOLDINGS'],
+  ['cloud-crafting.mjs','CLOUD_CRAFTING'], ['cloud-world.mjs','CLOUD_WORLD'], ['cloud-records.mjs','CLOUD_RECORDS'],
+  ['cloud-mechanics-core.mjs','CLOUD_MECHANICS_CORE'], ['cloud-mechanics-rolls.mjs','CLOUD_ROLLS'],
+  ['cloud-mechanics-combat.mjs','CLOUD_COMBAT'], ['cloud-mechanics-spells.mjs','CLOUD_SPELLS'],
+  ['cloud-mechanics-actions.mjs','CLOUD_ACTIONS'], ['cloud-mechanics.mjs','CLOUD_MECHANICS'], ['cloud-service.mjs','CLOUD_SERVICE'],
+  ['cloud-media-codec.mjs','CLOUD_MEDIA_CODEC'], ['cloud-media.mjs','CLOUD_MEDIA'], ['cloud-inbox.mjs','CLOUD_INBOX'], ['cloud-http.mjs','CLOUD_HTTP'], ['cloud-mcp.mjs','CLOUD_MCP'], ['mcp.mjs', 'MCP'],
   ['bootstrap.mjs', 'BOOTSTRAP'], ['worker.mjs', 'ENTRY'],
 ];
 const names = new Map(modules.map(([file, name]) => [`./${file}`, name]));

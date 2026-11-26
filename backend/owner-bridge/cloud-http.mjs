@@ -1,0 +1,79 @@
+import { handleCloudMedia } from './cloud-media.mjs';
+import { cloudRecordView } from './cloud-records-query.mjs';
+import { BridgeError } from './core.mjs';
+import { cloudFail, validCloudId } from './cloud-validation.mjs';
+import { CloudPlan } from './cloud-plan.mjs';
+import { cloudContext, cloudRelationships } from './cloud-query.mjs';
+import { mechanicActorSheet } from './cloud-mechanics.mjs';
+
+export async function cloudBody(request) {
+  if(request.headers.get('content-type')?.split(';')[0].trim()!=='application/json')cloudFail(415,'JSON_REQUIRED');
+  const reader=request.body?.getReader();if(!reader)cloudFail(400,'BODY_REQUIRED');
+  const chunks=[];let size=0;
+  for(;;){const item=await reader.read();if(item.done)break;size+=item.value.length;if(size>65536){await reader.cancel();cloudFail(413,'REQUEST_TOO_LARGE');}chunks.push(item.value);}
+  const data=new Uint8Array(size);let offset=0;
+  for(const chunk of chunks){data.set(chunk,offset);offset+=chunk.length;}
+  try{return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(data));}catch{cloudFail(400,'INVALID_JSON');}
+}
+export async function cloudSheet(service,principal,id,actorId) {
+  const opened=await service.access(principal,id);
+  const ctx=new CloudPlan(service,service.key(id),opened.grant,{commandId:'preview-actor-sheet',operation:'inspect_actor'},service.now());
+  const sheet=await mechanicActorSheet(ctx,actorId), again=await service.access(principal,id);
+  if(again.continuity.epoch!==opened.continuity.epoch||again.continuity.revision!==opened.continuity.revision||again.grant.revision!==opened.grant.revision)cloudFail(409,'SNAPSHOT_CHANGED');
+  return {epoch:opened.continuity.epoch,revision:opened.continuity.revision,sheet};
+}
+export function cloudResponse(value,status=200) {
+  return Response.json(value,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}});
+}
+export async function cloudHttp(request,bridge,service,ownerPrincipal) {
+  const url=new URL(request.url);
+  try {
+    const parts=url.pathname.split('/').slice(3).map(decodeURIComponent);
+    const [id,action,item,decision]=parts,method=request.method;
+    if((action!=='media' && parts.length>4)||!validCloudId(id))cloudFail(404,'UNKNOWN_ROUTE');
+    const origin=request.headers.get('Origin');
+    if(origin && origin!==url.origin)cloudFail(403,'CROSS_ORIGIN_DENIED');
+    let principal;
+    if(request.headers.has('authorization')||request.headers.has('X-Astravar-Credential')){
+      const bearer=request.headers.get('Authorization')||'';
+      if(!bearer.startsWith('Bearer '))cloudFail(401,'AUTHENTICATION_REQUIRED');
+      principal=await bridge.authenticate(request.headers.get('X-Astravar-Credential')||'',bearer.slice(7));
+    }else{
+      if(!ownerPrincipal)cloudFail(401,'AUTHENTICATION_REQUIRED');
+      if(method!=='GET' && origin!==url.origin)cloudFail(403,'SAME_ORIGIN_REQUIRED');
+      principal=ownerPrincipal;
+    }
+    if(action==='media')return await handleCloudMedia(request,service,principal,id,parts.slice(1).join('/'));
+    const options={};
+    for(const [key,value] of url.searchParams){
+      if(Object.hasOwn(options,key))cloudFail(400,'DUPLICATE_PARAMETER');
+      if(['limit','atRevision','atEpoch','grantRevision','sinceRevision'].includes(key)){
+        if(!/^(0|[1-9][0-9]{0,15})$/.test(value)||!Number.isSafeInteger(Number(value)))cloudFail(400,'INVALID_PAGE');
+        options[key]=Number(value);
+      }else if(['kind','id','after','actorId','query'].includes(key))options[key]=value;
+      else if(key==='activeOnly' && ['true','false'].includes(value))options[key]=value==='true';
+      else cloudFail(400,'UNKNOWN_PARAMETER');
+    }
+    let result;
+    if(method==='POST'&&action==='isolated'&&!item){
+      const body=await cloudBody(request);if(!body||Array.isArray(body)||Object.keys(body).length)cloudFail(400,'INVALID_REQUEST');
+      result=await service.createIsolated(principal,id);
+    }else if(method==='POST'&&action==='grants'&&item&&!decision)result=await service.setGrant(principal,id,item,await cloudBody(request));
+    else if(method==='GET'&&action==='capabilities'&&!item)result=await service.capabilities(principal,id);
+    else if(method==='GET'&&action==='state'&&!item)result=await service.state(principal,id,options);
+    else if(method==='GET'&&action==='records'&&item&&!decision)result=await cloudRecordView(service,principal,id,item,options);
+    else if(method==='GET'&&action==='context'&&!item)result=await cloudContext(service,principal,id,options);
+    else if(method==='GET'&&action==='sheet'&&item&&!decision)result=await cloudSheet(service,principal,id,item);
+    else if(method==='GET'&&action==='links'&&item&&!decision)result=await cloudRelationships(service,principal,id,item);
+    else if(method==='POST'&&action==='commands'&&!item)result=await service.submit(principal,id,await cloudBody(request));
+    else if(method==='GET'&&action==='receipts'&&item&&!decision)result=await service.receipt(principal,id,item);
+    else if(method==='GET'&&action==='review-status'&&!item)result=await service.reviewStatus(principal,id);
+    else if(method==='GET'&&action==='approvals'&&!item)result=await service.approvals(principal,id,options);
+    else if(method==='POST'&&action==='approvals'&&item&&decision){
+      const body=await cloudBody(request);
+      if(!['verify','refuse'].includes(decision)||!body||Object.keys(body).length!==1||!Object.hasOwn(body,'digest'))cloudFail(400,'EXACT_REVIEW_REQUIRED');
+      result=await service.review(principal,id,item,body.digest,decision);
+    }else cloudFail(404,'UNKNOWN_ROUTE');
+    return cloudResponse(result,result.status==='PENDING_APPROVAL'?202:200);
+  }catch(e){return cloudResponse({status:e instanceof BridgeError&&e.status===409?'CONFLICT':'UNVERIFIED',error:{code:e instanceof BridgeError?e.code:'SERVICE_UNAVAILABLE'}},e instanceof BridgeError?e.status:503);}
+}

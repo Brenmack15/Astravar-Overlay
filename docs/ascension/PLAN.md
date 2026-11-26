@@ -48,3 +48,9 @@ Keep test SQL and media isolated. Production region and residency, provider/acco
 | 7 | Outside this assignment | Separate owner-authorized production migration |
 
 Each feature needs scoped retrieval, authoring/execution where applicable, permission handling, a durable receipt and independent readback before claiming functional parity. Features unavailable to the new backend remain identified in the trace and capability matrices. Git history records implementation checkpoints. Update this ledger after verification and before any release designation.
+
+## Isolated engineering checkpoint
+
+The release baseline and source trace register are preserved on the feature branch. The first authoritative Worker verification used a file-backed SQL database with zero registered Android credentials. Authenticated MCP changed an actor, made an exact-denomination purchase, spent a finite resource and wrote a resolved timeline event. Each commit produced an independently read receipt. A fresh Worker/database handle and subsequently paired synthetic device read the resulting records once, then the DM independently observed a device-originated edit. This exercised the real Worker and device wire protocol. The native APK, Android UI and physical handset have separate gates.
+
+The approval fixture survived restart, bound the reviewed digest, and exercised refuse and revoked-grant behavior. The equivalent absolute ability fixture links a distinct superseded receipt to the satisfying commit. The database fixture fences old device writers, checks foreign keys, and rolls back failed multi-record commands. The trace checker indexed 175 directive entries, 503 primary backlog paragraphs, 52 companion fixture paragraphs and 63 AI capabilities. These counts measure coverage of the register. Individual feature acceptance remains tracked independently.

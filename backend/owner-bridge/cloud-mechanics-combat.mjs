@@ -1,0 +1,144 @@
+import { stats, identifier, boolean, named, whole, arrayOf, option, fields, mode, evidence, attackSchema, must, op, actor, owned, insert, save, sheet, gearEligible, numeric, rollPolicy, spend, useTiming } from './cloud-mechanics-core.mjs';
+import { observed } from './cloud-mechanics-rolls.mjs';
+
+export const damageEvidence=arrayOf(fields({id:identifier,evidence},['id','evidence']),24);
+export function componentRules(list,allowScaling=false){
+  must(new Set(list.map(c=>c.id)).size===list.length,'DUPLICATE_DAMAGE_COMPONENT');
+  for(const c of list){
+    must(c.dice>0||c.flat!==0||c.abilityBonus,'EMPTY_DAMAGE_COMPONENT');
+    must(!c.variants || c.variants.length>0 && c.variants.includes(c.type) && new Set(c.variants).size===c.variants.length,'INVALID_COMPONENT_VARIANTS');
+    must(allowScaling||!c.extraDicePerLevel,'UNSUPPORTED_ATTACK_SCALING');
+    must(allowScaling||c.type!=='healing','ATTACK_COMPONENT_TYPE_INVALID');
+  }
+}
+export function snapshotComponents(components,p,chosen={},levels=0){
+  return components.map(c=>{
+    const bonus=c.abilityBonus?p.abilities[c.abilityBonus].modifier:0;
+    must(bonus!=null,'DAMAGE_ABILITY_UNKNOWN');
+    return {id:c.id,name:c.name,type:chosen[c.id]??c.type,dice:c.dice+(c.extraDicePerLevel??0)*levels,sides:c.sides,
+      flat:c.flat+bonus,critical:c.critical!==false};
+  });
+}
+export function rollComponents(components,recorded,critical){
+  const entries=new Map(recorded.map(e=>[e.id,e.evidence]));
+  must(entries.size===recorded.length && entries.size===components.length,'DAMAGE_COMPONENT_EVIDENCE_REQUIRED');
+  return components.map(c=>{
+    const e=entries.get(c.id);must(e,'COMPONENT_MISSING');
+    const dice=c.dice*(critical&&c.critical?2:1);
+    return {...observed(c.name,dice,c.sides,c.flat,'sum',e),id:c.id,type:c.type};
+  });
+}
+async function defineAttack(ctx,x){
+  const a=await actor(ctx,x.actorId);
+  componentRules(x.components);
+  must((!x.requiresAttunement&&!x.requiresOperating) || x.sourceItemId,'ATTACK_ITEM_REQUIRED');
+  must(x.resolution!=='attack'||x.fixedHit!=null||x.ability,'HIT_FORMULA_REQUIRED');
+  must(x.resolution!=='save'||x.saveAbility && x.saveDc!=null,'SAVE_FORMULA_REQUIRED');
+  must(x.resolution==='attack'||(x.fixedHit==null&&x.hitBonus==null),'HIT_ON_NON_ATTACK');
+  must(x.longRange==null||x.range!=null&&x.longRange>=x.range,'INVALID_LONG_RANGE');
+  if(x.sourceItemId)must(await ctx.get('item_instance',x.sourceItemId),'ATTACK_SOURCE_MISSING');
+  if(x.formId)await owned(ctx,'form',x.formId,a.id);
+  for(const id of x.excludedForms??[])await owned(ctx,'form',id,a.id);
+  if(x.cost)await owned(ctx,'resource_pool',x.cost.poolId,a.id);
+  const {actorId,attackId,name,...config}=x;
+  await insert(ctx,'attack',attackId,actorId,name,{...config,selections:[]});
+  if(x.cost)await ctx.link(attackId,'uses_pool',x.cost.poolId);
+  if(x.sourceItemId)await ctx.link(attackId,'requires_item',x.sourceItemId);
+  if(x.formId)await ctx.link(attackId,'requires_form',x.formId);
+  return {attackId};
+}
+async function loadAttack(ctx,x){
+  const a=await actor(ctx,x.actorId),attack=await owned(ctx,'attack',x.attackId,a.id),p=await sheet(ctx,a.id);
+  const d=attack.data;
+  must(!p.conditions.some(c=>['incapacitated','unconscious','stunned','petrified','paralyzed'].includes(c)),'ACTOR_CANNOT_ATTACK');
+  must((!d.formId||d.formId===p.formId)&&!d.excludedForms?.includes(p.formId),'ATTACK_FORM_INELIGIBLE');
+  must(await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating),'ATTACK_SOURCE_INELIGIBLE');
+  const chosen=Object.fromEntries(d.selections.filter(s=>s.formId===p.formId).map(s=>[s.componentId,s.type]));
+  return {a,attack,p,components:snapshotComponents(d.components,p,chosen)};
+}
+async function chooseVariant(ctx,x){
+  const {attack,p}=await loadAttack(ctx,x);
+  const component=attack.data.components.find(c=>c.id===x.componentId);
+  must(component?.variants?.includes(x.type),'DAMAGE_VARIANT_UNAVAILABLE');
+  const selections=attack.data.selections.filter(s=>s.formId!==p.formId||s.componentId!==x.componentId);
+  selections.push({formId:p.formId,componentId:x.componentId,type:x.type});
+  await save(ctx,attack,{...attack.data,selections});
+  return {attackId:attack.id,formId:p.formId,componentId:x.componentId,type:x.type};
+}
+async function resolveAttack(ctx,x){
+  const {a,attack,p,components}=await loadAttack(ctx,x),d=attack.data;
+  must(d.resolution!=='manual','MANUAL_ADJUDICATION_REQUIRED');
+  let hit=null,critical=false;
+  if(d.resolution==='attack'){
+    must(x.hit,'ATTACK_DICE_REQUIRED');
+    const policy=rollPolicy(p.effects,'attack:'+attack.id,x.mode);
+    const mod=d.ability?p.abilities[d.ability].modifier:null;
+    must(d.fixedHit!=null || mod!=null && (!d.proficient || p.proficiency!=null),'ATTACK_MODIFIER_UNKNOWN');
+    const base=d.fixedHit??((mod??0)+(d.proficient?p.proficiency:0)+(d.hitBonus??0));
+    const total=numeric(base,p.effects,'attack',attack.id).value;
+    hit=observed(attack.title,policy.count,20,total,policy.mode==='normal'?'sum':policy.mode==='advantage'?'highest':'lowest',x.hit,true);
+    critical=hit.natural===20;
+  }else must(!x.hit&&x.mode==='normal','UNEXPECTED_ATTACK_ROLL');
+  must(x.includeDamage || x.damage===undefined,'UNREQUESTED_DAMAGE');
+  const damage=x.includeDamage?rollComponents(components,x.damage??[],critical):null;
+  await useTiming(ctx,a,d.timing);
+  const costs=d.cost?[await spend(ctx,a.id,d.cost.poolId,d.cost.amount)]:[];
+  const result={actorId:a.id,formId:p.formId,attackId:attack.id,sourceItemId:d.sourceItemId??null,resolution:d.resolution,
+    sourceRevision:attack.revision,hit,critical,components,damage,costs,timing:d.timing,appliedDamage:null,
+    save:d.resolution==='save'?{ability:d.saveAbility,dc:d.saveDc,success:d.saveSuccess??null}:null,outcome:hit?.natural===1?'miss':'pending',
+    commandId:ctx.commandId,recordedAt:ctx.now};
+  await insert(ctx,'attack_attempt',x.attemptId,a.id,attack.title,result);
+  await ctx.link(x.attemptId,'used_attack',attack.id);
+  return {attemptId:x.attemptId,...result};
+}
+function freshTurn(a){return {action:true,bonus_action:true,reaction:true,attacks:a.data.attacksPerAction};}
+async function startEncounter(ctx,x){
+  must(x.participants.length>0 && new Set(x.participants.map(p=>p.actorId)).size===x.participants.length,'INVALID_PARTICIPANTS');
+  const list=[];
+  for(const entry of x.participants){
+    const a=await actor(ctx,entry.actorId),r=await owned(ctx,'roll',entry.initiativeRollId,a.id);
+    must(!a.data.encounterId && r.data.kind==='initiative' && r.data.status==='resolved','INITIATIVE_UNAVAILABLE');
+    list.push({a,rollId:r.id,initiative:r.data.total});
+  }
+  list.sort((a,b)=>b.initiative-a.initiative);
+  const data={active:true,participants:list.map(p=>p.a.id),initiative:list.map(p=>({actorId:p.a.id,total:p.initiative,rollId:p.rollId})),
+    economy:Object.fromEntries(list.map(p=>[p.a.id,freshTurn(p.a)])),index:0,round:1};
+  // Group encounter history is continuity-wide; a partial actor grant cannot read it.
+  await ctx.require('combat',null);
+  must(!await ctx.get('encounter',x.encounterId),'ENCOUNTER_ID_EXISTS');
+  await ctx.put({id:x.encounterId,kind:'encounter',actorId:null,title:x.name,data});
+  for(const p of list){
+    await save(ctx,p.a,{...p.a.data,encounterId:x.encounterId});
+    await ctx.link(x.encounterId,'participant',p.a.id);await ctx.link(x.encounterId,'initiative_roll',p.rollId);
+  }
+  return {encounterId:x.encounterId,round:1,currentActorId:list[0].a.id};
+}
+async function progress(ctx,x,end){
+  const e=await ctx.get('encounter',x.encounterId);
+  must(e?.life==='active'&&e.data.active && e.data.participants[e.data.index]===x.currentActorId,'ENCOUNTER_CHANGED');
+  const d=e.data;
+  if(end){
+    for(const id of d.participants){
+      const a=await actor(ctx,id);must(a.data.encounterId===e.id,'ENCOUNTER_STATE_UNRESOLVED');
+      await save(ctx,a,{...a.data,encounterId:null});
+    }
+    await save(ctx,e,{...d,active:false,outcome:x.outcome});return {encounterId:e.id,active:false,outcome:x.outcome};
+  }
+  const index=(d.index+1)%d.participants.length,round=d.round+(index===0?1:0),a=await actor(ctx,d.participants[index]);
+  await save(ctx,e,{...d,index,round,slotSpentActorIds:[],economy:{...d.economy,[a.id]:freshTurn(a)}});
+  return {encounterId:e.id,round,currentActorId:a.id};
+}
+export const combatOperations=Object.freeze({
+  define_attack:op('combat',attackSchema,defineAttack),
+  select_damage_variant:op('combat',fields({actorId:identifier,attackId:identifier,componentId:identifier,type:identifier},['actorId','attackId','componentId','type']),chooseVariant),
+  resolve_attack:op('combat',fields({actorId:identifier,attemptId:identifier,attackId:identifier,mode,hit:evidence,includeDamage:boolean,damage:damageEvidence},['actorId','attemptId','attackId','mode','includeDamage']),resolveAttack),
+  roll_attack_damage:op('combat',fields({actorId:identifier,attemptId:identifier,damage:damageEvidence},['actorId','attemptId','damage']),async(ctx,x)=>{
+    const r=await owned(ctx,'attack_attempt',x.attemptId,x.actorId);
+    must(r.data.damage===null,'ATTEMPT_DAMAGE_ALREADY_RECORDED');
+    const damage=rollComponents(r.data.components,x.damage,r.data.critical);
+    await save(ctx,r,{...r.data,damage});return {attemptId:r.id,damage,outcome:r.data.outcome,appliedDamage:null};
+  }),
+  start_encounter:op('combat',fields({encounterId:identifier,name:named(160),participants:arrayOf(fields({actorId:identifier,initiativeRollId:identifier},['actorId','initiativeRollId']),16)},['encounterId','name','participants']),startEncounter),
+  advance_encounter_turn:op('combat',fields({encounterId:identifier,currentActorId:identifier},['encounterId','currentActorId']),(ctx,x)=>progress(ctx,x,false)),
+  end_encounter:op('combat',fields({encounterId:identifier,currentActorId:identifier,outcome:named(500)},['encounterId','currentActorId','outcome']),(ctx,x)=>progress(ctx,x,true))
+});
