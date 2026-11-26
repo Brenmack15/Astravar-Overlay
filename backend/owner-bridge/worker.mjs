@@ -1,3 +1,5 @@
+import { cloudAccessPage } from './cloud-admin.mjs';
+import { CLOUD_LIFECYCLE_OPERATIONS } from './cloud-lifecycle.mjs';
 import { CLOUD_MEDIA_KINDS, CLOUD_MEDIA_OPERATIONS } from './cloud-media.mjs';
 import { CloudService } from './cloud-service.mjs';
 import { MECHANIC_KINDS, MECHANIC_OPERATIONS } from './cloud-mechanics.mjs';
@@ -86,7 +88,7 @@ async function handleWorkerRequest(request, env, context) {
   }}):null;
   const cloudService=configured && env.ASTRAVAR_CLOUD_ENABLED==='1' ? new CloudService(
     typeof env.DB.withSession==='function'?env.DB.withSession('first-primary'):env.DB,
-    {ownerId,kinds:{...MECHANIC_KINDS,...RECORD_KINDS,...CLOUD_MEDIA_KINDS},operations:{...MECHANIC_OPERATIONS,...RECORD_OPERATIONS,...CLOUD_MEDIA_OPERATIONS},isolated:env.ASTRAVAR_CLOUD_ENV==='isolated'}) : null;
+    {ownerId,kinds:{...MECHANIC_KINDS,...RECORD_KINDS,...CLOUD_MEDIA_KINDS},operations:{...MECHANIC_OPERATIONS,...RECORD_OPERATIONS,...CLOUD_MEDIA_OPERATIONS,...CLOUD_LIFECYCLE_OPERATIONS},isolated:env.ASTRAVAR_CLOUD_ENV==='isolated'}) : null;
   if(cloudService)cloudService.mediaBucket=env.ASTRAVAR_MEDIA;
   // Tool schemas contain no private data and are needed for plugin provisioning.
   // Actual tools/call still requires the configured owner and verified identity.
@@ -95,6 +97,7 @@ async function handleWorkerRequest(request, env, context) {
   const isOwner = request.headers.get('oai-authenticated-user-id') === ownerId;
   const ownerPrincipal = isOwner ? { ownerId, role: 'owner', credentialId: 'sites-owner', scopes: [] } : null;
   if (url.pathname.startsWith('/v3/continuities/')) return cloudService ? cloudHttp(request,bridge,cloudService,ownerPrincipal) : json({error:{code:'CLOUD_PROTOCOL_DISABLED'}},404);
+  if (request.method==='GET' && /^\/owner\/ascension\/[A-Za-z0-9._:-]+\/access$/.test(url.pathname)) return cloudService&&isOwner ? cloudAccessPage() : json({error:{code:'OWNER_AUTHENTICATION_REQUIRED'}},401);
   if (request.method==='GET' && /^\/owner\/ascension\/[A-Za-z0-9._:-]+$/.test(url.pathname)) return cloudService&&isOwner ? cloudInboxPage() : json({error:{code:'OWNER_AUTHENTICATION_REQUIRED'}},401);
   if (url.pathname.startsWith('/owner/bootstrap')) return handleBootstrap(request, env);
   if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/owner')) return isOwner ? ownerPage() : json({ mode: MODE, error: { code: 'OWNER_AUTHENTICATION_REQUIRED' } }, 401);

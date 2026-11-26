@@ -43,11 +43,13 @@ export const CLOUD_ENVELOPE = cloudObject({
   epoch: { ...CLOUD_REVISION, minimum: 1 }, expectedRevision: CLOUD_REVISION,
   operation: { type: 'string', minLength: 1, maxLength: 80, pattern: '^[a-z][a-z0-9_]+$' },
   args: { type: 'object', properties: {}, additionalProperties: false },
-});
+  replacesCommandId: CLOUD_ID, replacesDigest: {type:'string',pattern:'^[a-f0-9]{64}$'},
+},['version','commandId','epoch','expectedRevision','operation','args']);
 export function validateCloudCommand(command, operations) {
   const definition = command && Object.hasOwn(operations, command.operation) ? operations[command.operation] : null;
   if (!definition) cloudFail(400, 'UNSUPPORTED_OPERATION');
   const envelope = { ...CLOUD_ENVELOPE, properties: { ...CLOUD_ENVELOPE.properties, args: definition.schema } };
+  if (Object.hasOwn(command,'replacesCommandId')!==Object.hasOwn(command,'replacesDigest') || command.replacesCommandId===command.commandId)cloudFail(400,'INVALID_REPLACEMENT');
   if (!cloudMatches(command, envelope) || JSON.stringify(command).length > 48000) cloudFail(400, 'INVALID_COMMAND');
   return definition;
 }

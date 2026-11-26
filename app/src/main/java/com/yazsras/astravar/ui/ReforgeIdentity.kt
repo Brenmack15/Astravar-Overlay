@@ -53,8 +53,17 @@ import kotlinx.serialization.json.Json
 }
 
 @Composable internal fun ReforgePortrait(reference: String?, modifier: Modifier = Modifier.size(72.dp)) {
+    val bitmap = rememberSheetPortrait(reference)
+
+    if (bitmap != null) Image(bitmap, contentDescription = "Character portrait", modifier = modifier, contentScale = ContentScale.Crop)
+    else Box(modifier, contentAlignment = androidx.compose.ui.Alignment.Center) {
+        ArcaneIcon("Emblem", Modifier.fillMaxSize().padding(6.dp), RebuildPalette.GoldBright)
+    }
+}
+
+@Composable internal fun rememberSheetPortrait(reference: String?): ImageBitmap? {
     val context = LocalContext.current
-    val bitmap by produceState<ImageBitmap?>(null, reference) {
+    return key(reference) { produceState<ImageBitmap?>(null, reference) {
         value = withContext(Dispatchers.IO) {
             runCatching {
                 val uri = Uri.parse(reference ?: return@runCatching null)
@@ -72,16 +81,13 @@ import kotlinx.serialization.json.Json
                 } ?: return@runCatching null
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                require(bounds.outMimeType?.startsWith("image/") == true && bounds.outWidth in 1..32_768 && bounds.outHeight in 1..32_768)
                 var sample = 1
                 while (bounds.outWidth / sample > 512 || bounds.outHeight / sample > 512) sample *= 2
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
             }.getOrNull()
         }
-    }
-    if (bitmap != null) Image(bitmap!!, contentDescription = "Character portrait", modifier = modifier, contentScale = ContentScale.Crop)
-    else Box(modifier, contentAlignment = androidx.compose.ui.Alignment.Center) {
-        ArcaneIcon("Emblem", Modifier.fillMaxSize().padding(6.dp), RebuildPalette.GoldBright)
-    }
+    }.value }
 }
 
 @Composable internal fun ReforgeIdentityEditor(latestCharacter: ReforgeCharacter, onDismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit) {

@@ -57,7 +57,7 @@ async function walletOverview(service,b,grant,opts) {
     complete:aggregate.walletCount>0 && aggregate.missingWalletCount===0 && keys.every(key=>!unknown[key])}};
 }
 const itemBase=`WITH party AS (${partyActors}), items AS (
- SELECT i.id,i.actor_id,i.data_json,i.title,d.id AS definition_id,
+ SELECT i.id,i.actor_id,i.data_json,CASE WHEN json_extract(i.data_json,'$.customized')=1 THEN i.title ELSE d.title END AS title,d.id AS definition_id,
   CASE WHEN json_extract(d.data_json,'$.stackable')=1 AND json_extract(i.data_json,'$.customized')=0
    AND json_extract(i.data_json,'$.attuned')=0 AND json_extract(i.data_json,'$.operating')=0
    AND json_extract(i.data_json,'$.resourcePoolId') IS NULL AND json_extract(i.data_json,'$.condition')='standard'
@@ -72,9 +72,12 @@ async function inventoryOverview(service,b,grant,opts) {
   fullParty(grant,'inventory');
   if(opts.id) {
     const definition=await subject(service,b,grant,opts.id,'item_definition');
-    const rows=(await service.s(itemBase+`SELECT id,data_json AS data FROM items WHERE definition_id=? AND id>? ORDER BY id LIMIT ?`,
-      ...b,...b,definition.id,opts.after,opts.limit+1).all()).results;
-    const items=rows.slice(0,opts.limit).map(row=>({id:row.id,...JSON.parse(row.data)}));
+    const rows=(await service.s(itemBase+`SELECT i.id,i.title,i.data_json AS data,
+      (SELECT title FROM cloud_entities a WHERE a.owner_id=? AND a.continuity_id=? AND a.kind='actor' AND a.id=json_extract(i.data_json,'$.ownerId')) AS ownerName,
+      (SELECT title FROM cloud_entities a WHERE a.owner_id=? AND a.continuity_id=? AND a.kind='actor' AND a.id=json_extract(i.data_json,'$.custodianId')) AS custodianName
+      FROM items i WHERE definition_id=? AND i.id>? ORDER BY i.id LIMIT ?`,
+      ...b,...b,...b,...b,definition.id,opts.after,opts.limit+1).all()).results;
+    const items=rows.slice(0,opts.limit).map(row=>({id:row.id,title:row.title,ownerName:row.ownerName,custodianName:row.custodianName,...JSON.parse(row.data)}));
     return {definitionId:definition.id,items,nextAfter:rows.length>opts.limit?items.at(-1).id:null};
   }
   const rows=(await service.s(itemBase+`SELECT group_key AS groupId,definition_id AS definitionId,min(title) AS title,
@@ -167,5 +170,5 @@ export async function cloudRecordView(service,principal,id,view,input={}) {
   else result=await history(service,b,grant,view,opts);
   const again=await service.access(principal,id);
   if(again.grant.revision!==grant.revision||again.continuity.revision!==c.revision||again.continuity.epoch!==c.epoch)cloudFail(409,'SNAPSHOT_CHANGED');
-  return {view,continuityId:id,epoch:c.epoch,revision:c.revision,grantRevision:grant.revision,...result};
+  return {view,authority:'cloud',subject:grant.subject,continuityId:id,epoch:c.epoch,revision:c.revision,grantRevision:grant.revision,...result};
 }

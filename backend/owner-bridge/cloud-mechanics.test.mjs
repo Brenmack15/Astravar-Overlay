@@ -191,3 +191,112 @@ test('encounter initiatives are actual roll references; extra attacks have a sha
   await f.command('end_encounter',{encounterId:'combat-one',currentActorId:who,outcome:'synthetic fixture complete'});
   assert.equal((await f.read(who)).data.encounterId,null);
 });
+
+test('form-bound blink and selective fear use independent pools; unqualified destinations preserve charges',async t=>{
+  const f=await setup(t);await f.defined();await f.defined({actorId:'listener',name:'Synthetic listener'});await f.defined({actorId:'bystander',name:'Synthetic bystander'});
+  await f.pool('shared-blink','charge',3,3,'long_rest');await f.pool('once-roar','charge',0,1,'deployment');
+  await f.command('define_form',{actorId:who,formId:'heavy-body',name:'Heavy configuration',source:'fixture',size:'large',grounded:true,timing:'other',activationSeconds:60,durationSeconds:3600,resetPoolId:'once-roar'});
+  await f.command('define_action',{actorId:who,actionId:'blink-action',name:'Blink',source:'fixture',type:'teleport',timing:'bonus_action',range:30,cost:{poolId:'shared-blink',amount:1}});
+  await f.command('define_action',{actorId:who,actionId:'fear-action',name:'Selective fear',source:'fixture',type:'frighten',timing:'bonus_action',range:30,saveDc:15,saveAbility:'WIS',durationSeconds:60,formId:'heavy-body',cost:{poolId:'once-roar',amount:1}});
+  const blink={actorId:who,actionId:'blink-action',declared:true,useId:'blink-one',destination:{label:'stone floor',distanceFeet:30,unoccupied:true,visible:true,grounded:true,availableSize:'large',passengers:0,permittedByBarriers:true}};
+  await f.command('use_action',blink);
+  await f.command('change_form',{actorId:who,formId:'heavy-body',elapsedSeconds:60,uninterrupted:true});
+  for(const invalid of [{distanceFeet:31},{passengers:1},{grounded:false},{availableSize:'tiny'},{permittedByBarriers:false}])
+    await assert.rejects(f.command('use_action',{...blink,useId:'bad-blink',destination:{...blink.destination,...invalid}}));
+  assert.equal((await f.read('shared-blink')).data.current,2);
+  await f.command('use_action',{...blink,useId:'blink-two'});
+  await f.command('use_action',{actorId:who,actionId:'fear-action',declared:true,useId:'fear',targets:[{actorId:'listener',hears:true,distanceFeet:25}]});
+  assert.deepEqual((await f.read('listener')).data.conditions,[]);
+  await f.command('record_check',{actorId:'listener',rollId:'wis-save',check:check('save','WIS'),evidence:dice(4),forUseId:'fear'});
+  await f.command('resolve_action_save',{actorId:who,useId:'fear',targetActorId:'listener',rollId:'wis-save'});
+  assert.deepEqual((await f.read('listener')).data.conditions,['frightened']);assert.deepEqual((await f.read('bystander')).data.conditions,[]);
+  await f.command('advance_actor_time',{actorId:'listener',elapsedSeconds:60,confirmed:true});
+  assert.deepEqual((await f.read('listener')).data.conditions,[]);
+  await f.command('advance_actor_time',{actorId:who,elapsedSeconds:3600,confirmed:true});
+  assert.equal((await f.read(who)).data.activeFormId,null);assert.equal((await f.read('shared-blink')).data.current,1);assert.equal((await f.read('once-roar')).data.current,0);
+});
+test('authorized interrupt preserves original faces, consumes reaction and pool once, and keeps actual result',async t=>{
+  const f=await setup(t);await f.defined();await f.pool('insight-charge','charge',2,2,'long_rest');
+  await f.command('define_action',{actorId:who,actionId:'assist-roll',name:'Assist',source:'fixture',type:'roll_bonus',timing:'reaction',bonusAbility:'INT',range:30,cost:{poolId:'insight-charge',amount:1}});
+  await f.command('record_check',{actorId:who,rollId:'original',check:check('skill','arcana'),evidence:dice(4)});
+  const use={actorId:who,actionId:'assist-roll',useId:'reaction-001',declared:true,reaction:{rollId:'original',targetActorId:who,distanceFeet:0,visible:true,windowOpen:true}};
+  await f.command('use_action',use);
+  const result=(await f.read('original')).data;
+  assert.equal(result.originalTotal,9);assert.equal(result.total,14);assert.equal(result.faces[0].value,4);
+  await assert.rejects(f.command('use_action',{...use,useId:'reaction-002'}),/ROLL_REACTION_INELIGIBLE/);
+  assert.equal((await f.read('insight-charge')).data.current,1);
+});
+
+test('reviewed attack edits preserve form variants, previous attempts, component identity and resource links',async t=>{
+  const f=await setup(t);await f.defined();
+  await f.pool('pool-one','charge',3,3,'long_rest');
+  await f.pool('pool-two','charge',4,4,'long_rest');
+  const x={actorId:who,attackId:'reviewed',name:'Scope test',source:'synthetic workbench',
+    timing:'attack',delivery:'ranged',resolution:'attack',fixedHit:3,range:40,longRange:80,
+    components:[component('fixed','force',0,6,1),component('rider','cold',1,6,0,{variants:['cold','fire']})],
+    cost:{poolId:'pool-one',amount:1}};
+  await f.command('define_attack',x);
+  await f.command('select_damage_variant',{actorId:who,attackId:x.attackId,componentId:'rider',type:'fire'});
+  await f.command('resolve_attack',{actorId:who,attackId:x.attackId,attemptId:'before-edit',mode:'normal',hit:dice(16),includeDamage:true,
+    damage:[{id:'fixed',evidence:dice()},{id:'rider',evidence:dice(4)}]});
+  const before=await f.read('before-edit');
+  const previous=await f.read(x.attackId),originalRevision=previous.revision;
+  const next={...x,name:'Revised scope test',expectedAttackRevision:originalRevision,range:60,longRange:120,
+    components:[x.components[1],x.components[0]],cost:{poolId:'pool-two',amount:2}};
+  const edit=await f.command('update_attack',next);
+  assert.equal(edit.out.attackRevision,originalRevision+1);
+  let saved=await f.read(x.attackId);
+  assert.equal(saved.title,'Revised scope test');assert.equal(saved.data.selections[0].type,'fire');
+  assert.deepEqual(saved.data.components.map(c=>c.id),['rider','fixed']);
+  assert.deepEqual(await f.read('before-edit'),before);
+  assert.equal((await f.read('pool-one')).data.current,2);
+  assert.equal((await f.read('pool-two')).data.current,4);
+  const links=(await f.db.prepare('SELECT relation,to_id FROM cloud_links WHERE from_id=?').bind(x.attackId).all()).results;
+  assert.ok(links.some(e=>e.relation==='uses_pool'&&e.to_id==='pool-two'));
+  assert.ok(!links.some(e=>e.relation==='uses_pool'&&e.to_id==='pool-one'));
+  await assert.rejects(f.command('update_attack',next),/ATTACK_REVISION_CHANGED/);
+  const removal={...next,expectedAttackRevision:saved.revision,components:[component('rider','cold',1,6,0)]};
+  await assert.rejects(f.command('update_attack',removal),/REVIEW_VARIANT_REMOVAL/);
+  assert.deepEqual(await f.read(x.attackId),saved);
+  const removed=await f.command('update_attack',{...removal,discardUnavailableSelections:true});
+  assert.deepEqual(removed.out.removedSelections,saved.data.selections);
+  saved=await f.read(x.attackId);assert.deepEqual(saved.data.selections,[]);
+  const rider={id:'after-hit',trigger:'hit',effect:'Owner-resolved fixture condition',componentId:'rider'};
+  await assert.rejects(f.command('update_attack',{...removal,expectedAttackRevision:saved.revision,riders:[rider]}),/RIDER_REQUIRES_REVIEWED_ADJUDICATION/);
+  const {fixedHit,...manual}=removal;
+  await f.command('update_attack',{...manual,expectedAttackRevision:saved.revision,resolution:'manual',riders:[rider]});
+  assert.deepEqual((await f.read(x.attackId)).data.riders,[rider]);
+});
+
+test('target resolution validates linked saves, source defenses, pending damage and exact-once target HP',async t=>{
+  const f=await setup(t);await f.defined();await f.defined({actorId:'listener',name:'Fictional listener',role:'creature',maxHp:30,currentHp:30,temporaryHp:2});
+  await f.command('define_effect',{actorId:'listener',effectId:'ward',name:'Cold ward',source:'synthetic definition',target:'damage_defense',key:'cold',operation:'resistance'});
+  await f.command('define_attack',{actorId:who,attackId:'cone',name:'Saving throw area',source:'fixture',timing:'action',delivery:'area',resolution:'save',saveAbility:'DEX',saveDc:15,saveSuccess:'half',components:[component('cold','cold',2,8,0)]});
+  await f.command('resolve_attack',{actorId:who,attackId:'cone',attemptId:'area-hit',targets:['listener'],mode:'normal',includeDamage:false});
+  const request={actorId:who,attemptId:'area-hit',targetActorId:'listener',saveRollId:'actual-save',source:'resolved fixture action'};
+  await f.command('record_check',{actorId:'listener',rollId:'unrelated-save',check:check('save','DEX'),evidence:dice(19)});
+  await assert.rejects(f.command('resolve_attack_target',{...request,saveRollId:'unrelated-save'}),/SAVE_ROLL_UNAVAILABLE/);
+  await f.command('record_check',{actorId:'listener',rollId:'actual-save',check:check('save','DEX'),evidence:dice(19),forAttemptId:'area-hit'});
+  await assert.rejects(f.command('resolve_attack_target',request),/ATTEMPT_DAMAGE_REQUIRED/);
+  await f.command('roll_attack_damage',{actorId:who,attemptId:'area-hit',damage:[{id:'cold',evidence:dice(7,7)}]});
+  const first=await f.command('resolve_attack_target',request);
+  assert.deepEqual([first.out.decision,first.out.amount,first.out.hp.absorbedByTemporaryHp,first.out.hp.afterHp],['save_succeeded',3,2,29]);
+  await f.service.submit(dm,cid,first.command);await assert.rejects(f.command('resolve_attack_target',request),/TARGET_UNDECLARED_OR_ALREADY_RESOLVED/);
+  assert.equal((await f.read('listener')).data.currentHp,29);
+});
+
+test('mixed signed formulas and pending workshop context use real evidence and native three-face policy',async t=>{
+  const f=await setup(t);await f.defined();
+  const custom={kind:'custom',key:'formula',name:'Mixed dice',mode:'normal',terms:[{count:1,sides:8,sign:'add'},{count:1,sides:4,sign:'subtract'}],flat:3};
+  const r=await f.command('record_check',{actorId:who,rollId:'mixed',check:custom,evidence:dice(6,2)});
+  assert.equal(r.out.total,7);assert.deepEqual(r.out.faces.map(f=>f.sign),[1,-1]);
+  const tagged={...check('skill','history','advantage'),contextTags:['pocket-workshop']};
+  await assert.rejects(f.command('record_check',{actorId:who,rollId:'unverified',check:tagged,evidence:dice(6,12)}),/ROLL_CONTEXT_UNVERIFIED/);
+  const revision=(await f.service.continuity(cid)).revision;
+  const pending=await f.service.submit(dm,cid,{version:1,commandId:'context-confirm',epoch:1,expectedRevision:revision,operation:'set_roll_context',args:{actorId:who,tag:'pocket-workshop',active:true,source:'owner-reviewed access'}});
+  assert.equal(pending.status,'PENDING_APPROVAL');await f.service.review(owner,cid,pending.commandId,pending.digest,'verify');
+  await f.effect('three','roll_edge','skill:history','keep_highest_three',{contextTag:'pocket-workshop'});
+  const s=await f.sheet();assert.equal(s.rollContexts['pocket-workshop'].rollModes['skill:history'].advantage.count,3);
+  const actual=await f.command('record_check',{actorId:who,rollId:'verified',check:tagged,evidence:dice(6,12,9)});
+  assert.deepEqual(actual.out.faces.map(f=>f.kept),[false,true,false]);
+});

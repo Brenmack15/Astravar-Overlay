@@ -41,7 +41,8 @@ class ReforgeCampaignConnectionsTest {
         try {
             activity.get().setContent { AstravarTheme { ReforgeCharacterSheet(campaign, local) } }
             compose.waitUntil(10_000) { compose.onAllNodesWithText("Campaign connections").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("Campaign connections").performScrollTo().performClick()
+            compose.onNodeWithTag("genesis-character-controls").performClick()
+            compose.onNodeWithText("Campaign membership").performScrollTo().performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithText("I reviewed this name-only campaign identity").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Create campaign identity").assertIsNotEnabled()
             assertTrue(runBlocking { campaign.records.characterProfiles.first() }.isEmpty())

@@ -51,7 +51,7 @@ export const effectSchema = fields({
   target:option('ability_score','ability_check','skill','save','passive','initiative','ac','attack','spell_attack','spell_dc','damage_defense','condition_immunity','roll_edge'),
   key:identifier, operation:option('add','set','resistance','immunity','vulnerability','advantage','disadvantage','keep_highest_three'),
   amount:whole(-1000,1000), priority:whole(-100,100), stackingKey:identifier,
-  sourceItemId:identifier, requiresAttunement:boolean, requiresOperating:boolean, formId:identifier, contextTag:identifier,
+  sourceItemId:identifier, transfersWithItem:boolean, requiresAttunement:boolean, requiresOperating:boolean, formId:identifier, contextTag:identifier,
   expiresAt:nullable(whole(0,100000000000)), enabled:boolean
 }, ['actorId','effectId','name','source','target','key','operation']);
 export const costSchema = fields({poolId:identifier,amount:whole(1)},['poolId','amount']);
@@ -62,17 +62,20 @@ export const restSchema = fields({
 }, ['actorId','kind','elapsedSeconds','confirmed','hitDice']);
 export const checkSpec = fields({
   kind:option('ability','save','skill','initiative','custom'), key:identifier, name:named(120), mode,
-  contextTags:arrayOf(identifier,12), dice:whole(1,100), sides:whole(2,1000), flat:whole(-10000,10000)
+  contextTags:arrayOf(identifier,12), dice:whole(1,200), sides:whole(2,1000), flat:whole(-1000000,1000000),
+  terms:arrayOf(fields({count:whole(1,200),sides:whole(2,1000),sign:option('add','subtract')},['count','sides','sign']),100)
 }, ['kind','key','mode']);
 export const evidence = fields({origin,faces:arrayOf(whole(1,1000),200)},['origin','faces']);
 export const attackSchema = fields({
-  actorId:identifier, attackId:identifier, name:named(160), source:named(300), sourceItemId:identifier,
+  actorId:identifier, attackId:identifier, name:named(160), source:named(300), sourceItemId:identifier, transfersWithItem:boolean,
   requiresAttunement:boolean, requiresOperating:boolean, formId:identifier, excludedForms:arrayOf(identifier,16), classification:named(60),
   delivery:option('melee','ranged','area','other'), resolution:option('attack','save','automatic','manual'),
   timing:actionCost, ability:option(...stats), proficient:boolean, hitBonus:whole(-200,200),
   fixedHit:whole(-200,200), saveAbility:option(...stats), saveDc:whole(1,100),saveSuccess:option('none','half','full'),
   reach:whole(0,10000), range:whole(0,10000), longRange:whole(0,10000), area:named(160),
-  components:arrayOf(component,24), cost:costSchema, description:named(2000)
+  components:arrayOf(component,24), cost:costSchema, description:named(2000),
+  riders:arrayOf(fields({id:identifier,trigger:option('hit','failed_save','prepared_charge','custom'),effect:named(500),
+    duration:named(160),componentId:identifier,saveAbility:option(...stats),saveDc:whole(1,100)},['id','trigger','effect']),16)
 },['actorId','attackId','name','source','timing','delivery','resolution','components']);
 export const spellSchema = fields({
   actorId:identifier, spellId:identifier, name:named(160), source:named(300), baseLevel:whole(0,9), concentration:boolean,
@@ -97,6 +100,17 @@ export async function insert(ctx,kind,id,actorId,title,data) {
   return row;
 }
 export async function save(ctx,row,data) { return ctx.put({...row,data}); }
+export async function transferableSource(ctx,config){
+  if(!config.transfersWithItem)return;
+  const item=config.sourceItemId?await ctx.get('item_instance',config.sourceItemId):null;
+  must(item?.life==='active' && item.data.partyAccess && item.data.quantity===1 && item.data.custodianId===config.actorId &&
+    !config.formId && !config.excludedForms?.length,'TRANSFERABLE_RULE_REQUIRES_INDEPENDENT_ITEM');
+  if(config.cost){
+    must(item.data.resourcePoolId===config.cost.poolId,'TRANSFERABLE_RULE_REQUIRES_ITEM_CHARGES');
+    const pool=await owned(ctx,'resource_pool',config.cost.poolId,config.actorId);
+    must(pool.data.type==='charge','TRANSFERABLE_RULE_REQUIRES_ITEM_CHARGES');
+  }
+}
 export async function gearEligible(ctx,itemId,actorId,attunement=false,requiresOperating=false) {
   if (!itemId) return !attunement && !requiresOperating;
   const item=await ctx.get('item_instance',itemId);
@@ -170,7 +184,7 @@ export async function sheet(ctx,id,contextTags=[]) {
     const stat=configured.ability??standardSkills[key], base=checks[stat].value, pb=a.data.proficiency;
     const rank=configured.rank??0;
     const trained=base==null || (rank && pb==null)?null:base+(rank?rank*pb:0);
-    skills[key]=numeric(trained,active,'skill',key);
+    skills[key]={...numeric(trained,active,'skill',key),name:configured.name??key.split('_').map(w=>w[0].toUpperCase()+w.slice(1)).join(' '),ability:stat,rank};
     const mode=rollPolicy(active,'skill:'+key).mode;
     const adjustment=mode==='advantage'?5:mode==='disadvantage'?-5:0;
     passives[key]={...numeric(skills[key].value==null?null:10+skills[key].value+adjustment,active,'passive',key),mode,adjustment};
@@ -178,10 +192,12 @@ export async function sheet(ctx,id,contextTags=[]) {
   const movement={...a.data.speeds,...form?.data.speeds};
   if(form?.data.grounded){movement.fly=0; movement.hover=0;}
   const ac=numeric(form?.data.baseAc??a.data.baseAc,active,'ac','all');
+  const subjects=[...stats.flatMap(k=>['ability:'+k,'save:'+k]),...Array.from(keys,k=>'skill:'+k),'initiative:initiative'];
+  const rollModes=Object.fromEntries(subjects.map(key=>[key,Object.fromEntries(['normal','advantage','disadvantage'].map(mode=>[mode,rollPolicy(active,key,mode)]))]));
   return {actorId:id,formId:form?.id??null,abilities,checks,saves,skills,passives,ac,movement,
     initiative:numeric(abilities.DEX.modifier,active,'initiative','all'),proficiency:a.data.proficiency,
     currentHp:a.data.currentHp,maxHp:a.data.maxHp,temporaryHp:a.data.temporaryHp,
-    activeEffects:active.map(r=>r.id),suppressedEffects:suppressed,conditions:a.data.conditions,
+    activeEffects:active.map(r=>r.id),suppressedEffects:suppressed,conditions:a.data.conditions,rollModes,contextTags:a.data.contextTags??[],
     defenses:active.filter(r=>r.data.target==='damage_defense').map(r=>({type:r.data.key,kind:r.data.operation,source:r.id})),
     effects:active};
 }

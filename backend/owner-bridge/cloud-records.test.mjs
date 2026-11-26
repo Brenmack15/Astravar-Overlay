@@ -7,6 +7,9 @@ import { SqliteAdapter } from './sqlite-adapter.mjs';
 import { CloudService } from './cloud-service.mjs';
 import { cloudRecordView } from './cloud-records-query.mjs';
 import { RECORD_KINDS, RECORD_OPERATIONS } from './cloud-records.mjs';
+import { MECHANIC_KINDS, MECHANIC_OPERATIONS, mechanicActorSheet } from './cloud-mechanics.mjs';
+import { CloudPlan } from './cloud-plan.mjs';
+import { cloudActions } from './cloud-actions-view.mjs';
 
 const ddl=await readFile(new URL('./schema.sql',import.meta.url),'utf8');
 const owner={role:'owner',credentialId:'sites-owner',ownerId:'test-owner'};
@@ -18,16 +21,19 @@ const allScopes=[...new Set(Object.values(kinds))].flatMap(s=>[s+'.read',s+'.wri
 const amounts=(values={})=>({cp:0,sp:0,ep:0,gp:0,pp:0,...values});
 const definition=(id='supply',stackable=true)=>({definitionId:id,name:'Supplies',category:'gear',description:'Carried supplies',
   rarity:null,stackable,wearable:!stackable,handheld:!stackable,attunement:'none',source});
-async function fixture(t) {
+async function fixture(t,withMechanics=false) {
   const dir=await mkdtemp(join(tmpdir(),'astravar-records-'));
   const path=join(dir,'private.sqlite');
   let db=new SqliteAdapter(path);
   db.exec(ddl);
-  const create=()=>new CloudService(db,{ownerId:owner.ownerId,operations:RECORD_OPERATIONS,kinds,isolated:true});
+  const create=()=>new CloudService(db,{ownerId:owner.ownerId,
+    operations:withMechanics?{...MECHANIC_OPERATIONS,...RECORD_OPERATIONS}:RECORD_OPERATIONS,
+    kinds:withMechanics?{...MECHANIC_KINDS,...kinds}:kinds,isolated:true});
   let service=create();
   t.after(async()=>{db.close();await rm(dir,{recursive:true,force:true});});
   await service.createIsolated(owner,continuity);
-  for(const [id,role] of [['hero','player'],['ally','companion']]) {
+  const party=[['hero','player'],['ally','companion']];
+  for(const [id,role] of withMechanics?[]:party) {
     await db.prepare("INSERT INTO cloud_entities(owner_id,continuity_id,id,kind,actor_id,title,data_json,life,revision) VALUES(?,?,?,'actor',?,?,?,'active',1)")
       .bind(owner.ownerId,continuity,id,id,id,JSON.stringify({role})).run();
   }
@@ -42,8 +48,59 @@ async function fixture(t) {
   const submit=(cmd,p=dm)=>service.submit(p,continuity,cmd);
   const run=async(op,args,p=dm)=>(await submit(await body(op,args),p)).receipt.outcome;
   const record=async(id,p=owner)=>(await service.state(p,continuity,{id,activeOnly:false})).records[0];
+  if(withMechanics){
+    await grant([...new Set([...allScopes,'resources.read','resources.write'])]);
+    for(const [actorId,role] of party)await run('define_actor',{actorId,role,name:actorId,rulesProfile:'revised_2024',level:5,
+      abilities:{STR:10,DEX:10,CON:10,INT:10,WIS:10,CHA:10},temporaryHp:0,gameSeconds:0,source});
+  }
   return {get db(){return db;},get service(){return service;},body,submit,run,record,grant,reopen(){db.close();db=new SqliteAdapter(path);service=create();}};
 }
+test('a transferred item carries only its granted rules and actual remaining charges across custody, storage and retrieval',async t=>{
+  const f=await fixture(t,true);
+  const projection=async actorId=>mechanicActorSheet(new CloudPlan(f.service,f.service.key(continuity),
+    await f.service.grantForSubject(continuity,'sites-mcp'),{commandId:'read'},Date.now()),actorId);
+  const move=(type,actorId)=>f.run('transfer_item',{itemId:'lens',quantity:1,splitId:null,source,reason:'Confirmed movement',
+    destination:{type,actorId,recipientName:null,recipientId:null,locationId:null}});
+  await f.run('define_item_definition',definition('lens-spec',false));
+  await f.run('acquire_item',{itemId:'lens',definitionId:'lens-spec',ownerId:'hero',quantity:1,source});
+  await f.run('define_resource',{actorId:'hero',poolId:'charges',name:'Lens charge',type:'charge',maximum:5,current:3,recovery:'dawn',source});
+  await f.run('bind_item_charge_pool',{itemId:'lens',poolId:'charges',source});
+  const grant={actorId:'hero',sourceItemId:'lens',transfersWithItem:true,source};
+  await f.run('define_effect',{...grant,effectId:'lens-int',name:'Focus',target:'ability_score',key:'INT',operation:'add',amount:1});
+  await f.run('define_action',{...grant,actionId:'lens-pulse',name:'Calibrate',type:'use',timing:'other',cost:{poolId:'charges',amount:1}});
+  await f.run('define_attack',{...grant,attackId:'lens-ray',name:'Light',timing:'action',delivery:'ranged',
+    resolution:'attack',fixedHit:2,components:[]});
+  await f.run('define_effect',{...grant,transfersWithItem:false,effectId:'personal-bonus',name:'Trained handling',
+    target:'ability_score',key:'DEX',operation:'add',amount:1});
+  await f.run('equip_item',{itemId:'lens',equipment:'held',source});
+  await f.run('use_action',{actorId:'hero',actionId:'lens-pulse',useId:'pulse-one',declared:true});
+  assert.equal((await f.record('charges')).data.current,2);
+  assert.equal((await projection('hero')).abilities.INT.effective,11);
+  await move('party_actor','ally');
+  assert.equal((await projection('hero')).abilities.INT.effective,10);
+  assert.equal((await f.record('hero')).data.poolIds.length,0);
+  assert.equal((await projection('ally')).abilities.INT.effective,10);
+  await f.run('equip_item',{itemId:'lens',equipment:'held',source});
+  assert.equal((await projection('ally')).abilities.INT.effective,11);
+  assert.equal((await projection('ally')).abilities.DEX.effective,10);
+  assert.equal((await f.record('personal-bonus')).actorId,'hero');
+  assert.equal((await f.record('pulse-one')).actorId,'hero');
+  assert.deepEqual((await cloudActions(f.service,dm,continuity,'ally')).rows.map(row=>row.id),['lens-pulse','lens-ray']);
+  assert.equal((await f.record('charges')).actorId,'ally');
+  assert.equal((await f.record('charges')).data.current,2);
+  await move('unassigned',null);
+  assert.equal((await f.record('charges')).actorId,null);
+  assert.deepEqual((await f.record('ally')).data.poolIds,[]);
+  assert.deepEqual((await cloudActions(f.service,dm,continuity,'ally')).rows,[]);
+  f.reopen();
+  await move('party_actor','hero');
+  assert.deepEqual((await f.record('hero')).data.poolIds,['charges']);
+  assert.equal((await f.record('charges')).data.current,2);
+  await f.run('define_action',{actorId:'hero',actionId:'elsewhere',name:'Other charge use',type:'use',timing:'other',cost:{poolId:'charges',amount:1},source});
+  await assert.rejects(move('party_actor','ally'),/SHARED_CHARGE_POOL_TRANSFER_REVIEW_REQUIRED/);
+  assert.equal((await f.record('lens')).data.custodianId,'hero');
+  assert.equal((await f.record('lens-pulse')).actorId,'hero');
+});
 test('multi-actor coin transfers and atomic purchases conserve exact denominations across retries and reopen',async t=>{
   const f=await fixture(t);
   await f.run('define_wallet',{walletId:'purse-a',title:'Carried coin',holderId:'hero',shared:false,coins:amounts({gp:40,ep:null}),source});
@@ -198,4 +255,63 @@ test('actual material quantity, decided stage, blueprint history and linked outp
   assert.equal((await f.record('wood')).data.quantity,3);assert.equal((await f.record('build')).data.outputId,'fixture-frame');
   assert.equal((await cloudRecordView(f.service,dm,continuity,'genealogy',{id:'wood'})).events[0].data.definitionId,'supply');
   assert.equal((await cloudRecordView(f.service,dm,continuity,'genealogy',{id:'fixture-frame'})).events[0].data.beforeQuantity,5);
+});
+
+test('explicit exchange conserves copper and insufficient exact coins do not silently make change',async t=>{
+  const f=await fixture(t);
+  await f.run('define_wallet',{walletId:'fund',title:'Shared funds',holderId:null,shared:true,coins:amounts({gp:3}),source});
+  const convert={walletId:'fund',give:amounts({gp:1}),receive:amounts({sp:10}),source,reason:'Authorized exchange'};
+  await f.run('exchange_coins',convert);
+  assert.deepEqual((await f.record('fund')).data.coins,amounts({gp:2,sp:10}));
+  await assert.rejects(f.run('exchange_coins',{...convert,receive:amounts({sp:11})}),/EXCHANGE_VALUE_MISMATCH/);
+  const totals=await cloudRecordView(f.service,dm,continuity,'wallets');
+  assert.equal(totals.totals.knownCopper,'300');assert.equal(totals.totals.missingWalletCount,2);
+});
+test('attunement and operating state respect configured elapsed time, known capacity, eligible physical item and active form',async t=>{
+  const f=await fixture(t);
+  const item={...definition('coil',false),attunement:'required',attunementSeconds:3600,activation:'manual'};
+  await f.run('define_item_definition',item);
+  await f.run('acquire_item',{itemId:'first',definitionId:item.definitionId,quantity:1,ownerId:'hero',source});
+  await f.run('equip_item',{itemId:'first',equipment:'worn',source});
+  const attune={itemId:'first',attuned:true,confirmed:true,elapsedSeconds:3600,source};
+  await assert.rejects(f.run('set_item_operating',{itemId:'first',operating:true,source}),/ACTIVATION_PREREQUISITES/);
+  await assert.rejects(f.run('set_item_attunement',attune),/ATTUNEMENT_LIMIT_UNKNOWN/);
+  await f.db.prepare("UPDATE cloud_entities SET data_json=json_set(data_json,'$.attunementCapacity',1),revision=revision+1 WHERE id='hero'").bind().run();
+  await assert.rejects(f.run('set_item_attunement',{...attune,elapsedSeconds:3599}),/ATTUNEMENT_PREREQUISITES/);
+  await f.run('set_item_attunement',attune);
+  await f.run('set_item_operating',{itemId:'first',operating:true,source});
+  await f.run('acquire_item',{itemId:'second',definitionId:item.definitionId,quantity:1,ownerId:'hero',source});
+  await assert.rejects(f.run('set_item_attunement',{...attune,itemId:'second'}),/ATTUNEMENT_CAPACITY/);
+  await f.db.prepare("INSERT INTO cloud_entities(owner_id,continuity_id,id,kind,actor_id,title,data_json,life,revision) VALUES(?,?,?,'form','hero','Source form',?,'active',1)")
+    .bind(owner.ownerId,continuity,'mode',JSON.stringify({sourceItemId:'first',requiresAttunement:true})).run();
+  await f.db.prepare("UPDATE cloud_entities SET data_json=json_set(data_json,'$.activeFormId','mode'),revision=revision+1 WHERE id='hero'").bind().run();
+  await assert.rejects(f.run('set_item_operating',{itemId:'first',operating:false,source}),/FORM_REVERSION_REQUIRED/);
+  await assert.rejects(f.run('set_item_attunement',{...attune,attuned:false}),/FORM_REVERSION_REQUIRED/);
+  assert.equal((await f.record('first')).data.operating,true);
+});
+
+test('successor assembly preserves earlier component identity and no nested item remains separately usable',async t=>{
+  const f=await fixture(t);
+  await f.run('define_item_definition',definition('machine',false));
+  for(const id of ['core','frame','successor'])await f.run('acquire_item',{itemId:id,definitionId:'machine',quantity:1,ownerId:'hero',source});
+  async function phase(projectId,donor,output) {
+    await f.run('propose_invention',{projectId,title:'Synthetic assembly',actorId:'hero',intent:'Install existing reviewed parts.',requirements:[],researchIds:[],source});
+    const stageId='stage-'+projectId;
+    await f.run('define_construction_stage',{stageId,projectId,blueprintId:null,title:'Install',prerequisites:[],requiredWork:null,checkRequired:false,source});
+    await f.run('resolve_construction_stage',{stageId,outcome:'completed',rollId:null,worldTimeSpent:null,evidence:'Confirmed installation.',source});
+    await f.run('integrate_component',{eventId:'event-'+projectId,projectId,stageId,donorItemId:donor,outputItemId:output,
+      method:'installed',quantity:1,evidence:'Explicit reusable installation.',source});
+    await f.run('link_completed_invention',{projectId,outputItemId:output,stageIds:[stageId],source});
+  }
+  await phase('first','core','frame');
+  await phase('next','frame','successor');
+  for(const id of ['core','frame']) {
+    const d=(await f.record(id)).data;
+    assert.equal(d.holding,'installed');assert.equal(d.quantity,1);assert.equal(d.partyAccess,false);
+    await assert.rejects(f.run('equip_item',{itemId:id,equipment:'held',source}),/ITEM_UNAVAILABLE/);
+  }
+  const graph=await cloudRecordView(f.service,dm,continuity,'genealogy',{id:'frame'});
+  assert.deepEqual(graph.events.map(e=>e.id).sort(),['event-first','event-next']);
+  const items=await cloudRecordView(f.service,dm,continuity,'inventory');
+  assert.equal(items.groups.length,1);assert.equal(items.groups[0].knownQuantity,1);
 });

@@ -42,7 +42,7 @@ internal fun classRulesId(label: String): String = when (label) {
     /** Replaces ability + training + bonus; active effects and conditions still apply. */
     val baselineOverride: Int? = null
 )
-@Serializable enum class NumericTarget { ABILITY, ABILITY_CAP, SAVE, SKILL, INITIATIVE, ARMOR_CLASS, MAX_HP, SPEED, SPELL_ATTACK, SPELL_DC, ATTACK, DAMAGE, RESOURCE_CAPACITY }
+@Serializable enum class NumericTarget { ABILITY, ABILITY_CAP, SAVE, SKILL, INITIATIVE, ARMOR_CLASS, MAX_HP, SPEED, SPELL_ATTACK, SPELL_DC, ATTACK, DAMAGE, RESOURCE_CAPACITY, ABILITY_CHECK, PASSIVE }
 @Serializable enum class NumberOperation { ADD, SET, MINIMUM, MAXIMUM }
 @Serializable enum class DamageKind { ACID, BLUDGEONING, COLD, FIRE, FORCE, LIGHTNING, NECROTIC, PIERCING, POISON, PSYCHIC, RADIANT, SLASHING, THUNDER }
 @Serializable enum class DefenseKind { RESISTANCE, IMMUNITY, VULNERABILITY }
@@ -110,7 +110,8 @@ internal fun classRulesId(label: String): String = when (label) {
     @EncodeDefault(EncodeDefault.Mode.NEVER) val formId: String? = null,
     @EncodeDefault(EncodeDefault.Mode.NEVER) val formKnown: Boolean = true,
     @EncodeDefault(EncodeDefault.Mode.NEVER) val pools: List<ResourcePool> = emptyList(),
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val modesUntil: Map<String,Long> = emptyMap()
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val modesUntil: Map<String,Long> = emptyMap(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val formPortraitRefs: Map<String,String> = emptyMap()
 )
 /** Original descriptive evidence remains immutable when a reviewed attack is later edited. */
 @Serializable data class RecordedAttackSource(
@@ -183,7 +184,8 @@ internal fun classRulesId(label: String): String = when (label) {
     @EncodeDefault(EncodeDefault.Mode.NEVER) val pinnedSkillIds: Set<String> = emptySet(),
     /** Connected armor state; adoption never deletes the original weapon archive. */
     @EncodeDefault(EncodeDefault.Mode.NEVER) val armor: GenesisArmorState? = null,
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val reviewedProficiency: ReviewedProficiency? = null
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val reviewedProficiency: ReviewedProficiency? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val rollPresets: List<RollPreset> = emptyList()
 )
 @Serializable data class CalculationContext(
     val targetCreatureType: String? = null, val damageType: DamageKind? = null,
@@ -204,5 +206,7 @@ internal fun classRulesId(label: String): String = when (label) {
     val defenses: List<EffectPayload.Defense>, val conditionImmunities: Set<String>,
     val resourceMaxima: Map<String, Int?>, val warnings: List<String> = emptyList(),
     val movement: Map<String, Int?> = emptyMap(), val senses: Map<String, Int?> = emptyMap(),
-    val customSkills: Map<String, CalculatedNumber> = emptyMap()
+    val customSkills: Map<String, CalculatedNumber> = emptyMap(),
+    val abilityChecks: Map<Stat, CalculatedNumber> = emptyMap(),
+    val passiveExplanations: Map<String, CalculatedNumber> = emptyMap()
 )

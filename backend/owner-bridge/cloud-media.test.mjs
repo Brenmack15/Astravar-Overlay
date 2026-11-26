@@ -7,6 +7,7 @@ import { SqliteAdapter } from './sqlite-adapter.mjs';
 import { CloudService } from './cloud-service.mjs';
 import { CLOUD_MEDIA_KINDS, CLOUD_MEDIA_OPERATIONS, handleCloudMedia, stageCloudMcpImage } from './cloud-media.mjs';
 import { encodeMediaPng, inspectMediaPng, mediaDigest } from './cloud-media-codec.mjs';
+import { CLOUD_LIFECYCLE_OPERATIONS } from './cloud-lifecycle.mjs';
 
 const schema=await readFile(new URL('./schema.sql',import.meta.url),'utf8');
 const id='qa-media';
@@ -38,7 +39,7 @@ async function fileBucket(t) {
 }
 async function fixture(t) {
   const db=new SqliteAdapter();t.after(()=>db.close());db.exec(schema);
-  const service=new CloudService(db,{ownerId,isolated:true,operations:CLOUD_MEDIA_OPERATIONS,kinds:{actor:'character',...CLOUD_MEDIA_KINDS}});
+  const service=new CloudService(db,{ownerId,isolated:true,operations:{...CLOUD_MEDIA_OPERATIONS,...CLOUD_LIFECYCLE_OPERATIONS},kinds:{actor:'character',...CLOUD_MEDIA_KINDS}});
   service.mediaBucket=await fileBucket(t);
   await service.createIsolated(owner,id);
   await service.setGrant(owner,id,'sites-mcp',{scopes,auto:['character.write','media.write'],actors:['actor-a'],revoked:false,
@@ -150,4 +151,40 @@ test('MCP stages supplied bytes under its existing actor grant and rejects malfo
   await assert.rejects(stageCloudMcpImage(service,dm,{...args,bytesBase64:'a'.repeat(49156)}),{code:'INVALID_MEDIA_ENCODING'});
   await assert.rejects(stageCloudMcpImage(service,dm,{...args,bytesBase64:'ai=='}),{code:'INVALID_MEDIA_ENCODING'});
   await assert.rejects(stageCloudMcpImage(service,dm,{...args,targetId:'actor-b'}),{code:'IMAGE_UNAVAILABLE'});
+});
+
+test('deleting an owner-selected target and its exclusive image removes reviewed bytes, staged candidates and detailed evidence',async t=>{
+  const {service,db,request,submit}=await fixture(t),{bytes,hash}=await fixtureImage();
+  await request(dm,'media/uploads/attached','PUT',bytes,hash);
+  await request(owner,'media/uploads/attached/original');
+  const image=await submit('attached','archival-image',hash);
+  await service.review(owner,id,image.commandId,image.digest,'verify');
+  await request(dm,'media/uploads/draft-one','PUT',bytes,hash);
+  const erase=(cmd,records)=>service.submit(owner,id,{version:1,commandId:cmd,epoch:1,expectedRevision:1,operation:'permanently_delete_records',
+    args:{records,confirmation:'PERMANENT_DELETE',acknowledgeExternalBackups:true}});
+  const records=[{id:'actor-a',kind:'actor',revision:1},{id:'archival-image',kind:'media_asset',revision:1}];
+  await assert.rejects(erase('omit-artwork',records.slice(0,1)),{code:'DEPENDENT_RECORDS_RETAINED'});
+  const stale=await erase('delete-both-stale',records);
+  await request(dm,'media/uploads/draft-two','PUT',bytes,hash);
+  await assert.rejects(service.review(owner,id,stale.commandId,stale.digest,'verify'),{code:'TRANSACTION_PRECONDITION_FAILED'});
+  assert.equal((await request(owner,'media/primary/actor-a/original')).status,200);
+  await service.review(owner,id,stale.commandId,stale.digest,'refuse');
+  const exact=await erase('delete-both-reviewed',records);
+  assert.equal((await service.approvals(owner,id)).requests[0].plan.result.media.remove.length,3);
+  const retainedBucket=service.mediaBucket;
+  service.mediaBucket=null;
+  const pending=await service.review(owner,id,exact.commandId,exact.digest,'verify');
+  assert.equal(pending.status,'COMMITTED');
+  assert.deepEqual(pending.receipt.assetCleanup,{status:'PENDING',assets:3});
+  assert.equal(db.db.prepare("SELECT count(*) AS n FROM cloud_entities WHERE id IN ('actor-a','archival-image')").get().n,0);
+  service.mediaBucket=retainedBucket;
+  const done=await service.receipt(owner,id,exact.commandId);
+  assert.deepEqual(done.receipt.assetCleanup,{status:'COMPLETE',assets:3});
+  assert.equal(retainedBucket.keys.size,0);
+  assert.equal(db.db.prepare('SELECT count(*) AS n FROM cloud_media_uploads').get().n,0);
+  assert.equal(db.db.prepare('SELECT count(*) AS n FROM cloud_media_previews').get().n,0);
+  assert.equal((await service.receipt(owner,id,exact.commandId)).revision,done.revision);
+  await assert.rejects(request(dm,'media/primary/actor-a/original'),{code:'IMAGE_UNAVAILABLE'});
+  await assert.rejects(request(owner,'media/uploads/attached','PUT',bytes,hash,'actor','actor-b'),{code:'TRANSACTION_PRECONDITION_FAILED'});
+  assert.deepEqual(db.db.prepare('PRAGMA foreign_key_check').all(),[]);
 });

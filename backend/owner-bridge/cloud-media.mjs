@@ -123,7 +123,7 @@ async function putUpload(request,service,principal,id,uploadId) {
 async function checkUploadObjects(service,id,command,plan) {
   const {args}=command;
   const b=service.key(id),row=await uploadById(service,b,args.uploadId);
-  if(!row || row.state!=='ready' || row.digest!==args.sha256 || row.target_id!==args.targetId ||
+  if(!row || row.state!=='ready' || row.expires_at<=service.now() || row.digest!==args.sha256 || row.target_id!==args.targetId ||
      row.target_kind!==args.targetKind || row.epoch!==command.epoch)cloudFail(409,'IMAGE_CANDIDATE_CHANGED');
   const reviewed=await service.s(`SELECT requested_at FROM cloud_media_previews WHERE owner_id=? AND continuity_id=?
     AND upload_id=? AND digest=? AND target_id=? AND target_kind=? AND target_revision=?`,...b,args.uploadId,
@@ -165,12 +165,14 @@ export const CLOUD_MEDIA_OPERATIONS=Object.freeze({
 });
 
 async function shownCandidate(service,principal,id,uploadId,variant) {
-  const b=service.key(id),{grant}=await service.access(principal,id),row=await uploadById(service,b,uploadId);
+  const b=service.key(id),{grant,continuity}=await service.access(principal,id),row=await uploadById(service,b,uploadId);
   if(!row || row.state!=='ready' || (grant.subject!=='sites-owner'&&grant.subject!==row.subject))unavailable();
   const target=await targetById(service,b,row.target_id);
   requireTarget(service,grant,target,false);
   if(target.kind!==row.target_kind||target.actor_id!==row.actor_id)unavailable();
   const response=await readObject(service,b,uploadId,JSON.parse(row.metadata_json),variant);
+  const again=await service.access(principal,id);
+  if(again.grant.revision!==grant.revision||again.continuity.epoch!==continuity.epoch||again.continuity.revision!==continuity.revision)cloudFail(409,'SNAPSHOT_CHANGED');
   if(grant.subject==='sites-owner' && variant==='original'){
     // Receipt of a preview is recorded separately from the explicit owner decision.
     await service.s(`INSERT INTO cloud_media_previews
@@ -181,14 +183,17 @@ async function shownCandidate(service,principal,id,uploadId,variant) {
   return response;
 }
 async function primaryImage(service,principal,id,targetId,variant) {
-  const b=service.key(id),{grant}=await service.access(principal,id),target=await targetById(service,b,targetId);
+  const b=service.key(id),{grant,continuity}=await service.access(principal,id),target=await targetById(service,b,targetId);
   requireTarget(service,grant,target,false);
   const asset=await service.s(`SELECT e.actor_id,e.data_json FROM cloud_links l JOIN cloud_entities e
     ON e.owner_id=l.owner_id AND e.continuity_id=l.continuity_id AND e.id=l.to_id
     WHERE l.owner_id=? AND l.continuity_id=? AND l.from_id=? AND l.relation='primary_image' AND e.kind='media_asset' AND e.life='active'`,...b,targetId).first();
   if(!asset || !cloudAllowed(grant,'media',asset.actor_id,false))unavailable();
   const meta=JSON.parse(asset.data_json);
-  return readObject(service,b,meta.uploadId,meta,variant);
+  const result=await readObject(service,b,meta.uploadId,meta,variant);
+  const again=await service.access(principal,id);
+  if(again.grant.revision!==grant.revision||again.continuity.epoch!==continuity.epoch||again.continuity.revision!==continuity.revision)cloudFail(409,'SNAPSHOT_CHANGED');
+  return result;
 }
 async function cleanup(service,principal,id,uploadId) {
   service.owner(principal,id);
@@ -250,4 +255,12 @@ export async function stageCloudMcpImage(service,principal,args) {
   const request=new Request(url,{method:'PUT',headers:{'Content-Type':'image/png','X-Astravar-Content-SHA256':args.sha256},
     body:Uint8Array.from(decoded,char=>char.charCodeAt(0))});
   return (await handleCloudMedia(request,service,principal,args.continuityId,path)).json();
+}
+
+/** The lifecycle worker calls this only for durable, owner-approved GC rows. */
+export async function purgeCloudMediaObjects(service,binding,uploadId,digest) {
+  const keysToPurge=await keys(binding,uploadId,digest);
+  const bucket=storage(service);
+  await bucket.delete([keysToPurge.original,keysToPurge.thumbnail]);
+  if(await bucket.head(keysToPurge.original)||await bucket.head(keysToPurge.thumbnail))cloudFail(503,'IMAGE_CLEANUP_PENDING');
 }

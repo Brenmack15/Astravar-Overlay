@@ -149,3 +149,14 @@ internal data class RebirthJournalSnapshot(val checkpoints: List<CampaignCheckpo
         PlayerTextButton(onClick = open) { Text(action) }
     }
 }
+
+@Composable internal fun ChronicleLanding(repository: CampaignLedgerRepository, open: (String) -> Unit) {
+    val snapshot by rememberRebirthJournalSnapshot(repository)
+    Page {
+        PlayerHeading("Chronicle")
+        PlayerOutlinedButton(onClick = { open("Encounters") }) { Text("Encounters") }
+        val current = snapshot
+        if (current == null) CircularProgressIndicator()
+        else RebirthCampaignJournalContent(current, open, showHeading = false)
+    }
+}

@@ -47,14 +47,14 @@ class GenesisPagerTest {
             compose.onNodeWithTag("section-Sheet").assertIsSelected()
             compose.onNodeWithTag("genesis-character-pager").performTouchInput { swipeLeft() }
             compose.waitForIdle()
-            compose.onNodeWithTag("section-Combat").assertIsSelected()
+            compose.onNodeWithTag("section-Actions").assertIsSelected()
             compose.onNodeWithText("Content for Combat").assertIsDisplayed()
             compose.onNodeWithTag("section-Equipment").performClick()
             compose.waitForIdle()
             compose.onNodeWithText("Content for Equipment").assertIsDisplayed()
             compose.onNodeWithTag("genesis-character-pager").performTouchInput { swipeRight() }
             compose.waitForIdle()
-            compose.onNodeWithTag("section-Combat").assertIsSelected()
+            compose.onNodeWithTag("section-Actions").assertIsSelected()
             compose.runOnIdle { activity.get().onBackPressedDispatcher.onBackPressed() }
             compose.waitForIdle()
             compose.onNodeWithTag("section-Sheet").assertIsSelected()
@@ -94,7 +94,7 @@ class GenesisPagerTest {
             compose.onNodeWithText("Sheet row 20").performScrollTo()
             val sheetOffset = scrollOffset("Sheet")
             assertTrue(sheetOffset > 0)
-            compose.onNodeWithTag("section-Combat").performClick()
+            compose.onNodeWithTag("section-Actions").performClick()
             compose.waitForIdle()
             assertEquals(0f, scrollOffset("Combat"), 0.5f)
             compose.onNodeWithText("Combat row 15").performScrollTo()
@@ -102,14 +102,14 @@ class GenesisPagerTest {
             compose.onNodeWithTag("section-Sheet").performClick()
             compose.waitForIdle()
             assertEquals(sheetOffset, scrollOffset("Sheet"), 0.5f)
-            compose.onNodeWithTag("section-Combat").performClick()
+            compose.onNodeWithTag("section-Actions").performClick()
             compose.waitForIdle()
             var saved: Map<String, List<Any?>> = emptyMap()
             compose.runOnIdle { saved = registry.performSave(); shown.value = false }
             compose.waitForIdle()
             compose.runOnIdle { registry = SaveableStateRegistry(saved) { true }; shown.value = true }
             compose.waitForIdle()
-            compose.onNodeWithTag("section-Combat").assertIsSelected()
+            compose.onNodeWithTag("section-Actions").assertIsSelected()
             assertEquals(combatOffset, scrollOffset("Combat"), 0.5f)
             compose.onNodeWithTag("section-Sheet").performClick()
             compose.waitForIdle()
@@ -133,7 +133,7 @@ class GenesisPagerTest {
             compose.onNodeWithTag("section-Sheet").assertIsSelected()
             compose.onNodeWithTag("genesis-character-pager").performTouchInput { swipeLeft() }
             compose.waitForIdle()
-            compose.onNodeWithTag("section-Combat").assertIsSelected()
+            compose.onNodeWithTag("section-Actions").assertIsSelected()
         } finally { activity.pause().stop().destroy() }
     }
 
@@ -182,7 +182,7 @@ class GenesisPagerTest {
             assertTrue("Table gestures must not prevent vertical page scrolling", scrollOffset("Sheet") > 0f)
             compose.onNodeWithTag("genesis-character-pager").performTouchInput { swipeLeft() }
             compose.waitForIdle()
-            compose.onNodeWithTag("section-Combat").assertIsSelected()
+            compose.onNodeWithTag("section-Actions").assertIsSelected()
         } finally { activity.pause().stop().destroy() }
     }
 
@@ -202,7 +202,7 @@ class GenesisPagerTest {
             compose.onNodeWithTag("section-Sheet").assertIsSelected()
             compose.onNodeWithTag("genesis-character-pager").performTouchInput { swipeLeft() }
             compose.waitForIdle()
-            compose.onNodeWithTag("section-Combat").assertIsSelected()
+            compose.onNodeWithTag("section-Actions").assertIsSelected()
         } finally { activity.pause().stop().destroy() }
     }
 
@@ -219,7 +219,7 @@ class GenesisPagerTest {
             compose.runOnIdle { modal.value = false }
             compose.onNodeWithTag("genesis-character-pager").performTouchInput { swipeLeft() }
             compose.waitForIdle()
-            compose.onNodeWithTag("section-Combat").assertIsSelected()
+            compose.onNodeWithTag("section-Actions").assertIsSelected()
         } finally { activity.pause().stop().destroy() }
     }
 
@@ -255,8 +255,9 @@ class GenesisPagerTest {
             // layout rectangle: sibling occlusion affects only these final bounds.
             val equipmentId = compose.onNodeWithTag("section-Equipment").fetchSemanticsNode().id
             val spellsId = compose.onNodeWithTag("section-Spells").fetchSemanticsNode().id
-            val hint = compose.onNodeWithText("Swipe between sections").fetchSemanticsNode()
-            val indicator = compose.onNodeWithTag("genesis-page-indicator").fetchSemanticsNode()
+            compose.onNodeWithText("Swipe between sections").assertDoesNotExist()
+            compose.onNodeWithTag("genesis-page-indicator").assertDoesNotExist()
+            val pagerId = compose.onNodeWithTag("genesis-character-pager").fetchSemanticsNode().id
             compose.runOnIdle {
                 val provider = requireNotNull(findAccessibilityProvider(activity.get().window.decorView))
                 for ((id, selected) in listOf(equipmentId to false, spellsId to true)) {
@@ -271,14 +272,7 @@ class GenesisPagerTest {
                     assertEquals(selected, info.isSelected)
                     if (!selected) assertTrue(info.isClickable)
                 }
-                for (chrome in listOf(hint, indicator)) {
-                    val info = requireNotNull(provider.createAccessibilityNodeInfo(chrome.id))
-                    val bounds = Rect().also(info::getBoundsInScreen)
-                    assertTrue("The native page hint must remain wholly readable: $bounds",
-                        info.isVisibleToUser && bounds.height() >= chrome.boundsInRoot.height.roundToInt() &&
-                            bounds.width() >= chrome.boundsInRoot.width.roundToInt())
-                }
-                assertEquals("Spells, page 5 of 8", provider.createAccessibilityNodeInfo(indicator.id)?.stateDescription)
+                assertEquals("Spells, page 5 of 8", provider.createAccessibilityNodeInfo(pagerId)?.stateDescription)
             }
             compose.onNodeWithTag("section-Equipment").performTouchInput {
                 click(Offset(centerX, height - 1f))

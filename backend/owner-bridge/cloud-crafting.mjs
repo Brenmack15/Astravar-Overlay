@@ -64,8 +64,8 @@ async function integrate(ctx,args) {
     if(seen.has(id))continue;
     seen.add(id);queue.push(...(parents.get(id)??[]));
   }
-  // A previously assembled item may have installed pieces. Its future use needs explicit integration review.
-  if(parents.has(donor.id)) recordsFail('ASSEMBLY_INTEGRATION_REVIEW_REQUIRED',409);
+  // A whole assembly keeps its earlier component links. Consuming its materials would need an explicit disposition for those children.
+  if(parents.has(donor.id) && args.method==='material_consumed') recordsFail('ASSEMBLY_CONSUMPTION_REVIEW_REQUIRED',409);
   const definition=await recordRead(ctx,'item_definition',donor.data.definitionId);
   const quantity=args.method==='material_consumed'?donor.data.quantity-args.quantity:donor.data.quantity;
   const unavailable=args.method!=='material_consumed'||quantity===0;

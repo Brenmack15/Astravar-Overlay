@@ -183,44 +183,55 @@ internal fun optionalInt(value: String, label: String, min: Int = 0, max: Int = 
     onDismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit, onRoll: (String, Int) -> Unit) {
     val character = requireNotNull(rememberReforgeSnapshot(latestCharacter))
     val value = projection.abilities.getValue(stat)
-    var score by rememberSaveable { mutableStateOf(character.baseAbilities[stat]?.toString() ?: "") }
-    var error by remember { mutableStateOf("") }
-    PlayerSheet("${stat.name} · ${value.effective.value ?: "?"} (${reforgeSigned(value.modifier)})", onDismiss,
-        dirty = score != (character.baseAbilities[stat]?.toString() ?: ""), actions = {
-            PlayerTextButton(onClick = { ConditionRules.abilityCheckModifier(character, stat)?.let { onRoll("${stat.name} check", it) } }, enabled = value.modifier != null) { Text("Roll check") }
-            PlayerButton(onClick = {
-                try { onSave(GameplayRules.preserveCapacities(character, character.copy(baseAbilities = character.baseAbilities + (stat to optionalInt(score, stat.name, 0, 100))))) }
-                catch (e: Exception) { error = e.message ?: "Check score" }
-            }) { Text("Save score") }
-        }) {
-        Text("Permanent ${value.permanent ?: "unknown"} → effective ${value.effective.value ?: "unknown"}", style = MaterialTheme.typography.titleMedium)
-        Field("Permanent base score", score, { score = it })
-        Text("Active calculation", color = RebuildPalette.Ice)
-        value.effective.explanation.forEach { line ->
-            Text("${if (line.applied) "•" else "○"} ${line.label}${line.value?.let { ": $it" } ?: ""}${line.reason.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""}", color = if (line.applied) MaterialTheme.colorScheme.onSurface else RebuildPalette.Muted)
-        }
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
-    }
-}
-
-@Composable internal fun ReforgeTrainingEditor(latestCharacter: ReforgeCharacter, onDismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit) {
-    val character = requireNotNull(rememberReforgeSnapshot(latestCharacter))
+    val originalScore = character.baseAbilities[stat]?.toString().orEmpty()
+    var score by rememberSaveable { mutableStateOf(originalScore) }
+    var tools by rememberSaveable { mutableStateOf(character.toolProficiencies.sorted().joinToString(", ")) }
     val trainingDraft = rememberReforgeDraft(character.skills, MapSerializer(String.serializer(), SkillTraining.serializer()))
     val savesDraft = rememberReforgeDraft(character.saveProficiencies, SetSerializer(Stat.serializer()))
     var training by trainingDraft
     var saves by savesDraft
-    PlayerSheet("Proficiencies & Expertise", onDismiss, dirty = training != character.skills || saves != character.saveProficiencies,
-        actions = { PlayerButton(enabled = trainingDraft.canSave && savesDraft.canSave, onClick = { onSave(character.copy(skills = training, saveProficiencies = saves)) }) { Text("Save training") } }) {
-        ReforgeDraftRecovery(trainingDraft, savesDraft)
-        Text("Saving throws", style = MaterialTheme.typography.titleMedium)
-        Stat.entries.forEach { stat -> Toggle(stat.name, stat in saves) { saves = if (it) saves + stat else saves - stat } }
-        Text("Skills", style = MaterialTheme.typography.titleMedium)
-        reforgeSkills.forEach { (name, ability) ->
-            val current = training[name] ?: SkillTraining(ability)
-            Choices(name, listOf("Untrained", "Proficient", "Expertise", "Half proficiency"), when {
-                current.expertise -> "Expertise"; current.proficient -> "Proficient"; current.halfProficiency -> "Half proficiency"; else -> "Untrained"
-            }) { choice -> training = training + (name to SkillTraining(ability, choice == "Proficient" || choice == "Expertise", choice == "Expertise", choice == "Half proficiency")) }
+    var error by remember { mutableStateOf("") }
+    val toolSet = tools.split(',').map(String::trim).filter(String::isNotBlank).toSet()
+    val stale = character.revision != latestCharacter.revision || character.id != latestCharacter.id
+    val check = projection.abilityChecks[stat]?.value
+    val save = projection.saves[stat]
+    val dirty = score != originalScore || training != character.skills || saves != character.saveProficiencies || toolSet != character.toolProficiencies
+    PlayerSheet("Ability Inspector & Training", onDismiss, dirty = dirty, actions = {
+        PlayerTextButton(enabled = !stale && !dirty && check != null, onClick = { check?.let { onRoll("${stat.fullLabel} check", it) } }) { Text("Roll check") }
+        PlayerButton(enabled = !stale && trainingDraft.canSave && savesDraft.canSave, onClick = {
+            try {
+                val updated = character.copy(baseAbilities = character.baseAbilities + (stat to optionalInt(score, stat.name, 0, 100)),
+                    skills = training, saveProficiencies = saves, toolProficiencies = toolSet)
+                onSave(GameplayRules.preserveCapacities(character, updated))
+            } catch (e: IllegalArgumentException) { error = e.message ?: "Review the score or training." }
+        }) { Text("Save changes") }
+    }) {
+        Text(stat.fullLabel, style = MaterialTheme.typography.titleLarge)
+        Text("Permanent ${value.permanent ?: "unknown"} → effective ${value.effective.value ?: "unknown"}", style = MaterialTheme.typography.titleMedium)
+        Text("Ability modifier ${reforgeSigned(value.modifier)} · Check ${reforgeSigned(check)} · Save ${reforgeSigned(save?.value)}")
+        Field("Permanent base score", score, { score = it }, enabled = !stale)
+        PlayerDisclosure("Calculation sources", initiallyOpen = true) {
+            (value.effective.explanation + projection.abilityChecks[stat]?.explanation.orEmpty() + save?.explanation.orEmpty()).distinct().forEach { line ->
+                Text("${line.label}${line.value?.let { " · $it" } ?: ""}${line.reason.takeIf(String::isNotBlank)?.let { " · $it" } ?: ""}",
+                    color = if (line.applied) MaterialTheme.colorScheme.onSurface else RebuildPalette.Muted)
+            }
         }
+        ReforgeDraftRecovery(trainingDraft, savesDraft)
+        PlayerDisclosure("Saving-throw proficiencies") {
+            Stat.entries.forEach { ability -> Toggle(ability.fullLabel, ability in saves) { checked -> saves = if (checked) saves + ability else saves - ability } }
+        }
+        PlayerDisclosure("Skill proficiency and expertise") {
+            reforgeSkills.forEach { (name, ability) ->
+                val current = training[name] ?: SkillTraining(ability)
+                Choices(name, listOf("Untrained", "Proficient", "Expertise", "Half proficiency"), when {
+                    current.expertise -> "Expertise"; current.proficient -> "Proficient"; current.halfProficiency -> "Half proficiency"; else -> "Untrained"
+                }) { choice -> training = training + (name to current.copy(proficient = choice in setOf("Proficient", "Expertise"),
+                    expertise = choice == "Expertise", halfProficiency = choice == "Half proficiency")) }
+            }
+        }
+        PlayerDisclosure("Tool training") { Field("Tool proficiencies (comma separated)", tools, { tools = it }, enabled = !stale) }
+        if (stale) Text("The actor changed. Reopen this inspector to edit the current revision.", color = MaterialTheme.colorScheme.error)
+        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
     }
 }
 

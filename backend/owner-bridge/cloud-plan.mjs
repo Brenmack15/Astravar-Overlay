@@ -54,6 +54,7 @@ export class CloudPlan {
     const rows=(await this.service.s('SELECT * FROM cloud_entities WHERE owner_id=? AND continuity_id=? AND kind=?'+restriction+' ORDER BY id LIMIT 513',...this.binding,kind,...bindings).all()).results;
     if(rows.length>512) cloudFail(409,'BOUNDED_QUERY_EXCEEDED');
     const projected=new Map(rows.map(r=>[r.id,cloudEntity(r)]));
+    for(const [id,row] of projected)if(!this.reads.has(id))this.reads.set(id,row);
     for(const [id,change] of this.changes){if(change.before?.kind===kind)projected.delete(id);if(change.after?.kind===kind && cloudAllowed(this.grant,scope,change.after.actorId))projected.set(id,change.after);}
     for(const r of projected.values())this.require(scope,r.actorId,false);
     return [...projected.values()].map(r=>structuredClone(r));
@@ -89,7 +90,7 @@ export class CloudPlan {
   async link(fromId,relation,toId){return this.edge(fromId,relation,toId,false);}
   async unlink(fromId,relation,toId){return this.edge(fromId,relation,toId,true);}
   freeze(result) {
-    const plan={result,changes:[...this.changes.values()],edges:[...this.edges.values()],access:[...this.access.values()]};
+    const plan={result,readIds:[...this.reads.keys()],changes:[...this.changes.values()],edges:[...this.edges.values()],access:[...this.access.values()]};
     if(canonical(plan).length>240000) cloudFail(413,'PLAN_TOO_LARGE');
     return plan;
   }

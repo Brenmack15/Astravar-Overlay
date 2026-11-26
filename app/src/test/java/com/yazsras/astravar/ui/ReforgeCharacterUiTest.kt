@@ -419,7 +419,7 @@ class ReforgeCharacterUiTest {
         listOf("quick-health", "quick-attack", "quick-spells", "quick-inventory").forEach {
             compose.onNodeWithTag(it).assertDoesNotExist()
         }
-        val sampleRows = listOf("genesis-character-tabs", "genesis-page-indicator")
+        val sampleRows = listOf("genesis-character-tabs")
             .associateWith { compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot.center.y.toInt() }
         compose.runOnIdle { invalidateNativeCaptureWindows() }
         compose.mainClock.advanceTimeByFrame()
@@ -456,30 +456,13 @@ class ReforgeCharacterUiTest {
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
             val captureName = "rebirth-sheet-${width}-font${(fontScale * 100).toInt()}"
             capture("$captureName-overview")
-            val indicatorLayouts = mutableListOf<TextLayoutResult>()
-            compose.onNodeWithTag("genesis-page-indicator")
-                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(indicatorLayouts)) }
-            val indicator = indicatorLayouts.single()
-            assertEquals("Page count must stay on one line at enlarged font sizes", 1, indicator.lineCount)
-            // String Text's semantics paragraph retains the Row's maximum
-            // width even when its measured text fits. Check actual line ink and
-            // every character, rather than that paragraph's blank allocation.
-            assertEquals("1 / ${genesisCharacterSections.size}", indicator.layoutInput.text.text)
-            assertEquals("The complete page count must remain visible", indicator.layoutInput.text.length,
-                indicator.getLineEnd(0, visibleEnd = true))
-            assertFalse("Page count must not be ellipsized", indicator.isLineEllipsized(0))
-            assertTrue("Page count ink must fit beside the swipe hint", indicator.getLineLeft(0) >= -1f &&
-                indicator.getLineRight(0) <= indicator.size.width + 1f)
-            val indicatorBounds = compose.onNodeWithTag("genesis-page-indicator").fetchSemanticsNode().boundsInRoot
-            assertTrue("Page count must not be clipped by its parent", indicatorBounds.width + 1f >= indicator.size.width &&
-                indicatorBounds.height + 1f >= indicator.size.height)
-            compose.onNodeWithText("Character setup").performScrollTo()
-            capture("$captureName-actions")
-            listOf("Roll dice", "Character setup", "Switch character").forEach { label ->
+            compose.onNodeWithTag("genesis-page-indicator").assertDoesNotExist()
+            compose.onNodeWithText("Swipe between sections").assertDoesNotExist()
+            compose.onNodeWithContentDescription("Roll Manager").assertIsDisplayed().assertWidthIsAtLeast(48.dp)
+            compose.onNodeWithTag("genesis-character-controls").assertIsDisplayed().performClick()
+            listOf("Character setup", "Switch character").forEach { label ->
                 val action = compose.onNode(hasText(label) and hasClickAction())
-                // Switching is pinned above the pager, so it must remain visible
-                // after the page scroll without requiring a scrollable ancestor.
-                if (label != "Switch character") action.performScrollTo()
+                action.performScrollTo()
                 action.assertIsDisplayed().assertIsEnabled().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
                 val text = compose.onNodeWithText(label, useUnmergedTree = true)
                 val layouts = mutableListOf<TextLayoutResult>()
@@ -505,6 +488,50 @@ class ReforgeCharacterUiTest {
         }
     }
 
+    @Test fun nestedAbilityControlsSeparateInspectionOptionsAndSavedQuickResults() {
+        val actor = fixture().copy(effects = listOf(EffectDefinition("training-bonus", "Check practice",
+            RuleSource("practice", "Reviewed fixture training", Acceptance.ACCEPTED_HOMEBREW),
+            EffectPayload.Number(NumericTarget.ABILITY_CHECK, NumberOperation.ADD, 1, "STR"))))
+        withSheet(character = actor) { repository ->
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("reforge-check-STR").fetchSemanticsNodes().isNotEmpty() }
+            val check = compose.onNodeWithTag("reforge-check-STR")
+            check.assertContentDescriptionEquals("Strength check +0")
+            check.performClick()
+            compose.waitUntil(10_000) { runBlocking { repository.rollHistory(actor.id).first() }.size == 1 }
+            val result = runBlocking { repository.rollHistory(actor.id).first() }.single()
+            assertEquals("Strength check", result.label)
+            assertEquals(0, result.components.single().modifier)
+            assertEquals("STR", result.components.single().subjectId)
+            assertEquals(DiceMode.NORMAL, result.components.single().mode)
+            assertTrue(result.components.single().dice.single().face in 1..20)
+            compose.onNodeWithText("Ability Inspector & Training").assertDoesNotExist()
+
+            compose.onNodeWithTag("reforge-save-STR").performSemanticsAction(SemanticsActions.OnLongClick)
+            compose.onNodeWithText("Effective mode", substring = true).assertExists()
+            compose.onNodeWithTag("reforge-roll-result").assertDoesNotExist()
+            compose.onNodeWithText("Close").performClick()
+            compose.onNodeWithTag("reforge-STR").performClick()
+            compose.onNodeWithText("Ability Inspector & Training").assertExists()
+            compose.onNodeWithText("Ability modifier -1 · Check +0 · Save -1").assertExists()
+            assertEquals(1, runBlocking { repository.rollHistory(actor.id).first() }.size)
+            assertEquals(1L, runBlocking { repository.get(actor.id) }!!.revision)
+        }
+    }
+
+    @Test fun nameOpensProfileAndPortraitCancelPreservesTheActor() = withSheet { repository ->
+        val actor = fixture()
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText(actor.name).performClick()
+        compose.onNodeWithText("Character Profile").assertExists()
+        listOf("Defenses", "Features & Traits", "Proficiencies & Training", "Background").forEach { compose.onNodeWithText(it).assertExists() }
+        compose.onNodeWithText("Close").performClick()
+        compose.onNodeWithContentDescription("Manage ${actor.name} portrait").performClick()
+        compose.onNodeWithText("Choose image").assertExists()
+        compose.onNodeWithText("Close").performClick()
+        assertEquals(1L, runBlocking { repository.get(actor.id) }!!.revision)
+        assertEquals(null, runBlocking { repository.get(actor.id) }!!.character.portraitRef)
+    }
+
     @Test fun fullSkillRowStartsAReviewableRollWithoutOpeningADisclosure() = withSheet { repository ->
         compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
         compose.onNode(hasText("Arcana") and hasClickAction()).performScrollTo().performClick()
@@ -517,11 +544,11 @@ class ReforgeCharacterUiTest {
         val unknown = fixture().copy(baseAbilities = emptyMap())
         withSheet(character = unknown) { repository ->
             compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("reforge-STR").assertContentDescriptionEquals("STR Not set")
+            compose.onNodeWithTag("reforge-STR").assertContentDescriptionEquals("Strength score unknown")
             compose.onNodeWithText("Score not set").assertDoesNotExist()
             capture("rebirth-character-unknown-stats")
-            compose.onNodeWithTag("reforge-save-STR").performScrollTo().assertWidthIsAtLeast(300.dp).assertIsNotEnabled()
-            compose.onNodeWithTag("reforge-save-DEX").performScrollTo().assertWidthIsAtLeast(300.dp).assertIsNotEnabled()
+            compose.onNodeWithTag("reforge-save-STR").performScrollTo().assertWidthIsAtLeast(48.dp).assertIsNotEnabled()
+            compose.onNodeWithTag("reforge-save-DEX").performScrollTo().assertWidthIsAtLeast(48.dp).assertIsNotEnabled()
             capture("rebirth-character-unknown-saves")
             assertTrue(runBlocking { repository.rollHistory(unknown.id).first() }.isEmpty())
             assertTrue(runBlocking { repository.get(unknown.id) }!!.character.baseAbilities.isEmpty())
@@ -581,6 +608,7 @@ class ReforgeCharacterUiTest {
                 GameplayRules.equip(before.character, "armor-instance", ItemState.WORN), "Synthetic equip")
         }
         compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("genesis-character-controls").performClick()
         compose.onNodeWithText("Character setup").performScrollTo().performClick()
         compose.onNodeWithText("Name", substring = false).performTextReplacement("Renamed synthetic artificer")
         compose.onNodeWithText("Save character").assertIsDisplayed().performClick()
@@ -595,7 +623,8 @@ class ReforgeCharacterUiTest {
 
     @Test fun archiveRequiresConfirmationAndRestoreReturnsSameSavedSheet() = withSheet { repository ->
         compose.waitUntil(10000) { compose.onAllNodesWithTag("reforge-STR").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText("Switch character").performClick()
+        compose.onNodeWithTag("genesis-character-controls").performClick()
+        compose.onNodeWithText("Switch character").performScrollTo().performClick()
         compose.onNodeWithText("Manage saved sheets").performScrollTo().performClick()
         compose.onNodeWithText("Archive Synthetic artificer").performScrollTo().performClick()
         assertFalse(runBlocking { repository.get("synthetic-player") }!!.character.archived)

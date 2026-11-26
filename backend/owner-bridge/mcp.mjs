@@ -192,6 +192,6 @@ export async function handleMcp(request, bridge, { ownerId, allowPublicDiscovery
     }
     return result({ content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value, isError: false });
   } catch (error) {
-    return result({ content: [{ type: 'text', text: JSON.stringify({ error: safeError(error), confirmation: 'UNVERIFIED' }) }], isError: true });
+    return result({ content: [{ type: 'text', text: JSON.stringify({ error: safeError(error), confirmation: 'UNVERIFIED', ...(cloudTool && error.conflict?{conflict:error.conflict}:{}) }) }], isError: true });
   }
 }

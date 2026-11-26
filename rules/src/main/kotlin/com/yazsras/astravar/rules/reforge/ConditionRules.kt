@@ -38,7 +38,7 @@ object ConditionRules {
             }
         }
         if(c.exhaustionLevel>0 && c.rules.core==RuleFamily.REVISED_2024) {
-            listOf(NumericTarget.SAVE,NumericTarget.SKILL,NumericTarget.INITIATIVE,NumericTarget.ATTACK,NumericTarget.SPELL_ATTACK).forEach { target ->
+            listOf(NumericTarget.SAVE,NumericTarget.ABILITY_CHECK,NumericTarget.INITIATIVE,NumericTarget.ATTACK,NumericTarget.SPELL_ATTACK).forEach { target ->
                 add("exhaustion",target.name,EffectPayload.Number(target,NumberOperation.ADD,-2*c.exhaustionLevel))
             }
             add("exhaustion","speed",EffectPayload.Number(NumericTarget.SPEED,NumberOperation.ADD,-5*c.exhaustionLevel))
@@ -58,7 +58,6 @@ object ConditionRules {
         if(character.exhaustionLevel>=6) return "Exhaustion has reached the fatal level; resolve the character's state with the DM."
         return null
     }
-    fun abilityCheckModifier(character:ReforgeCharacter,stat:Stat):Int? = CharacterCalculator.calculate(character).abilities.getValue(stat).modifier?.let {
-        it-if(character.rules.core==RuleFamily.REVISED_2024) 2*character.exhaustionLevel else 0
-    }
+    fun abilityCheckModifier(character: ReforgeCharacter, stat: Stat): Int? =
+        CharacterCalculator.calculate(character).abilityChecks.getValue(stat).value
 }

@@ -1,9 +1,9 @@
-import { stats, identifier, named, whole, nullable, arrayOf, option, boolean, fields, actionCost, costSchema, must, op, actor, owned, insert, save, gearEligible, sheet, spend, useTiming } from './cloud-mechanics-core.mjs';
+import { stats, identifier, named, whole, nullable, arrayOf, option, boolean, fields, actionCost, costSchema, must, op, actor, owned, insert, save, transferableSource, gearEligible, sheet, spend, useTiming } from './cloud-mechanics-core.mjs';
 
 const sizeOrder=['tiny','small','medium','large','huge','gargantuan'];
 const actionSchema=fields({
   actorId:identifier,actionId:identifier,name:named(120),source:named(300),
-  type:option('use','teleport','frighten','roll_bonus'),timing:actionCost,formId:identifier,sourceItemId:identifier,
+  type:option('use','teleport','frighten','roll_bonus'),timing:actionCost,formId:identifier,sourceItemId:identifier,transfersWithItem:boolean,
   requiresOperating:boolean,requiresAttunement:boolean,cost:costSchema,range:whole(0,1200),saveDc:whole(1,100),
   saveAbility:option(...stats),durationSeconds:whole(1,86400),bonusAbility:option(...stats),fixedBonus:whole(-100,100)
 },['actorId','actionId','name','source','type','timing']);
@@ -11,6 +11,7 @@ async function define(ctx,x){
   await actor(ctx,x.actorId);
   must((!x.requiresOperating&&!x.requiresAttunement)||x.sourceItemId,'ACTION_SOURCE_REQUIRED');
   if(x.sourceItemId)must(await ctx.get('item_instance',x.sourceItemId),'ACTION_SOURCE_MISSING');
+  await transferableSource(ctx,x);
   if(x.formId)await owned(ctx,'form',x.formId,x.actorId);
   if(x.cost)await owned(ctx,'resource_pool',x.cost.poolId,x.actorId);
   if(x.type==='teleport')must(x.range!=null,'TELEPORT_RANGE_REQUIRED');

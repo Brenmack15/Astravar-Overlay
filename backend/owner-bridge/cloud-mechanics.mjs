@@ -1,4 +1,4 @@
-import { stats, damageTypes, standardSkills, identifier, boolean, whole, nullable, named, option, fields, actorSchema, resourceSchema, formSchema, effectSchema, restSchema, must, op, owned, actor, insert, save, gearEligible, activeForm, sheet, spend, useTiming, addClock } from './cloud-mechanics-core.mjs';
+import { stats, damageTypes, standardSkills, identifier, boolean, whole, nullable, named, option, fields, actorSchema, resourceSchema, formSchema, effectSchema, restSchema, must, op, owned, actor, insert, save, transferableSource, gearEligible, activeForm, sheet, spend, useTiming, addClock } from './cloud-mechanics-core.mjs';
 import { rollOperations } from './cloud-mechanics-rolls.mjs';
 import { combatOperations } from './cloud-mechanics-combat.mjs';
 import { actionOperations } from './cloud-mechanics-actions.mjs';
@@ -11,6 +11,10 @@ export const MECHANIC_KINDS=Object.freeze({
 });
 export async function mechanicActorSheet(ctx,actorId){
   const {effects,...projection}=await sheet(ctx,actorId);
+  if(projection.contextTags.includes('pocket-workshop')){
+    const context=await sheet(ctx,actorId,['pocket-workshop']);
+    projection.rollContexts={'pocket-workshop':{rollModes:context.rollModes,skills:context.skills,checks:context.checks,saves:context.saves,initiative:context.initiative}};
+  }
   return projection;
 }
 
@@ -103,6 +107,7 @@ async function effect(ctx,x){
   }
   if(x.formId)await owned(ctx,'form',x.formId,a.id);
   if(x.sourceItemId)must(await ctx.get('item_instance',x.sourceItemId),'EFFECT_SOURCE_MISSING');
+  await transferableSource(ctx,x);
   must((!x.requiresAttunement&&!x.requiresOperating)||x.sourceItemId,'EFFECT_SOURCE_REQUIRED');
   const {actorId,effectId,name,...config}=x;
   await insert(ctx,'effect',effectId,actorId,name,{...config,enabled:x.enabled??true,priority:x.priority??0});
@@ -138,6 +143,48 @@ async function hp(ctx,x){
   }
   await save(ctx,a,after);
   return {actorId:a.id,kind:x.kind,beforeHp:before.currentHp,afterHp:after.currentHp,temporaryHp:after.temporaryHp,absorbedByTemporaryHp:absorbed,absorbedByIntegrity:shell,activeFormId:after.activeFormId};
+}
+async function applyAttackTarget(ctx,x){
+  const attempt=await owned(ctx,'attack_attempt',x.attemptId,x.actorId), d=attempt.data;
+  must(d.targets?.includes(x.targetActorId) && !d.targetResults.some(r=>r.targetActorId===x.targetActorId),'TARGET_UNDECLARED_OR_ALREADY_RESOLVED');
+  const target=await actor(ctx,x.targetActorId), p=await sheet(ctx,target.id,target.data.contextTags??[]);
+  let decision,half=false,applies=true;
+  if(d.resolution==='attack'){
+    must(!x.saveRollId && (d.hit.natural===1||d.hit.natural===20||p.ac.value!=null),'TARGET_AC_UNKNOWN');
+    applies=d.hit.natural!==1 && (d.hit.natural===20 || d.hit.total>=p.ac.value);
+    decision=applies?'hit':'miss';
+  }else if(d.resolution==='save'){
+    must(x.saveRollId && d.save?.success,'SAVE_OUTCOME_CONFIGURATION_REQUIRED');
+    const roll=await owned(ctx,'roll',x.saveRollId,target.id);
+    must(roll.data.forAttemptId===attempt.id && roll.data.kind==='save' && roll.data.status==='resolved' &&
+      roll.data.key===d.save.ability && !roll.data.adjudicated,'SAVE_ROLL_UNAVAILABLE');
+    const success=roll.data.total>=d.save.dc;
+    applies=!success || d.save.success!=='none';half=success && d.save.success==='half';
+    decision=success?'save_succeeded':'save_failed';
+    await save(ctx,roll,{...roll.data,adjudicated:true});
+  }else{
+    must(d.resolution==='automatic'&&!x.saveRollId,'UNSUPPORTED_TARGET_RESOLUTION');decision='automatic';
+  }
+  must(!applies||Array.isArray(d.damage),'ATTEMPT_DAMAGE_REQUIRED');
+  const byType=new Map();
+  for(const c of d.damage??[])byType.set(c.type,(byType.get(c.type)??0)+Math.max(0,c.total));
+  if(half && [...byType.values()].filter(value=>value%2!==0).length>1)must(false,'MIXED_DAMAGE_ROUNDING_REQUIRES_ADJUDICATION');
+  const components=[];
+  for(const [type,rolled] of byType){
+    const defenses=p.defenses.filter(r=>r.type===type), keys=new Set(defenses.map(r=>r.kind));
+    let amount=applies?(half?Math.floor(rolled/2):rolled):0;
+    if(keys.has('immunity'))amount=0;
+    else { if(keys.has('resistance'))amount=Math.floor(amount/2);if(keys.has('vulnerability'))amount*=2; }
+    components.push({type,rolled,applied:amount,defenses});
+  }
+  const total=components.reduce((n,c)=>n+c.applied,0);
+  const applied=total?await hp(ctx,{actorId:target.id,kind:'damage',amount:total}):null;
+  const result={targetActorId:target.id,decision,ac:d.resolution==='attack'?p.ac.value:null,saveRollId:x.saveRollId??null,
+    amount:total,components,hp:applied,source:x.source,commandId:ctx.commandId};
+  const targetResults=[...d.targetResults,result], complete=targetResults.length===d.targets.length;
+  await save(ctx,attempt,{...d,targetResults,outcome:complete?'resolved':'pending',appliedDamage:targetResults.reduce((n,r)=>n+r.amount,0)});
+  if(x.saveRollId)await ctx.link(attempt.id,'resolved_save',x.saveRollId);
+  return {attemptId:attempt.id,...result,complete};
 }
 async function completeRest(ctx,x){
   const a=await actor(ctx,x.actorId), long=x.kind==='long_rest';
@@ -243,6 +290,7 @@ export const MECHANIC_OPERATIONS=Object.freeze({
   enable_effect:op('character',fields({actorId:identifier,effectId:identifier,enabled:boolean},['actorId','effectId','enabled']),async(ctx,x)=>{
     const e=await owned(ctx,'effect',x.effectId,x.actorId);await save(ctx,e,{...e.data,enabled:x.enabled});return {effectId:e.id,enabled:x.enabled};
   }),
+  resolve_attack_target:op('combat',fields({actorId:identifier,attemptId:identifier,targetActorId:identifier,saveRollId:identifier,source:named(300)},['actorId','attemptId','targetActorId','source']),applyAttackTarget),
   apply_hp_change:op('combat',fields({actorId:identifier,kind:option('damage','heal','temporary'),amount:whole(),replaceTemporary:boolean},['actorId','kind','amount']),hp),
   ...rollOperations,...combatOperations,...spellOperations,...actionOperations
 });

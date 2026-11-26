@@ -1,3 +1,7 @@
+import { cloudAccessAdmin } from './cloud-admin.mjs';
+import { cloudActions } from './cloud-actions-view.mjs';
+import { cloudArchiveView } from './cloud-lifecycle.mjs';
+import { cloudSpellbook } from './cloud-spellbook.mjs';
 import { handleCloudMedia } from './cloud-media.mjs';
 import { cloudRecordView } from './cloud-records-query.mjs';
 import { BridgeError } from './core.mjs';
@@ -59,10 +63,14 @@ export async function cloudHttp(request,bridge,service,ownerPrincipal) {
       const body=await cloudBody(request);if(!body||Array.isArray(body)||Object.keys(body).length)cloudFail(400,'INVALID_REQUEST');
       result=await service.createIsolated(principal,id);
     }else if(method==='POST'&&action==='grants'&&item&&!decision)result=await service.setGrant(principal,id,item,await cloudBody(request));
+    else if(method==='GET'&&action==='access'&&!item)result=await cloudAccessAdmin(service,principal,id);
     else if(method==='GET'&&action==='capabilities'&&!item)result=await service.capabilities(principal,id);
     else if(method==='GET'&&action==='state'&&!item)result=await service.state(principal,id,options);
     else if(method==='GET'&&action==='records'&&item&&!decision)result=await cloudRecordView(service,principal,id,item,options);
+    else if(method==='GET'&&action==='archive'&&!item)result=await cloudArchiveView(service,principal,id,options);
     else if(method==='GET'&&action==='context'&&!item)result=await cloudContext(service,principal,id,options);
+    else if(method==='GET'&&action==='spellbook'&&item&&!decision)result=await cloudSpellbook(service,principal,id,item,options);
+    else if(method==='GET'&&action==='actions'&&item&&!decision)result=await cloudActions(service,principal,id,item,options);
     else if(method==='GET'&&action==='sheet'&&item&&!decision)result=await cloudSheet(service,principal,id,item);
     else if(method==='GET'&&action==='links'&&item&&!decision)result=await cloudRelationships(service,principal,id,item);
     else if(method==='POST'&&action==='commands'&&!item)result=await service.submit(principal,id,await cloudBody(request));
@@ -75,5 +83,5 @@ export async function cloudHttp(request,bridge,service,ownerPrincipal) {
       result=await service.review(principal,id,item,body.digest,decision);
     }else cloudFail(404,'UNKNOWN_ROUTE');
     return cloudResponse(result,result.status==='PENDING_APPROVAL'?202:200);
-  }catch(e){return cloudResponse({status:e instanceof BridgeError&&e.status===409?'CONFLICT':'UNVERIFIED',error:{code:e instanceof BridgeError?e.code:'SERVICE_UNAVAILABLE'}},e instanceof BridgeError?e.status:503);}
+  }catch(e){return cloudResponse({status:e instanceof BridgeError&&e.status===409?'CONFLICT':'UNVERIFIED',error:{code:e instanceof BridgeError?e.code:'SERVICE_UNAVAILABLE'},...(e instanceof BridgeError && e.conflict?{conflict:e.conflict}:{})},e instanceof BridgeError?e.status:503);}
 }

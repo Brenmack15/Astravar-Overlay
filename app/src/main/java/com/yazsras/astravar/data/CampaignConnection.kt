@@ -54,6 +54,13 @@ data class CampaignConnectionPublication(@PrimaryKey val commandId: String, val 
 data class CampaignConnectionMirror(val origin: String, val campaignId: String, val deviceId: String,
     val kind: String, val recordId: String, val revision: Long, val fingerprint: String)
 @Dao interface CampaignConnectionDao {
+    @Query("""SELECT CASE WHEN s.deviceId <> '' AND s.revokePending=0
+        AND s.lastSyncAt >= (CAST(strftime('%s','now') AS INTEGER)-300)*1000 THEN
+        (SELECT COUNT(*) FROM campaign_connection_commands c WHERE c.origin=s.origin AND c.campaignId=s.campaignId
+        AND c.deviceId=s.deviceId AND c.state='PENDING_APPROVAL' AND c.receiptJson IS NULL)
+        ELSE NULL END FROM campaign_connection_settings s WHERE s.id=1""")
+    fun actionableReviews(): kotlinx.coroutines.flow.Flow<Int?>
+
     @Query("SELECT * FROM campaign_connection_settings WHERE id=1") suspend fun settings(): CampaignConnectionSettings?
     @Upsert suspend fun settings(value: CampaignConnectionSettings)
     @Query("SELECT * FROM campaign_connection_commands ORDER BY receivedAt,commandId") suspend fun commands(): List<CampaignConnectionCommand>
@@ -267,6 +274,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         dao.settings(value.copy(deviceId = id, accountLabel = response.getValue("ownerLabel").jsonPrimitive.content,
             grantJson = g.toString(), localAutoSyncJson = "[]", deviceCode = "", userCode = "", verificationUri = "", pairingExpiresAt = 0,
             status = "Paired · initial synchronization pending"))
+        CampaignSyncPreferences(context).resumeLegacyPublishing(value.origin,value.campaignId,id)
         CampaignConnectionSyncJob.schedule(context)
         try { syncUnlocked() } catch (e: CancellationException) { throw e } catch (e: Exception) { failure(e) }
         snapshotUnlocked()
@@ -486,8 +494,10 @@ class CampaignConnectionClient internal constructor(private val context: Context
     /** Every automatic caller shares this pause gate, including Activity/overlay and OS recovery. */
     suspend fun foreground(manual: Boolean = false): JsonObject = lock.withLock {
         val value = setting()
+        if (CloudCampaignClient.fencesLegacy(context, value.campaignId)) return@withLock snapshotUnlocked()
         if (value.deviceId.isBlank()) return@withLock snapshotUnlocked().also { CampaignSyncNotifications.update(context, it) }
-        if (!manual && CampaignSyncPreferences(context).paused) {
+        val controls=CampaignSyncPreferences(context)
+        if (!manual && (controls.paused || !controls.allowsLegacyPublishing(value.origin,value.campaignId,value.deviceId))) {
             CampaignConnectionSyncJob.cancel(context)
             return@withLock snapshotUnlocked().also { CampaignSyncNotifications.update(context, it) }
         }
@@ -824,6 +834,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
         }
     }
     private suspend fun finishLocal(value: CampaignConnectionSettings, command: CampaignConnectionCommand, manual: Boolean = false, recoverOnly: Boolean = false) {
+        if (CloudCampaignClient.fencesLegacy(context, value.campaignId)) throw OwnerSyncFailure("CLOUD_AUTHORITY_FENCE")
         syncDiagnostics.stage(value, if (recoverOnly) CampaignSyncStage.LOCAL_COMMIT_RECOVERY else CampaignSyncStage.LOCAL_COMMIT)
         requireAutomaticAllowed()
         require(command.state == "APPLYING"); parsed(command)
@@ -919,6 +930,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
     private fun visible(value: CampaignConnectionSettings, records: List<CampaignSyncRecord>): List<CampaignSyncRecord> =
         CampaignConnectionProjection.project(records, activeRead(value).also { checkedGrant(value, grant(value)) })
     private suspend fun publish(value: CampaignConnectionSettings) {
+        if (CloudCampaignClient.fencesLegacy(context, value.campaignId)) throw OwnerSyncFailure("CLOUD_AUTHORITY_FENCE")
         for (publication in dao.publications().filter { it.origin == value.origin && it.campaignId == value.campaignId && it.deviceId == value.deviceId && it.state == "PENDING" }) flushPublication(value, publication)
         val mirrors = dao.mirrors(value.origin, value.campaignId, value.deviceId).associateBy { it.kind to it.recordId }
         syncDiagnostics.stage(value, CampaignSyncStage.LOCAL_SNAPSHOT)

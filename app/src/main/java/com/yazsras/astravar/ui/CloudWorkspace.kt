@@ -1,0 +1,289 @@
+package com.yazsras.astravar.ui
+
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import com.yazsras.astravar.AstravarApp
+import com.yazsras.astravar.data.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.*
+
+@Composable internal fun CloudAuthorityRoute(app: AstravarApp, legacy: @Composable () -> Unit) {
+    val client = remember(app) { CloudCampaignClient.open(app) }
+    val seq by client.changes.collectAsState()
+    var loaded by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<CloudSnapshot?>(null) }
+    var retry by remember { mutableIntStateOf(0) }
+    LaunchedEffect(client, seq, retry) {
+        try { selected = client.workspace(); failed = false; loaded = true }
+        catch (e: CancellationException) { throw e }
+        catch (_: Exception) { failed = true; loaded = false }
+    }
+    if (loaded && selected == null) { legacy(); return }
+    AstravarTheme {
+        Surface(Modifier.fillMaxSize(), color = RebuildPalette.Canvas) {
+            val snapshot = selected
+            if (failed) Page {
+                Text("Campaign authority could not be read on this installation.")
+                PlayerButton({ retry++ }) { Text("Retry") }
+            } else if (!loaded || snapshot == null) Box { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+            else CloudWorkspace(client, snapshot)
+        }
+    }
+}
+
+@Composable internal fun OpenCloudWorkspace() {
+    val app = LocalContext.current.applicationContext
+    val client = remember(app) { CloudCampaignClient.open(app) }
+    var loading by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    PlayerOutlinedButton(onClick = {
+        if (loading) return@PlayerOutlinedButton
+        loading = true; message = null
+        scope.launch {
+            try { client.refresh(openExisting = true) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { message = cloudError(e) }
+            finally { loading = false }
+        }
+    }, enabled = !loading) { Text("Open existing cloud campaign") }
+    message?.let { Text(it, color = RebuildPalette.Muted) }
+}
+
+internal fun cloudError(e: Exception): String = when ((e as? OwnerSyncFailure)?.code) {
+    "CLOUD_NOT_SELECTED","CLOUD_CONTINUITY_UNKNOWN","CLOUD_AUTHORITY_REQUIRED","CLOUD_HTTP_404" -> "A cloud-authoritative campaign has not been verified for this pairing."
+    "AUTHENTICATION_REQUIRED","CLOUD_BINDING_CHANGED","CLOUD_GRANT_DENIED","CLOUD_GRANT_UNVERIFIED","CREDENTIAL_REVOKED_OR_EXPIRED" -> "Access is unavailable. Check this device’s campaign and cloud grant."
+    "SNAPSHOT_CHANGED","CLOUD_REVIEW_STALE","EXPECTED_REVISION_CONFLICT" -> "The campaign changed. Refresh and review the current values."
+    "COMMAND_UNKNOWN" -> "The server has no receipt for this command."
+    "NETWORK_UNAVAILABLE","NETWORK_TIMEOUT","TLS_FAILURE" -> "Cloud unavailable. Any previously downloaded records may be stale."
+    else -> (e as? OwnerSyncFailure)?.code?.let { "Cloud request incomplete · ${cloudLabel(it.lowercase())}" }
+        ?: "The cloud response could not be verified."
+}
+
+private val categoryScopes = mapOf(
+    "Character" to setOf("character","resources","combat","rolls","spells"),
+    "Inventory" to setOf("inventory","economy","crafting"), "Connections" to setOf("world"), "Chronicle" to setOf("chronicle","combat")
+)
+
+@Composable private fun CloudWorkspace(client: CloudCampaignClient, snapshot: CloudSnapshot) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val clipboard = LocalClipboardManager.current
+    var tab by rememberSaveable { mutableStateOf("Character") }
+    var query by rememberSaveable { mutableStateOf("") }
+    var search by rememberSaveable { mutableStateOf(false) }
+    var tool by rememberSaveable { mutableStateOf<String?>(null) }
+    var actorId by rememberSaveable(snapshot.binding) { mutableStateOf<String?>(null) }
+    var initialFields by remember { mutableStateOf(buildJsonObject {}) }
+    var menuScope by remember { mutableStateOf<Set<String>?>(null) }
+    var inspected by rememberSaveable { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var verified by remember { mutableStateOf(false) }
+    var count by remember { mutableStateOf<Int?>(null) }
+    var caps by remember { mutableStateOf<JsonObject?>(null) }
+    var records by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var more by remember { mutableStateOf(true) }
+    var pending by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var result by remember { mutableStateOf<JsonObject?>(null) }
+    var operation by remember { mutableStateOf<JsonObject?>(null) }
+    var reviewed by remember { mutableStateOf<CloudSnapshot?>(null) }
+    val operations = (caps?.get("operations") as? JsonArray).orEmpty().map { it.jsonObject }
+
+    suspend fun loadRecords(append: Boolean = false): Boolean {
+        try {
+            val page = client.records(if (append) records.lastOrNull()?.cloudText("id").orEmpty() else "", query=if (search) query else "")
+            records = if (append) records + page else page
+            more = page.size == 50
+            pending = client.pending()
+            return true
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { records = emptyList(); pending = emptyList(); more = false; verified = false; error = cloudError(e); return false }
+    }
+    suspend fun refresh() {
+        if (busy) return
+        busy = true; verified = false; count = null; error = null
+        try {
+            val received = client.refresh()
+            val capabilities = client.capabilities()
+            require(capabilities.cloudText("continuityId") == received.binding.continuity &&
+                capabilities.cloudText("subject") == received.binding.subject && capabilities.getValue("epoch").jsonPrimitive.long == received.version.epoch &&
+                capabilities.getValue("grantRevision").jsonPrimitive.long == received.version.grantRevision)
+            caps = capabilities
+            verified = loadRecords()
+            try { count = client.reviewCount() }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { count = null }
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { caps = null; error = cloudError(e); loadRecords() }
+        finally { busy = false }
+    }
+    LaunchedEffect(snapshot.binding, lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            loadRecords()
+            refresh()
+            while (true) { delay(30_000); if (!busy) refresh() }
+        }
+    }
+    LaunchedEffect(search, query, snapshot.version, snapshot.visible) {
+        if (search && snapshot.visible) loadRecords()
+    }
+    LaunchedEffect(snapshot.visible, snapshot.version.grantExpiresAt, snapshot.binding) {
+        if (!snapshot.visible) {
+            records = emptyList(); pending = emptyList(); caps = null; result = null; inspected = null; operation = null; count = null; verified = false
+        } else {
+            val until = try { client.validUntil() } catch (e: CancellationException) { throw e } catch (_: Exception) { 0L }
+            delay((until - System.currentTimeMillis()).coerceAtLeast(0L))
+            records = emptyList(); pending = emptyList(); caps = null; result = null; inspected = null; operation = null; count = null; verified = false
+            loadRecords()
+        }
+    }
+    fun ownerPage() {
+        val url = verifiedOwnerPage("${snapshot.binding.origin}/owner/ascension/${snapshot.binding.continuity}", snapshot.binding.origin)
+        try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url.toString()))) }
+        catch (_: android.content.ActivityNotFoundException) { error = "A browser is required for owner review." }
+    }
+    fun command(work: suspend () -> JsonObject) {
+        if (busy) return
+        busy = true; error = null
+        scope.launch {
+            try {
+                result = work(); operation = null; tool = "Result"; loadRecords()
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = cloudError(e); verified = false; loadRecords() }
+            finally { busy = false }
+        }
+    }
+    fun openOperation(name: String, args: JsonObject) {
+        val item = operations.firstOrNull { it.cloudText("name") == name }
+        if (item == null || !verified) { error = "The current grant or connection cannot perform this operation."; return }
+        reviewed = snapshot; initialFields = args; operation = item; tool = null; error = null
+    }
+
+    Scaffold(containerColor = RebuildPalette.Canvas, topBar = {
+        RebuildAppHeader(false, search = { search = !search; query = "" }, tools = { tool = "Tools" },
+            notifications = { tool = "Inbox" }, actionable = count)
+    }, bottomBar = { RebuildPrimaryNavigation(tab) { tab=it; inspected=null; search=false; query="" } },
+        floatingActionButton = {
+            if (tab == "Character" && !search && snapshot.visible && actorId != null) FloatingActionButton(
+                onClick = { tool = "Dice" }, shape = CircleShape, containerColor = RebuildPalette.Panel,
+                modifier = Modifier.semantics { contentDescription = "Open Roll Manager" }
+            ) { ArcaneIcon("D20",Modifier.size(30.dp),RebuildPalette.GoldBright) }
+        }
+    ) { insets ->
+        Column(Modifier.fillMaxSize().padding(insets).padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+            PlayerHeading(if (search) "Find" else tab) {
+                PlayerTextButton({ scope.launch { refresh() } }, enabled=!busy) { Text("Refresh") }
+            }
+            Text(if (verified && snapshot.visible) "Cloud · revision ${snapshot.version.revision}" else if (snapshot.visible) "Cached · may be stale" else "Cloud access unavailable",
+                color=RebuildPalette.GoldBright, style=MaterialTheme.typography.labelMedium)
+            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            error?.let { Text(it,color=MaterialTheme.colorScheme.error) }
+            if (snapshot.visible) {
+                if (search) {
+                    PlayerSearch(query,{query=it},"Find a campaign record")
+                    LazyColumn { items(records,key={it.cloudText("id")}) { row ->
+                        PlayerEntry(row.cloudText("title"),cloudLabel(row.cloudText("kind")),"Find",{ inspected=row.cloudText("id") })
+                    }; if (more) item { PlayerTextButton({ scope.launch { loadRecords(true) } }) { Text("Load more") } } }
+                } else if (tab == "Character") {
+                    CloudActorWorkspace(client,snapshot,verified,actorId,{ actorId=it },::openOperation,{ inspected=it },
+                        { name,args -> command { client.submit(name,args,snapshot) } })
+                } else key(tab,snapshot.binding) {
+                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                        CloudRecordScreen(tab,actorId,client,snapshot,verified,::openOperation,{ inspected=it })
+                        if (operations.any { it.cloudText("scope") in categoryScopes.getValue(tab) })
+                            PlayerOutlinedButton({ menuScope=categoryScopes[tab];tool="Operations" }, enabled=verified && !busy) { Text("Manage $tab") }
+                        Spacer(Modifier.height(32.dp))
+                    }
+                }
+            }
+        }
+    }
+    val inspectId=inspected
+    if (inspectId!=null && snapshot.visible) key(inspectId) {
+        var row by remember { mutableStateOf<JsonObject?>(null) }
+        LaunchedEffect(snapshot) { row=client.record(inspectId) }
+        PlayerSheet(row?.cloudText("title") ?: "Record", { inspected=null }) {
+            row?.let {
+                if (it.cloudText("kind") in cloudMediaTargets)
+                    CloudEntityImage(client,snapshot,verified,it.cloudText("id"),it.cloudText("kind"),it.cloudText("title"))
+                RecordFields(it.getValue("data"))
+                PlayerDisclosure("Record details") { Text(it.cloudText("id")); Text("Revision ${it["revision"]}") }
+            } ?: Text("This record is unavailable in your active view.")
+        }
+    }
+    when(tool) {
+        "Tools" -> PlayerSheet("Owner connection", { tool=null }) {
+            Text("Cloud campaign · ${snapshot.binding.continuity}")
+            Text("Last cached revision ${snapshot.version.revision}")
+            PlayerButton({ ownerPage() }) { Text("Open owner administration") }
+            PlayerTextButton({ tool="History" }) { Text("Check submitted commands") }
+            PlayerTextButton({ menuScope=null; tool="Operations" },enabled=verified && !busy) { Text("All permitted operations") }
+        }
+        "Dice" -> actorId?.let { if (snapshot.visible) CloudRollManager(client,snapshot,it,verified) { tool=null } }
+        "Inbox" -> PlayerSheet("Notification center",{tool=null}) {
+            Text(count?.let { if(it==1) "1 request awaiting owner review" else "$it requests awaiting owner review" }
+                ?: "Sign in to see current owner requests.")
+            PlayerButton({ ownerPage() }) { Text("Review in owner account") }
+        }
+        "Operations" -> PlayerSheet("Campaign operations",{tool=null}) {
+            operations.filter { menuScope==null || it.cloudText("scope") in menuScope.orEmpty() }.sortedBy { it.cloudText("name") }.forEach { op ->
+                PlayerTextButton({ openOperation(op.cloudText("name"),buildJsonObject {}) },enabled=verified && !busy) {
+                    Text(cloudLabel(op.cloudText("name")))
+                }
+            }
+        }
+        "History" -> PlayerSheet("Submitted commands",{tool=null}) {
+            if (pending.isEmpty()) Text("No locally pending commands.")
+            pending.forEach { entry ->
+                Text(cloudLabel(entry.cloudText("operation")))
+                PlayerTextButton({ command { client.verify(entry.cloudText("commandId")) } },enabled=!busy) { Text("Check receipt") }
+                PlayerTextButton({ command { client.retry(entry.cloudText("commandId")) } },enabled=!busy) { Text("Retry original command") }
+            }
+            error?.let { Text(it,color=MaterialTheme.colorScheme.error) }
+        }
+        "Result" -> result?.let { r -> PlayerSheet("Transaction result",{ tool=null }) {
+            Text(cloudLabel(r.cloudText("status").lowercase()))
+            RecordFields(r["receipt"] ?: r)
+            PlayerButton({ clipboard.setText(AnnotatedString(r.toString())) }) { Text("Copy result") }
+        } }
+    }
+    val target=operation
+    val baseline=reviewed
+    if (target!=null && baseline!=null)
+        CloudCommandForm(target,busy,{ operation=null },{ args -> command { client.submit(target.cloudText("name"),args,baseline) } },error,initialFields)
+}
+
+@Composable internal fun RecordFields(value: JsonElement) {
+    when (value) {
+        is JsonObject -> value.forEach { (key,v) ->
+            if (v is JsonPrimitive) Text("${cloudLabel(key)} · ${if (v == JsonNull) "Unknown" else v.content}")
+            else PlayerDisclosure(cloudLabel(key)) { RecordFields(v) }
+        }
+        is JsonArray -> value.forEach { RecordFields(it) }
+        is JsonPrimitive -> Text(if (value == JsonNull) "Unknown" else value.content)
+    }
+}

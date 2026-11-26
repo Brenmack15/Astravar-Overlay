@@ -28,7 +28,7 @@ private data class GenesisInventoryView(
 
 /** One projection of saved physical identities. Browsing never copies, approves or mutates records. */
 @Composable fun GenesisInventoryHub(repository: CampaignLedgerRepository, local: ReforgeRepository,
-    open: (ReforgeSearchDestination) -> Unit, openCampaignRecords: () -> Unit) {
+    open: (ReforgeSearchDestination) -> Unit, openCampaignRecords: () -> Unit, openInventions: (() -> Unit)? = null) {
     val context = LocalContext.current.applicationContext
     val preferences = remember(context) { ReforgePreferences.open(context) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -55,7 +55,7 @@ private data class GenesisInventoryView(
             PlayerOutlinedButton(onClick = openCampaignRecords) { Text("Campaign items") }
         }
     } else GenesisInventoryContent(current.entries, current.profiles, current.activeId, current.ownerNames,
-        current.companionIds, open, openCampaignRecords)
+        current.companionIds, open, openCampaignRecords, openInventions)
 }
 
 internal fun genesisInventoryBelongsTo(entry: GenesisInventoryEntry, profileId: String): Boolean =
@@ -66,10 +66,10 @@ internal fun genesisInventoryOwnerRoute(owner: GenesisInventoryOwner, companionI
 
 @Composable internal fun GenesisInventoryContent(entries: List<GenesisInventoryEntry>, profiles: List<ReforgeSavedCharacter>,
     activeProfileId: String?, ownerNames: Map<String, String>, companionIds: Set<String>,
-    open: (ReforgeSearchDestination) -> Unit, openCampaignRecords: () -> Unit) {
+    open: (ReforgeSearchDestination) -> Unit, openCampaignRecords: () -> Unit, openInventions: (() -> Unit)? = null) {
     val active = profiles.firstOrNull { it.character.id == activeProfileId && !it.character.archived }?.character
     var query by rememberSaveable { mutableStateOf("") }
-    var filter by rememberSaveable(activeProfileId) { mutableStateOf(if (active == null) "All items" else "My items") }
+    var filter by rememberSaveable { mutableStateOf("All items") }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     val visible = remember(entries, active?.id, query, filter, ownerNames) {
         entries.filter { entry ->
@@ -94,6 +94,7 @@ internal fun genesisInventoryOwnerRoute(owner: GenesisInventoryOwner, companionI
             }, modifier = Modifier.fillMaxWidth().testTag("inventory-notion-transfer")) {
                 Text("Import character & inventory from Notion file")
             }
+            if (openInventions != null) PlayerTextButton(onClick = openInventions) { Text("Inventions & research") }
             PlayerSearch(query, { query = it }, "Find an item or owner")
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) { PlayerTabs(if (active == null) listOf("All items") else listOf("My items", "All items"), filter, { filter = it }) }

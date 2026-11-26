@@ -97,9 +97,11 @@ async function itemEvent(ctx, type, before, after, reason, source, relatedIds = 
   await recordNew(ctx, 'item_event', id);
   const owners = [before?.actorId, after.actorId].filter(value => value !== undefined);
   const summarize = row => row ? { ownerId: row.data.ownerId, custodianId: row.data.custodianId, locationId: row.data.locationId,
-    holding: row.data.holding, quantity: row.data.quantity, equipment: row.data.equipment } : null;
+    holding: row.data.holding, quantity: row.data.quantity, equipment: row.data.equipment,
+    externalRecipientId:row.data.externalRecipientId??null,externalRecipientName:row.data.externalRecipientName??null } : null;
+  const definition=await recordRead(ctx,'item_definition',after.data.definitionId);
   await ctx.put({ id, kind: 'item_event', title: reason, actorId: owners.every(actor => actor === after.actorId) ? after.actorId : null,
-    data: { type, before: summarize(before), after: summarize(after), source, commandId: ctx.commandId, recordedAt: ctx.now } });
+    data: { type, definitionId:definition.id, definitionRevision:definition.revision, before: summarize(before), after: summarize(after), source, commandId: ctx.commandId, recordedAt: ctx.now } });
   for (const itemId of new Set([after.id,...relatedIds])) await ctx.link(id, 'item_subject', itemId);
   for (const originalId of new Set(relatedIds)) if(originalId !== after.id) {
     await ctx.link(id,'from_stack',originalId);
@@ -119,7 +121,7 @@ async function outputItem(ctx, args) {
   const item = { kind:'item_instance', id:args.itemId, actorId:args.ownerId, title:def.title, life:'active',
     data: { definitionId:def.id, ownerId:args.ownerId, custodianId:args.ownerId, locationId:null, quantity:args.quantity,
       holding:'carried', partyAccess:true, equipment:'packed', attuned:false, operating:false, resourcePoolId:null,
-      customized:false, condition:'standard', source:args.source } };
+      customized:false, favorite:false, condition:'standard', source:args.source } };
   await ctx.put(item);
   await ctx.link(item.id,'definition',def.id);
   await ctx.link(item.id,'owned_by',args.ownerId);
@@ -163,11 +165,69 @@ async function divide(ctx, original, quantity, newId) {
   return child;
 }
 async function applyPlacement(ctx, original, next) {
+  if (original.data.custodianId !== next.data.custodianId) await moveItemRules(ctx,original,next);
   await ctx.put(next);
   for (const [relation,field] of [['owned_by','ownerId'],['held_by','custodianId'],['located_at','locationId']]) {
     if (original.data[field] === next.data[field]) continue;
     if (original.data[field] !== null) await ctx.unlink(original.id,relation,original.data[field]);
     if (next.data[field] !== null) await ctx.link(next.id,relation,next.data[field]);
+  }
+}
+async function moveItemRules(ctx,item,next) {
+  const from=item.data.custodianId, to=next.data.custodianId;
+  const grants=(await ctx.service.s(`SELECT e.id,e.kind FROM cloud_links l JOIN cloud_entities e
+    ON e.owner_id=l.owner_id AND e.continuity_id=l.continuity_id AND e.id=l.from_id
+    WHERE l.owner_id=? AND l.continuity_id=? AND l.to_id=? AND l.relation='requires_item'
+    AND e.life='active' AND e.kind IN('attack','effect','action_definition')
+    AND json_extract(e.data_json,'$.transfersWithItem')=1 ORDER BY e.id LIMIT 65`,...ctx.binding,item.id).all()).results;
+  if(grants.length>64) recordsFail('ITEM_GRANT_REVIEW_LIMIT',409);
+  const poolId=item.data.resourcePoolId;
+  if(!grants.length && !poolId) return;
+  if(poolId){
+    // Past expenditure and rest receipts keep their original actor. Active unrelated
+    // consumers need explicit review before a physical item can take this pool away.
+    const dependency=await ctx.service.s(`SELECT 1 AS present FROM cloud_links l JOIN cloud_entities e
+      ON e.owner_id=l.owner_id AND e.continuity_id=l.continuity_id AND e.id=l.from_id
+      WHERE l.owner_id=? AND l.continuity_id=? AND l.to_id=? AND l.from_id<>?
+        AND l.relation IN('charge_pool','uses_pool') AND e.life='active'
+        AND l.from_id NOT IN(SELECT value FROM json_each(?)) LIMIT 1`,
+      ...ctx.binding,poolId,item.id,JSON.stringify(grants.map(row=>row.id))).first();
+    if(dependency) recordsFail('SHARED_CHARGE_POOL_TRANSFER_REVIEW_REQUIRED',409);
+  }
+  const records=[];
+  for(const grant of grants) {
+    const row=await recordRead(ctx,grant.kind,grant.id);
+    if(row.data.formId || row.data.excludedForms?.length || row.data.sourceItemId!==item.id ||
+        (row.data.cost && row.data.cost.poolId!==poolId)) recordsFail('ITEM_GRANT_TRANSFER_REVIEW_REQUIRED',409);
+    records.push(row);
+  }
+  if(poolId){
+    const pool=await recordRead(ctx,'resource_pool',poolId);
+    if(pool.data.type!=='charge') recordsFail('CHARGE_POOL_TRANSFER_REVIEW_REQUIRED',409);
+    records.push(pool);
+  }
+  if(records.some(record=>record.actorId!==from)) recordsFail('ITEM_GRANT_CUSTODY_MISMATCH',409);
+  const effectIds=grants.filter(row=>row.kind==='effect').map(row=>row.id);
+  const poolIds=poolId?[poolId]:[];
+  for(const [actorId,attach] of [[from,false],[to,true]]) {
+    if(actorId===null || (!effectIds.length && !poolIds.length)) continue;
+    const actor=await partyActor(ctx,actorId);
+    const data={...actor.data};
+    for(const [key,ids] of [['effectIds',effectIds],['poolIds',poolIds]]){
+      if(!ids.length) continue;
+      const previous=actor.data[key];
+      if(!Array.isArray(previous) || ids.some(id=>previous.includes(id)===attach))
+        recordsFail('ITEM_GRANT_ACTOR_INDEX_MISMATCH',409);
+      const updated=attach?[...previous,...ids]:previous.filter(id=>!ids.includes(id));
+      if(updated.length>128) recordsFail('ACTOR_MECHANIC_CAPACITY',409);
+      data[key]=updated;
+    }
+    await ctx.put(recordEdit(actor,data));
+  }
+  for(const record of records){
+    await ctx.put(recordEdit(record,record.data,{actorId:to}));
+    if(from!==null) await ctx.unlink(record.id,'actor',from);
+    if(to!==null) await ctx.link(record.id,'actor',to);
   }
 }
 function validateDestination(d) {
@@ -182,7 +242,6 @@ async function moveItem(ctx,args,eventType = 'transfer') {
   const item = await recordRead(ctx,'item_instance',args.itemId);
   usable(item);
   if (item.data.quantity === null || item.data.quantity < args.quantity) recordsFail('INSUFFICIENT_KNOWN_QUANTITY',409);
-  if(item.data.resourcePoolId) recordsFail('CHARGE_POOL_TRANSFER_REVIEW_REQUIRED',409);
   const partial = args.quantity < item.data.quantity;
   if (partial !== (args.splitId !== null)) recordsFail('PARTIAL_TRANSFER_REQUIRES_NEW_ID');
   const sourceItem = partial ? await divide(ctx,item,args.quantity,args.splitId) : item;
@@ -250,6 +309,29 @@ export const HOLDING_OPERATIONS = Object.freeze({
     await ctx.put({ id:definitionId,kind:'item_definition',actorId:null,title:name,data:{...data,activation:data.activation??'passive',attunementSeconds:data.attunementSeconds??null} });
     return {definitionId};
   }),
+  edit_item_definition: recordsOperation('inventory',recordObject({definitionId:recordId,name:recordTitle,description:recordText,
+    category:recordTitle,rarity:recordMaybe(recordTitle),source:recordSource}),async(ctx,args)=>{
+    const def=await recordRead(ctx,'item_definition',args.definitionId);
+    const {definitionId,name,...changes}=args;
+    await ctx.put(recordEdit(def,{...def.data,...changes},{title:name}));
+    // Instances resolve display from the shared definition unless explicitly customized.
+    return {definitionId,appliesTo:'shared_definition'};
+  }),
+  customize_item: recordsOperation('inventory',recordObject({itemId:recordId,name:recordTitle,description:recordText,condition:recordTitle,source:recordSource}),async(ctx,args)=>{
+    const item=await recordRead(ctx,'item_instance',args.itemId);
+    usable(item);
+    if(item.data.quantity!==1) recordsFail('CUSTOMIZE_SINGLE_INSTANCE_REQUIRED',409);
+    const changed=recordEdit(item,{...item.data,customized:true,description:args.description,condition:args.condition,source:args.source},{title:args.name});
+    await ctx.put(changed);
+    return {itemId:item.id,itemEventId:await itemEvent(ctx,'customization',item,changed,'Customization',args.source)};
+  }),
+  set_item_favorite: recordsOperation('inventory',recordObject({itemId:recordId,favorite:recordBool}),async(ctx,args)=>{
+    const item=await recordRead(ctx,'item_instance',args.itemId);
+    usable(item);
+    if(item.data.favorite===args.favorite) recordsFail('FAVORITE_ALREADY_SET',409);
+    await ctx.put(recordEdit(item,{...item.data,favorite:args.favorite}));
+    return {itemId:item.id,favorite:args.favorite};
+  }),
   acquire_item: recordsOperation('inventory',acquireItem,async (ctx,args) => {
     const item = await outputItem(ctx,args);
     return {itemId:item.id,itemEventId:await itemEvent(ctx,'acquisition',null,item,'Acquisition',args.source),quantity:args.quantity};
@@ -311,7 +393,10 @@ export const HOLDING_OPERATIONS = Object.freeze({
     if(item.data.attuned===args.attuned) recordsFail('ATTUNEMENT_ALREADY_SET',409);
     if(args.attuned){
       if(!Number.isSafeInteger(actor.data.attunementCapacity)) recordsFail('ATTUNEMENT_LIMIT_UNKNOWN',409);
-      const count=(await ctx.list('item_instance')).filter(other=>other.life==='active' && other.data.partyAccess && other.data.custodianId===actor.id && other.data.attuned).length;
+      ctx.require('inventory',actor.id,false);
+      const {count}=await ctx.service.s(`SELECT count(*) AS count FROM cloud_entities WHERE owner_id=? AND continuity_id=?
+        AND kind='item_instance' AND life='active' AND json_extract(data_json,'$.custodianId')=?
+        AND json_extract(data_json,'$.partyAccess')=1 AND json_extract(data_json,'$.attuned')=1`,...ctx.binding,actor.id).first();
       if(count>=actor.data.attunementCapacity) recordsFail('ATTUNEMENT_CAPACITY',409);
     }
     const result=recordEdit(item,{...item.data,attuned:args.attuned,operating:args.attuned?item.data.operating:false,source:args.source});

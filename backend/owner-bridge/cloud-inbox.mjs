@@ -3,9 +3,10 @@ export function cloudInboxPage() {
   const nonce=crypto.randomUUID().replaceAll('-','');
   const html=`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Astravar · Owner review</title><style nonce="${nonce}">*{box-sizing:border-box}body{background:#101724;color:#f0e7d1;font:1rem/1.5 system-ui,sans-serif;max-width:50rem;margin:auto;padding:1.2rem}h1,h2{color:#eed18c}article{border:1px solid #586071;padding:1rem;margin:1rem 0;border-radius:.5rem}button{min-height:44px;margin-right:.6rem;padding:.55rem 1.1rem}img{max-width:100%;max-height:24rem}pre{white-space:pre-wrap;overflow-wrap:anywhere}summary{cursor:pointer}</style>
-<h1>Owner review</h1><p id="status" role="status"></p><main id="inbox"></main>
+<h1>Owner review</h1><a id="manage">Campaign permissions</a><p id="status" role="status"></p><main id="inbox"></main>
 <script nonce="${nonce}">
 const main=document.getElementById('inbox'),status=document.getElementById('status');
+document.getElementById('manage').href=location.pathname+'/access';
 const base='/v3/continuities/'+encodeURIComponent(location.pathname.split('/').pop())+'/approvals';
 function el(parent,tag,t){const v=document.createElement(tag);if(t!==undefined)v.textContent=t;parent.appendChild(v);return v}
 async function list(){main.replaceChildren();status.textContent='Loading requests…';let after='',count=0;try{do{const r=await fetch(base+'?limit=25'+(after?'&after='+encodeURIComponent(after):''),{credentials:'same-origin',cache:'no-store'});if(!r.ok)throw Error('Owner authorization and a cloud continuity are required.');const page=await r.json();count=page.actionableCount;page.requests.forEach(render);after=page.nextAfter}while(after);status.textContent=count?count+' awaiting review':'No pending requests.'}catch(e){status.textContent=e.message}}

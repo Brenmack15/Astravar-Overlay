@@ -15,8 +15,8 @@ const modules = [
   ['cloud-crafting.mjs','CLOUD_CRAFTING'], ['cloud-world.mjs','CLOUD_WORLD'], ['cloud-records.mjs','CLOUD_RECORDS'],
   ['cloud-mechanics-core.mjs','CLOUD_MECHANICS_CORE'], ['cloud-mechanics-rolls.mjs','CLOUD_ROLLS'],
   ['cloud-mechanics-combat.mjs','CLOUD_COMBAT'], ['cloud-mechanics-spells.mjs','CLOUD_SPELLS'],
-  ['cloud-mechanics-actions.mjs','CLOUD_ACTIONS'], ['cloud-mechanics.mjs','CLOUD_MECHANICS'], ['cloud-service.mjs','CLOUD_SERVICE'],
-  ['cloud-media-codec.mjs','CLOUD_MEDIA_CODEC'], ['cloud-media.mjs','CLOUD_MEDIA'], ['cloud-inbox.mjs','CLOUD_INBOX'], ['cloud-http.mjs','CLOUD_HTTP'], ['cloud-mcp.mjs','CLOUD_MCP'], ['mcp.mjs', 'MCP'],
+  ['cloud-mechanics-actions.mjs','CLOUD_ACTIONS'], ['cloud-mechanics.mjs','CLOUD_MECHANICS'],
+  ['cloud-media-codec.mjs','CLOUD_MEDIA_CODEC'], ['cloud-media.mjs','CLOUD_MEDIA'], ['cloud-evidence.mjs','CLOUD_EVIDENCE'], ['cloud-lifecycle.mjs','CLOUD_LIFECYCLE'], ['cloud-service.mjs','CLOUD_SERVICE'], ['cloud-actions-view.mjs','CLOUD_ACTIONS_VIEW'], ['cloud-spellbook.mjs','CLOUD_SPELLBOOK'], ['cloud-admin.mjs','CLOUD_ADMIN'], ['cloud-inbox.mjs','CLOUD_INBOX'], ['cloud-http.mjs','CLOUD_HTTP'], ['cloud-mcp.mjs','CLOUD_MCP'], ['mcp.mjs', 'MCP'],
   ['bootstrap.mjs', 'BOOTSTRAP'], ['worker.mjs', 'ENTRY'],
 ];
 const names = new Map(modules.map(([file, name]) => [`./${file}`, name]));

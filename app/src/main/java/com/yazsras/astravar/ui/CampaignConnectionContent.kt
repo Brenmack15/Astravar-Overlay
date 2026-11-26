@@ -78,7 +78,7 @@ private fun connectionTime(value: Long?) = value?.let {
     onRestrictPermissions: (Set<String>, Set<String>) -> Unit = { _, _ -> },
     onPauseSync: (Boolean) -> Unit = {}, onSyncNotification: (Boolean) -> Unit = {},
     onPushy: (Boolean) -> Unit = {}, onPrepareCampaign: () -> Unit = {},
-    onReviewMembership: () -> Unit = {}, onReviewCombatAccess: () -> Unit = {}
+    onReviewMembership: () -> Unit = {}, onReviewCombatAccess: () -> Unit = {}, openTool: ((String)->Unit)? = null
 ) {
     var origin by rememberSaveable(view.origin) { mutableStateOf(view.origin) }
     var deviceName by rememberSaveable(view.deviceName) { mutableStateOf(view.deviceName) }
@@ -98,6 +98,23 @@ private fun connectionTime(value: Long?) = value?.let {
     val locked = view.busy || view.pairingCode != null
     val hasWritableCategories = view.writeScopes.any { it in writableCampaignCategories }
     Page {
+        if (view.deviceId.isNotBlank()) {
+            OpenCloudWorkspace()
+            val context=androidx.compose.ui.platform.LocalContext.current.applicationContext
+            val sync=remember(context){com.yazsras.astravar.data.CampaignSyncPreferences(context)}
+            var resume by remember(view.deviceId){mutableStateOf(!sync.allowsLegacyPublishing(view.origin,view.campaignId,view.deviceId))}
+            if(resume)PlayerCard {
+                Text("Automatic device publishing is paused after the upgrade.")
+                PlayerOutlinedButton({sync.resumeLegacyPublishing(view.origin,view.campaignId,view.deviceId);resume=false}){
+                    Text("Resume existing device connection")
+                }
+            }
+        }
+        if(openTool!=null) PlayerDisclosure("Backups and recovery") {
+            listOf("Complete backup","Character backup","Campaign backup","Campaign import","Original armor archive").forEach { label->
+                PlayerEntry(label,"","History",{openTool(if(label=="Original armor archive")"Weapon backup" else label)})
+            }
+        }
         PlayerHeading("Owner connection")
         PlayerCard {
             Text("Campaign connection", style = MaterialTheme.typography.titleLarge, color = RebuildPalette.GoldBright)
@@ -329,27 +346,9 @@ private fun connectionTime(value: Long?) = value?.let {
             if (view.pending.isEmpty()) Text("No pending operations have been retrieved.", color = RebuildPalette.Muted)
             else Text("${view.pending.size} pending or requiring review", color = RebuildPalette.Muted)
         }
-        view.pending.forEach { pending -> PlayerCard {
-            Text(pending.state.replace('_', ' '), color = RebuildPalette.GoldBright, style = MaterialTheme.typography.titleMedium)
-            Text("Source: ${pending.source.ifBlank { "Unverified" }}", color = RebuildPalette.Muted)
-            Text("Command ${pending.commandId}", style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
-            pending.operations.forEach { op ->
-                Text("${op.type.replace('_', ' ')} · ${op.recordId}", style = MaterialTheme.typography.labelLarge)
-                Text("Expected revision ${op.expectedRevision?.toString() ?: "Unknown"} · saved revision ${op.currentRevision?.toString() ?: "Unknown"}", style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
-                op.current.forEach { (field, value) -> Text("Current $field: $value", style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted) }
-                op.proposed.forEach { (field, value) -> Text("Proposed $field: $value", style = MaterialTheme.typography.bodySmall) }
-            }
-            if (pending.message.isNotBlank()) Text(pending.message, color = RebuildPalette.Muted)
-            val canApprove = !pending.terminalReceipt && pending.state in setOf("PENDING_APPROVAL", "PENDING_DELIVERY") && pending.operations.isNotEmpty() && pending.operations.all {
-                it.expectedRevision != null && it.currentRevision != null && it.expectedRevision == it.currentRevision && it.proposed.isNotEmpty() && it.previewVerified
-            }
-            if (!pending.terminalReceipt && pending.state in setOf("PENDING_APPROVAL", "PENDING_DELIVERY")) {
-                PlayerButton(onClick = { onDecision(pending.commandId, true) }, enabled = view.connected && !view.busy && canApprove,
-                    modifier = Modifier.fillMaxWidth()) { Text("Approve reviewed transaction") }
-                PlayerOutlinedButton(onClick = { onDecision(pending.commandId, false) }, enabled = view.connected && !view.busy,
-                    modifier = Modifier.fillMaxWidth()) { Text("Reject transaction") }
-            }
-        } }
+        view.pending.forEach { pending ->
+            CampaignRequestCard(pending, view.connected && !view.busy, onDecision)
+        }
         PlayerCard {
             Text("Recent saves and receipts", style = MaterialTheme.typography.titleMedium)
             if (view.receipts.isEmpty()) Text("No command receipts have been retrieved.", color = RebuildPalette.Muted)

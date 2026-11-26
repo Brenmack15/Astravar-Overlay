@@ -131,3 +131,39 @@ test('an equivalent absolute ability request is superseded with separate proof a
   assert.equal((await l.rpc('get_cloud_state',{})).revision,2);
   assert.equal((await l.request(path+'/approvals')).value.actionableCount,0);
 });
+
+test('stale event receives a conflict disposition; scoped replacement binds original intent and requires a fresh owner decision',async t=>{
+  const l=await lab(t);
+  await l.rpc('submit_cloud_command',{command:command(0,'define_actor',player)});
+  await l.grant('sites-mcp',baseScopes,[],['*'],1);
+  const args={actorId:'inventor',ability:'INT',score:17},old=command(1,'set_actor_ability',args);
+  const proposal=await l.rpc('submit_cloud_command',{command:old});assert.equal(proposal.status,'PENDING_APPROVAL');
+  const other=await l.post(path+'/commands',command(1,'set_actor_ability',{...args,ability:'DEX'}));assert.equal(other.value.status,'COMMITTED');
+  const conflict=await l.post(path+'/approvals/'+old.commandId+'/verify',{digest:proposal.digest});assert.equal(conflict.value.status,'CONFLICT');
+  const replacement={...command(2,old.operation,args),replacesCommandId:old.commandId,replacesDigest:proposal.digest};
+  const altered=await l.rpc('submit_cloud_command',{command:{...replacement,commandId:crypto.randomUUID(),args:{...args,score:20}}});
+  assert.equal(altered.error,'MATERIAL_INTENT_CHANGED');
+  const next=await l.rpc('submit_cloud_command',{command:replacement});assert.equal(next.status,'PENDING_APPROVAL');
+  const duplicate=await l.rpc('submit_cloud_command',{command:{...replacement,commandId:crypto.randomUUID()}});assert.equal(duplicate.error,'TRANSACTION_PRECONDITION_FAILED');
+  const outcome=await l.post(path+'/approvals/'+replacement.commandId+'/verify',{digest:next.digest});assert.equal(outcome.value.status,'COMMITTED');
+  assert.equal((await l.rpc('get_cloud_receipt',{commandId:old.commandId})).status,'CONFLICT');
+  assert.equal((await l.rpc('get_cloud_state',{id:'inventor'})).records[0].data.abilities.INT,17);
+});
+
+test('spellbook inspection and level previews calculate scaling without casting or changing slots',async t=>{
+  const l=await lab(t);let rev=0;
+  async function seed(operation,args){
+    const r=await l.post(path+'/commands',command(rev++,operation,args));assert.equal(r.value.status,'COMMITTED',JSON.stringify(r));
+  }
+  await seed('define_actor',player);
+  for(const level of [1,2]){
+    await seed('define_resource',{actorId:'inventor',poolId:'slot-'+level,name:'Slot '+level,type:'spell_slot',maximum:2,current:2,recovery:'long_rest',slotLevel:level,source:'fixture'});
+  }
+  await seed('define_spell',{actorId:'inventor',spellId:'test-light',name:'Fixture Light',source:'fixture',baseLevel:1,concentration:false,timing:'action',ritual:false,resolution:'automatic',components:[{id:'light',name:'Light',type:'radiant',dice:1,sides:6,flat:0,critical:false,extraDicePerLevel:1}]});
+  await seed('grant_spell',{actorId:'inventor',spellId:'test-light',grantId:'light-grant',source:'fixture',route:'slot',levels:[1,2],preparation:'prepared'});
+  const r=await l.request(path+'/spellbook/inventor');
+  assert.equal(r.status,200,JSON.stringify(r));assert.deepEqual(r.value.rows.map(row=>[row.level,row.components[0].dice,row.hit,row.dc,row.spellId]),[[1,1,null,null,'test-light'],[2,2,null,null,'test-light']]);
+  assert.deepEqual(r.value.rows[1].eligibleSlotIds,['slot-2']);
+  assert.equal((await l.request(path+'/state')).value.revision,rev);
+  assert.deepEqual(r.value.slots.map(s=>s.current),[2,2]);
+});

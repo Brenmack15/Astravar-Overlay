@@ -46,8 +46,8 @@ class GenesisSkillsUiTest {
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         try {
             controller.get().setContent { AstravarTheme { ReforgeCharacterSheet(CampaignLedgerRepository(ledgerDb), repository) } }
-            waitFor("Add skill")
-            compose.onNodeWithText("Add skill").performScrollTo().performClick()
+            waitFor("Skills")
+            compose.onNodeWithText("Skills").performScrollTo().performClick()
             field("Skill name").performTextReplacement("Engineering")
             action("Untrained").performScrollTo().performClick()
             compose.onNodeWithText("Expertise").performClick()
@@ -66,13 +66,15 @@ class GenesisSkillsUiTest {
             action("Enter physical dice faces").performScrollTo().performClick()
             field("Faces in order (comma separated)").performScrollTo().performTextReplacement("12")
             action("Validate entered dice").performScrollTo().performClick()
-            compose.onNodeWithTag("reforge-roll-result").assertTextEquals("26")
+            compose.onNodeWithTag("reforge-roll-result").assertTextEquals("Engineering · 26")
             action("Save roll").performScrollTo().performClick()
             compose.waitUntil(10_000) { runBlocking { repository.rollHistory(actorId).first().isNotEmpty() } }
+            compose.onNodeWithTag("skill-roll-${created.id}").performScrollTo().performClick()
             compose.onNodeWithTag("skill-edit-${created.id}").performScrollTo().performClick()
             field("Skill name").performTextReplacement("Runecraft")
             action("Save skill").performClick()
             compose.waitUntil(10_000) { runBlocking { repository.get(actorId)!!.character.customSkills.single().name == "Runecraft" } }
+            compose.onNodeWithTag("skill-roll-${created.id}").performScrollTo().performClick()
             compose.onNodeWithTag("skill-edit-${created.id}").performScrollTo().performClick()
             action("Remove skill").performClick()
             compose.onNodeWithText("Remove", useUnmergedTree = true).performClick()

@@ -79,8 +79,9 @@ class GenesisCompactChromeTest {
                 assertTrue(text.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(layouts) == true)
                 assertEquals("The real dialog must retain the system font scale", 2f, layouts.single().layoutInput.density.fontScale, .01f)
             }
-            compose.onNode(hasContentDescription("Armor Class") and hasAnyAncestor(isDialog())).performScrollTo().assertIsDisplayed()
-            compose.onNode(hasTestTag("quick-health") and hasAnyAncestor(isDialog())).performScrollTo().performClick()
+            compose.onNodeWithText("Close").performClick()
+            compose.onNodeWithContentDescription("Armor Class").assertIsDisplayed()
+            compose.onNodeWithContentDescription("HP 8 / 12").performClick()
             compose.onNodeWithText("Hit points").assertIsDisplayed()
             compose.onNodeWithText("Close").performClick()
             compose.onNodeWithTag("section-Features").assertIsSelected()

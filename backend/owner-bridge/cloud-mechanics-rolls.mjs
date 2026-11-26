@@ -22,10 +22,12 @@ function checkName(kind,key,a){
 }
 function assertSpecification(s){
   if(s.kind==='custom'){
-    must(s.name && s.dice!=null && s.sides!=null,'CUSTOM_FORMULA_REQUIRED');
-    if(s.mode!=='normal')must(s.dice===1&&s.sides===20,'D20_MODE_UNAVAILABLE');
+    must(s.name && (s.terms!==undefined ? s.dice===undefined && s.sides===undefined : s.dice!=null && s.sides!=null),'CUSTOM_FORMULA_REQUIRED');
+    if(s.terms){
+      must(s.mode==='normal' && s.terms.reduce((n,t)=>n+t.count,0)<=200 && (s.terms.length>0||s.flat!=null),'CUSTOM_FORMULA_INVALID');
+    }else if(s.mode!=='normal')must(s.dice===1&&s.sides===20,'D20_MODE_UNAVAILABLE');
   }else{
-    must(s.dice===undefined&&s.sides===undefined&&s.flat===undefined&&s.name===undefined,'DERIVED_MODIFIER_REQUIRED');
+    must(s.dice===undefined&&s.sides===undefined&&s.flat===undefined&&s.name===undefined&&s.terms===undefined,'DERIVED_MODIFIER_REQUIRED');
     if(s.kind==='initiative')must(s.key==='initiative','INVALID_INITIATIVE');
     if(s.kind==='ability'||s.kind==='save')must(stats.includes(s.key),'INVALID_ABILITY');
   }
@@ -45,6 +47,20 @@ async function calculate(ctx,actorId,s,e){
     s.kind==='save'?projection.saves[s.key]?.value:s.kind==='skill'&&Object.hasOwn(projection.skills,s.key)?
     projection.skills[s.key].value:s.kind==='initiative'?projection.initiative.value:null;
   must(signed!=null,'CHECK_MODIFIER_UNKNOWN');
+  if(custom && s.terms){
+    const faces=[];let total=signed;
+    for(const t of s.terms)for(let i=0;i<t.count;i++){
+      const value=e.faces[faces.length];
+      must(Number.isInteger(value) && value>=1 && value<=t.sides,'INVALID_RECORDED_FACES');
+      const sign=t.sign==='add'?1:-1; faces.push({sides:t.sides,value,kept:true,sign}); total+=sign*value;
+    }
+    must(e.faces.length===faces.length,'INVALID_RECORDED_FACES');
+    const terms=faces.map((f,i)=>(f.sign<0?'− ':i>0?'+ ':'')+'('+f.value+')');
+    if(signed||!terms.length)terms.push((signed<0?'− ':terms.length?'+ ':'')+Math.abs(signed));
+    return {name:s.name,status:'resolved',origin:e.origin,faces,modifier:signed,total,natural:null,mode:'normal',
+      text:s.name+': '+terms.join(' ')+' = '+total,actorId,formId:projection.formId,kind:s.kind,key:s.key,
+      requestedMode:s.mode,sourceRevision:a.revision,recordedAt:ctx.now,commandId:ctx.commandId};
+  }
   const isCheck=!custom || s.sides===20 && s.dice===1;
   const effective=isCheck?policy:{mode:'normal',count:custom?s.dice:1};
   const keeps=effective.mode==='normal'?'sum':effective.mode==='advantage'?'highest':'lowest';
@@ -62,7 +78,7 @@ async function recordCheck(ctx,x){
   }
   if(x.forAttemptId){
     const attempt=await ctx.get('attack_attempt',x.forAttemptId);
-    must(attempt?.life==='active' && attempt.data.resolution==='save' && x.check.kind==='save' && attempt.data.save.ability===x.check.key,'NO_MATCHING_SAVE_REQUEST');
+    must(attempt?.life==='active' && attempt.data.resolution==='save' && attempt.data.targets?.includes(x.actorId) && !attempt.data.targetResults?.some(r=>r.targetActorId===x.actorId) && x.check.kind==='save' && attempt.data.save.ability===x.check.key,'NO_MATCHING_SAVE_REQUEST');
     result.forAttemptId=x.forAttemptId;
   }
   await insert(ctx,'roll',x.rollId,x.actorId,result.name,result);
@@ -102,6 +118,13 @@ async function savePreset(ctx,x){
   return {presetId:x.presetId,name:x.name,entries:x.entries};
 }
 export const rollOperations=Object.freeze({
+  set_roll_context:{...op('character',fields({actorId:identifier,tag:identifier,active:boolean,source:named(300)},['actorId','tag','active','source']),async(ctx,x)=>{
+    const a=await actor(ctx,x.actorId), tags=new Set(a.data.contextTags??[]);
+    if(x.active)tags.add(x.tag);else tags.delete(x.tag);
+    must(tags.size<=32,'ROLL_CONTEXT_LIMIT');
+    await save(ctx,a,{...a.data,contextTags:[...tags].sort()});
+    return {actorId:a.id,tag:x.tag,active:x.active,source:x.source};
+  }),ownerReview:true},
   record_check:op('rolls',fields({actorId:identifier,rollId:identifier,check:checkSpec,evidence,forUseId:identifier,forAttemptId:identifier},['actorId','rollId','check','evidence']),recordCheck),
   record_roll_batch:op('rolls',fields({actorId:identifier,batchId:identifier,entries:arrayOf(fields({rollId:identifier,check:checkSpec,evidence},['rollId','check']),24)},['actorId','batchId','entries']),batch),
   save_roll_preset:op('rolls',fields({actorId:identifier,presetId:identifier,name:named(120),entries:arrayOf(checkSpec,24),update:boolean},['actorId','presetId','name','entries','update']),savePreset),

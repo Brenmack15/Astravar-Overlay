@@ -1,6 +1,8 @@
 package com.yazsras.astravar.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -17,12 +19,10 @@ import java.util.UUID
 
 @Composable internal fun GenesisSkills(
     character: ReforgeCharacter, projection: CharacterProjection, busy: Boolean,
-    onAdd: () -> Unit, onEdit: (String) -> Unit, onPin: (String, Boolean) -> Unit,
-    onRoll: (String, Int, String) -> Unit
+    onAdd: () -> Unit, onPin: (String, Boolean) -> Unit,
+    onRoll: (String, Int?, String, Boolean) -> Unit
 ) {
-    RebirthSectionLabel("Skills") {
-        PlayerTextButton(onClick = onAdd, enabled = !busy) { Text("Add skill") }
-    }
+    RebirthSectionLabel("Skills", onTitle = onAdd)
     val entries = remember(character, projection) { SkillRules.entries(character, projection) }
     val hasPins = entries.any { it.pinned }
     var previousPinned: Boolean? = null
@@ -51,14 +51,17 @@ import java.util.UUID
                     }
                     if (skill.custom) add("Custom")
                 }.joinToString(" · ")
-                Column(Modifier.weight(1f)) {
-                    RebirthCheckRow(skill.name, detail, skill.calculation.value,
-                        modifier = Modifier.testTag("skill-roll-${skill.id}")) {
-                        skill.calculation.value?.let { onRoll(skill.name, it, skill.id) }
-                    }
+                Column(Modifier.weight(1f).heightIn(min = 48.dp).testTag("skill-roll-${skill.id}")
+                    .clickable(role = Role.Button, onClickLabel = "Inspect ${skill.name}") {
+                        onRoll(skill.name, skill.calculation.value, skill.id, false)
+                    }, verticalArrangement = Arrangement.Center) {
+                    Text(skill.name, style = MaterialTheme.typography.bodyLarge)
+                    Text(detail, style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
                 }
-                if (skill.custom) PlayerTextButton(onClick = { onEdit(skill.id) }, enabled = !busy,
-                    modifier = Modifier.testTag("skill-edit-${skill.id}").semantics { contentDescription = "Edit ${skill.name} custom skill" }) { Text("Edit") }
+                SheetRollTarget(skill.name, skill.calculation.value,
+                    { onRoll(skill.name, skill.calculation.value, skill.id, true) },
+                    { onRoll(skill.name, skill.calculation.value, skill.id, false) },
+                    Modifier.testTag("skill-quick-${skill.id}"))
             }
         }
     }
