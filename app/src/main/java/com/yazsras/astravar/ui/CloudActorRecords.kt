@@ -10,6 +10,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
@@ -122,7 +124,7 @@ private fun formula(c:JsonObject):String{
                 var natural:Int?=null
                 if(attack){
                     val policy=row.getValue("modes").jsonObject.getValue(requested).jsonObject
-                    val evidence=rawEvidence(policy.getValue("count").jsonPrimitive.int,20)
+                    val evidence=castAidEvidence(rawEvidence(policy.getValue("count").jsonPrimitive.int,20),row["rollAids"] as? JsonArray,"attack")
                     put("hit",evidence)
                     val faces=evidence.getValue("faces").jsonArray.map{it.jsonPrimitive.int}
                     natural=when(policy.cloudText("mode")){"advantage"->faces.max();"disadvantage"->faces.min();else->faces.single()}
@@ -177,13 +179,14 @@ private fun formula(c:JsonObject):String{
                         if(row.cloudText("kind")=="attack"){
                             val hit=row.textValue("hit")?.toIntOrNull()
                             val hitText=if(hit!=null){if(hit>=0)"+$hit" else "$hit"} else (row.textValue("resolvedSaveDc") ?: cfg.textValue("saveDc"))?.let{"DC $it"} ?: "Resolve"
-                            Box(Modifier.sizeIn(minHeight=48.dp,minWidth=48.dp).combinedClickable(enabled=enabled,role=Role.Button,onClickLabel="Roll attack only",
+                            Box(Modifier.sizeIn(minHeight=48.dp,minWidth=48.dp).semantics{contentDescription="Roll "+row.cloudText("title")+" attack"}.combinedClickable(enabled=enabled,role=Role.Button,onClickLabel="Roll attack only",
                                 onLongClickLabel="Attack options",onLongClick={selection=id;mode="normal";details="Attack options"},onClick={perform(row,false)}),contentAlignment=Alignment.Center){Text(hitText)}
                             val formula=row.rowsAt("components").joinToString(" + ",transform=::formula)
                             Box(Modifier.widthIn(min=48.dp,max=128.dp).heightIn(min=48.dp).combinedClickable(enabled=damageAvailable,role=Role.Button,onClickLabel="Roll damage",
                                 onLongClickLabel="Damage options",onLongClick={selection=id;details="Damage options"},onClick={damageClick(row)}),contentAlignment=Alignment.Center){Text(formula.ifBlank{"Damage"},style=MaterialTheme.typography.labelMedium)}
                         }else if(cfg.textValue("type")=="roll_bonus")
                             PlayerTextButton({selection=id;details="Roll reaction"},enabled=enabled){Text("Choose roll")}
+                        else if(cfg.textValue("type")=="teleport" && "destinationRequirements" in row)CloudDisplacementAction(row,actorId,enabled,commit)
                         else PlayerTextButton({open("use_action",buildJsonObject{put("actionId",id);put("useId",UUID.randomUUID().toString())})},enabled=enabled){Text("Use")}
                     }
                 }

@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 import ascension_migrate as mig
 from ascension_migrate_legacy import COINS, encode
-from ascension_migrate_reviewed import STATS, scoped_identity, template
+from ascension_migrate_reviewed import STATS, project, scoped_identity, template
 
 TENANT=("fixture-owner","fixture-continuity")
 ACTOR="fixture-actor"
@@ -124,6 +124,109 @@ class ReviewedGraphTest(unittest.TestCase):
     def package(self):
         self.path.write_bytes(encode(self.plan))
         return mig.convert_reviewed(self.files,self.path,self.dst,TENANT)
+
+    def test_scoped_actor_provenance_uses_identity_witnesses_and_reproduces_version_one(self):
+        originals={mig.sha(path.read_bytes()):path.read_bytes() for path in self.files}
+        legacy=copy.deepcopy(self.plan)
+        legacy["version"]=1
+        _,old_rows,old_links,old_media=project(originals,legacy,TENANT)
+        _,rows,links,media=project(originals,self.plan,TENANT)
+        self.assertEqual((old_links,old_media),(links,media))
+        for prior,current in zip(old_rows,rows):
+            before=json.loads(prior["data_json"])
+            after=json.loads(current["data_json"])
+            if current["id"]==ACTOR:
+                self.assertNotIn("importedSources",before)
+                refs=after.pop("importedSources")
+                self.assertEqual([{"family":"playable.characters","sourceId":ACTOR,"revision":3,"updatedAt":101,
+                                   "fields":["abilities","baseAc","currentHp","level","maxHp","proficiency","rulesProfile","temporaryHp"]}],refs)
+                self.assertFalse(any(digest in json.dumps(refs) for digest in originals))
+            self.assertEqual(before,after)
+        actor=next(t for t in self.plan["targets"] if t["id"]==ACTOR)
+        actor["data"]["importedSources"]=[{"sourceId":"another-actor"}]
+        with self.assertRaisesRegex(ValueError,"derived from reviewed identity"):
+            project(originals,self.plan,TENANT)
+
+    def test_reviewed_companion_bond_and_concentrated_cast_survive_isolated_recovery(self):
+        companion="fixture-helper"; spell="support-spell"; cast="recorded-support"; grant="support-route"
+        actor=next(t for t in self.plan["targets"] if t["id"]==ACTOR)
+        helper={**actor["data"],"role":"companion","poolIds":["occupied-slot"],"rollAidRefs":[{"casterId":ACTOR,"castId":cast,"expiresAt":72}]}
+        aid={"family":"support","sides":4,"applies":["attack","save"]}
+        pattern={"category":"class","source":"Teaching record","description":"Original known pattern","references":[]}
+        slot={"type":"ordinary","maximum":1,"current":0,"recovery":"none","source":"Occupied capacity record"}
+        bond={"operatorId":ACTOR,"knownFeatureId":"known-pattern","dedicatedPoolId":"occupied-slot"}
+        ability={"category":"companion","source":"Original bond","description":"Dedicated companion","references":[],"infusionBond":bond}
+        recorded=[(companion,"actor",companion,helper),("known-pattern","feature",ACTOR,pattern),
+                  ("occupied-slot","resource_pool",companion,slot),("original-bond","feature",companion,ability),
+                  (spell,"spell",ACTOR,{"baseLevel":1,"source":"Reviewed source","concentration":True,"timing":"action",
+                                       "resolution":"automatic","ritual":False,"components":[],"rollAid":aid}),
+                  (grant,"spell_grant",ACTOR,{"spellId":spell,"levels":[1],"route":"slot","preparation":"prepared","source":"Ledger grant"}),
+                  (cast,"cast_instance",ACTOR,{"spellId":spell,"grantId":grant,"rollAid":aid,"resolution":"automatic",
+                                              "targets":[companion],"concentration":True})]
+        archive_records=[]
+        def add_record(id,values):
+            body="Player-known reviewed synthetic source for "+id
+            archive_records.append({"externalId":id,"visibility":"player","category":"character","sourceUrl":"collection://fixture/"+id,
+                                    "propertiesJson":json.dumps(values),"body":body,"contentSha256":mig.sha(body.encode())})
+        for id,kind,owner,data in recorded:
+            add_record(id,{"id":id,"actorId":owner,"data":data})
+        add_record("known-caster-state",{"actorId":ACTOR,"concentrationCastId":cast})
+        payload=json.dumps({"campaignId":TENANT[1],"title":"Fixture historical mechanics","sourceRootUrl":"collection://fixture",
+                            "sourceRootRevision":"4","records":archive_records})
+        source=self.root/"historical-abilities.json"
+        source.write_bytes(encode({"format":"astravar-campaign-archive","schema":1,"payload":payload,"payloadSha256":mig.sha(payload.encode())}))
+        self.files.append(source); reviewed=template([source.read_bytes()],*TENANT); self.plan["sources"].update(reviewed["sources"])
+        sources={}
+        for decision in reviewed["decisions"]:
+            if decision["family"]=="reference.records":
+                id=decision["identity"][0];sources[id]={k:decision[k] for k in ("source","family","identity")}
+                decision.update(disposition="map",targets=[ACTOR if id=="known-caster-state" else id],playerKnown=True,reason="Review exact structural source")
+            else:
+                decision.update(disposition="historical",reason="Retain source collection metadata")
+            self.plan["decisions"].append(decision)
+        original_path=["propertiesJson","$json"]
+        def witness(key,target,source_path,target_path):
+            self.plan["parity"].append({**sources[key],"target":target,"sourcePath":original_path+source_path,"targetPath":target_path,"transform":"exact"})
+        def edge(key,origin,relation,target,path):
+            self.plan["links"].append({**sources[key],"from":origin,"relation":relation,"to":target,"targetPath":original_path+path})
+        for id,kind,owner,data in recorded:
+            self.plan["targets"].append(dict(id=id,kind=kind,actorId=owner,title=id,data=data,revision=1,life="active"))
+            witness(id,id,["id"],["id"])
+            for key in data: witness(id,id,["data",key],["data",key])
+        actor["data"]["concentrationCastId"]=cast
+        witness("known-caster-state",ACTOR,["concentrationCastId"],["data","concentrationCastId"])
+        edge("known-caster-state",ACTOR,"concentrates_on",cast,["concentrationCastId"])
+        for key,relation in (("operatorId","infusion_operator"),("knownFeatureId","known_infusion"),("dedicatedPoolId","dedicated_slot")):
+            edge("original-bond","original-bond",relation,bond[key],["data","infusionBond",key])
+        edge(grant,grant,"grants_spell",spell,["data","spellId"])
+        edge(cast,cast,"cast_spell",spell,["data","spellId"])
+        edge(cast,cast,"used_grant",grant,["data","grantId"])
+        edge(cast,cast,"target",companion,["data","targets",0])
+        # A bad target or extra slot must not turn a historical source into a new gameplay effect.
+        originals={mig.sha(path.read_bytes()):path.read_bytes() for path in self.files}
+        for wrong in ("operator","target","missing-edge","optional-toggle"):
+            invalid=copy.deepcopy(self.plan)
+            where={r["id"]:r for r in invalid["targets"]}
+            if wrong=="operator": where["original-bond"]["data"]["infusionBond"]["operatorId"]=companion
+            if wrong=="target": where[cast]["data"]["targets"]=[ACTOR]
+            if wrong=="missing-edge": invalid["links"]=[e for e in invalid["links"] if e["relation"]!="dedicated_slot"]
+            if wrong=="optional-toggle": where[spell]["data"]["concentration"]=False
+            with self.subTest(wrong=wrong),self.assertRaises(ValueError):
+                project(originals,invalid,TENANT)
+        self.assertEqual(0,self.package()["counts"]["cloud_receipts"])
+        preview=mig.inspect(self.lab,self.dst);mig.apply(self.lab,self.dst,preview["approvalSha256"])
+        mig.control(self.lab,"cutover",mig.control(self.lab,"cutover")["approvalSha256"])
+        verify_script=mig.ROOT/"scripts/tests/ascension_reviewed_readback.mjs"
+        def readback(stage,epoch):
+            return json.loads(subprocess.check_output(["node",str(verify_script),mig.inspect(stage)["database"],"--companion-sources",str(epoch)],cwd=mig.ROOT))
+        first=readback(self.lab,2)
+        self.assertEqual((0,0,"support",4),(first["revision"],first["bondRemaining"],first["activeAid"]["family"],first["activeAid"]["sides"]))
+        portable=self.root/"post-cutover.zip";mig.export(self.lab,portable)
+        recovered=self.root/"cold";mig.init(recovered,*TENANT)
+        preview=mig.inspect(recovered,portable);mig.apply(recovered,portable,preview["approvalSha256"])
+        mig.control(recovered,"cutover",mig.control(recovered,"cutover")["approvalSha256"])
+        second=readback(recovered,3)
+        self.assertEqual(first["activeAid"],second["activeAid"]);self.assertEqual(0,second["bondRemaining"])
 
     def test_multisource_equal_mechanics_original_receipts_and_exact_graph(self):
         result=self.package()
@@ -277,6 +380,97 @@ class ReviewedGraphTest(unittest.TestCase):
         facts["facts"][0]["sourceBinding"]["rowSha256"]=d["rowSha256"]
         self.rebind_source(2,facts)
         self.assertEqual(3,self.package()["originalSources"])
+
+    def test_original_native_attack_and_accepted_variants_cost_survive_edit_and_portable_migration(self):
+        attack_id="fixture-ray"
+        raw=self.complete["playable"]["characters"][0]
+        actor=json.loads(raw["characterJson"])
+        sheet={"id":attack_id,"name":"Tuning ray","attackBonus":7,"damageFormula":"1d4+1 force and 1d6+2 elemental",
+               "actionEconomy":"Action","resourceCost":"One documented tool charge","evidenceStatus":"Confirmed","source":"Survey apparatus sheet"}
+        source_json=json.dumps(sheet,separators=(",",":"))
+        recorded={"profileId":ACTOR,"attackId":attack_id,"sheetRevision":8,"sheetSource":sheet["source"],"attackJson":source_json,
+                  "fingerprint":mig.sha(source_json.encode()),"reviewedSheetConflicts":[]}
+        raw_components=[{"id":"ray-base","label":"Force ray","type":"FORCE","formula":{"dice":[{"count":1,"sides":4}],"flat":1},"criticalDice":True},
+                        {"id":"element","label":"Elemental ray","type":"FIRE","formula":{"dice":[{"count":1,"sides":6}],"flat":2},"criticalDice":True}]
+        attack={"id":attack_id,"name":sheet["name"],"fixedAttackBonus":7,"proficient":False,"actionType":"Action",
+                "tags":["ranged"],"addAbilityToDamage":False,"requiredItemId":ITEM,"damage":raw_components,"recordedSource":recorded}
+        actor["attacks"]=[attack];raw["characterJson"]=json.dumps(actor)
+        native_item=self.complete["authority"]["items"][0]
+        instance=json.loads(native_item["instanceJson"]);instance.update(quantity=1,equipment="held",operating=True)
+        native_item["instanceJson"]=json.dumps(instance)
+        next(t for t in self.plan["targets"] if t["id"]==ITEM)["data"].update(quantity=1,equipment="held",operating=True)
+        self.rebind_source(0,self.complete)
+        nd=next(d for d in template([self.files[0].read_bytes()],*TENANT)["decisions"] if d["family"]=="playable.characters.attacks")
+        nd.update(disposition="map",playerKnown=True,targets=[attack_id],reason="Reviewed original native attack and both components")
+        self.plan["decisions"].append(nd)
+
+        # This independent player-known archive is the authority for the limited pool and permitted elements.
+        # The native attack's prose alone cannot establish either rule.
+        supplement={"attackId":attack_id,"timing":"attack","delivery":"ranged","resolution":"attack",
+                    "cost":{"poolId":POOL,"amount":1},"variants":["fire","cold"],
+                    "selections":[{"actorId":ACTOR,"componentId":"element","type":"cold","formId":None}]}
+        body="Accepted device-era elemental configuration and exact tool charge."
+        reference={"externalId":"approved-rule","visibility":"player","category":"equipment","sourceUrl":"collection://fixture/equipment",
+                   "propertiesJson":json.dumps(supplement),"body":body,"contentSha256":mig.sha(body.encode())}
+        payload=json.dumps({"campaignId":TENANT[1],"title":"Fixture source","sourceRootUrl":"collection://fixture",
+                            "sourceRootRevision":"8","records":[reference]})
+        source_path=self.root/"approved-source.json";source_path.write_bytes(encode({"format":"astravar-campaign-archive","schema":1,
+            "payloadSha256":mig.sha(payload.encode()),"payload":payload}))
+        self.files.append(source_path);source_plan=template([source_path.read_bytes()],*TENANT)
+        self.plan["sources"].update(source_plan["sources"])
+        for d in source_plan["decisions"]:
+            d.update(disposition="historical",reason="Preserved original archive identity")
+            if d["family"]=="reference.records":
+                rd=d;d.update(disposition="map",targets=[attack_id],reason="Matching approved rule for this attack identity",playerKnown=True)
+            self.plan["decisions"].append(d)
+        def binding(d): return {k:d[k] for k in ("source","family","identity")}
+        def witness(d,sp,tp,transform="exact"):
+            self.plan["parity"].append({**binding(d),"sourcePath":sp,"target":attack_id,"targetPath":tp,"transform":transform})
+        def edge(d,relation,to,sp):
+            self.plan["links"].append({**binding(d),"from":attack_id,"relation":relation,"to":to,"targetPath":sp})
+        from_native={"source":recorded["sheetSource"],"sourceItemId":ITEM,"fixedHit":7,"recordedSource":recorded}
+        pp=["propertiesJson","$json"]
+        data={**from_native,**{k:supplement[k] for k in ("timing","delivery","resolution","cost","selections")}}
+        components=[]
+        for i,c in enumerate(raw_components):
+            value={"id":c["id"],"name":c["label"],"type":c["type"].lower(),"dice":c["formula"]["dice"][0]["count"],
+                   "sides":c["formula"]["dice"][0]["sides"],"flat":c["formula"]["flat"],"critical":c["criticalDice"]}
+            path=["data","components",i]
+            for target,original in (("id",["id"]),("name",["label"]),("type",["type"]),("dice",["formula","dice",0,"count"]),
+                                    ("sides",["formula","dice",0,"sides"]),("flat",["formula","flat"]),("critical",["criticalDice"])):
+                witness(nd,["damage",i]+original,path+[target],"lowercase" if target=="type" else "exact")
+            if i==1:
+                value["variants"]=supplement["variants"];witness(rd,pp+["variants"],path+["variants"])
+            components.append(value)
+        data["components"]=components
+        self.plan["targets"].append(dict(id=attack_id,kind="attack",actorId=ACTOR,title=sheet["name"],data=data,life="active",revision=8))
+        witness(nd,["id"],["id"]);witness(nd,["name"],["title"]);witness(nd,["recordedSource","sheetRevision"],["revision"])
+        for target,field in (("fixedHit",["fixedAttackBonus"]),("source",["recordedSource","sheetSource"]),
+                             ("recordedSource",["recordedSource"]),("sourceItemId",["requiredItemId"])):
+            witness(nd,field,["data",target])
+        for k in ("timing","delivery","resolution","cost","selections"):
+            witness(rd,pp+[k],["data",k])
+        edge(nd,"requires_item",ITEM,["requiredItemId"]);edge(rd,"uses_pool",POOL,pp+["cost","poolId"])
+
+        frozen=copy.deepcopy(self.plan)
+        for failure in ("missing original","illegal variant","missing cost edge"):
+            self.plan=copy.deepcopy(frozen)
+            if failure=="missing original": self.plan["targets"][-1]["data"].pop("recordedSource")
+            if failure=="illegal variant": self.plan["targets"][-1]["data"]["selections"][0]["type"]="acid"
+            if failure=="missing cost edge": self.plan["links"].pop()
+            with self.subTest(failure=failure),self.assertRaises(ValueError): self.package()
+        self.plan=frozen;self.package()
+        mig.apply(self.lab,self.dst,mig.inspect(self.lab,self.dst)["approvalSha256"])
+        mig.control(self.lab,"cutover",mig.control(self.lab,"cutover")["approvalSha256"])
+        script=str(mig.ROOT/"scripts/tests/ascension_attack_readback.mjs")
+        result=json.loads(subprocess.check_output(["node",script,mig.inspect(self.lab)["database"],"edit"],cwd=mig.ROOT))
+        self.assertEqual(recorded,result["originalSource"])
+        bundle=self.root/"after-edit.zip";mig.export(self.lab,bundle);mig.check_database(mig.read_bundle(bundle))
+        second=self.root/"fresh";mig.init(second,*TENANT)
+        mig.apply(second,bundle,mig.inspect(second,bundle)["approvalSha256"])
+        mig.control(second,"cutover",mig.control(second,"cutover")["approvalSha256"])
+        restored=json.loads(subprocess.check_output(["node",script,mig.inspect(second)["database"],"restored"],cwd=mig.ROOT))
+        self.assertEqual(result,restored)
 
     def test_accepted_native_maximum_hp_and_damage_effects_use_shared_types(self):
         raw=self.complete["playable"]["characters"][0]

@@ -74,6 +74,7 @@ private enum class SpellbookFilter(val label: String) {
     var unavailableRouteId by rememberSaveable { mutableStateOf<String?>(null) }
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
     var inspecting by rememberSaveable { mutableStateOf<String?>(null) }
+    var sourceStat by rememberSaveable { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -350,6 +351,7 @@ private enum class SpellbookFilter(val label: String) {
                                 }
                             }
                             "Combat" -> {
+                                PlayerOutlinedButton(onClick = { openSection("Spells") }) { Text("Cast a spell") }
                                 if (character.conditions.isNotEmpty() || character.concentrationSpellId != null) {
                                     Column(Modifier.fillMaxWidth().background(RebuildPalette.Panel, RoundedCornerShape(8.dp)).padding(12.dp),
                                         verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -762,14 +764,10 @@ private enum class SpellbookFilter(val label: String) {
                     ReforgeRichText(character.background)
                     PlayerTextButton(onClick = { dialog = "Identity" }) { Text("Edit background") }
                     PlayerTextButton(onClick = { dialog = "Notes" }) { Text("Character notes") }
-                    PlayerTextButton(onClick = { dialog = "HistoricalSources" }) { Text("Character source evidence") }
+                    PlayerTextButton(onClick = { sourceStat=null;dialog = "HistoricalSources" }) { Text("Character source evidence") }
                 }
             }
-            "HistoricalSources" -> LegacyCharacterSources(repository, local, requireNotNull(saved), { dialog = null },
-                { dialog = "HistoricalReferences" })
-            "HistoricalReferences" -> RebuildToolSheet("Armor source references", { dialog = "HistoricalSources" }) {
-                CampaignReferenceLibraryV21(repository)
-            }
+            "HistoricalSources" -> LegacyCharacterSources(repository,local,requireNotNull(saved),sourceStat,{dialog=null})
             "AttackManagement" -> PlayerSheet("Manage attacks", { dialog = null }) {
                 PlayerButton(onClick = { dialog = "Attack" }) { Text("Create attack") }
                 GenesisSourceAttackReviewButton(repository, local, requireNotNull(saved))
@@ -800,7 +798,7 @@ private enum class SpellbookFilter(val label: String) {
         }
         inspecting?.let { stat ->
             ReforgeAbilityInspector(character, projection, Stat.valueOf(stat), { inspecting = null },
-                { change("Edit permanent $stat", it) }, { inspecting = null; dialog = "HistoricalSources" }) { label, modifier ->
+                { change("Edit permanent $stat", it) }, { sourceStat=stat;inspecting = null; dialog = "HistoricalSources" }) { label, modifier ->
                 requestRoll(label, modifier, RollKind.ABILITY_CHECK, stat)
             }
         }

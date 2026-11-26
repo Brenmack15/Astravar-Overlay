@@ -63,6 +63,45 @@ class CampaignConnectionTest {
             requestedReadJson=scopes,requestedWriteJson=scopes,grantJson=remote.grant.toString()))
         return client(remote).also { if (syncNow) it.sync() }
     }
+    @Test fun retainedHistoryPagesVerifyCurrentAndCommittedRevisionsWithoutHidingOlderAttention() = runBlocking {
+        val remote = Remote()
+        val client = paired(remote)
+        client.setAutoSync(setOf("hp"))
+        val id = remote.propose()
+        client.sync()
+        val stored = requireNotNull(journal.connection().command(id))
+        assertEquals("VERIFIED", stored.state)
+        val receipt = requireNotNull(stored.receiptJson)
+        val original = Json.parseToJsonElement(receipt).jsonObject
+        val proof = client.snapshot().getValue("history").jsonArray.single().jsonObject
+        assertEquals(receipt, proof.getValue("receiptJson").jsonPrimitive.content)
+        val result = original.getValue("records").jsonArray.single().jsonObject
+        val op = proof.getValue("operations").jsonArray.single().jsonObject
+        assertEquals("adjust_hp", op.getValue("type").jsonPrimitive.content)
+        assertEquals(result.getValue("revision").jsonPrimitive.long - 1, op.getValue("expectedRevision").jsonPrimitive.long)
+        assertEquals(result.getValue("revision"), op.getValue("currentRevision"))
+        repeat(51) { index ->
+            journal.connection().insert(stored.copy(commandId = "earlier-fixture-$index", receivedAt = stored.receivedAt - index - 1,
+                state = "REPAIR_REVIEW", body = "{}", decisionBody = null, receiptJson = null))
+        }
+        val latest = client.snapshot()
+        assertEquals(51, latest.getValue("unverifiedHistoryCount").jsonPrimitive.int)
+        assertEquals(50, latest.getValue("history").jsonArray.size)
+        val cursor = latest.getValue("historyNext").jsonPrimitive.content
+        val page = client.showReceiptPage(cursor)
+        val ids = (latest.getValue("history").jsonArray + page.getValue("history").jsonArray).map { it.jsonObject.getValue("commandId").jsonPrimitive.content }
+        assertEquals(52, ids.distinct().size)
+        assertTrue(page.getValue("historyHasNewer").jsonPrimitive.boolean)
+        assertFalse("historyNext" in page)
+        assertEquals(page.getValue("history"), client.snapshot().getValue("history"))
+        assertEquals(receipt, journal.connection().command(id)?.receiptJson)
+        assertEquals(14, current().currentHp)
+        val settings = requireNotNull(journal.connection().settings())
+        journal.connection().settings(settings.copy(localReadJson = "[]", localWriteJson = "[]"))
+        val narrowed = client.showReceiptPage(null).getValue("history").jsonArray.first().jsonObject
+        assertTrue(narrowed.getValue("operations").jsonArray.isEmpty())
+    }
+
     @Test fun combatReviewKeepsExistingGrantUntilTheOwnerConfirmsOnTheService() = runBlocking {
         val remote = Remote()
         val initial = CampaignConnectionProtocol.scopeArray(setOf("hp"))

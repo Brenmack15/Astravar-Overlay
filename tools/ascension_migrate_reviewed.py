@@ -62,6 +62,7 @@ REF = {
     "project_stage": {"projectId": "invention_project"}, "blueprint_version": {"projectId": "invention_project"},
 }
 EDGE_TARGET = {
+    "infusion_operator":"actor","known_infusion":"feature","dedicated_slot":"resource_pool",
     "deployment_form":"form","deploying":"form_deployment","inherits_form_rules":"form",
     "includes_event":"timeline_event","part_of_arc":"story_arc","follows_session":"campaign_session","session_in_arc":"story_arc",
     "opens_at_checkpoint":"checkpoint","closes_at_checkpoint":"checkpoint",
@@ -90,6 +91,7 @@ EDGE_TARGET = {
     "part_of_trade": "party_exchange", "trade_party": "actor", "trade_wallet": "wallet", "trade_holding": "item_instance",
 }
 EDGE_FROM = {
+    "infusion_operator":{"feature"},"known_infusion":{"feature"},"dedicated_slot":{"feature"},
     "deployment_form":{"form_deployment"},"deploying":{"actor"},"inherits_form_rules":{"form"},
     "part_of_arc":{"story_arc"},"follows_session":{"campaign_session"},"session_in_arc":{"campaign_session"},
     "opens_at_checkpoint":{"campaign_session"},"closes_at_checkpoint":{"campaign_session"},"includes_event":{"story_arc","campaign_session"},
@@ -219,7 +221,7 @@ def template(raws, owner, continuity):
             decisions.append({"source":digest, "family":family, "identity":list(ids), "rowSha256":sha(encode(row)),
                               "disposition":"pending", "reason":"", "targets":[], "playerKnown":False})
     verify(names and decisions, "At least one identified source record is required")
-    return {"format":FORMAT,"version":1,"owner":owner,"continuity":continuity,"sources":dict(sorted(names.items())),
+    return {"format":FORMAT,"version":2,"owner":owner,"continuity":continuity,"sources":dict(sorted(names.items())),
             "decisions":decisions,"targets":[],"links":[],"parity":[],"media":[]}
 
 
@@ -275,6 +277,31 @@ def check_target(row, entities):
                    "Unproven encounter membership or turn for deployment")
             verify(data["status"] != "deploying" or entities[aid]["data"].get("encounterId") == encounter_id,
                    "Active actor and deployment disagree on current encounter")
+    if kind=="attack":
+        cost = data.get("cost")
+        if cost is not None:
+            pool = entities.get(cost.get("poolId") if isinstance(cost, dict) else None, {})
+            verify(pool.get("kind") == "resource_pool" and pool.get("actorId") == aid, "Attack cost belongs to a missing or different actor pool")
+        components = data.get("components")
+        choices = data.get("selections", [])
+        verify(isinstance(components, list) and all(isinstance(part,dict) and isinstance(part.get("id"),str) for part in components)
+               and isinstance(choices,list), "Invalid attack components or variant assignments")
+        parts = {part["id"]: part for part in components}
+        verify(len(parts) == len(components), "Duplicate native attack component identity")
+        selections = set()
+        for selection in choices:
+            verify(isinstance(selection,dict) and isinstance(selection.get("componentId"),str) and
+                   isinstance(selection.get("actorId",aid),str) and (selection.get("formId") is None or isinstance(selection["formId"],str)),
+                   "Invalid attack variant identity")
+            actor = selection.get("actorId", aid)
+            form = selection.get("formId")
+            key = actor, form, selection.get("componentId")
+            verify(entities.get(actor, {}).get("kind") == "actor" and
+                   (actor == aid or data.get("transfersWithItem") is True) and
+                   (form is None or entities.get(form, {}).get("kind") == "form" and entities[form]["actorId"] == actor) and
+                   key not in selections and selection.get("type") in parts.get(key[-1], {}).get("variants", []),
+                   "Invalid migrated attack variant or actor/form assignment")
+            selections.add(key)
     if kind=="effect":
         charge = data.get("charge")
         if charge is not None:
@@ -384,10 +411,40 @@ def scalar_paths(value, prefix=()):
         yield prefix,value
 
 
+def actor_source_references(plan, entries, decisions, targets):
+    """Publish only witnessed identities of mapped, player-known actor records."""
+    eligible={"playable.characters","records.characterProfiles","authority.actors"}
+    fields={}
+    bindings={}
+    for witness in plan["parity"]:
+        key=source_key(witness)
+        target=witness["target"]
+        if key[1] not in eligible or targets[target]["kind"]!="actor" or not decisions[key]["playerKnown"]:
+            continue
+        path=witness["targetPath"]
+        if path==["id"] and witness["transform"] in ("scopedIdentity","exact"):
+            original=path_value(entries[key],witness["sourcePath"])
+            if isinstance(original,str) and IDENTITY.fullmatch(original):
+                bindings[(target,key)]=original
+        if len(path)>1 and path[0]=="data" and path[1] in {"abilities","level","baseAc","maxHp","currentHp","temporaryHp","proficiency","rulesProfile"}:
+            fields.setdefault((target,key),set()).add(path[1])
+    per_actor={}
+    for (target,key),original in sorted(bindings.items()):
+        row=entries[key]
+        revision=row.get("revision")
+        stamp=row.get("updatedAt")
+        ref={"family":key[1],"sourceId":original,"revision":revision if type(revision) is int and revision>0 else None,
+             "updatedAt":stamp if type(stamp) is int and stamp>0 else None,
+             "fields":sorted(fields.get((target,key),set()))}
+        # Multiple independent exports can witness the same actor and revision.
+        per_actor.setdefault(target,{})[encode(ref)]=ref
+    return {actor:[rows[key] for key in sorted(rows)] for actor,rows in per_actor.items()}
+
+
 def project(raw_by_hash, plan, tenant):
     base_fields={"format","version","owner","continuity","sources","decisions","targets","links","parity"}
     verify(isinstance(plan,dict) and set(plan) in (base_fields,base_fields|{"media"}) and
-           plan["format"]==FORMAT and type(plan["version"]) is int and plan["version"]==1 and
+           plan["format"]==FORMAT and type(plan["version"]) is int and plan["version"] in (1,2) and
            (plan["owner"],plan["continuity"])==tenant and all(isinstance(v,str) and v.strip() for v in tenant),
            "Unsupported or wrongly scoped reviewed mapping")
     baseline=template(list(raw_by_hash.values()), *tenant)
@@ -473,6 +530,8 @@ def project(raw_by_hash, plan, tenant):
         active_by_native[native_identity]=signature
     entities={}
     for target in plan["targets"]:
+        if plan["version"]==2 and isinstance(target,dict) and target.get("kind")=="actor":
+            verify(isinstance(target.get("data"),dict) and "importedSources" not in target["data"], "Actor source references are derived from reviewed identity witnesses")
         verify(isinstance(target,dict) and set(target)=={"id","kind","actorId","title","life","revision","data"} and
                isinstance(target["id"],str) and IDENTITY.fullmatch(target["id"]) and target["id"] not in entities and
                target["kind"] in REQUIRED and target["life"] in ("active","archived") and type(target["revision"]) is int and target["revision"]>=1 and
@@ -537,6 +596,23 @@ def project(raw_by_hash, plan, tenant):
                 verify(ids[0] in (source_id, aliases.get(source_id)), "Native effect belongs to a different physical source")
             if isinstance(native_source, dict) and native_source.get("id"):
                 verify(exact(target["data"].get("sourceRecord"),native_source), "The native equipment rule source identity must be preserved")
+    for key, decision in decisions.items():
+        if decision["disposition"] != "map" or not key[1].endswith(".attacks"):
+            continue
+        source = entries[key].get("recordedSource")
+        if source is None:
+            continue
+        verify(isinstance(source,dict) and isinstance(source.get("profileId"),str) and source["profileId"].strip() and
+               source.get("attackId") == entries[key].get("id") and isinstance(source.get("attackJson"),str) and
+               sha(source["attackJson"].encode()) == source.get("fingerprint"), "The original native attack source identity or digest is invalid")
+        recorded_attack = loads(source["attackJson"].encode())
+        verify(isinstance(recorded_attack,dict) and recorded_attack.get("id") == source["attackId"], "The reviewed source names a different native attack")
+        for target_id in decision["targets"]:
+            target = entities[target_id]
+            if target["kind"] == "attack":
+                verify(exact(target["data"].get("recordedSource"), source), "The original native attack review must be preserved")
+                if key[1] == "playable.characters.attacks":
+                    verify(key[2][0] in (target["actorId"], aliases.get(target["actorId"])), "The native actor attack is mapped to another actor")
     witnesses={}
     for w in plan["parity"]:
         verify(isinstance(w,dict) and set(w)=={"source","family","identity","sourcePath","target","targetPath","transform"} and
@@ -655,6 +731,14 @@ def project(raw_by_hash, plan, tenant):
         verify(key in decisions and link["from"] in decisions[key]["targets"] and
                (exact(path_value(entries[key],link["targetPath"]),link["to"]) or
                 link["to"] in aliases and exact(path_value(entries[key],link["targetPath"]),aliases[link["to"]])), "Relationship lacks source-bound target identity")
+        source_entity=entities[link["from"]]
+        bond_field={"infusion_operator":"operatorId","known_infusion":"knownFeatureId","dedicated_slot":"dedicatedPoolId"}.get(link["relation"])
+        if bond_field:
+            verify((source_entity["data"].get("infusionBond") or {}).get(bond_field)==link["to"], "Original companion bond edge disagrees with its recorded source")
+        if source_entity["kind"]=="cast_instance" and source_entity["data"].get("rollAid") is not None:
+            cast=source_entity["data"]
+            permitted={"target":cast["targets"],"cast_spell":[cast["spellId"]],"used_grant":[cast["grantId"]]}
+            verify(link["relation"] not in permitted or link["to"] in permitted[link["relation"]],"Concentrated roll aid edge disagrees with its cast")
         expected=EDGE_TARGET[link["relation"]]
         verify((expected=="*" or entities[link["to"]]["kind"] in expected.split()) and
                entities[link["from"]]["kind"] in EDGE_FROM.get(link["relation"],REQUIRED), "Wrong typed edge endpoint")
@@ -668,6 +752,7 @@ def project(raw_by_hash, plan, tenant):
     must_link["form_deployment"]={"formId":"deployment_form"}
     must_link["form"]={"inheritedRuleFormIds":"inherits_form_rules"}
     must_link["effect"]={"sourceItemId":"requires_item","formId":"requires_form"}
+    must_link["attack"]={"sourceItemId":"requires_item","formId":"requires_form","excludedForms":"excludes_form"}
     must_link["story_arc"]={"parentArcId":"part_of_arc","eventIds":"includes_event"}
     must_link["campaign_session"]={"arcId":"session_in_arc","previousSessionId":"follows_session",
         "openingCheckpointId":"opens_at_checkpoint","closingCheckpointId":"closes_at_checkpoint","eventIds":"includes_event"}
@@ -682,14 +767,27 @@ def project(raw_by_hash, plan, tenant):
             node=ancestry[node]
         closed.update(visited)
     for ident,target in entities.items():
+        if target["kind"] == "feature" and target["data"].get("infusionBond") is not None:
+            bond = target["data"]["infusionBond"]
+            for field,relation in (("operatorId","infusion_operator"),("knownFeatureId","known_infusion"),("dedicatedPoolId","dedicated_slot")):
+                verify((ident,relation,bond[field]) in seen, "Missing original companion bond edge for "+field)
+        if target["kind"] == "cast_instance" and target["data"].get("rollAid") is not None:
+            cast = target["data"]
+            verify((ident,"cast_spell",cast["spellId"]) in seen and (ident,"used_grant",cast["grantId"]) in seen and
+                   all((ident,"target",target_id) in seen for target_id in cast["targets"]), "Missing source-bound roll-aid cast edge")
+        if target["kind"] == "attack" and target["data"].get("cost"):
+            verify((ident,"uses_pool",target["data"]["cost"]["poolId"]) in seen, "Missing canonical edge for attack cost")
         if target["kind"] == "effect" and target["data"].get("charge"):
             verify((ident,"uses_pool",target["data"]["charge"]["poolId"]) in seen, "Missing canonical edge for effect charge")
         for field,relation in must_link.get(target["kind"],{}).items():
             val=target["data"].get(field)
             values=val if isinstance(val,list) else [] if val is None else [val]
             verify(all((ident,relation,i) in seen for i in values), "Missing canonical edge for "+field)
+    refs=actor_source_references(plan,entries,decisions,entities) if plan["version"]==2 else {}
     rows=sorted(({"owner_id":tenant[0],"continuity_id":tenant[1],"id":t["id"],"kind":t["kind"],"actor_id":t["actorId"],
-                  "title":t["title"],"life":t["life"],"revision":t["revision"],"data_json":encode(t["data"]).decode()} for t in entities.values()),key=lambda x:x["id"])
+                  "title":t["title"],"life":t["life"],"revision":t["revision"],
+                  "data_json":encode({**t["data"],**({"importedSources":refs[t["id"]]} if t["id"] in refs else {})}).decode()}
+                 for t in entities.values()),key=lambda x:x["id"])
     links.sort(key=lambda r:(r["from_id"],r["relation"],r["to_id"]))
     media_objects={}
     presentations=set()

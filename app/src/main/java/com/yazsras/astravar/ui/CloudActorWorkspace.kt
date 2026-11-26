@@ -96,7 +96,7 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
         if (actorId!=null && online) try { sheet=client.projection(snapshot,"sheet/$actorId").obj("sheet") }
         catch(e:CancellationException){throw e} catch(e:Exception){ notice=cloudError(e) }
     }
-    fun roll(kind:String,key:String,mode:String="normal",physical:List<Int>?=null) {
+    fun roll(kind:String,key:String,mode:String="normal",physical:List<Int>?=null,physicalAid:Map<String,Int> = emptyMap()) {
         val id=actorId ?: return
         sheet.obj("rollRestrictions").value("$kind:$key")?.let { reason->notice=cloudLabel(reason.lowercase());return }
         val count=sheet.obj("rollModes").obj("$kind:$key").obj(mode).value("count")?.toIntOrNull()
@@ -104,11 +104,14 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
         if (physical!=null && (physical.size!=count || physical.any { it !in 1..20 })) { notice="Enter $count actual d20 result(s)."; return }
         val faces=physical ?: List(count) { 1 + faceSource.nextInt(20) }
         rollOption=null; notice=null
-        commit("record_check",buildJsonObject {
+        val baseEvidence=buildJsonObject { put("origin",if(physical==null) "app" else "player_physical");put("faces",JsonArray(faces.map(::JsonPrimitive))) }
+        val evidence=castAidEvidence(baseEvidence,sheet?.get("rollAids") as? JsonArray,kind,physicalAid)
+        val body=buildJsonObject {
             put("actorId",id); put("rollId",UUID.randomUUID().toString())
             putJsonObject("check") { put("kind",kind); put("key",key); put("mode",mode) }
-            putJsonObject("evidence") { put("origin",if (physical==null) "app" else "player_physical"); put("faces",JsonArray(faces.map(::JsonPrimitive))) }
-        })
+            put("evidence",evidence)
+        }
+        if(physical!=null && (evidence["aidDice"] as? JsonArray).orEmpty().any{"face" !in it.jsonObject})openOperation("record_check",body) else commit("record_check",body)
     }
     if (selected==null || actorId==null) {
         Column { PlayerButton({ overlay="Actors" }) { Text("Choose character") }
@@ -195,7 +198,10 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
                     }
                     "Equipment" -> CloudRecordScreen(section,actorId,client,snapshot,online,openOperation,inspect)
                     "Spells","Resources" -> CloudSpellRest(section,actorId,client,snapshot,online,openOperation)
-                    "Actions","Forms","History" -> CloudActorRecords(section,client,snapshot,actorId,online,openOperation,inspect,commit)
+                    "Actions","Forms","History" -> {
+                        if(section=="Actions")PlayerOutlinedButton({scope.launch {pager.animateScrollToPage(sections.indexOf("Spells"))}}){Text("Cast a spell")}
+                        CloudActorRecords(section,client,snapshot,actorId,online,openOperation,inspect,commit)
+                    }
                 }
                 Spacer(Modifier.height(78.dp))
             }
@@ -224,6 +230,7 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
                     }, enabled = online) { Text(label) }
                 }
             }
+            selected?.let{CloudCompanionCare(client,snapshot,it,online){op,fields->overlay=null;openOperation(op,fields)}}
             CloudHpMaximumSources(sheet)
         }
         "AC" -> PlayerSheet("Armor class",{overlay=null}) { RecordFields(sheet.obj("ac") ?: JsonNull) }
@@ -246,9 +253,14 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
                     }
                 }
             }
-            if(actorId!=null)PlayerOutlinedButton({overlay=null;openOperation("set_condition",args("actorId" to actorId))},enabled=online){Text("Manage condition")} }
+            if(actorId!=null){
+                CloudConditionSources(actorId,data,online,{ source -> overlay=null;inspect(source) }) { fields ->
+                    overlay=null;openOperation("set_condition",fields)
+                }
+                PlayerOutlinedButton({overlay=null;openOperation("set_condition",buildJsonObject{put("actorId",actorId);put("enabled",true)})},enabled=online){Text("Manage condition")}
+            } }
         "Feature" -> features.find { it.cloudText("id")==featureDetail }?.let { feature ->
-            CloudProfileFeature(client,snapshot,feature,{overlay="Profile"},{linked->overlay=null;inspect(linked)})
+            CloudProfileFeature(client,snapshot,feature,{overlay="Profile"},{linked->overlay=null;inspect(linked)}){op,fields->overlay=null;openOperation(op,fields)}
         }
         "Profile" -> PlayerSheet("Character Profile",{overlay=null}) {
             PlayerTabs(listOf("Defenses","Features & Traits","Proficiencies & Training","Background"),profileTab,{profileTab=it})
@@ -272,7 +284,11 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
             Text(name,style=MaterialTheme.typography.titleMedium); RecordFields(entry ?: JsonNull)
         }
         if(actorId!=null){
-            PlayerTextButton({ selectedAbility=null;openOperation("set_actor_ability",args("actorId" to actorId,"ability" to stat)) },enabled=online){Text("Edit base score")}
+            selected?.let { row->CloudSelectedStatSources(client,snapshot,row,stat,sheet,online,{ section->selectedAbility=null;scope.launch{pager.animateScrollToPage(sections.indexOf(section))} }) { id->selectedAbility=null;inspect(id) } }
+            PlayerTextButton({ selectedAbility=null;openOperation("set_actor_ability",buildJsonObject {
+                put("actorId",actorId);put("ability",stat);put("score",data.obj("abilities")?.get(stat) ?: JsonNull)
+                data.obj("abilitySources").obj(stat).value("source")?.let { put("source",it) }
+            }) },enabled=online){Text("Edit base score")}
             CloudAbilityTraining(actorId,stat,data,sheet,online){name,input->selectedAbility=null;openOperation(name,input)}
         }
     } }
@@ -287,7 +303,17 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
             PlayerButton({roll(kind,key,mode)},enabled=online && expected!=null){Text("Roll")}
             OutlinedTextField(faces,{faces=it},label={Text("Physical d20 faces, in order")})
             val values=faces.split(Regex("[,\\s]+")).filter(String::isNotBlank).mapNotNull { it.toIntOrNull() }
-            PlayerOutlinedButton({roll(kind,key,mode,values)},enabled=online && expected!=null && Regex("[0-9]+(?:[,\\s]+[0-9]+)*").matches(faces.trim())){Text("Record physical dice")}
+            val aids=(sheet?.get("rollAids") as? JsonArray).orEmpty().map{it.jsonObject}.filter {r->r.getValue("applies").jsonArray.any {it.jsonPrimitive.content==kind}}
+            var aidFaces by rememberSaveable(ref){mutableStateOf("{}")}
+            val entered=Json.parseToJsonElement(aidFaces).jsonObject
+            for(rule in aids){
+                val family=rule.cloudText("family");val sides=rule.getValue("sides").jsonPrimitive.int
+                OutlinedTextField(entered[family]?.jsonPrimitive?.content.orEmpty(),{v->aidFaces=JsonObject(entered+(family to JsonPrimitive(v.take(3)))).toString()},
+                    label={Text("Actual "+cloudLabel(family)+" d"+sides)},singleLine=true)
+            }
+            val actual=aids.mapNotNull{r->val key=r.cloudText("family");entered[key]?.jsonPrimitive?.intOrNull?.takeIf{it in 1..r.getValue("sides").jsonPrimitive.int}?.let{key to it}}.toMap()
+            PlayerOutlinedButton({roll(kind,key,mode,values,actual)},enabled=online && expected!=null && actual.size==aids.size && Regex("[0-9]+(?:[,\\s]+[0-9]+)*").matches(faces.trim())){Text("Record physical dice")}
+
             if(kind=="skill"&&actorId!=null){
                 val definition=sheet.obj("skillDefinitions").obj(key)
                 val pinned=definition.value("pinned")=="true"

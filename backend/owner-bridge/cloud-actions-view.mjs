@@ -26,6 +26,7 @@ export async function cloudActions(service,principal,id,actorId,options={}) {
     const d=entity.data;
     if(!matchesForm(d,p.ruleFormIds) || !await gearEligible(ctx,d.sourceItemId,actorId,d.requiresAttunement,d.requiresOperating))continue;
     const reasons=[];
+    if(['disabled','dormant'].includes(a.data.activityState))reasons.push('ACTOR_INACTIVE');
     if(p.exhaustion.status==='fatal')reasons.push('FATAL_EXHAUSTION_REQUIRES_RESOLUTION');
     if(p.exhaustion.status==='adjudication_required')reasons.push('EXHAUSTION_ADJUDICATION_REQUIRED');
     if(p.conditions.some(s=>['incapacitated','unconscious','stunned','paralyzed','petrified'].includes(s)))reasons.push('ACTOR_CANNOT_ACT');
@@ -45,7 +46,12 @@ export async function cloudActions(service,principal,id,actorId,options={}) {
         if(d.resolution==='save')resolvedSaveDc=attackSaveDc(d,p); }
       catch(e){if(!(e instanceof BridgeError))throw e;reasons.push(e.code);damageReasons.push(e.code);}
     }
-    rows.push({id:entity.id,title:entity.title,kind:entity.kind,configuration,components,hit,resolvedSaveDc,reasons,damageReasons,
+    let destinationRequirements;
+    if(d.type==='teleport'){
+      const form=p.formId?await ctx.get('form',p.formId):null;
+      destinationRequirements={range:d.range,groundedOnly:form?.data.grounded===true,minimumSize:p.size};
+    }
+    rows.push({...(destinationRequirements?{destinationRequirements}:{}),rollAids:p.rollAids.filter(r=>r.applies.includes('attack')),id:entity.id,title:entity.title,kind:entity.kind,configuration,components,hit,resolvedSaveDc,reasons,damageReasons,
       optionalCharges:offeredCharges(p,'attack',entity.id,entity.id,components,d.resolution),
       modes:Object.fromEntries(['normal','advantage','disadvantage'].map(m=>[m,rollPolicy(p.effects,'attack:'+entity.id,m)]))});
   }

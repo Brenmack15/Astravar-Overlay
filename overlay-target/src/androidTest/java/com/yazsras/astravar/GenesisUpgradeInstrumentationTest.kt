@@ -64,6 +64,15 @@ class GenesisUpgradeInstrumentationTest {
         ui.ensurePrimaryTab(product, "Character")
         find("Ascension upgrade fixture")
         ui.descriptionBounds(retainedHp(17), product)
+        ui.selectSection(product, "Sheet")
+        val intelligence = ui.descriptionBounds("Intelligence score 15", product)
+        // The title lies above the independent check/save targets within the same card.
+        assertTrue(device.click(intelligence.centerX(), intelligence.top + maxOf(1, intelligence.height() / 22)))
+        tap("Character source evidence")
+        find("INT · base 15 · effective 15")
+        find("Ascension upgrade fixture")
+        tap("Close")
+        ui.descriptionBounds(retainedHp(17), product)
         val markers = mapOf("Character" to By.desc(retainedHp(17)), "Inventory" to By.text("Inventions & research"),
             "Connections" to By.text("Companions"), "Chronicle" to By.text("Encounters"))
         for ((tab, marker) in markers) {

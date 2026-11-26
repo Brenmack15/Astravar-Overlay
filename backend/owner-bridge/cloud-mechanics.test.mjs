@@ -303,6 +303,28 @@ test('an optional interrupt remains bound to the original encounter and turn thr
   assert.equal((await f.read('limited-support')).data.current,1);
 });
 
+test('timed manual conditions retain independent source, exact expiry and derived movement through cold SQL restoration',async t=>{
+  const directory=await mkdtemp(join(tmpdir(),'condition-clock-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+  const f=await setup(t,join(directory,'original.sqlite'));await f.defined({speeds:{walk:30},gameSeconds:100});
+  const set=(sourceId,enabled,extras={})=>f.command('set_condition',{actorId:who,key:'restrained',sourceId,enabled,...extras});
+  const first=await set('net-a',true,{durationSeconds:30});await set('net-b',true,{durationSeconds:60});
+  await assert.rejects(set('net-a',true,{durationSeconds:45}),/CONDITION_SOURCE_DURATION_CHANGED/);
+  await assert.rejects(set('net-a',false,{durationSeconds:30}),/DURATION_ON_REMOVAL/);
+  await assert.rejects(f.command('set_condition',{actorId:who,key:'exhaustion',sourceId:'manual-entry',enabled:true,level:1,durationSeconds:30}),/EXHAUSTION_REQUIRES_PINNED_RECOVERY/);
+  const before=(await f.read(who)).data;const copy=join(directory,'independent.sqlite');
+  f.db.db.prepare('VACUUM INTO ?').run(copy);
+  await set('net-a',false);await set('net-b',false);assert.equal((await f.sheet()).movement.walk,30);
+  f.reopen(copy);
+  assert.deepEqual((await f.read(who)).data.conditionSources,before.conditionSources);
+  assert.deepEqual(await f.retry(first.command),first.result);assert.equal((await f.sheet()).movement.walk,0);
+  const removed=await set('net-a',false);await f.retry(removed.command);
+  const tick=elapsedSeconds=>f.command('advance_actor_time',{actorId:who,elapsedSeconds,confirmed:true});
+  await tick(59);assert.equal((await f.sheet()).movement.walk,0);
+  await tick(1);assert.deepEqual((await f.read(who)).data.conditionSources,[]);assert.equal((await f.sheet()).movement.walk,30);
+  await f.defined({actorId:'unknown-clock',name:'Unknown clock',gameSeconds:null});
+  await assert.rejects(f.command('set_condition',{actorId:'unknown-clock',key:'restrained',sourceId:'net',enabled:true,durationSeconds:10}),/GAME_CLOCK_UNKNOWN/);
+});
+
 test('reviewed attack edits preserve form variants, previous attempts, component identity and resource links',async t=>{
   const f=await setup(t);await f.defined();
   await f.pool('pool-one','charge',3,3,'long_rest');
@@ -1106,4 +1128,69 @@ test('pinned multiclass advancement records one selected class and subclass, kee
   assert.equal(more.out.classChange.before,null);assert.equal(more.out.classChange.after.level,1);
   assert.deepEqual((await f.read(who)).data.classTracks.map(v=>v.level),[3,2,1]);assert.equal((await f.read(who)).data.currentHp,42);
   await assert.rejects(f.command('advance_actor_level',{actorId:who,eventId:'repin',fromLevel:6,toLevel:7,source:'Fixture',classGain:{...rune,fromClassLevel:2}}),/SUBCLASS_ALREADY_PINNED/);
+});
+
+test('dedicated original bond, communication and conditional social rolls are independent of equipment slots and ordinary material',async t=>{
+  const f=await setup(t);
+  const {seedCompanionAcceptance}=await import('./fixtures/companion-traits.mjs');
+  let bindingReceipt;
+  await seedCompanionAcceptance(async(op,args)=>{
+    const result=await f.command(op,args);
+    if(args.featureId==='original-link')bindingReceipt=result.result.receipt;
+    return result;
+  });
+  assert.deepEqual(bindingReceipt.changes.map(c=>c.after.id),['original-link']);
+  const original=(await f.read('original-link')).data.infusionBond,source=await f.read('known-pattern');
+  assert.deepEqual(original,{operatorId:'ally',knownFeatureId:'known-pattern',dedicatedPoolId:'dedicated-capacity'});
+  const domainCounts=()=>f.db.db.prepare("SELECT kind,count(*) n FROM cloud_entities WHERE kind IN ('actor','wallet','item_instance','wallet_transaction') GROUP BY kind ORDER BY kind").all();
+  const before=domainCounts(),tool=await f.read('kit-instance');
+  await assert.rejects(f.command('define_feature',{actorId:who,featureId:'second-link',name:'Another binding',kind:'companion',description:'fixture',source:'fixture',references:[],infusionBond:original}),/DEDICATED_COMPANION_SLOT_OCCUPIED/);
+  await assert.rejects(f.command('revise_resource',{actorId:'ally',poolId:'dedicated-capacity',recovery:'long_rest',source:'Fixture invalid refill'}),/ORIGINAL_COMPANION_SLOT_IN_USE/);
+  assert.equal((await f.read('dedicated-capacity')).data.current,0);assert.equal((await f.read('ordinary-capacity')).data.current,2);
+  assert.deepEqual((await f.read('calibration')).data.includedScore,{ability:'DEX',before:16,after:18});
+  assert.deepEqual([(await f.read(who)).data.abilities.DEX,(await f.sheet()).abilities.DEX.modifier],[18,4]);
+  const social={featureId:'welcome',targetActorId:'listener',attitude:'indifferent',perceives:true,purpose:'goodwill',harmlessEndearing:true};
+  const attempt=(id,key,context,...faces)=>f.command('record_check',{actorId:who,rollId:id,check:{...check('skill',key),social:context},evidence:dice(...faces)});
+  assert.equal((await attempt('kindness','persuasion',social,5,16)).out.mode,'advantage');
+  assert.equal((await attempt('entertain','performance',{...social,purpose:'entertain',harmlessEndearing:false},16,5)).out.total,17);
+  for(const [id,part] of [['hostile',{attitude:'hostile'}],['unseen',{perceives:false}],['unsafe',{harmlessEndearing:false}],['unknown',{attitude:'unknown'}],['unrelated',{purpose:'other'}]])
+    assert.equal((await attempt(id,'persuasion',{...social,...part},11)).out.social.applied,false);
+  const translate=(id,extra={})=>f.command('use_action',{actorId:who,actionId:'translate',useId:id,declared:true,translation:{recipientId:'ally',inputLanguage:'Fixture A',outputLanguage:'Fixture B',modality:'writing',sourcePerceived:true,outputHeard:true,...extra}});
+  assert.equal((await translate('read-to-ally')).out.translation.modality,'writing');
+  assert.equal((await translate('speak-to-ally',{modality:'speech'})).out.translation.recipientId,'ally');
+  for(const [key,arg,reason] of [['unheard',{outputHeard:false},/TRANSLATION_SENSE_REQUIRED/],['unknown-output',{outputLanguage:'Fixture C'},/TRANSLATION_RECIPIENT_UNAVAILABLE/],['missing-package',{inputLanguage:'Fixture D'},/TRANSLATOR_PACKAGE_UNAVAILABLE/]])
+    await assert.rejects(translate(key,arg),reason);
+  await f.command('equip_item',{itemId:'vocoder',equipment:'packed',source:'Fixture removal'});
+  await assert.rejects(translate('unpowered'),/ACTION_ITEM_INELIGIBLE/);
+  assert.equal((await f.sheet()).communications.some(c=>c.kind==='telepathy' && c.twoWay && !c.sharedSenses),true);
+  assert.deepEqual((await f.read('ally')).data.conditions,[]);assert.deepEqual((await f.read('listener')).data.conditions,[]);
+  assert.deepEqual(await f.read('known-pattern'),source);assert.deepEqual(await f.read('kit-instance'),tool);assert.deepEqual(domainCounts(),before);
+});
+
+test('a targeted concentrated casting contributes actual dice to checks of the permitted types and never to damage, AC or slots on the target',async t=>{
+  const f=await setup(t);const {seedCompanionAcceptance}=await import('./fixtures/companion-traits.mjs');await seedCompanionAcceptance(f.command);
+  const aid=()=>({origin:'player_physical',faces:[13],aidDice:[{family:'support',face:3}]});
+  const attack=(attackId,id,record)=>f.command('resolve_attack',declaredAttack(attackId,id,{hit:record}));
+  const saving=(id,record)=>f.command('record_check',{actorId:who,rollId:id,check:check('save','WIS'),evidence:record});
+  await assert.rejects(saving('unearned',aid()),/CAST_AID_EVIDENCE_REQUIRED/);assert.equal((await f.sheet()).rollAids.length,0);
+  await f.command('cast_spell',{actorId:'ally',castId:'actual-aid',grantId:'aid-grant',level:1,slotPoolId:'operator-slot',targets:[who]});
+  assert.equal((await f.read('ally')).data.concentrationCastId,'actual-aid');assert.equal((await f.read('operator-slot')).data.current,1);
+  assert.deepEqual((await f.sheet()).rollAids,[{family:'support',castId:'actual-aid',sides:4,applies:['attack','save']}]);
+  await assert.rejects(saving('missing-aid',dice(13)),/CAST_AID_EVIDENCE_REQUIRED/);
+  await assert.rejects(saving('invented-aid',{...aid(),aidDice:[{family:'support',face:5}]}),/CAST_AID_FACE_INVALID/);
+  for(const [attackId,total] of [['nip',24],['rake',24],['pulse',25]]){
+    const r=await attack(attackId,'blessed-'+attackId,aid());assert.equal(r.out.hit.total,total);
+    assert.equal(r.out.hit.natural,13);assert.equal(r.out.hit.aidDice[0].castId,'actual-aid');assert.equal(r.out.hit.aidDice[0].face,3);assert.equal(r.out.appliedDamage,null);
+  }
+  const save=await saving('aided-save',aid());assert.deepEqual([save.out.beforeAid,save.out.total],[14,17]);assert.match(save.out.text,/3 on d4/);
+  const misapplied=f.command('record_check',{actorId:who,rollId:'wrong-check',check:check('ability','DEX'),evidence:aid()});await assert.rejects(misapplied,/CAST_AID_INELIGIBLE/);
+  const ordinary=await f.command('record_check',{actorId:who,rollId:'ordinary-check',check:check('ability','DEX'),evidence:dice(13)});assert.equal(ordinary.out.total,17);
+  const damage=await f.command('roll_damage_only',{actorId:who,attackId:'rake',rollId:'ordinary-impact',damage:[{id:'impact',evidence:dice(4,3,2)}]});
+  assert.equal(damage.out.components[0].total,13);assert.equal((await f.sheet()).ac.value,16);
+  const pools=(await f.service.state(dm,cid,{kind:'resource_pool',limit:100})).records;
+  assert.equal(pools.filter(r=>r.kind==='resource_pool'&&r.actorId===who&&r.data.type==='spell_slot').length,0);
+  await f.command('advance_actor_time',{actorId:'ally',elapsedSeconds:60,confirmed:true});
+  assert.equal((await f.sheet()).rollAids.length,0);await assert.rejects(attack('nip','expired-aid',aid()),/CAST_AID_EVIDENCE_REQUIRED/);
+  assert.equal((await attack('nip','no-aid',dice(13))).out.hit.total,21);
+  assert.equal((await f.read('operator-slot')).data.current,1);
 });

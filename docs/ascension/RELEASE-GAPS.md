@@ -2,7 +2,7 @@
 
 This register identifies work that can change the 4.1 release decision. The source and per-paragraph outcomes are in [directive requirements](requirements.csv), [backlog cases](requirements-backlog.csv), [fixture verification](requirements-fixtures.csv) and [capabilities](capabilities.csv). Each capability includes its native entry and outstanding observable interaction. The authoritative operation count and replay/readback results are in [protocol parity](protocol-parity.json).
 
-The isolated service registered 119 commands. All 118 gameplay commands passed in both authenticated directions, with 1,011 submissions and 1,623 independently read affected records per direction. The owner-only continuity settings command has its own positive owner and denied client tests. The private campaign was outside these tests. [Wire evidence](protocol-parity.json)
+The isolated service registered 119 commands. All 118 gameplay commands passed in both authenticated directions, with 1,227 submissions and 1,957 independently read affected records per direction. The owner-only continuity settings command has its own positive owner and denied client tests. The private campaign was outside these tests. [Wire evidence](protocol-parity.json)
 
 ## Implementation and compatibility
 

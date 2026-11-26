@@ -175,6 +175,7 @@ import java.io.IOException
             onRenew = { origin, profile -> operate { val url = client.startServiceAuthorization(origin, profile); openOwner(url, origin); client.snapshot() } },
             onImportAuthorization = { importAuthorization.launch(arrayOf("application/json", "application/octet-stream")) },
             onDiagnostics = { diagnostics = true },
+            onReceiptPage = { before -> operate { client.showReceiptPage(before) } },
             onPrepareCampaign = {
                 val environment = connectedEnvironment
                 if (environment == null || view.campaignId != "local-campaign") {

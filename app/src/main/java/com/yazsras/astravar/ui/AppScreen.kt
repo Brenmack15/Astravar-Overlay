@@ -93,7 +93,12 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     val searchRoute = searchProfileId?.let { GenesisCharacterRoute(it, searchSection, searchDetail, searchRouteToken) }
     LaunchedEffect(tool, selectedPlayerId) {
         val section = genesisRetiredToolSection(tool) ?: return@LaunchedEffect
-        searchProfileId = selectedPlayerId ?: "local-player"
+        if(tool=="Character sources" && companionPlayId!=null) {
+            searchProfileId=companionPlayId;searchIsCompanion=true;companionPlaySection=section
+            searchSection=section;searchDetail=null;searchRouteToken++;tool=null;tab="Connections"
+            return@LaunchedEffect
+        }
+        searchProfileId = if(tool=="Character sources") selectedPlayerId else selectedPlayerId ?: "local-player"
         searchSection = section; searchDetail = null; searchRouteToken++
         searchIsCompanion = false; companionPlayId = null; tool = null; tab = "Character"
     }
@@ -359,15 +364,12 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                         "Campaign import" -> CampaignArchiveImportV21(app.campaignLedger)
                         "Weapon backup" -> Page {BackupPage(current,actions)}
                         "Armor systems", "Armor weapon", "Rules & profile", "Resources & recovery",
-                        "Spell reservoir", "Spell library", "Roll history" -> Text("Opening character…")
+                        "Spell reservoir", "Spell library", "Roll history", "Character sources" -> Text("Opening character…")
                         "ChatGPT Prompts", "ChatGPT toolkit" -> ChatGptPromptsPage(app.campaignLedger.prompts)
                         "Appearance", "Overlay & appearance" -> SettingsPage(app,current,actions,startOverlay,grantOverlay,stopOverlay)
                         "Companions" -> PartyPageV2(app.campaignLedger, current, openReferences={tool=null;tab="Chronicle";campaignPage="Reference Library"}) {
                             tool = null; requestedInventory = "Campaign items"; inventoryRoute++; tab = "Inventory"
                         }
-                        "Character sources" -> PlayerEntry("Character source evidence", "Open an ability inspector on the selected sheet", "History", {
-                            tool = null; tab = "Character"
-                        })
                         else -> HelpPage()
                     }
                 }}

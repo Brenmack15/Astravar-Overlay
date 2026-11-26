@@ -47,9 +47,11 @@ internal fun campaignSourceMetadataV21(source: CampaignArchivePayload) = Campaig
     source.attachments.map { CampaignSourceAttachmentMetadataV21(it.id, it.fileName, it.mimeType,
         it.sourceUrl, it.sha256, it.status, it.base64 != null) })
 
-@Composable fun CampaignReferenceLibraryV21(repository: CampaignLedgerRepository) {
-    val references by repository.archive.references.collectAsState(initial = emptyList())
-    val relations by repository.archive.relations.collectAsState(initial = emptyList())
+@Composable fun CampaignReferenceLibraryV21(repository: CampaignLedgerRepository, allowedReferences: Set<String>? = null) {
+    val allReferences by repository.archive.references.collectAsState(initial = emptyList())
+    val allRelations by repository.archive.relations.collectAsState(initial = emptyList())
+    val references=remember(allReferences,allowedReferences){if(allowedReferences==null)allReferences else allReferences.filter{it.id in allowedReferences}}
+    val relations=remember(allRelations,allowedReferences){if(allowedReferences==null)allRelations else allRelations.filter{it.fromId in allowedReferences && it.toId in allowedReferences}}
     var query by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf("All") }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -101,7 +103,7 @@ internal fun campaignSourceMetadataV21(source: CampaignArchivePayload) = Campaig
             PlayerDisclosure("Source properties") {
                 ArchiveOriginalTextV21(record.propertiesJson, "source properties", record.id)
             }
-            PlayerDisclosure("Archive source & attachments") { CampaignArchiveSourceDetailsV21(repository, record.packageHash) }
+            if(allowedReferences==null) PlayerDisclosure("Archive source & attachments") { CampaignArchiveSourceDetailsV21(repository, record.packageHash) }
             PlayerDisclosure("Relationships (${associated.size})", initiallyOpen = associated.isNotEmpty()) {
                 associated.take(relationLimit).forEach { relation ->
                     val otherId = if (relation.fromId == record.id) relation.toId else relation.fromId

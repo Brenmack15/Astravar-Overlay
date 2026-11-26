@@ -3,6 +3,7 @@ package com.yazsras.astravar.ui
 import androidx.compose.runtime.*
 import com.yazsras.astravar.data.CloudCampaignClient
 import com.yazsras.astravar.data.CloudSnapshot
+import com.yazsras.astravar.data.cloudText
 import com.yazsras.astravar.rules.reforge.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.*
@@ -72,6 +73,32 @@ private fun rollStatus(result: JsonObject): String {
     return if (status == "COMMITTED") "Committed and verified" else status.lowercase().replace('_', ' ')
 }
 
+private fun confirmedPresetStatus(result: JsonObject): String {
+    val message = rollStatus(result)
+    check(result.field("status") == "COMMITTED") { message }
+    return message
+}
+
+private fun checkEvidence(result: DiceResult): JsonObject = buildJsonObject {
+    put("origin", if (result.manual) "player_physical" else "app")
+    put("faces", buildJsonArray { result.faces.forEach { add(it.face) } })
+}
+
+private suspend fun CloudCampaignClient.changePreset(snapshot: CloudSnapshot, operation: String, args: JsonObject): String {
+    val prior = pending().firstOrNull { it.field("operation") == operation && it["args"] == args &&
+        it["epoch"]?.jsonPrimitive?.longOrNull == snapshot.version.epoch }
+    val response = if (prior == null) submit(operation, args, snapshot) else retry(requireNotNull(prior.field("commandId")))
+    return confirmedPresetStatus(response)
+}
+
+private suspend fun CloudCampaignClient.retirePreset(snapshot: CloudSnapshot, id: String, permanent: Boolean): String {
+    val row = requireNotNull(record(id)) { "The preset is no longer active." }
+    return changePreset(snapshot, if (permanent) "permanently_delete_records" else "archive_records", buildJsonObject {
+        putJsonArray("records") { add(buildJsonObject { put("kind", "roll_preset"); put("id", id); put("revision", row.getValue("revision")) }) }
+        if (permanent) { put("confirmation", "PERMANENT_DELETE"); put("acknowledgeExternalBackups", true) }
+    })
+}
+
 @Composable internal fun CloudRollManager(client: CloudCampaignClient, snapshot: CloudSnapshot, actorId: String,
     online: Boolean, onDismiss: () -> Unit) {
     var sheet by remember(actorId, snapshot.binding) { mutableStateOf<JsonObject?>(null) }
@@ -107,6 +134,14 @@ private fun rollStatus(result: JsonObject): String {
     val workshop = (sheet?.get("contextTags") as? JsonArray).orEmpty().any { it.jsonPrimitive.content == "pocket-workshop" }
     RollManagerPanel(actorId, revision, options, presets, history, editable = online && loadedAt == revision,
         workshopEligible = workshop, onDismiss = onDismiss, information = loadError,
+        applicableAids = { check ->
+            (sheet?.get("rollAids") as? JsonArray).orEmpty().map { it.jsonObject }.filter { aid ->
+                aid.getValue("applies").jsonArray.any { it.jsonPrimitive.content == cloudCheckNames[check.kind] }
+            }.map { aid -> ManagerAid(aid.cloudText("family"), aid.cloudText("castId"), aid.getValue("sides").jsonPrimitive.int) }
+        },
+        prepareEvidence = { check, result, physical ->
+            castAidEvidence(checkEvidence(result), sheet?.get("rollAids") as? JsonArray, cloudCheckNames.getValue(check.kind), physical)
+        },
         resolve = { entry, useWorkshop ->
             if (entry.kind == RollKind.CUSTOM) ManagerFormula(SecureDice.parse(requireNotNull(entry.customFormula)), entry.mode)
             else {
@@ -134,9 +169,7 @@ private fun rollStatus(result: JsonObject): String {
                         put(if (usesPreset) "rolls" else "entries", buildJsonArray { batch.rolls.forEach { r -> add(buildJsonObject {
                             put("rollId", r.id)
                             if (!usesPreset) put("check", cloudCheckArgs(r.check, batch.workshop))
-                            put("evidence", buildJsonObject {
-                                put("origin", if (r.result.manual) "player_physical" else "app"); put("faces", buildJsonArray { r.result.faces.forEach { add(it.face) } })
-                            })
+                            put("evidence", r.evidence ?: checkEvidence(r.result))
                         }) } })
                     }, snapshot)
                 }
@@ -150,15 +183,10 @@ private fun rollStatus(result: JsonObject): String {
                 SavedRollBatch(entries.map { requireNotNull(it.field("text")) }, "Committed and verified")
             }
         }, savePreset = { p ->
-            rollStatus(client.submit("save_roll_preset", buildJsonObject {
+            client.changePreset(snapshot, "save_roll_preset", buildJsonObject {
                 put("actorId", actorId); put("presetId", p.id); put("name", p.name); put("update", presets.any { it.id == p.id })
                 put("entries", buildJsonArray { p.entries.forEach { add(cloudCheckArgs(it, p.workshop)) } })
-            }, snapshot))
-        }, deletePreset = { id ->
-            val row = requireNotNull(client.record(id))
-            rollStatus(client.submit("permanently_delete_records", buildJsonObject {
-                put("records", buildJsonArray { add(buildJsonObject { put("kind", "roll_preset"); put("id", id); put("revision", row.getValue("revision")) }) })
-                put("confirmation", "PERMANENT_DELETE"); put("acknowledgeExternalBackups", true)
-            }, snapshot))
-        })
+            })
+        }, archivePreset = { id -> client.retirePreset(snapshot, id, permanent = false) },
+        deletePreset = { id -> client.retirePreset(snapshot, id, permanent = true) })
 }

@@ -37,11 +37,17 @@ data class CampaignOperationView(val type: String, val recordId: String, val exp
 data class CampaignPendingView(val commandId: String, val state: String, val source: String,
     val message: String, val operations: List<CampaignOperationView>, val terminalReceipt: Boolean = false)
 data class CampaignReceiptView(val commandId: String, val state: String, val message: String,
-    val independentlyVerified: Boolean)
+    val independentlyVerified: Boolean, val eventId: String = "", val fingerprint: String = "",
+    val operations: List<CampaignReceiptOperationView> = emptyList()) {
+    val needsAttention get() = !independentlyVerified
+}
+data class CampaignReceiptOperationView(val type: String, val recordId: String, val expected: Long?, val current: Long?, val committed: Long?)
 data class CampaignConnectionView(
     val connected: Boolean = false, val status: String = "Disconnected", val origin: String = "",
     val campaignId: String = "", val selectedProfileId: String = "", val deviceId: String = "",
     val deviceName: String = "Android device", val account: String = "", val lastSyncAt: Long? = null,
+    val campaignName: String = "", val historyHasNewer: Boolean = false, val historyNext: String? = null,
+    val unverifiedHistoryCount: Int = 0,
     val revokePending: Boolean = false, val profiles: List<CampaignConnectionProfileView> = emptyList(),
     val pairingCode: String? = null, val pairingUrl: String? = null, val grantId: String = "",
     val grantRevision: Long? = null, val readScopes: Set<String> = emptySet(),
@@ -78,7 +84,8 @@ private fun connectionTime(value: Long?) = value?.let {
     onRestrictPermissions: (Set<String>, Set<String>) -> Unit = { _, _ -> },
     onPauseSync: (Boolean) -> Unit = {}, onSyncNotification: (Boolean) -> Unit = {},
     onPushy: (Boolean) -> Unit = {}, onPrepareCampaign: () -> Unit = {},
-    onReviewMembership: () -> Unit = {}, onReviewCombatAccess: () -> Unit = {}, openTool: ((String)->Unit)? = null
+    onReviewMembership: () -> Unit = {}, onReviewCombatAccess: () -> Unit = {}, openTool: ((String)->Unit)? = null,
+    onReceiptPage: (String?) -> Unit = {}
 ) {
     var origin by rememberSaveable(view.origin) { mutableStateOf(view.origin) }
     var deviceName by rememberSaveable(view.deviceName) { mutableStateOf(view.deviceName) }
@@ -102,11 +109,6 @@ private fun connectionTime(value: Long?) = value?.let {
             OpenCloudWorkspace()
             LegacyPublishingConsent(view.origin, view.campaignId, view.deviceId)
         }
-        if(openTool!=null) PlayerDisclosure("Backups and recovery") {
-            listOf("Complete backup","Character backup","Campaign backup","Campaign import","Original armor archive").forEach { label->
-                PlayerEntry(label,"","History",{openTool(if(label=="Original armor archive")"Weapon backup" else label)})
-            }
-        }
         PlayerHeading("Owner connection")
         PlayerCard {
             Text("Campaign connection", style = MaterialTheme.typography.titleLarge, color = RebuildPalette.GoldBright)
@@ -119,15 +121,10 @@ private fun connectionTime(value: Long?) = value?.let {
                 modifier = Modifier.testTag("campaign-connection-status"))
             Text("Account: ${view.account.ifBlank { "Not authenticated" }}")
             Text("Device: ${view.deviceName}", color = RebuildPalette.Muted)
-            Text("Campaign: ${view.campaignId.ifBlank { "Not selected" }}", color = RebuildPalette.Muted)
+            val campaignLabel = view.campaignName.ifBlank { if (view.campaignId.isBlank()) "Not selected" else "Name unavailable" }
+            Text("Campaign: $campaignLabel", color = RebuildPalette.Muted)
             if (view.readinessDetail.isNotBlank()) Text(view.readinessDetail, color = RebuildPalette.Muted,
                 modifier = Modifier.testTag("campaign-readiness-detail"))
-            Text("Last successful service response: ${connectionTime(view.lastServerResponseAt)}", color = RebuildPalette.Muted,
-                modifier = Modifier.testTag("campaign-service-response-time"))
-            Text("Last upload attempt: ${connectionTime(view.lastUploadAttemptAt)}", color = RebuildPalette.Muted)
-            Text("Last accepted publication: ${connectionTime(view.lastPublicationAcceptedAt)}", color = RebuildPalette.Muted)
-            Text("Last independent record verification: ${connectionTime(view.lastIndependentVerificationAt)}", color = RebuildPalette.Muted)
-            Text("Last fully completed synchronization: ${connectionTime(view.lastFullSyncAt)}", color = RebuildPalette.Muted)
             Text("Last complete gameplay verification: ${view.gameplayVerifiedAt?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM).format(Date(it)) } ?: "Not yet verified"}", color = RebuildPalette.Muted,
                 modifier = Modifier.testTag("campaign-gameplay-verification-time"))
             if (view.failedStage.isNotBlank()) {
@@ -142,9 +139,6 @@ private fun connectionTime(value: Long?) = value?.let {
                 if (view.canonicalReviewProfileId.isNotBlank()) {
                     Text("Record eligibility and verification are blocked until shared values are reconciled.", color = RebuildPalette.GoldBright,
                         modifier = Modifier.testTag("campaign-record-verification-blocked"))
-                } else {
-                    Text("Local campaign records eligible for sync: ${view.localRecordCount}", color = RebuildPalette.Muted)
-                    Text("Current records independently verified: ${view.verifiedRecordCount} of ${view.localRecordCount}", color = RebuildPalette.Muted)
                 }
                 if (view.pendingPublicationCount > 0) Text("Uploads awaiting verification: ${view.pendingPublicationCount}", color = RebuildPalette.GoldBright)
                 if (view.pendingRemovalCount > 0) Text("Previously shared records awaiting removal: ${view.pendingRemovalCount}", color = RebuildPalette.GoldBright)
@@ -152,6 +146,20 @@ private fun connectionTime(value: Long?) = value?.let {
                 if (view.pendingReceiptCount > 0) Text("Device decisions awaiting verified receipts: ${view.pendingReceiptCount}", color = RebuildPalette.GoldBright)
             }
             if (view.revokePending) Text("Server revocation pending. Local access is disabled; retry to confirm server revocation.", color = RebuildPalette.GoldBright)
+            if (view.authorizationPending) Text("Permission update awaiting verification", color = RebuildPalette.GoldBright)
+            if (view.unverifiedHistoryCount > 0) Text("Receipts needing attention: ${view.unverifiedHistoryCount}", color = RebuildPalette.GoldBright)
+            PlayerDisclosure("Sync details") {
+                Text("Last successful service response: ${connectionTime(view.lastServerResponseAt)}", color = RebuildPalette.Muted,
+                    modifier = Modifier.testTag("campaign-service-response-time"))
+                Text("Last upload attempt: ${connectionTime(view.lastUploadAttemptAt)}", color = RebuildPalette.Muted)
+                Text("Last accepted publication: ${connectionTime(view.lastPublicationAcceptedAt)}", color = RebuildPalette.Muted)
+                Text("Last independent record verification: ${connectionTime(view.lastIndependentVerificationAt)}", color = RebuildPalette.Muted)
+                Text("Last fully completed synchronization: ${connectionTime(view.lastFullSyncAt)}", color = RebuildPalette.Muted)
+                if (view.connected && view.canonicalReviewProfileId.isBlank()) {
+                    Text("Local campaign records eligible for sync: ${view.localRecordCount}", color = RebuildPalette.Muted)
+                    Text("Current records independently verified: ${view.verifiedRecordCount} of ${view.localRecordCount}", color = RebuildPalette.Muted)
+                }
+            }
             if (view.connected || view.revokePending) PlayerButton(onClick = onSync, enabled = !view.busy,
                 modifier = Modifier.fillMaxWidth()) { Text("Sync now") }
         }
@@ -186,8 +194,9 @@ private fun connectionTime(value: Long?) = value?.let {
                 else -> Text("Membership is connected, but there are no typed records in this campaign yet. Review the character's saved values before expecting remote data.", color = RebuildPalette.GoldBright)
             }
         }
-        PlayerCard {
-            Text("Background sync", style = MaterialTheme.typography.titleMedium)
+        PlayerDisclosure("Sync settings") {
+            if (view.connected || view.revokePending) PlayerButton(onClick = onSync, enabled = !view.busy,
+                modifier = Modifier.fillMaxWidth()) { Text("Run manual sync") }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Pause automatic sync", modifier = Modifier.weight(1f))
                 Switch(view.automaticSyncPaused, onPauseSync,
@@ -215,8 +224,7 @@ private fun connectionTime(value: Long?) = value?.let {
                 else -> "Pushy sends only a signed wake hint, then Astravar syncs through Cloudflare. Screen-off, Doze and Samsung battery settings may delay delivery."
             }, color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
         }
-        if (!view.connected && !view.revokePending) PlayerCard {
-            Text("Choose your campaign", style = MaterialTheme.typography.titleMedium)
+        if (!view.connected && !view.revokePending) PlayerDisclosure("Choose your campaign", initiallyOpen = view.pairingCode != null) {
             if (view.profiles.isEmpty()) Text("No saved player profile is available. Save or restore your established character before pairing.", color = RebuildPalette.Muted)
             view.profiles.forEach { candidate ->
                 PlayerOutlinedButton(onClick = { selected = candidate.id }, enabled = !locked,
@@ -257,8 +265,7 @@ private fun connectionTime(value: Long?) = value?.let {
             }
         }
         if (view.connected) {
-            PlayerCard {
-                Text("Available record access", style = MaterialTheme.typography.titleMedium)
+            PlayerDisclosure("Available record access") {
                 if ("combat" in view.readScopes && "combat" !in view.writeScopes) {
                     Text("Allow reviewed attacks, defenses and resolved combat actions for this campaign. Roll history stays read-only. The owner must confirm the change on the private service.",
                         style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
@@ -299,8 +306,7 @@ private fun connectionTime(value: Long?) = value?.let {
                         color = RebuildPalette.GoldBright, style = MaterialTheme.typography.bodySmall)
                 }
             }
-            PlayerCard {
-                Text("Trusted DM Auto-Sync", style = MaterialTheme.typography.titleLarge, color = RebuildPalette.GoldBright)
+            PlayerDisclosure("Trusted DM Auto-Sync") {
                 Text("Authorize automatic saves only for gameplay you explicitly decide or resolve. Rule checks, revision checks and audit receipts still apply.", color = RebuildPalette.Muted)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(if (trusted) "Automatic saving" else "Manual approval", modifier = Modifier.weight(1f))
@@ -341,20 +347,28 @@ private fun connectionTime(value: Long?) = value?.let {
         view.pending.forEach { pending ->
             CampaignRequestCard(pending, view.connected && !view.busy, onDecision)
         }
-        PlayerCard {
-            Text("Recent saves and receipts", style = MaterialTheme.typography.titleMedium)
+        view.receipts.filter { it.needsAttention && view.pending.none { pending -> pending.commandId == it.commandId } }.forEach {
+            PlayerCard { CampaignReceiptDetails(it) }
+        }
+        PlayerDisclosure("Recent activity and receipts") {
             if (view.receipts.isEmpty()) Text("No command receipts have been retrieved.", color = RebuildPalette.Muted)
-            view.receipts.take(15).forEach { receipt ->
-                Text(receipt.state.replace('_', ' '), style = MaterialTheme.typography.labelLarge, color = RebuildPalette.Ice)
-                Text("Command ${receipt.commandId}", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
-                if (receipt.message.isNotBlank()) Text(receipt.message, color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
-                Text(if (receipt.independentlyVerified) "Independent server receipt retrieved" else "Server receipt pending or unverified",
-                    color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
-                HorizontalDivider()
+            view.receipts.forEach { CampaignReceiptDetails(it) }
+            view.historyNext?.let { before ->
+                PlayerOutlinedButton({ onReceiptPage(before) }, enabled = !view.busy) { Text("Earlier receipts") }
+            }
+            if (view.historyHasNewer) PlayerTextButton({ onReceiptPage(null) }, enabled = !view.busy) { Text("Most recent receipts") }
+        }
+        if (openTool != null) {
+            PlayerDisclosure("Backups and recovery") {
+                for (label in listOf("Complete backup", "Character backup", "Campaign backup", "Campaign import")) {
+                    PlayerEntry(label, "", "History", { openTool(label) })
+                }
+            }
+            PlayerDisclosure("Archives") {
+                PlayerEntry("Original armor archive", "Original weapon and armor configuration", "History", { openTool("Weapon backup") })
             }
         }
-        PlayerCard {
-            Text("Access and security", style = MaterialTheme.typography.titleMedium)
+        PlayerDisclosure("Access and security") {
             Text("Renew the private service credential through your browser. Device credentials remain encrypted on this installation.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
             PlayerOutlinedButton(onClick = { onRenew((if (view.connected) view.origin else origin).trim(), if (view.connected) view.selectedProfileId else selected) },
                 enabled = !view.busy && (if (view.connected) view.origin else origin).isNotBlank() && (if (view.connected) view.selectedProfileId else selected).isNotBlank(),
@@ -365,6 +379,7 @@ private fun connectionTime(value: Long?) = value?.let {
                 modifier = Modifier.fillMaxWidth()) { Text(if (view.revokePending) "Retry server revocation" else "Disconnect and revoke access") }
             PlayerTextButton(onClick = { advanced = !advanced }) { Text("Advanced diagnostics") }
             if (advanced) {
+                Text("Campaign ID: ${view.campaignId.ifBlank { "Not selected" }}", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
                 Text("Device ID: ${view.deviceId.ifBlank { "Not enrolled" }}", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
                 Text("Service: ${view.origin.ifBlank { "Not selected" }}", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
                 Text("Grant ID: ${view.grantId.ifBlank { "Not enrolled" }}", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
@@ -377,6 +392,23 @@ private fun connectionTime(value: Long?) = value?.let {
         text = { Text("Stop this device's campaign synchronization and revoke its server grant. Saved campaign records and transaction history remain on this device. Offline revocation remains pending until the server confirms it.") },
         confirmButton = { TextButton(onClick = { revokeReview = false; onRevoke() }, enabled = !view.busy) { Text("Revoke access") } },
         dismissButton = { TextButton(onClick = { revokeReview = false }) { Text("Cancel") } })
+}
+
+@Composable
+private fun CampaignReceiptDetails(receipt: CampaignReceiptView) {
+    Text(receipt.state.replace('_', ' '), style = MaterialTheme.typography.labelLarge,
+        color = if (receipt.needsAttention) RebuildPalette.GoldBright else RebuildPalette.Ice)
+    Text("Command ${receipt.commandId}", style = MaterialTheme.typography.bodySmall)
+    if (receipt.message.isNotBlank()) Text(receipt.message, color = RebuildPalette.Muted)
+    Text(if (receipt.independentlyVerified) "Independent server receipt retrieved" else "Server receipt pending or unverified")
+    if (receipt.eventId.isNotBlank()) Text("Receipt ${receipt.eventId}", style = MaterialTheme.typography.bodySmall)
+    if (receipt.fingerprint.isNotBlank()) Text("Fingerprint ${receipt.fingerprint}", style = MaterialTheme.typography.bodySmall)
+    for (op in receipt.operations) {
+        Text("${op.type.replace('_', ' ')} · ${op.recordId}")
+        Text("Expected ${op.expected ?: "unknown"} · current ${op.current ?: "unknown"} · committed ${op.committed ?: "unknown"}",
+            color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
+    }
+    HorizontalDivider()
 }
 
 private fun JsonObject.connectionText(key: String) = (get(key) as? JsonPrimitive)?.contentOrNull.orEmpty()
@@ -412,7 +444,10 @@ internal fun campaignConnectionView(snapshot: JsonObject, now: Long = System.cur
     return CampaignConnectionView(
         connected = (snapshot["connected"] as? JsonPrimitive)?.booleanOrNull == true && !grantExpired && !revoking,
         status = if (revoking) "Server revocation pending" else if (grantExpired) "Authentication expired" else snapshot.connectionText("status").ifBlank { "Disconnected" }, origin = snapshot.connectionText("origin"),
-        campaignId = snapshot.connectionText("campaignId"), selectedProfileId = snapshot.connectionText("selectedProfileId"),
+        campaignId = snapshot.connectionText("campaignId"), campaignName = snapshot.connectionText("campaignName"), selectedProfileId = snapshot.connectionText("selectedProfileId"),
+        historyNext = snapshot.connectionText("historyNext").ifBlank { null },
+        historyHasNewer = (snapshot["historyHasNewer"] as? JsonPrimitive)?.booleanOrNull == true,
+        unverifiedHistoryCount = snapshot.connectionLong("unverifiedHistoryCount")?.coerceIn(0,Int.MAX_VALUE.toLong())?.toInt() ?: 0,
         deviceId = snapshot.connectionText("deviceId"), deviceName = snapshot.connectionText("deviceName").ifBlank { "Android device" },
         account = snapshot.connectionText("accountLabel"), lastSyncAt = snapshot.connectionLong("lastSyncAt")?.takeIf { it > 0 },
         lastServerResponseAt = snapshot.connectionLong("lastServerResponseAt")?.takeIf { it > 0 },
@@ -455,8 +490,29 @@ internal fun campaignConnectionView(snapshot: JsonObject, now: Long = System.cur
                 op.connectionLong("currentRevision"), displayFields(op["current"] ?: op["currentFields"]), if (op.connectionText("type") in setOf("define_native_item", "define_native_actor")) (nativeSourceReview(op["fields"]) + nativeSourceReview(op["nativePreview"])) else displayFields(op["proposedFields"] ?: op["fields"]) + if (op.connectionText("type") == "acquire_item") nativeSourceReview(op["nativePreview"]) else emptyList(),
                 op["proposedFields"] is JsonObject && (op.connectionText("type") !in setOf("acquire_item","define_native_actor","define_native_item") ||
                     (op["nativePreview"] as? JsonObject)?.get("valid") == JsonPrimitive(true))) }, row.connectionText("commandId") in terminalCommands) },
-        receipts = snapshot.connectionRows("history").map { row -> CampaignReceiptView(row.connectionText("commandId"), row.connectionText("state"), row.connectionText("message"),
-            row["receiptJson"] != null && row["receiptJson"] !is JsonNull && row.connectionText("state") in setOf("COMMITTED", "VERIFIED", "REJECTED", "CONFLICT")) }
+        receipts = snapshot.connectionRows("history").map { row ->
+            val stored = (row["receiptJson"] as? JsonPrimitive)?.contentOrNull?.let { runCatching { Json.parseToJsonElement(it) as? JsonObject }.getOrNull() }
+            val commandId = row.connectionText("commandId")
+            val state = row.connectionText("state")
+            val expectedStatus = when (state) {
+                "COMMITTED", "VERIFIED" -> "APPLIED"
+                "REJECTED", "CONFLICT" -> state
+                else -> null
+            }
+            val verified = expectedStatus != null && stored != null && stored.connectionText("commandId") == commandId &&
+                stored.connectionText("status") == expectedStatus && stored.connectionText("eventId").isNotBlank() &&
+                stored.connectionText("fingerprint").isNotBlank() && stored.connectionText("fingerprint") == row.connectionText("fingerprint")
+            val results = stored?.connectionRows("records").orEmpty().associateBy { it.connectionText("kind") to it.connectionText("recordId") }
+            CampaignReceiptView(commandId, state, row.connectionText("message"), verified,
+                if (verified) stored?.connectionText("eventId").orEmpty() else "",
+                if (verified) stored?.connectionText("fingerprint").orEmpty() else "",
+                row.connectionRows("operations").map { op ->
+                    val recordId = op.connectionText("recordId")
+                    val result = if (verified) results[op.connectionText("kind") to recordId] else null
+                    CampaignReceiptOperationView(op.connectionText("type"), recordId, op.connectionLong("expectedRevision"),
+                        op.connectionLong("currentRevision"), result?.connectionLong("revision"))
+                })
+        }
     )
 }
 

@@ -246,7 +246,7 @@ private fun CharacterNumberField(label: String, value: String, change: (String) 
 }
 
 @Composable
-private fun CharacterProfileDialog(snapshot: CharacterProfile?, latest: CharacterProfile?, records: CampaignRecordsRepository,
+internal fun CharacterProfileDialog(snapshot: CharacterProfile?, latest: CharacterProfile?, records: CampaignRecordsRepository,
     profileId: String, onDismiss: () -> Unit, onSaved: () -> Unit) {
     var name by rememberSaveable { mutableStateOf(snapshot?.name.orEmpty()) }
     var hp by rememberSaveable { mutableStateOf(snapshot?.currentHp?.toString().orEmpty()) }
@@ -290,8 +290,8 @@ private fun CharacterProfileDialog(snapshot: CharacterProfile?, latest: Characte
 }
 
 @Composable
-private fun CharacterAbilityDialog(key: String, snapshot: CharacterAbility?, latest: CharacterAbility?, profileExists: Boolean,
-    profileId: String, records: CampaignRecordsRepository, onDismiss: () -> Unit, onSaved: () -> Unit) {
+internal fun CharacterAbilityDialog(key: String, snapshot: CharacterAbility?, latest: CharacterAbility?, profileExists: Boolean,
+    profileId: String, records: CampaignRecordsRepository, onDismiss: () -> Unit, onSaved: () -> Unit, showArtwork: Boolean=true) {
     var score by rememberSaveable(key) { mutableStateOf(snapshot?.score?.toString().orEmpty()) }
     var magic by rememberSaveable(key) { mutableStateOf(snapshot?.magicModifier?.toString() ?: "0") }
     var notes by rememberSaveable(key) { mutableStateOf(snapshot?.notes.orEmpty()) }
@@ -317,7 +317,7 @@ private fun CharacterAbilityDialog(key: String, snapshot: CharacterAbility?, lat
     }) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            AbilityTile(key, abilityNames[key] ?: key, scorePreview, totalPreview, Modifier.width(92.dp))
+            if(showArtwork) AbilityTile(key, abilityNames[key] ?: key, scorePreview, totalPreview, Modifier.width(92.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("${abilityNames[key] ?: key} modifier", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelLarge)
                 Text(signedModifier(totalPreview), color = RebuildPalette.Gold, style = MaterialTheme.typography.headlineMedium)

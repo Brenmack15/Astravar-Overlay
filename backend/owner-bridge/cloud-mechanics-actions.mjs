@@ -41,6 +41,7 @@ async function define(ctx,x){
   const {actorId,actionId,name,...data}=x;
   await insert(ctx,'action_definition',actionId,actorId,name,data);
   for(const v of x.payloadVariants??[])await ctx.link(actionId,'permits_payload',v.spellId);
+  if(x.communicationFeatureId)await ctx.link(actionId,'communication_feature',x.communicationFeatureId);
   if(x.formId)await ctx.link(actionId,'requires_form',x.formId);
   for(const id of new Set(x.excludedForms??[]))await ctx.link(actionId,'excludes_form',id);
   if(x.sourceItemId)await ctx.link(actionId,'requires_item',x.sourceItemId);
@@ -54,7 +55,9 @@ export async function applyCondition(ctx,actorId,key,enabled,sourceId,expiresAt=
   let sources=[...(a.data.conditionSources??[])];
   if(enabled){
     must(!p.effects.some(r=>r.data.target==='condition_immunity' && r.data.key===key),'CONDITION_IMMUNE');
-    if(!sources.some(s=>s.key===key&&s.sourceId===sourceId))sources.push({key,sourceId,expiresAt});
+    const prior=sources.find(s=>s.key===key&&s.sourceId===sourceId);
+    if(prior)must((prior.expiresAt??null)===expiresAt,'CONDITION_SOURCE_DURATION_CHANGED');
+    else sources.push({key,sourceId,expiresAt});
   }else sources=sources.filter(s=>!(s.key===key&&s.sourceId===sourceId));
   const preexisting=a.data.conditions.filter(c=>!(a.data.conditionSources??[]).some(s=>s.key===c));
   const conditions=[...new Set([...preexisting,...sources.map(s=>s.key)])];
@@ -62,7 +65,7 @@ export async function applyCondition(ctx,actorId,key,enabled,sourceId,expiresAt=
   if(ends&&a.data.concentrationCastId)await ctx.unlink(a.id,'concentrates_on',a.data.concentrationCastId);
   const next=enabled && ['incapacitated','unconscious','stunned','paralyzed','petrified'].includes(key)?await interruptIfPending(ctx,a,'actor_incapacitated'):a.data;
   await save(ctx,a,{...next,conditionSources:sources,conditions,concentrationCastId:ends?null:next.concentrationCastId});
-  return {actorId,key,conditions};
+  return {actorId,key,sourceId,enabled,expiresAt,conditions};
 }
 async function setExhaustion(ctx,x){
   const a=await actor(ctx,x.actorId),p=await sheet(ctx,a.id);
@@ -104,7 +107,7 @@ async function execute(ctx,x){
     const form=p.formId?await owned(ctx,'form',p.formId,a.id):null;
     must(dest.visible&&dest.unoccupied&&dest.permittedByBarriers&&dest.passengers===0&&dest.distanceFeet<=d.range,'TELEPORT_DESTINATION_INVALID');
     must(!form?.data.grounded||dest.grounded,'GROUNDED_DESTINATION_REQUIRED');
-    if(form?.data.size)must(sizeOrder.indexOf(dest.availableSize)>=sizeOrder.indexOf(form.data.size),'DESTINATION_TOO_SMALL');
+    if(p.size)must(sizeOrder.indexOf(dest.availableSize)>=sizeOrder.indexOf(p.size),'DESTINATION_TOO_SMALL');
     data.from=a.data.position??null;data.destination=dest;
     await save(ctx,a,{...a.data,position:dest.label});
   }else if(d.type==='frighten'){
@@ -137,6 +140,7 @@ async function execute(ctx,x){
   if(d.cost)data.costs.push(await spend(ctx,a.id,d.cost.poolId,d.cost.amount));
   await insert(ctx,'action_use',x.useId,a.id,action.title,data);
   await ctx.link(x.useId,'used_action',action.id);
+  if(data.translation)await ctx.link(x.useId,'audience',data.translation.recipientId);
   if(data.castId)await ctx.link(x.useId,'delivered_cast',data.castId);
   if(data.deflection)await ctx.link(x.useId,'deflected_attempt',data.deflection.attemptId);
   if(data.rollId)await ctx.link(x.useId,'adjusted_roll',data.rollId);
@@ -190,12 +194,22 @@ export const actionOperations=Object.freeze({
     await save(ctx,attempt,{...d,targetResults:d.targetResults.map(r=>r.targetActorId===target.id?{...r,riderStatus:'resolved',pushResult:result}:r)});
     await ctx.link(attempt.id,'resolved_rider',roll.id);return result;
   }),
-  set_condition:op('combat',fields({actorId:identifier,key:identifier,enabled:boolean,sourceId:identifier,level:whole(0,6),
+  set_condition:op('combat',fields({actorId:identifier,key:identifier,enabled:boolean,sourceId:identifier,level:whole(0,6),durationSeconds:whole(1,31536000),
     customExhaustionRule:option('legacy_2014','revised_2024','manual'),adjudicationSource:named(300)},['actorId','key','enabled','sourceId']),async(ctx,x)=>{
     ctx.require('combat',x.actorId);
-    if(x.key.toLowerCase()==='exhaustion')return setExhaustion(ctx,x);
+    if(x.key.toLowerCase()==='exhaustion'){
+      must(x.durationSeconds==null,'EXHAUSTION_REQUIRES_PINNED_RECOVERY');return setExhaustion(ctx,x);
+    }
     must(x.level===undefined && !x.customExhaustionRule && !x.adjudicationSource,'EXHAUSTION_FIELDS_REQUIRE_EXHAUSTION');
     // Manually entered declarations carry an independent namespace from effect-generated conditions.
-    return applyCondition(ctx,x.actorId,x.key.toLowerCase(),x.enabled,'manual:'+x.sourceId);
+    let expiresAt=null;
+    if(x.durationSeconds!=null){
+      must(x.enabled,'DURATION_ON_REMOVAL');
+      const a=await actor(ctx,x.actorId);
+      must(a.data.gameSeconds!=null,'GAME_CLOCK_UNKNOWN');
+      expiresAt=a.data.gameSeconds+x.durationSeconds;
+      must(Number.isSafeInteger(expiresAt)&&expiresAt<=100000000000,'GAME_CLOCK_OUT_OF_RANGE');
+    }
+    return applyCondition(ctx,x.actorId,x.key.toLowerCase(),x.enabled,'manual:'+x.sourceId,expiresAt);
   })
 });

@@ -1,4 +1,5 @@
-import { checkDiceOwner, stats, identifier, boolean, named, whole, nullable, arrayOf, option, fields, evidence, mode, spellSchema, must, op, actor, owned, insert, save, gearEligible, numeric, sheet, rollPolicy, spend, useTiming } from './cloud-mechanics-core.mjs';
+import { registerCastAid,applyCastAid,activeCastAids } from './cloud-cast-aid.mjs';
+import { d20Evidence,checkDiceOwner, stats, identifier, boolean, named, whole, nullable, arrayOf, option, fields, evidence, mode, spellSchema, must, op, actor, owned, insert, save, gearEligible, numeric, sheet, rollPolicy, spend, useTiming } from './cloud-mechanics-core.mjs';
 import { damageEvidence, componentRules, snapshotComponents, rollComponents } from './cloud-mechanics-combat.mjs';
 import { observed } from './cloud-mechanics-rolls.mjs';
 import { chargedEffectSelection, reserveEffectCosts, settleEffectCosts } from './cloud-effect-costs.mjs';
@@ -11,6 +12,7 @@ export function scaledSpellEffects(spell,level){
 }
 async function defineSpell(ctx,x,edit=false){
   await actor(ctx,x.actorId);componentRules(x.components,true);
+  if(x.rollAid)must(x.concentration && x.resolution==='automatic' && x.rollAid.applies.length>0 && new Set(x.rollAid.applies).size===x.rollAid.applies.length,'CONCENTRATED_AID_REQUIRED');
   must(x.resolution!=='save'||x.saveAbility,'SPELL_SAVE_ABILITY_REQUIRED');
   for(const [base,perLevel] of [['targets','targetsPerLevel'],['durationSeconds','durationPerLevel'],['areaFeet','areaPerLevel']])
     must(x.scaling?.[perLevel]===undefined||x.scaling[base]!==undefined,'SPELL_SCALING_BASE_REQUIRED');
@@ -99,7 +101,7 @@ async function cast(ctx,x){
     resolution:d.resolution,hitModifier:hit,save:d.resolution==='save'?{ability:d.saveAbility,dc,success:d.saveSuccess??null}:null,components:snapshotComponents(d.components,p,{},x.level-d.baseLevel,'spell',spell.id),
     concentration:d.concentration,duration:d.duration??null,scaling,targets,targetResults:[],outcome:'pending',hit:null,damage:null,
     effectivePolicy:{normal:rollPolicy(p.effects,'spell_attack:'+g.id),advantage:rollPolicy(p.effects,'spell_attack:'+g.id,'advantage'),disadvantage:rollPolicy(p.effects,'spell_attack:'+g.id,'disadvantage')},
-    recordedAt:ctx.now,commandId:ctx.commandId};
+    ...(d.rollAid?{rollAid:d.rollAid}:{}),recordedAt:ctx.now,commandId:ctx.commandId};
   for(const id of data.targets)await actor(ctx,id);
   const held=await reserveEffectCosts(ctx,a.id,x.castId,x.chargedEffectIds,p,accuracy,data.components,d.resolution,targets);
   if(held.length)data.effectCharges=held;
@@ -111,6 +113,7 @@ async function cast(ctx,x){
     await ctx.link(a.id,'concentrates_on',x.castId);
     await save(ctx,a,{...a.data,concentrationCastId:x.castId,concentrationExpiresAt:scaling.durationSeconds!=null && a.data.gameSeconds!=null?a.data.gameSeconds+scaling.durationSeconds:null});
   }
+  if(d.rollAid)await registerCastAid(ctx,x.castId,a.id,targets,scaling.durationSeconds);
   return {castId:x.castId,...data};
 }
 async function castRoll(ctx,x){
@@ -125,6 +128,7 @@ async function castRoll(ctx,x){
     must(d.resolution==='attack'&&hit===null,'CAST_HIT_UNAVAILABLE');
     const p=d.effectivePolicy[x.mode??'normal'];
     hit=observed(c.title+' attack',p.count,20,d.hitModifier,p.mode==='normal'?'sum':p.mode==='advantage'?'highest':'lowest',x.hit,true);
+    hit=applyCastAid(hit,await activeCastAids(ctx,a),'attack',x.hit);
   }else must(!x.mode,'UNEXPECTED_ROLL_MODE');
   if(x.damage){
     must(damage===null&&d.components.length>0,'CAST_DAMAGE_UNAVAILABLE');
@@ -150,5 +154,5 @@ export const spellOperations=Object.freeze({
     await save(ctx,g,{...g.data,preparation});return {grantId:g.id,preparation};
   }),
   cast_spell:op('spells',fields({actorId:identifier,grantId:identifier,castId:identifier,level:whole(0,9),slotPoolId:identifier,replaceConcentration:boolean,confirmedRitualTime:boolean,deliveryActorId:identifier,chargedEffectIds:chargedEffectSelection,targets:arrayOf(identifier,12)},['actorId','grantId','castId','level']),cast),
-  link_cast_roll:op('spells',fields({actorId:identifier,castId:identifier,hit:evidence,mode,damage:damageEvidence},['actorId','castId']),castRoll)
+  link_cast_roll:op('spells',fields({actorId:identifier,castId:identifier,hit:d20Evidence,mode,damage:damageEvidence},['actorId','castId']),castRoll)
 });

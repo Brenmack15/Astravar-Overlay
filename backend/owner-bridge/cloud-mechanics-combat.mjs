@@ -1,3 +1,5 @@
+import { applyCastAid } from './cloud-cast-aid.mjs';
+import { d20Evidence } from './cloud-mechanics-core.mjs';
 import {matchesForm} from './cloud-mechanics-core.mjs';
 import { changeDeploymentClock } from './cloud-form-deployment.mjs';
 import { armedComponents, shotChoice } from './cloud-mechanics-arsenal.mjs';
@@ -108,7 +110,8 @@ async function writeAttack(ctx,x,editing=false){
   const selections=oldSelections.filter(s=>config.components.find(c=>c.id===s.componentId)?.variants?.includes(s.type));
   must(selections.length===oldSelections.length||discardUnavailableSelections===true,'REVIEW_VARIANT_REMOVAL');
   const proof=sourceReview ?? (old?.data.sourceItemId===config.sourceItemId ? old?.data.sourceReview : null);
-  const data={...config,selections,...(proof?{sourceReview:proof}:{})};
+  // The imported native review belongs to the original source, including when a later editor changes the display or configuration.
+  const data={...config,selections,...(proof?{sourceReview:proof}:{}),...(old?.data.recordedSource?{recordedSource:old.data.recordedSource}:{})};
   const record=old
     ? await ctx.put({...old,title:name,data})
     : await insert(ctx,'attack',attackId,actorId,name,data);
@@ -126,7 +129,7 @@ async function loadAttack(ctx,x){
   must(!p.conditions.some(c=>['incapacitated','unconscious','stunned','petrified','paralyzed'].includes(c)),'ACTOR_CANNOT_ATTACK');
   must(matchesForm(d,p.ruleFormIds),'ATTACK_FORM_INELIGIBLE');
   must(await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating),'ATTACK_SOURCE_INELIGIBLE');
-  const chosen=Object.fromEntries(d.selections.filter(s=>(s.actorId??attack.actorId)===a.id&&s.formId===p.formId).map(s=>[s.componentId,s.type]));
+  const chosen=Object.fromEntries((d.selections??[]).filter(s=>(s.actorId??attack.actorId)===a.id&&s.formId===p.formId).map(s=>[s.componentId,s.type]));
   const mode=await attackModeFor(ctx,a,attack);
   return {a,attack,p,components:snapshotComponents([...d.components,...mode.components],d.payloadRule||d.chargeActionId?{...p,effects:[]}:p,chosen,0,'attack',attack.id),attackMode:mode};
 }
@@ -135,7 +138,7 @@ async function chooseVariant(ctx,x){
   must(x.componentId!==attack.data.payloadRule?.componentId,'PAYLOAD_REPLACES_VARIANT');
   const component=attack.data.components.find(c=>c.id===x.componentId);
   must(component?.variants?.includes(x.type),'DAMAGE_VARIANT_UNAVAILABLE');
-  const selections=attack.data.selections.filter(s=>(s.actorId??attack.actorId)!==attack.actorId||s.formId!==p.formId||s.componentId!==x.componentId);
+  const selections=(attack.data.selections??[]).filter(s=>(s.actorId??attack.actorId)!==attack.actorId||s.formId!==p.formId||s.componentId!==x.componentId);
   selections.push({actorId:attack.actorId,formId:p.formId,componentId:x.componentId,type:x.type});
   await save(ctx,attack,{...attack.data,selections});
   return {attackId:attack.id,formId:p.formId,componentId:x.componentId,type:x.type};
@@ -189,7 +192,7 @@ async function resolveAttack(ctx,x){
   if(d.resolution==='attack'){
     const total=attackModifier(attack,p);
     if(x.substitutionId){
-      must(!x.hit && x.mode==='normal','SUBSTITUTION_REPLACES_DICE');
+      must((!x.hit || x.hit.faces.length===0 && x.hit.aidDice?.length) && x.mode==='normal','SUBSTITUTION_REPLACES_DICE');
       const rule=await owned(ctx,'action_definition',x.substitutionId,a.id),f=rule.data;
       must(f.type==='fixed_attack_die' && f.cost && matchesForm(f,p.ruleFormIds) &&
         await gearEligible(ctx,f.sourceItemId,a.id,f.requiresAttunement,f.requiresOperating),'DIE_SUBSTITUTION_INELIGIBLE');
@@ -203,6 +206,7 @@ async function resolveAttack(ctx,x){
       hit=observed(attack.title,policy.count,20,total,policy.mode==='normal'?'sum':policy.mode==='advantage'?'highest':'lowest',x.hit,true);
       critical=hit.natural===20;
     }
+    hit=applyCastAid(hit,p.rollAids,'attack',x.hit);
   }else must(!x.hit && !x.substitutionId && x.mode==='normal','UNEXPECTED_ATTACK_ROLL');
   must(x.includeDamage || x.damage===undefined,'UNREQUESTED_DAMAGE');
   const damage=x.includeDamage?rollComponents(components,x.damage??[],critical):null;
@@ -302,7 +306,7 @@ export const combatOperations=Object.freeze({
   update_attack:op('combat',fields({...attackSchema.properties,expectedAttackRevision:whole(1,Number.MAX_SAFE_INTEGER),
     discardUnavailableSelections:boolean},[...attackSchema.required,'expectedAttackRevision']),(ctx,x)=>writeAttack(ctx,x,true)),
   select_damage_variant:op('combat',fields({actorId:identifier,attackId:identifier,componentId:identifier,type:identifier},['actorId','attackId','componentId','type']),chooseVariant),
-  resolve_attack:op('combat',fields({actorId:identifier,attemptId:identifier,attackId:identifier,actionUseId:identifier,replacesAttackId:identifier,substitutionId:identifier,payload:shotChoice,mode,hit:evidence,includeDamage:boolean,chargedEffectIds:chargedEffectSelection,damage:damageEvidence,targets:arrayOf(identifier,16)},['actorId','attemptId','attackId','mode','includeDamage']),resolveAttack),
+  resolve_attack:op('combat',fields({actorId:identifier,attemptId:identifier,attackId:identifier,actionUseId:identifier,replacesAttackId:identifier,substitutionId:identifier,payload:shotChoice,mode,hit:d20Evidence,includeDamage:boolean,chargedEffectIds:chargedEffectSelection,damage:damageEvidence,targets:arrayOf(identifier,16)},['actorId','attemptId','attackId','mode','includeDamage']),resolveAttack),
   roll_damage_only:op('combat',fields({actorId:identifier,attackId:identifier,rollId:identifier,payload:shotChoice,damage:damageEvidence},['actorId','attackId','rollId','damage']),standaloneDamage),
   roll_attack_damage:op('combat',fields({actorId:identifier,attemptId:identifier,damage:damageEvidence},['actorId','attemptId','damage']),async(ctx,x)=>{
     const r=await owned(ctx,'attack_attempt',x.attemptId,x.actorId);

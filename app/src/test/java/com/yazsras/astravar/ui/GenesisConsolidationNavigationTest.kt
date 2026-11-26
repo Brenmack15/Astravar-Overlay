@@ -41,7 +41,7 @@ class GenesisConsolidationNavigationTest {
     @Test fun restoredOldRoutesResolveToTheirCharacterPages() {
         mapOf("Armor systems" to "Features", "Rules & profile" to "Features", "Armor weapon" to "Combat",
             "Spell reservoir" to "Spells", "Spell library" to "Spells", "Resources & recovery" to "Resources",
-            "Roll history" to "History").forEach { (route, page) -> assertEquals(page, genesisRetiredToolSection(route)) }
+            "Roll history" to "History", "Character sources" to "Sheet").forEach { (route, page) -> assertEquals(page, genesisRetiredToolSection(route)) }
         assertNull(genesisRetiredToolSection("Complete backup"))
         assertNull(genesisRetiredToolSection(null))
     }

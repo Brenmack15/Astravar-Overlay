@@ -21,11 +21,12 @@ import kotlinx.serialization.json.*
     }
 }
 
-@Composable internal fun CloudProfileFeature(client: CloudCampaignClient, snapshot: CloudSnapshot, feature: JsonObject, close: ()->Unit, inspect: (String)->Unit) {
+@Composable internal fun CloudProfileFeature(client: CloudCampaignClient, snapshot: CloudSnapshot, feature: JsonObject, close: ()->Unit, inspect: (String)->Unit, open: (String,JsonObject)->Unit) {
     val d=feature.getValue("data").jsonObject
     PlayerSheet(feature.cloudText("title"),close) {
         (d["description"] as? JsonPrimitive)?.contentOrNull?.let {Text(it)}
         Text((d["source"] as? JsonPrimitive)?.contentOrNull ?: "Unknown source")
+        CloudCompanionFeature(client,snapshot,feature,open)
         val feat=d["feat"] as? JsonObject
         feat?.let {
             Text("Pinned rules · ${cloudLabel(it.cloudText("edition"))}")

@@ -1,3 +1,4 @@
+import { preserveDedicatedCapacity } from './cloud-companion-traits.mjs';
 import {checkedClassTracks} from './cloud-class-progression.mjs';
 import {formCollectionOperations} from './cloud-form-collection.mjs';
 import { checkDiceOwner, diceCategories, stats, damageTypes, standardSkills, identifier, boolean, whole, nullable, named, option, fields, actorSchema, resourceSchema, formSchema, effectSchema, restSchema, must, op, owned, actor, insert, save, transferableSource, gearEligible, activeForm, sheet, healedHp, spend, useTiming, addClock } from './cloud-mechanics-core.mjs';
@@ -100,6 +101,7 @@ async function reviseResource(ctx,x) {
     delete next.rechargeSides; delete next.rechargeMinimum;
   }
   validateResourceRules(next);
+  await preserveDedicatedCapacity(ctx,p,next);
   const priorTrigger = d.recoveryActorId && d.recoveryActorId!==p.actorId ? d.recoveryActorId : null;
   const nextTrigger = next.recoveryActorId && next.recoveryActorId!==p.actorId ? next.recoveryActorId : null;
   if(nextTrigger) must(['short_rest','long_rest','either_rest'].includes(next.recovery) && !['hit_die','spell_slot'].includes(next.type),'EXTERNAL_RECOVERY_TRIGGER_INVALID');
@@ -476,10 +478,13 @@ export const MECHANIC_OPERATIONS=Object.freeze({
     return {actorId:a.id,category:x.category,enabled:x.enabled,source:x.source};
   }),ownerReview:true},
   define_actor:op('character',actorSchema,defineActor),
-  set_actor_ability:op('character',fields({actorId:identifier,ability:option(...stats),score:nullable(whole(0,100))},['actorId','ability','score']),async(ctx,x)=>{
+  set_actor_ability:op('character',fields({actorId:identifier,ability:option(...stats),score:nullable(whole(0,100)),source:named(300)},['actorId','ability','score']),async(ctx,x)=>{
     const a=await actor(ctx,x.actorId);const before=a.data.abilities[x.ability];
-    await save(ctx,a,{...a.data,abilities:{...a.data.abilities,[x.ability]:x.score}});
-    return {actorId:a.id,ability:x.ability,before,after:x.score};
+    const previous=a.data.abilitySources?.[x.ability];
+    const attribution=previous && before===x.score && x.source===undefined ? previous : {source:x.source??null,commandId:ctx.commandId};
+    const abilitySources={...a.data.abilitySources,[x.ability]:attribution};
+    await save(ctx,a,{...a.data,abilitySources,abilities:{...a.data.abilities,[x.ability]:x.score}});
+    return {actorId:a.id,ability:x.ability,before,after:x.score,...(x.source?{source:x.source}:{})};
   }),
   set_skill_pin:op('character',fields({actorId:identifier,skillId:identifier,pinned:boolean},['actorId','skillId','pinned']),async(ctx,x)=>{
     const a=await actor(ctx,x.actorId);
@@ -508,6 +513,7 @@ export const MECHANIC_OPERATIONS=Object.freeze({
   correct_resource_balance:{...op('resources',fields({actorId:identifier,poolId:identifier,before:nullable(whole()),after:nullable(whole()),source:named(300)},['actorId','poolId','before','after','source']),async(ctx,x)=>{
     const p=await owned(ctx,'resource_pool',x.poolId,x.actorId);
     must(p.data.current===x.before && (p.data.maximum==null||x.after==null||x.after<=p.data.maximum),'RESOURCE_CORRECTION_BASELINE_CHANGED');
+    await preserveDedicatedCapacity(ctx,p,{...p.data,current:x.after});
     if(p.data.effectHolds?.length)must(x.after!=null && x.after>=p.data.effectHolds.reduce((n,h)=>n+h.amount,0),'RESOURCE_HAS_PENDING_EFFECT_CHARGES');
     await save(ctx,p,{...p.data,current:x.after});return {poolId:p.id,before:x.before,after:x.after,source:x.source};
   }),ownerReview:true},

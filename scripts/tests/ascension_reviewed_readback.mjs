@@ -21,7 +21,7 @@ async function read(name, args) {
 }
 try {
   await call('/v3/continuities/'+continuityId+'/grants/sites-mcp', {
-    scopes:['character.read','resources.read','inventory.read','economy.read'], auto:[],actors:['*'],
+    scopes:['character.read','resources.read','inventory.read','economy.read',...(process.argv[3]==='--companion-sources'?['spells.read']:[])], auto:[],actors:['*'],
     expectedGrantRevision:0, revoked:false,expiresAt:Date.now()+86400000,
   });
   const sheet=await read('get_cloud_actor_sheet',{id:'fixture-actor'});
@@ -30,7 +30,7 @@ try {
   const gear=await read('get_cloud_record_view',{view:'inventory',id:'fixture-gear'});
   const find=id=>state.records.find(row=>row.id===id);
   assert.equal(sheet.revision,0);
-  assert.equal(sheet.epoch,2);
+  assert.equal(sheet.epoch,Number(process.argv[4]??2));
   assert.equal(find('fixture-actor').data.currentHp,13);
   assert.equal(find('fixture-pool').data.current,1);
   assert.equal(wallets.wallets[0].data.coins.gp,14);
@@ -38,7 +38,16 @@ try {
   assert.equal(gear.holding.data.quantity,3);
   assert.equal(gear.holding.data.ownerId,'fixture-actor');
   assert.equal(gear.definition.id,'fixture-definition');
-  console.log(JSON.stringify({epoch:state.epoch,revision:state.revision,ordinaryHp:13,pool:1,items:3,
+  let companion={};
+  if(process.argv[3]==='--companion-sources'){
+    const helper=await read('get_cloud_actor_sheet',{id:'fixture-helper'});
+    assert.deepEqual(find('original-bond').data.infusionBond,{operatorId:'fixture-actor',knownFeatureId:'known-pattern',dedicatedPoolId:'occupied-slot'});
+    const [activeAid]=helper.sheet.rollAids;
+    assert.deepEqual(activeAid,{family:'support',castId:'recorded-support',sides:4,applies:['attack','save']});
+    assert.equal(find('recorded-support').data.targets[0],'fixture-helper');
+    companion={activeAid,bondRemaining:find('occupied-slot').data.current};
+  }
+  console.log(JSON.stringify({...companion,epoch:state.epoch,revision:state.revision,ordinaryHp:13,pool:1,items:3,
     coins:wallets.wallets[0].data.coins,definitionId:gear.definition.id}));
 } finally {
   db.close();

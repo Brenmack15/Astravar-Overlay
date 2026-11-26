@@ -17,7 +17,9 @@ internal class AscensionWorkerFixture private constructor(private val context: C
         pairing.cloudText("origin"), pairing.getValue("expiresAt").jsonPrimitive.long, pairing.cloudText("bearer"))
     private val database = "ascension-fixture-${UUID.randomUUID()}.db"
     private var cache = CloudSnapshotCache(context, database)
+    @Volatile var deviceOffline = false
     private val transport = OwnerConnectionTransport { origin, path, token, _, payload ->
+        if (deviceOffline) throw OwnerSyncFailure("NETWORK_UNAVAILABLE")
         require(origin == credential.origin && validCloudDevicePath(path) && token != null)
         val reply = call(buildJsonObject {
             put("call", "request"); put("route", path); put("credentialId", token.credentialId); put("token", token.bearer)
@@ -27,6 +29,7 @@ internal class AscensionWorkerFixture private constructor(private val context: C
     }
     private fun makeClient() = CloudCampaignClient(cache, { CloudSession(credential, null) }, transport,
         mediaTransport = { session, target, kind, upload, bytes ->
+            if (deviceOffline) throw OwnerSyncFailure("NETWORK_UNAVAILABLE")
             val path = if (upload == null) "primary/$target/thumbnail" else "uploads/$upload?targetKind=$kind&targetId=$target"
             val reply = call(buildJsonObject {
                 put("call", "media"); put("route", "/v3/continuities/${session.binding.continuity}/media/$path")

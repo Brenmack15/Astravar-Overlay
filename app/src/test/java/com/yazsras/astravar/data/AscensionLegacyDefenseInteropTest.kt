@@ -1,6 +1,18 @@
 package com.yazsras.astravar.data
 
 import android.content.Context
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.*
+import com.yazsras.astravar.ui.*
+import org.junit.Rule
+import org.robolectric.Robolectric
+import org.robolectric.annotation.GraphicsMode
+import org.robolectric.annotation.LooperMode
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.rules.reforge.*
@@ -17,8 +29,11 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35])
+@Config(sdk = [35],qualifiers="w440dp-h960dp-xhdpi")
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@LooperMode(LooperMode.Mode.PAUSED)
 class AscensionLegacyDefenseInteropTest {
+    @get:Rule val compose = createAstravarComposeRule()
     @Test fun restoredHistoricalDefenseReversibleScoreAndPhysicalChargesMatchNativeAndAuthoritativeReaders(): Unit = runBlocking {
         val root = generateSequence(File(requireNotNull(System.getProperty("user.dir"))).absoluteFile) { it.parentFile }
             .first { File(it, "scripts/tests/ascension_reviewed_defense.py").isFile }
@@ -70,9 +85,10 @@ class AscensionLegacyDefenseInteropTest {
                 fun receive(): JsonObject = Json.parseToJsonElement(requireNotNull(input.readLine())).jsonObject.also {
                     require("fixtureError" !in it) { "Isolated service rejected the native fixture" }
                 }
-                fun call(message:JsonObject): JsonObject {
+                val linkLock=Any()
+                fun call(message:JsonObject): JsonObject = synchronized(linkLock) {
                     output.write(message.toString());output.newLine();output.flush()
-                    return receive()
+                    receive()
                 }
                 val binding = receive()
                 val credential = OwnerSyncCredential(binding.cloudText("device"),binding.cloudText("continuity"),binding.cloudText("origin"),
@@ -134,6 +150,7 @@ class AscensionLegacyDefenseInteropTest {
                     assertEquals(result,dm("get_cloud_receipt",buildJsonObject {put("commandId","prove-ward-"+mode)}))
                     verifyProjection(state,snapshot.version.revision+1)
                 }
+                verifySourceScreen(client,char.id,::dm)
             } finally { process.destroyForcibly() }
         } finally {
             cache.close()
@@ -141,6 +158,60 @@ class AscensionLegacyDefenseInteropTest {
             context.deleteDatabase(cacheName)
             folder.deleteRecursively()
         }
+    }
+
+    private suspend fun verifySourceScreen(client:CloudCampaignClient,id:String,dm:(String,JsonObject)->JsonObject) {
+        var snapshot by mutableStateOf(client.refresh())
+        val activity=Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        fun node(m:SemanticsMatcher):SemanticsNodeInteraction {
+            try{compose.waitUntil(12000){compose.onAllNodes(m).fetchSemanticsNodes().isNotEmpty()}}
+            catch(e:ComposeTimeoutException){throw AssertionError(compose.onAllNodes(isRoot()).printToString(maxDepth=8),e)}
+            val scrolling=compose.onAllNodes(m and hasAnyAncestor(hasScrollAction()))
+            return if(scrolling.fetchSemanticsNodes().isNotEmpty())scrolling.onFirst().performScrollTo() else compose.onAllNodes(m).onFirst()
+        }
+        fun click(text:String){node(hasText(text) and hasClickAction()).performClick()}
+        fun record()=dm("get_cloud_state",buildJsonObject{put("id",id)}).getValue("records").jsonArray.single().jsonObject.getValue("data").jsonObject
+        fun scores()=record().getValue("abilities").jsonObject
+        fun inspector(){
+            node(hasTestTag("ability-card-INT")).performTouchInput{click(androidx.compose.ui.geometry.Offset(width/2f,4f))}
+            click("Character source evidence")
+        }
+        try {
+            activity.get().setContent {
+                val seq by client.changes.collectAsState()
+                LaunchedEffect(seq){client.workspace()?.let{snapshot=it}}
+                AstravarTheme {Surface(Modifier.fillMaxSize(),color=RebuildPalette.Canvas){CloudWorkspace(client,snapshot)}}
+            }
+            inspector()
+            node(hasText("Playable character · "+id));node(hasText("Source revision · 1"))
+            node(hasText("Mapped values · ",substring=true))
+            compose.onNodeWithText("Inspect spell sources and DCs").assertDoesNotExist()
+            val refs=record().getValue("importedSources")
+            assertEquals(1,refs.jsonArray.size);assertEquals("playable.characters",refs.jsonArray.single().jsonObject.cloudText("family"))
+            assertEquals(13,scores().getValue("INT").jsonPrimitive.int)
+            click("Edit base score")
+            node(hasText("Score") and hasSetTextAction()).performTextReplacement("15")
+            click("Add Source")
+            node(hasText("Source") and hasSetTextAction()).performTextReplacement("Reviewed measurement")
+            click("Submit");node(hasText("Transaction result"));click("Close")
+            assertEquals(15,scores().getValue("INT").jsonPrimitive.int)
+            val attribution=record().getValue("abilitySources").jsonObject.getValue("INT").jsonObject
+            val committed=dm("get_cloud_receipt",buildJsonObject{put("commandId",attribution.getValue("commandId"))})
+            assertEquals("COMMITTED",committed.cloudText("status"))
+            assertEquals("Reviewed measurement",committed.getValue("receipt").jsonObject.getValue("outcome").jsonObject.cloudText("source"))
+            inspector();node(hasText("Latest score source · Reviewed measurement"));click("Edit base score")
+            node(hasText("Score") and hasSetTextAction()).performTextReplacement("18")
+            val state=dm("get_cloud_state",buildJsonObject{put("id",id)})
+            val concurrent=dm("submit_cloud_command",buildJsonObject{putJsonObject("command"){
+                put("version",1);put("commandId","source-review-independent");put("operation","set_actor_ability")
+                put("epoch",state.getValue("epoch"));put("expectedRevision",state.getValue("revision"))
+                putJsonObject("args"){put("actorId",id);put("ability","INT");put("score",16);put("source","Newer source review")}
+            }})
+            assertEquals("COMMITTED",concurrent.cloudText("status"))
+            click("Submit");node(hasText("The campaign changed. Refresh and review the current values."))
+            assertEquals(16,scores().getValue("INT").jsonPrimitive.int)
+            assertEquals(refs,record().getValue("importedSources"));assertEquals(JsonNull,scores()["STR"])
+        }finally{activity.pause().stop().destroy()}
     }
 
     private fun scopeSource(source:RuleSource) = buildJsonObject {

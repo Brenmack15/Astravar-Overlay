@@ -1,15 +1,21 @@
+import { translateMessage } from './cloud-companion-traits.mjs';
 import { identifier, whole, named, option, boolean, arrayOf, fields, evidence, component, actor, owned, must, save, gearEligible, sheet, checkDiceOwner } from './cloud-mechanics-core.mjs';
 import { observed } from './cloud-mechanics-rolls.mjs';
 
-export const linkedTypes=['thermal_scan','gate','touch_delivery','deflection','timed_attack_mode'];
-export const linkedDefinitions={bondedActorId:identifier,thermal:fields({normal:whole(1,10000),faint:whole(1,10000),skillId:identifier,tag:identifier},['normal','faint','skillId','tag']),
+export const linkedTypes=['translate','thermal_scan','gate','touch_delivery','deflection','timed_attack_mode'];
+export const linkedDefinitions={communicationFeatureId:identifier,bondedActorId:identifier,thermal:fields({normal:whole(1,10000),faint:whole(1,10000),skillId:identifier,tag:identifier},['normal','faint','skillId','tag']),
   reduction:fields({dice:whole(1,20),sides:whole(2,100)},['dice','sides']),modeAttacks:arrayOf(identifier,16),modeReach:whole(1,200),modeComponent:component};
-export const linkedArguments={thermalReading:fields({distanceFeet:whole(0,10000),faint:boolean,obstacle:option('none','solid','deep_snow','magical_interference','unverified')},['distanceFeet','faint','obstacle']),
+export const linkedArguments={translation:fields({inputLanguage:named(80),outputLanguage:named(80),recipientId:identifier,modality:option('speech','writing'),sourcePerceived:boolean,outputHeard:boolean},['inputLanguage','outputLanguage','recipientId','modality','sourcePerceived','outputHeard']),thermalReading:fields({distanceFeet:whole(0,10000),faint:boolean,obstacle:option('none','solid','deep_snow','magical_interference','unverified')},['distanceFeet','faint','obstacle']),
   gate:fields({open:boolean,location:named(160),permittedHere:boolean,teleportAllowed:boolean},['open','location','permittedHere','teleportAllowed']),
   delivery:fields({castId:identifier,targetActorId:identifier,distanceToCaster:whole(0,10000),targetWithinReach:{const:true}},['castId','targetActorId','distanceToCaster','targetWithinReach']),
   deflection:fields({attemptId:identifier,targetActorId:identifier,distanceFeet:whole(0,10000),visible:{const:true},dice:evidence,
     allocation:arrayOf(fields({type:identifier,amount:whole()},['type','amount']),16)},['attemptId','targetActorId','distanceFeet','visible','dice'])};
 export async function validateLinkedAction(ctx,x){
+  must((x.type==='translate')===Boolean(x.communicationFeatureId),'TRANSLATOR_SOURCE_REQUIRED');
+  if(x.communicationFeatureId){
+    const f=await owned(ctx,'feature',x.communicationFeatureId,x.actorId);
+    must(f.data.speech?.translation===true && x.timing==='other' && f.data.sourceItemId===x.sourceItemId,'TRANSLATOR_CONFIGURATION_REQUIRED');
+  }
   if(x.bondedActorId){must(x.bondedActorId!==x.actorId,'BONDED_ACTOR_INVALID');await actor(ctx,x.bondedActorId);}
   if(x.type==='thermal_scan')must(x.thermal && x.thermal.faint<=x.thermal.normal && x.sourceItemId,'SENSOR_CONFIGURATION_REQUIRED');
   if(x.type==='deflection')must(x.timing==='reaction'&&x.bondedActorId&&x.reduction&&x.range!=null,'DEFLECTION_CONFIGURATION_REQUIRED');
@@ -25,7 +31,8 @@ export async function validateLinkedAction(ctx,x){
 }
 export async function executeLinkedAction(ctx,a,action,x,data){
   const d=action.data;
-  for(const [key,type] of [['thermalReading','thermal_scan'],['gate','gate'],['delivery','touch_delivery'],['deflection','deflection']])must((x[key]!==undefined)===(d.type===type),'ACTION_ARGUMENT_MISMATCH');
+  if(d.type==='translate') {must(x.translation,'TRANSLATION_REQUIRED');data.translation=await translateMessage(ctx,a,x,await sheet(ctx,a.id),d.communicationFeatureId);}
+  for(const [key,type] of [['translation','translate'],['thermalReading','thermal_scan'],['gate','gate'],['delivery','touch_delivery'],['deflection','deflection']])must((x[key]!==undefined)===(d.type===type),'ACTION_ARGUMENT_MISMATCH');
   if(d.type==='thermal_scan'){
     const read=x.thermalReading, limit=read.faint?d.thermal.faint:d.thermal.normal;
     const eligible=read.obstacle==='none' && read.distanceFeet<=limit;

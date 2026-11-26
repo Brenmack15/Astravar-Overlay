@@ -352,6 +352,12 @@ class CampaignConnectionClient internal constructor(private val context: Context
             dao.settings(current)
         }
     }
+    private var historyBefore: String? = null
+
+    suspend fun showReceiptPage(before: String?): JsonObject = lock.withLock {
+        historyBefore = before
+        snapshotUnlocked()
+    }
     suspend fun snapshot(): JsonObject = lock.withLock { snapshotUnlocked() }
     private suspend fun snapshotUnlocked(): JsonObject {
         val value = setting()
@@ -414,6 +420,7 @@ class CampaignConnectionClient internal constructor(private val context: Context
             put("sourceActorExists", actor != null)
             put("sourceActorCampaignId", actor?.campaignId?.let(::JsonPrimitive) ?: JsonNull)
             put("sourceActorPlayable", actor?.playable == true)
+            put("campaignName", selectedCampaign?.name.orEmpty())
             put("sourceCampaignPrepared", selectedCampaign != null && !selectedCampaign.archived)
             put("deviceName", value.deviceName); put("accountLabel", value.accountLabel)
             put("status", if (value.deviceId.isNotBlank() && !value.revokePending && (secret == null || secret.expiresAt <= now() || runCatching { checkedGrant(value, g) }.isFailure)) "Authentication expired" else value.status)
@@ -446,9 +453,36 @@ class CampaignConnectionClient internal constructor(private val context: Context
                     } })
                 })
             } })
-            put("history", buildJsonArray { commands.filter { it.state !in setOf("PENDING_DELIVERY", "PENDING_APPROVAL") }.takeLast(50).asReversed().forEach {
-                add(buildJsonObject { put("commandId", it.commandId); put("state", it.state); put("message", if (it.state == "CONFLICT") conflictSummary(value,it) else it.message); put("receiptJson", it.receiptJson?.let(::JsonPrimitive) ?: JsonNull) })
-            } })
+            val history = commands.asReversed().filter { it.state !in setOf("PENDING_DELIVERY", "PENDING_APPROVAL") }
+            val cursor = historyBefore?.let { id -> history.indexOfFirst { it.commandId == id } } ?: -1
+            val page = history.drop(cursor + 1).take(50)
+            put("historyHasNewer", cursor >= 0)
+            if (cursor + 1 + page.size < history.size) put("historyNext", page.last().commandId)
+            put("unverifiedHistoryCount", history.count { it.receiptJson == null && it.state !in setOf("APPLYING","APPLIED_PENDING","REJECTED_PENDING","CONFLICT_PENDING","DECISION_CONFLICT") })
+            put("history", buildJsonArray {
+                for (command in page) {
+                    add(buildJsonObject {
+                        put("commandId", command.commandId)
+                        put("fingerprint", command.fingerprint)
+                        put("state", command.state)
+                        put("message", if (command.state == "CONFLICT") conflictSummary(value, command) else command.message)
+                        put("receiptJson", command.receiptJson?.let(::JsonPrimitive) ?: JsonNull)
+                        put("operations", buildJsonArray {
+                            val scopes = activeRead(value)
+                            val allowed = runCatching {
+                                operations(command).filter { canReadKind(it.kind, it.recordId, scopes) && operationCategory(it) in scopes }
+                            }.getOrDefault(emptyList())
+                            for (op in allowed) {
+                                add(buildJsonObject {
+                                    put("type", op.type); put("kind", op.kind); put("recordId", op.recordId)
+                                    put("expectedRevision", op.expectedRevision)
+                                    localById[op.kind to op.recordId]?.let { put("currentRevision", it.revision) }
+                                })
+                            }
+                        })
+                    })
+                }
+            })
         }
     }
     private fun conflictSummary(value: CampaignConnectionSettings, command: CampaignConnectionCommand): String {

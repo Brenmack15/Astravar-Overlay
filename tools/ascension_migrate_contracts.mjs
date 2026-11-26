@@ -31,6 +31,10 @@ function validate(row) {
   if (!schema) invalid(row.kind,'contract unavailable');
   const proposed = {...row.data, actorId:row.actorId, name:row.title, title:row.title, [id]:row.id};
   if (row.kind === 'roll_preset') proposed.update = false;
+  if (row.kind === 'feature' && row.data.category != null) {
+    if (row.data.kind != null && row.data.kind !== row.data.category) invalid(row.kind,'conflicting feature categories');
+    proposed.kind = row.data.category;
+  }
   const fields={};
   for (const [key,spec] of Object.entries(schema.properties)) {
     if (Object.hasOwn(proposed,key) && (proposed[key] !== null || schema.required.includes(key) || cloudMatches(null,spec))) {
@@ -40,8 +44,65 @@ function validate(row) {
   if (!cloudMatches(fields,schema)) invalid(row.kind,'stored definition fails the shared service contract');
   if (row.kind === 'actor' && row.data.classTracks != null) checkedClassTracks(row.data.level,row.data.classTracks);
 }
+/** Check relationships on the imported point-in-time graph without replaying declarations or casts. */
+function validateCompanionSources(rows) {
+  const records = new Map(rows.map(row => [row.id,row]));
+  const companions = new Set(), operators = new Set(), occupied = new Set();
+  const aidSchema = operations.define_spell.schema.properties.rollAid;
+  for (const row of rows) {
+    const d = row.data;
+    if (row.kind === 'feature' && d.infusionBond != null) {
+      const {operatorId,knownFeatureId,dedicatedPoolId} = d.infusionBond;
+      const companion = records.get(row.actorId), operator = records.get(operatorId);
+      const known = records.get(knownFeatureId), slot = records.get(dedicatedPoolId);
+      if (companion?.data.role !== 'companion' || d.category !== 'companion' || d.sourceItemId || d.formId ||
+          operator?.kind !== 'actor' || operatorId === row.actorId || known?.kind !== 'feature' ||
+          known.actorId !== operatorId || !['class','homebrew'].includes(known.data.category) ||
+          slot?.kind !== 'resource_pool' || ![row.actorId,operatorId].includes(slot.actorId) ||
+          slot.data.type !== 'ordinary' || slot.data.maximum !== 1 || slot.data.current !== 0 || slot.data.recovery !== 'none' ||
+          (row.life === 'active' && [operator,known,slot].some(record => record.life !== 'active'))) {
+        invalid(row.kind,'unproven companion operator, known infusion or occupied dedicated pool');
+      }
+      if (companions.has(row.actorId) || operators.has(operatorId) || occupied.has(slot.id)) invalid(row.kind,'duplicate original companion bond');
+      companions.add(row.actorId); operators.add(operatorId); occupied.add(slot.id);
+    }
+    if (row.kind === 'feature' && d.includedScore != null && d.includedScore.before >= d.includedScore.after) {
+      invalid(row.kind,'invalid historical included ability increase');
+    }
+    if (['spell','cast_instance'].includes(row.kind) && d.rollAid != null) {
+      if (!cloudMatches(d.rollAid,aidSchema) || !d.concentration || d.resolution !== 'automatic' ||
+          !d.rollAid.applies.length || new Set(d.rollAid.applies).size !== d.rollAid.applies.length) {
+        invalid(row.kind,'invalid concentrated roll aid');
+      }
+      if (row.kind === 'cast_instance') {
+        const spell = records.get(d.spellId), grant = records.get(d.grantId);
+        if (spell?.kind !== 'spell' || spell.actorId !== row.actorId || grant?.kind !== 'spell_grant' ||
+            grant.actorId !== row.actorId || grant.data.spellId !== d.spellId || !Array.isArray(d.targets) ||
+            d.targets.length > 12 || new Set(d.targets).size !== d.targets.length || d.targets.some(id => records.get(id)?.kind !== 'actor')) {
+          invalid(row.kind,'unproven roll-aid cast, grant or targets');
+        }
+      }
+    }
+    if (row.kind === 'actor' && d.rollAidRefs != null) {
+      if (!Array.isArray(d.rollAidRefs) || d.rollAidRefs.length > 16) invalid(row.kind,'invalid actor roll-aid references');
+      const casts = new Set();
+      for (const ref of d.rollAidRefs) {
+        if (!ref || typeof ref !== 'object' || Object.keys(ref).sort().join() !== 'castId,casterId,expiresAt') invalid(row.kind,'invalid actor roll-aid reference');
+        const cast = records.get(ref.castId);
+        if (records.get(ref.casterId)?.kind !== 'actor' || cast?.kind !== 'cast_instance' || !cast.data.rollAid ||
+            cast.actorId !== ref.casterId || !Array.isArray(cast.data.targets) || !cast.data.targets.includes(row.id) ||
+            casts.has(ref.castId) || (ref.expiresAt !== null && (!Number.isSafeInteger(ref.expiresAt) || ref.expiresAt < 0))) {
+          invalid(row.kind,'roll-aid reference lacks its caster, target or recorded expiry');
+        }
+        casts.add(ref.castId);
+      }
+    }
+  }
+}
 try {
-  for (const row of JSON.parse(readFileSync(0, 'utf8'))) validate(row);
+  const rows = JSON.parse(readFileSync(0, 'utf8'));
+  for (const row of rows) validate(row);
+  validateCompanionSources(rows);
 } catch (error) {
   process.stderr.write(error.message+'\n');
   process.exitCode=2;

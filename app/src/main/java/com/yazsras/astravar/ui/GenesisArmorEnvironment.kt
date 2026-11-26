@@ -13,6 +13,7 @@ internal val LocalGenesisArmorLegacy = staticCompositionLocalOf<GenesisArmorLega
 internal fun genesisRetiredToolSection(tool: String?): String? = when (tool) {
     "Armor systems", "Rules & profile" -> "Features"
     "Armor weapon" -> "Combat"
+    "Character sources" -> "Sheet"
     "Spell reservoir", "Spell library" -> "Spells"
     "Resources & recovery" -> "Resources"
     "Roll history" -> "History"

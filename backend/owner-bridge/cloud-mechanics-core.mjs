@@ -1,3 +1,4 @@
+import { activeCastAids } from './cloud-cast-aid.mjs';
 import { BridgeError, sha256 } from './core.mjs';
 
 export const stats = ['STR','DEX','CON','INT','WIS','CHA'];
@@ -71,10 +72,12 @@ export const restSchema = fields({
 }, ['actorId','kind','elapsedSeconds','confirmed','hitDice']);
 export const checkSpec = fields({
   kind:option('ability','save','skill','initiative','custom'), key:identifier, name:named(120), mode,
+  social:fields({featureId:identifier,targetActorId:identifier,attitude:option('friendly','indifferent','hostile','unknown'),perceives:boolean,purpose:option('entertain','goodwill','other'),harmlessEndearing:boolean},['featureId','targetActorId','attitude','perceives','purpose','harmlessEndearing']),
   contextTags:arrayOf(identifier,12), dice:whole(1,200), sides:whole(2,1000), flat:whole(-1000000,1000000),
   terms:arrayOf(fields({count:whole(1,200),sides:whole(2,1000),sign:option('add','subtract')},['count','sides','sign']),100)
 }, ['kind','key','mode']);
 export const evidence = fields({origin,faces:arrayOf(whole(1,1000),200)},['origin','faces']);
+export const d20Evidence=fields({...evidence.properties,aidDice:arrayOf(fields({family:identifier,face:whole(1,100)},['family','face']),16)},['origin','faces']);
 export const attackSchema = fields({
   actorId:identifier, attackId:identifier, name:named(160), source:named(300), sourceItemId:identifier, transfersWithItem:boolean,
   requiresAttunement:boolean, requiresOperating:boolean, formId:identifier, excludedForms:arrayOf(identifier,16), classification:named(60),
@@ -95,6 +98,7 @@ export const spellSchema = fields({
   timing:actionCost, ritual:boolean, resolution:option('attack','save','automatic','manual'), saveAbility:option(...stats),saveSuccess:option('none','half','full'),
   scaling:fields({targets:whole(1,10000),targetsPerLevel:whole(0,1000),durationSeconds:whole(0,31536000),durationPerLevel:whole(0,31536000),
     areaFeet:whole(0,10000),areaPerLevel:whole(0,10000),source:named(300)},['source']),
+  rollAid:fields({family:identifier,sides:whole(2,100),applies:arrayOf(option('attack','save'),2)},['family','sides','applies']),
   description:named(2400),rangeKind:option('touch','self','distance','other'), range:named(120), duration:named(120), components:arrayOf(component,16)
 },['actorId','spellId','name','source','baseLevel','concentration','timing','ritual','resolution','components']);
 
@@ -338,7 +342,7 @@ export async function sheet(ctx,id,contextTags=[],previewFormId=undefined,charge
     if(d.lipReading)communications.push({featureId,kind:'lip_reading',requiresVisibleMouth:true,requiresUnderstoodLanguage:true});
     if(d.mobility)mobilityRules.push({featureId,kind:d.mobility,eligible:movement.fly>0,requiresMovement:'fly'});
   }
-  return {actorId:id,level:a.data.level,rulesProfile:a.data.rulesProfile,classTracks:a.data.classTracks??null,activeDeploymentId:a.data.activeDeploymentId??null,communications,mobilityRules,exhaustion,activityState:a.data.activityState??null,formId:form?.id??null,ruleFormIds:ruleFormIds(form),size:form?.data.size??a.data.size??null,creatureType:form?.data.creatureType??a.data.creatureType??null,
+  return {rollAids:await activeCastAids(ctx,a),actorId:id,level:a.data.level,rulesProfile:a.data.rulesProfile,classTracks:a.data.classTracks??null,activeDeploymentId:a.data.activeDeploymentId??null,communications,mobilityRules,exhaustion,activityState:a.data.activityState??null,formId:form?.id??null,ruleFormIds:ruleFormIds(form),size:form?.data.size??a.data.size??null,creatureType:form?.data.creatureType??a.data.creatureType??null,
     senses,abilities,checks,saves,skills,passives,skillDefinitions,ac,movement,
     initiative:numeric(abilities.DEX.modifier,active,'initiative','all'),proficiency:a.data.proficiency,
     currentHp:a.data.currentHp,maxHp:hpMaximum.value,temporaryHp:a.data.temporaryHp,

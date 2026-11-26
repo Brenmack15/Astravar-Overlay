@@ -8,6 +8,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -22,14 +23,28 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 
 internal data class ManagerOption(val check: QueuedCheck, val bonus: Int?)
 internal data class ManagerFormula(val formula: DiceFormula, val mode: DiceMode, val d20Count: Int = 1)
-@Serializable internal data class PreparedCheck(val id: String, val check: QueuedCheck, val result: DiceResult)
+internal data class ManagerAid(val family: String, val castId: String, val sides: Int)
+@Serializable internal data class PreparedCheck(val id: String, val check: QueuedCheck, val result: DiceResult, val evidence: JsonObject? = null)
 @Serializable internal data class PreparedRollBatch(val id: String, val revision: String, val rolls: List<PreparedCheck>, val workshop: Boolean, val presetId: String? = null)
 internal data class SavedRollBatch(val lines: List<String>, val status: String)
 private val rollRandom = SecureRandom()
 private val modes = listOf(DiceMode.NORMAL, DiceMode.ADVANTAGE, DiceMode.DISADVANTAGE)
+
+private fun presetModes(entries: List<QueuedCheck>): String {
+    val checks = entries.filter { it.kind != RollKind.CUSTOM }
+    return buildList {
+        for (mode in modes) {
+            val count = checks.count { it.mode == mode }
+            if (count > 0) add("$count ${mode.name.lowercase()}")
+        }
+        val custom = entries.size - checks.size
+        if (custom > 0) add("$custom custom ${if (custom == 1) "formula" else "formulas"}")
+    }.joinToString(" · ")
+}
 
 internal fun composeRollEvidence(formula: ManagerFormula, entered: String?, draw: (Int) -> Int = { rollRandom.nextInt(it) + 1 }): DiceResult {
     val faces = entered?.trim()?.let { raw -> if (raw.isEmpty()) emptyList() else raw.split(Regex("[\\s,]+" )).map { value ->
@@ -105,7 +120,10 @@ internal fun composeRollEvidence(formula: ManagerFormula, entered: String?, draw
 @Composable internal fun RollManagerPanel(actorId: String, revision: String, options: List<ManagerOption>, presets: List<RollPreset>,
     history: List<String>, editable: Boolean, workshopEligible: Boolean, onDismiss: () -> Unit, advanced: (() -> Unit)? = null, information: String = "",
     resolve: (QueuedCheck, Boolean) -> ManagerFormula, commit: suspend (PreparedRollBatch) -> SavedRollBatch,
-    savePreset: suspend (RollPreset) -> String, deletePreset: suspend (String) -> String) {
+    savePreset: suspend (RollPreset) -> String, deletePreset: suspend (String) -> String,
+    archivePreset: (suspend (String) -> String)? = null,
+    applicableAids: (QueuedCheck) -> List<ManagerAid> = { emptyList() },
+    prepareEvidence: ((QueuedCheck, DiceResult, Map<String, Int>) -> JsonObject)? = null) {
     var tab by rememberSaveable(actorId) { mutableStateOf("Dice") }
     var queueJson by rememberSaveable(actorId) { mutableStateOf("[]") }
     val queue = remember(queueJson) { Json.decodeFromString<List<QueuedCheck>>(queueJson) }
@@ -113,12 +131,20 @@ internal fun composeRollEvidence(formula: ManagerFormula, entered: String?, draw
     val prepared = remember(preparedJson) { preparedJson?.let { Json.decodeFromString<PreparedRollBatch>(it) } }
     var manual by rememberSaveable(actorId) { mutableStateOf(true) }
     var faceText by rememberSaveable(actorId) { mutableStateOf("") }
+    var aidText by rememberSaveable(actorId, queueJson) { mutableStateOf(hashMapOf<String, String>()) }
+    val aids = queue.map(applicableAids)
+    fun aidKey(index: Int, aid: ManagerAid) = "$index/${aid.castId}/${aid.family}"
+    fun validAidFaces(index: Int) = aids[index].all { aid -> aidText[aidKey(index, aid)]?.toIntOrNull() in 1..aid.sides }
+    val completedPhysicalAids = !manual || queue.indices.all(::validAidFaces)
     var custom by rememberSaveable(actorId) { mutableStateOf("1d20") }
     var customName by rememberSaveable(actorId) { mutableStateOf("") }
     var name by rememberSaveable(actorId) { mutableStateOf("") }
     var selected by rememberSaveable(actorId) { mutableStateOf<String?>(null) }
     var workshop by rememberSaveable(actorId) { mutableStateOf(false) }
     var deleteReview by rememberSaveable(actorId) { mutableStateOf<String?>(null) }
+    var selectorOpen by rememberSaveable(actorId) { mutableStateOf(false) }
+    var newPresetId by rememberSaveable(actorId) { mutableStateOf<String?>(null) }
+    var newPresetName by rememberSaveable(actorId) { mutableStateOf("") }
     var lastResults by rememberSaveable(actorId) { mutableStateOf(arrayListOf<String>()) }
     var status by rememberSaveable(actorId) { mutableStateOf("") }
     var busy by remember(actorId) { mutableStateOf(false) }
@@ -157,20 +183,60 @@ internal fun composeRollEvidence(formula: ManagerFormula, entered: String?, draw
             require(!manual || entered.size == queue.size) { "Enter one line of actual die faces for each queued roll." }
             val formulas = queue.map { resolve(it, workshop) }
             val rows = queue.mapIndexed { index, check ->
-                PreparedCheck(UUID.randomUUID().toString(), check, composeRollEvidence(formulas[index], if (manual) entered[index] else null))
+                val result = composeRollEvidence(formulas[index], if (manual) entered[index] else null)
+                val actual = if (manual) aids[index].associate { aid ->
+                    val face = aidText[aidKey(index, aid)]?.toIntOrNull()
+                    require(face != null && face in 1..aid.sides) { "Enter an actual d${aid.sides} face for ${check.label}." }
+                    aid.family to face
+                } else emptyMap()
+                PreparedCheck(UUID.randomUUID().toString(), check, result, prepareEvidence?.invoke(check, result, actual))
             }
             val presetId = presets.firstOrNull { it.id == selected && it.entries == queue && it.workshop == workshop }?.id
             PreparedRollBatch(UUID.randomUUID().toString(), revision, rows, workshop, presetId).also { preparedJson = Json.encodeToString(it) }
         }
         val outcome = commit(batch)
         if (outcome.lines.isNotEmpty()) {
-            lastResults = ArrayList(outcome.lines); preparedJson = null; faceText = ""; tab = "Results"
+            lastResults = ArrayList(outcome.lines); preparedJson = null; faceText = ""; aidText = hashMapOf(); tab = "Results"
         }
         status = outcome.status
     }
-    val tabs = listOf("Dice", "Skills", "Saves", "Abilities", "Queue", "Presets", "Results")
+    val templates = remember { RollManagerRules.templates() }
+    val activePreset = presets.firstOrNull { it.id == selected } ?: templates.firstOrNull { selected == null && it.name == name }
+    LaunchedEffect(presets, editable, deleteReview) {
+        if (editable && deleteReview != null && presets.none { it.id == selected }) {
+            selected = null; deleteReview = null
+        }
+    }
+    val tabs = listOf("Dice", "Skills", "Saves", "Abilities", "Queue", "Results")
     PlayerSheet("Roll Manager", onDismiss, dismissEnabled = !busy) {
         if (information.isNotEmpty()) Text(information, color = RebuildPalette.Muted)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) {
+                PlayerOutlinedButton({ selectorOpen = true }, Modifier.fillMaxWidth().testTag("roll-preset-selector"), enabled = mutable) {
+                    Column {
+                        Text("Presets")
+                        activePreset?.let {
+                            Text("${it.name} · ${it.entries.size}", style = MaterialTheme.typography.bodyMedium)
+                            Text(presetModes(it.entries), style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+                DropdownMenu(expanded = selectorOpen, onDismissRequest = { selectorOpen = false }) {
+                    (presets.map { it to false } + templates.map { it to true }).forEach { (preset, template) ->
+                        DropdownMenuItem(modifier = Modifier.testTag("roll-preset-option-${preset.id}"), text = {
+                            Column {
+                                Text("${preset.name} · ${preset.entries.size}")
+                                Text(presetModes(preset.entries), style = MaterialTheme.typography.labelMedium)
+                            }
+                        }, onClick = {
+                            selectorOpen = false
+                            load(preset, template)
+                        })
+                    }
+                }
+            }
+            PlayerTextButton({ tab = "Presets" }, enabled = mutable) { Text("Manage presets") }
+        }
         PlayerTabs(tabs, tab, { tab = it })
         when (tab) {
             "Dice" -> {
@@ -228,29 +294,72 @@ internal fun composeRollEvidence(formula: ManagerFormula, entered: String?, draw
                 }
                 if (queue.isNotEmpty()) {
                     PlayerTabs(listOf("Physical dice", "Roll in app"), if (manual) "Physical dice" else "Roll in app", { if (mutable) manual = it == "Physical dice" })
-                    if (manual) Field("Die faces in queue order, one roll per line", faceText, { faceText = it }, single = false, enabled = mutable)
+                    if (manual) {
+                        Field("Die faces in queue order, one roll per line", faceText, { faceText = it }, single = false, enabled = mutable)
+                        aids.forEachIndexed { i, grants -> grants.forEach { aid ->
+                            val key = aidKey(i, aid)
+                            val family = aid.family.replaceFirstChar { it.uppercase() }
+                            Field("${i + 1}. ${queue[i].label} · actual $family d${aid.sides}", aidText[key].orEmpty(),
+                                { value -> aidText = HashMap(aidText).apply { put(key, value) } }, enabled = mutable)
+                        } }
+                    }
                     if (workshop && !workshopEligible) Text("Pocket Workshop eligibility needs a confirmed source for this actor.")
-                    PlayerButton({ perform() }, enabled = editable && !busy && (!workshop || workshopEligible)) {
-                        Text(if (prepared == null) "Roll All" else "Verify recorded batch") }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PlayerButton({ perform() }, Modifier.weight(1f), enabled = editable && !busy && (prepared != null || completedPhysicalAids) && (!workshop || workshopEligible)) {
+                            Text(if (prepared == null) "Roll All" else "Verify recorded batch")
+                        }
+                        PlayerOutlinedButton({
+                            newPresetName = ""
+                            status = ""
+                            newPresetId = UUID.randomUUID().toString()
+                        }, Modifier.weight(1f), enabled = editable && mutable) { Text("Save as preset") }
+                    }
+                    newPresetId?.let { id ->
+                        PlayerCard {
+                            Field("New preset name", newPresetName, { newPresetName = it }, enabled = !busy)
+                            Text("${queue.size} ${if (queue.size == 1) "roll" else "rolls"} · ${presetModes(queue)}")
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                PlayerButton({
+                                    val next = RollPreset(id, newPresetName.trim(), queue, workshop)
+                                    launchAction {
+                                        status = savePreset(next)
+                                        selected = next.id
+                                        name = next.name
+                                        newPresetId = null
+                                    }
+                                }, enabled = editable && mutable && newPresetName.trim().length in 1..120) { Text("Save new preset") }
+                                PlayerTextButton({ newPresetId = null }, enabled = !busy) { Text("Cancel") }
+                            }
+                        }
+                    }
                     if (prepared != null) PlayerTextButton({ preparedJson = null; status = "Batch editor released. Check History or pending commands for its authoritative status." }, enabled = !busy) { Text("Return to editing") }
                 }
             }
             "Presets" -> {
                 Text("Research templates", style = MaterialTheme.typography.titleMedium)
-                RollManagerRules.templates().forEach { p -> PlayerTextButton({ load(p, true) }, enabled = mutable) { Text(p.name) } }
+                templates.forEach { p -> PlayerTextButton({ load(p, true) }, enabled = mutable) { Text(p.name) } }
                 if (presets.isNotEmpty()) Text("Saved presets", style = MaterialTheme.typography.titleMedium)
                 presets.forEach { p -> PlayerOutlinedButton({ load(p, false) }, enabled = mutable) { Text("${p.name} · ${p.entries.size}") } }
                 Field("Preset name", name, { name = it }, enabled = mutable)
+                Toggle("Requires Pocket Workshop", workshop, enabled = mutable) { workshop = it }
                 val canSave = editable && mutable && queue.isNotEmpty() && name.isNotBlank() && name.trim().length <= 120
                 PlayerButton({ val preset = RollPreset(selected ?: UUID.randomUUID().toString(), name.trim(), queue, workshop)
                     launchAction { status = savePreset(preset); selected = preset.id } }, enabled = canSave) { Text(if (selected == null) "Save queue as preset" else "Update preset") }
                 selected?.let { id ->
                     PlayerOutlinedButton({ val p = RollPreset(UUID.randomUUID().toString(), (name.trim().take(113) + " (copy)"), queue, workshop)
                         launchAction { status = savePreset(p); selected = p.id; name = p.name } }, enabled = canSave) { Text("Duplicate preset") }
-                    if (deleteReview == id) {
-                        PlayerOutlinedButton({ launchAction { status = deletePreset(id); deleteReview = null; selected = null } }, enabled = editable && mutable) { Text("Confirm removal of $name") }
+                    val archiving = deleteReview == "archive/$id"
+                    if (archiving || deleteReview == "delete/$id") {
+                        if (!archiving && archivePreset != null) Text("An owner must approve permanent deletion. Existing backups may retain a copy. A recorded batch keeps its preset available for archival.")
+                        PlayerOutlinedButton({ launchAction {
+                            status = if (archiving) requireNotNull(archivePreset)(id) else deletePreset(id)
+                            deleteReview = null; selected = null
+                        } }, enabled = editable && mutable) { Text(if (archiving) "Confirm archive of $name" else "Confirm permanent deletion of $name") }
                         PlayerTextButton({ deleteReview = null }) { Text("Cancel removal") }
-                    } else PlayerTextButton({ deleteReview = id }, enabled = editable && mutable) { Text("Remove saved preset") }
+                    } else {
+                        if (archivePreset != null) PlayerOutlinedButton({ deleteReview = "archive/$id" }, enabled = editable && mutable) { Text("Archive preset") }
+                        PlayerTextButton({ deleteReview = "delete/$id" }, enabled = editable && mutable) { Text("Delete preset permanently") }
+                    }
                 }
             }
             "Results" -> {

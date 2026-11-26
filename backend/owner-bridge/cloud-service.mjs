@@ -9,7 +9,9 @@ import { deletionTail, completeMediaCleanup } from './cloud-lifecycle.mjs';
 // transactions, damage, rests, transformations and other events require their
 // original identities even if they happen to produce an identical balance.
 const absoluteAssignments = {
-  set_actor_ability:{kind:'actor',key:'actorId',matches:(data,args)=>Object.hasOwn(data.abilities??{},args.ability)&&data.abilities[args.ability]===args.score},
+  set_actor_ability:{kind:'actor',key:'actorId',matches:(data,args)=>
+    Object.hasOwn(data.abilities??{},args.ability) && data.abilities[args.ability]===args.score &&
+    (args.source===undefined || data.abilitySources?.[args.ability]?.source===args.source)},
   set_skill_training:{kind:'actor',key:'actorId',matches:(data,args)=>{
     const row=data.skills?.[args.skillId];
     return row?.name===args.name && row.ability===args.ability && row.rank===args.rank;

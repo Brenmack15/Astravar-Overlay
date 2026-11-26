@@ -18,7 +18,7 @@ async function duplicate(ctx,x,defineForm){
     ...ctx.binding,x.actorId,source.id,x.actorId,x.actorId).all()).results;
   for(const {id} of attacks){
     const attack=await owned(ctx,'attack',id,x.actorId);
-    const selected=attack.data.selections.filter(s=>s.formId===source.id&&(s.actorId??x.actorId)===x.actorId);
+    const selected=(attack.data.selections??[]).filter(s=>s.formId===source.id&&(s.actorId??x.actorId)===x.actorId);
     await save(ctx,attack,{...attack.data,selections:attack.data.selections.concat(selected.map(s=>({...s,actorId:x.actorId,formId:copy.id})))});
   }
   return {actorId:x.actorId,formId:copy.id,sourceFormId:source.id,inheritedRuleFormIds};

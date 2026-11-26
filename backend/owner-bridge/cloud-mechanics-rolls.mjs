@@ -1,4 +1,6 @@
-import { checkDiceOwner, stats, identifier, named, whole, arrayOf, fields, option, boolean, checkSpec, evidence, must, op, owned, actor, insert, save, sheet, rollPolicy, reactionRollWindow } from './cloud-mechanics-core.mjs';
+import { applyCastAid } from './cloud-cast-aid.mjs';
+import { socialCheckEdge } from './cloud-companion-traits.mjs';
+import { d20Evidence,checkDiceOwner, stats, identifier, named, whole, arrayOf, fields, option, boolean, checkSpec, evidence, must, op, owned, actor, insert, save, sheet, rollPolicy, reactionRollWindow } from './cloud-mechanics-core.mjs';
 
 export function observed(name,count,sides,flat,keeps,e,eligibleD20=false) {
   must(Number.isSafeInteger(flat) && count>=0 && count<=200 && e.faces.length===count && e.faces.every(v=>Number.isInteger(v)&&v>=1&&v<=sides),'INVALID_RECORDED_FACES');
@@ -43,7 +45,10 @@ async function calculate(ctx,actorId,s,e,verifiedTags=[]){
   const a=await actor(ctx,actorId),projection=await sheet(ctx,actorId,[...new Set([...(s.contextTags??[]),...verifiedTags])]);
   checkDiceOwner(ctx,a,s.kind,e.origin);
   const restriction=projection.rollRestrictions[s.kind+':'+s.key];must(!restriction,restriction);
-  const policy=rollPolicy(projection.effects,s.kind+':'+s.key,s.mode);
+  const social=s.social?await socialCheckEdge(ctx,a,s,projection):null;
+  const effects=social?.edge?[...projection.effects,social.edge]:projection.effects;
+  const policy=rollPolicy(effects,s.kind+':'+s.key,s.mode);
+  if(s.kind!=='save')must(!e.aidDice?.length,'CAST_AID_INELIGIBLE');
   const custom=s.kind==='custom';
   const signed=custom?(s.flat??0):s.kind==='ability'?projection.checks[s.key]?.value:
     s.kind==='save'?projection.saves[s.key]?.value:s.kind==='skill'&&Object.hasOwn(projection.skills,s.key)?
@@ -66,8 +71,9 @@ async function calculate(ctx,actorId,s,e,verifiedTags=[]){
   const isCheck=!custom || s.sides===20 && s.dice===1;
   const effective=isCheck?policy:{mode:'normal',count:custom?s.dice:1};
   const keeps=effective.mode==='normal'?'sum':effective.mode==='advantage'?'highest':'lowest';
-  const result=observed(custom?s.name:checkName(s.kind,s.key,a),isCheck?effective.count:s.dice,custom?s.sides:20,signed,keeps,e,isCheck);
-  return {...result,mode:effective.mode,actorId,formId:projection.formId,kind:s.kind,key:s.key,requestedMode:s.mode,
+  let result=observed(custom?s.name:checkName(s.kind,s.key,a),isCheck?effective.count:s.dice,custom?s.sides:20,signed,keeps,e,isCheck);
+  if(s.kind==='save')result=applyCastAid(result,projection.rollAids,'save',e);
+  return {...result,...(social?{social:{...s.social,applied:social.applied}}:{}),mode:effective.mode,actorId,formId:projection.formId,kind:s.kind,key:s.key,requestedMode:s.mode,
     sourceRevision:a.revision,recordedAt:ctx.now,commandId:ctx.commandId,
     ...(['ability','save','skill'].includes(s.kind)?{reactionWindow:await reactionRollWindow(ctx,a)}:{})};
 }
@@ -168,7 +174,7 @@ export const rollOperations=Object.freeze({
     await save(ctx,a,{...a.data,contextTags:[...tags].sort()});
     return {actorId:a.id,tag:x.tag,active:x.active,source:x.source};
   }),ownerReview:true},
-  complete_pending_check:op('rolls',fields({actorId:identifier,batchId:identifier,rollId:identifier,evidence},['actorId','batchId','rollId','evidence']),async(ctx,x)=>{
+  complete_pending_check:op('rolls',fields({actorId:identifier,batchId:identifier,rollId:identifier,evidence:d20Evidence},['actorId','batchId','rollId','evidence']),async(ctx,x)=>{
     const r=await owned(ctx,'roll',x.rollId,x.actorId),b=await owned(ctx,'roll_batch',x.batchId,x.actorId);
     must(r.data.status==='pending' && r.data.batchId===b.id && b.data.results.some(e=>e.rollId===r.id&&e.status==='pending'),'ROLL_NOT_PENDING');
     const result={...await calculate(ctx,x.actorId,r.data.check,x.evidence),rollId:r.id,batchId:b.id,requestedAt:r.data.requestedAt};
@@ -176,10 +182,10 @@ export const rollOperations=Object.freeze({
     const results=b.data.results.map(e=>e.rollId===r.id?result:e),status=results.every(e=>e.status==='resolved')?'resolved':'pending';
     await save(ctx,b,{...b.data,results,status});return {batchId:b.id,status,result};
   }),
-  record_check:op('rolls',fields({actorId:identifier,rollId:identifier,check:checkSpec,evidence,forUseId:identifier,forSenseId:identifier,forRiderAttemptId:identifier,forAttemptId:identifier,forCastId:identifier,forConcentrationId:identifier},['actorId','rollId','check','evidence']),recordCheck),
-  record_roll_batch:op('rolls',fields({actorId:identifier,batchId:identifier,entries:arrayOf(fields({rollId:identifier,check:checkSpec,evidence},['rollId','check']),24)},['actorId','batchId','entries']),batch),
+  record_check:op('rolls',fields({actorId:identifier,rollId:identifier,check:checkSpec,evidence:d20Evidence,forUseId:identifier,forSenseId:identifier,forRiderAttemptId:identifier,forAttemptId:identifier,forCastId:identifier,forConcentrationId:identifier},['actorId','rollId','check','evidence']),recordCheck),
+  record_roll_batch:op('rolls',fields({actorId:identifier,batchId:identifier,entries:arrayOf(fields({rollId:identifier,check:checkSpec,evidence:d20Evidence},['rollId','check']),24)},['actorId','batchId','entries']),batch),
   save_roll_preset:op('rolls',fields({actorId:identifier,presetId:identifier,name:named(120),entries:arrayOf(checkSpec,24),update:boolean},['actorId','presetId','name','entries','update']),savePreset),
-  execute_roll_preset:op('rolls',fields({actorId:identifier,presetId:identifier,batchId:identifier,rolls:arrayOf(fields({rollId:identifier,evidence},['rollId']),24)},['actorId','presetId','batchId','rolls']),async(ctx,x)=>{
+  execute_roll_preset:op('rolls',fields({actorId:identifier,presetId:identifier,batchId:identifier,rolls:arrayOf(fields({rollId:identifier,evidence:d20Evidence},['rollId']),24)},['actorId','presetId','batchId','rolls']),async(ctx,x)=>{
     const p=await owned(ctx,'roll_preset',x.presetId,x.actorId);
     must(x.rolls.length===p.data.entries.length,'PRESET_EVIDENCE_COUNT');
     const result=await batch(ctx,{...x,entries:p.data.entries.map((check,i)=>({...x.rolls[i],check}))});

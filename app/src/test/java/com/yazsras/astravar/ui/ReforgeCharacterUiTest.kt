@@ -504,8 +504,52 @@ class ReforgeCharacterUiTest {
             compose.onNodeWithText("Character source evidence").performScrollTo().performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithText("Original campaign record").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Original campaign record").assertExists()
-            compose.onNodeWithText("Armor source references").assertExists()
+            compose.onNodeWithText("Equipment and source references").assertExists()
             assertEquals(before, runBlocking { repository.get(actor.id) })
+        }
+    }
+
+    @Test fun historicalSourceEditingRefusesStaleRevisionsAndKeepsTheOriginalAdoptedSheet() {
+        val id="historic-actor"
+        lateinit var local:ReforgeRepository
+        lateinit var campaign:CampaignLedgerRepository
+        withSheet(seed=false,companionProfileId=id,localSetup={local=it},campaignSetup={ledger->
+            campaign=ledger
+            runBlocking {
+                ledger.records.saveProfile(CharacterProfile(id=id,name="Workshop helper",level=4,armorClass=13),source="Original profile record")
+                ledger.records.saveAbility(CharacterAbility("INT",id,13,notes="Original appraisal"),source="Original ability record")
+                ledger.records.saveProfile(CharacterProfile(id="other-actor",name="Workshop helper",armorClass=21),source="Unrelated profile source")
+                local.adopt(ledger,local.readLegacyPreview(ledger,id))
+            }
+        }) {
+            val original=runBlocking{requireNotNull(local.get(id))}
+            fun press(text:String) {
+                val match=hasText(text) and hasClickAction()
+                val scroll=compose.onAllNodes(match and hasAnyAncestor(hasScrollAction()))
+                val control=if(scroll.fetchSemanticsNodes().isEmpty())compose.onNode(match) else scroll.onFirst().performScrollTo()
+                control.performClick()
+            }
+            compose.waitUntil(10000){compose.onAllNodesWithTag("reforge-INT").fetchSemanticsNodes().isNotEmpty()}
+            compose.onNodeWithTag("reforge-INT").performTouchInput { click(androidx.compose.ui.geometry.Offset(width/2f,4f)) }
+            press("Character source evidence")
+            compose.waitUntil(10000){compose.onAllNodesWithText("Reviewed INT · 13 · revision 1").fetchSemanticsNodes().isNotEmpty()}
+            compose.onNodeWithText("Unrelated profile source").assertDoesNotExist()
+            compose.onNodeWithText("Equipment and source references").assertDoesNotExist()
+            press("Edit source INT");compose.onNode(hasText("Ability score") and hasSetTextAction()).performTextReplacement("19")
+            runBlocking { campaign.records.saveAbility(CharacterAbility("INT",id,14),1,"Independent source correction") }
+            compose.waitUntil(10000){compose.onAllNodesWithText("This ability changed.",substring=true).fetchSemanticsNodes().isNotEmpty()}
+            compose.onNodeWithText("Save ability").assertIsNotEnabled()
+            press("Cancel");press("Discard")
+            press("Edit source status")
+            compose.onNode(hasText("Character level (blank = unknown)") and hasSetTextAction()).performTextReplacement("5")
+            press("Save character status")
+            compose.waitUntil(10000){runBlocking {campaign.readCharacterSnapshot(id).profile.level==5}}
+            val final=runBlocking{campaign.readCharacterSnapshot(id)}
+            assertEquals(14,final.abilities.single().score)
+            assertEquals("Independent source correction",final.abilities.single().source)
+            assertEquals(2L,final.profile.revision)
+            assertEquals(original,runBlocking{local.get(id)})
+            assertEquals(1L,runBlocking{campaign.readCharacterSnapshot("other-actor").profile.revision})
         }
     }
 

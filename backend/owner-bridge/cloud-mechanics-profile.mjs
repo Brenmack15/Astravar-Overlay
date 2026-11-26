@@ -1,3 +1,4 @@
+import {checkCompanionTrait,preserveDedicatedCapacity} from './cloud-companion-traits.mjs';
 import {applyClassGain,checkedClassTracks} from './cloud-class-progression.mjs';
 import { classIdentityFields,classTracksSchema,subclassPin,stats, identifier, whole, named, option, nullable, boolean, arrayOf, fields, must, op, actor, owned, insert, save } from './cloud-mechanics-core.mjs';
 
@@ -9,7 +10,10 @@ const trainSchema=fields({actorId:identifier,category:option('save','tool','weap
 const featureKinds=['effect','action_definition','attack','resource_pool','spell_grant'];
 const featureSchema=fields({actorId:identifier,featureId:identifier,name:named(160),kind:option('class','subclass','species','feat','homebrew','companion','form'),
   description:named(3000),source:named(300),formId:identifier,sourceItemId:identifier,requiresOperating:boolean,requiresAttunement:boolean,
-  speech:fields({languages:arrayOf(named(80),24),capacity:whole(0,24),fullSentences:boolean},['languages','capacity','fullSentences']),
+  infusionBond:fields({operatorId:identifier,knownFeatureId:identifier,dedicatedPoolId:identifier},['operatorId','knownFeatureId','dedicatedPoolId']),
+  includedScore:fields({ability:option(...stats),before:whole(0,100),after:whole(0,100)},['ability','before','after']),
+  socialCheck:option('nonhostile_goodwill_or_entertainment'),
+  speech:fields({translation:boolean,languages:arrayOf(named(80),24),capacity:whole(0,24),fullSentences:boolean},['languages','capacity','fullSentences']),
   telepathy:fields({partnerActorId:identifier,twoWay:boolean,sharedSenses:boolean,limitFeet:whole(1,1000000)},['partnerActorId','twoWay','sharedSenses']),
   lipReading:fields({visibleMouth:{const:true},understoodLanguage:{const:true}},['visibleMouth','understoodLanguage']),
   feat:fields({familyId:identifier,edition:option('legacy_2014','revised_2024','homebrew'),
@@ -51,6 +55,7 @@ async function training(ctx,x){
 }
 async function feature(ctx,x,edit){
   const a=await actor(ctx,x.actorId),old=edit?await owned(ctx,'feature',x.featureId,a.id):null;
+  await checkCompanionTrait(ctx,a,x,old);
   if(x.formId)await owned(ctx,'form',x.formId,a.id);
   must(x.kind!=='form'||x.formId,'FEATURE_FORM_REQUIRED');
   must((!x.requiresOperating&&!x.requiresAttunement)||x.sourceItemId,'FEATURE_ITEM_REQUIRED');
@@ -79,6 +84,7 @@ async function feature(ctx,x,edit){
   for(const r of x.references)await owned(ctx,r.kind,r.id,a.id);
   const data={category:x.kind,description:x.description,source:x.source,formId:x.formId??null,references:x.references,
     ...(x.sourceItemId?{sourceItemId:x.sourceItemId,requiresAttunement:x.requiresAttunement??false,requiresOperating:x.requiresOperating??false}:{}),
+    ...(x.infusionBond?{infusionBond:x.infusionBond}:{}),...(x.includedScore?{includedScore:x.includedScore}:{}),...(x.socialCheck?{socialCheck:x.socialCheck}:{}),
     ...(x.feat?{feat:x.feat}:{}),...(x.lipReading?{lipReading:x.lipReading}:{}),
     ...(x.speech?{speech:x.speech}:{}),...(x.telepathy?{telepathy:x.telepathy}:{}),...(x.mobility?{mobility:x.mobility}:{})};
   if(old){
@@ -90,6 +96,9 @@ async function feature(ctx,x,edit){
   for(const [kind,prev,next] of [['feature_source',old?.data.sourceItemId,x.sourceItemId],['communicates_with',old?.data.telepathy?.partnerActorId,x.telepathy?.partnerActorId]]){
     if(prev && prev!==next)await ctx.unlink(x.featureId,kind,prev);
     if(next && prev!==next)await ctx.link(x.featureId,kind,next);
+  }
+  if(x.infusionBond && !old?.data.infusionBond){
+    for(const [rel,id] of [['infusion_operator',x.infusionBond.operatorId],['known_infusion',x.infusionBond.knownFeatureId],['dedicated_slot',x.infusionBond.dedicatedPoolId]])await ctx.link(x.featureId,rel,id);
   }
   for(const r of x.references)if(!old?.data.references.some(b=>b.id===r.id))await ctx.link(x.featureId,'feature_mechanic',r.id);
   if(x.formId && x.formId!==old?.data.formId)await ctx.link(x.featureId,'feature_form',x.formId);
@@ -121,7 +130,9 @@ async function advance(ctx,x){
     must(p.data.maximum===c.previous && c.maximum>=c.previous && c.granted<=c.maximum-c.previous,'ADVANCEMENT_CAPACITY_CHANGED');
     must(!c.granted||p.data.current!=null,'BALANCE_UNKNOWN');
     const resulting=p.data.current==null?null:p.data.current+c.granted;
-    await save(ctx,p,{...p.data,maximum:c.maximum,current:resulting});
+    const nextPool={...p.data,maximum:c.maximum,current:resulting};
+    await preserveDedicatedCapacity(ctx,p,nextPool);
+    await save(ctx,p,nextPool);
     changes.push({...c,before:p.data.current,after:resulting});
   }
   await save(ctx,a,next);

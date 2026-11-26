@@ -124,6 +124,17 @@ try {
                 emit(await setup(path+'/grants/sites-mcp',{scopes:['world.read','character.read','chronicle.read','media.read'],
                     actors:['companion'],auto:[],expiresAt,expectedGrantRevision:1,revoked:false}));
             }
+            else if (call==='seedCompanionAcceptance' && process.argv.includes('--exercise-gameplay')) {
+                const {seedCompanionAcceptance}=await import('./companion-traits.mjs');
+                let revision=0;
+                await seedCompanionAcceptance(async(operation,args)=>{
+                    const command={version:1,commandId:'companion-setup-'+(revision+1),epoch:1,expectedRevision:revision,operation,args};
+                    const body=await setup('/mcp',{jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'submit_cloud_command',arguments:{continuityId:continuity,command}}});
+                    assert.equal(body.result?.structuredContent?.status,'COMMITTED',operation+' '+body.result?.content?.[0]?.text);
+                    revision=body.result.structuredContent.revision;
+                });
+                emit({revision,actorId:'actor-one'});
+            }
             else if (call === 'deviceTradeReview' && process.argv.includes('--exercise-gameplay')) emit(await grant('device:'+device,1,false,true,['economy']));
             else if (call === 'scopeEncounterAudience' && process.argv.includes('--exercise-gameplay')) {
                 // Establish the narrow player audience before storing any owner-only fixture actor.

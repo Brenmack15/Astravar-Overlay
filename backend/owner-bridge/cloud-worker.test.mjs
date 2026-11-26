@@ -4,6 +4,7 @@ import {readFileSync,mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {handleWorker} from './worker.mjs';
+import {CloudService} from './cloud-service.mjs';
 import {SqliteAdapter} from './sqlite-adapter.mjs';
 import {canonical,sha256} from './core.mjs';
 
@@ -130,6 +131,30 @@ test('an equivalent absolute ability request is superseded with separate proof a
   assert.equal(proof.status,'SUPERSEDED');assert.equal(proof.receipt.evidence.transactionId,ownerEvent.value.receipt.transactionId);
   assert.equal((await l.rpc('get_cloud_state',{})).revision,2);
   assert.equal((await l.request(path+'/approvals')).value.actionableCount,0);
+});
+
+test('supersession respects the latest score attribution even at the same numeric score',async t=>{
+  const l=await lab(t);
+  await l.rpc('submit_cloud_command',{command:command(0,'define_actor',player)});
+  const score={actorId:'inventor',ability:'INT',score:18};
+  const first={...score,source:'First recorded appraisal'},second={...score,source:'Subsequent measurement'};
+  const approved=await l.post(path+'/commands',command(1,'set_actor_ability',first));
+  const correction=await l.post(path+'/commands',command(2,'set_actor_ability',second));
+  assert.equal(approved.value.status,'COMMITTED');assert.equal(correction.value.status,'COMMITTED');
+  const redundantLegacy=await l.post(path+'/commands',command(3,'set_actor_ability',score));
+  assert.equal(redundantLegacy.value.status,'COMMITTED');
+  const earlierIntent=command(1,'set_actor_ability',first);
+  const stale=await l.rpc('submit_cloud_command',{command:earlierIntent});
+  assert.equal(stale.error,'EXPECTED_REVISION_CONFLICT');
+  const service=new CloudService(l.db,{ownerId,kinds:{actor:'character'}});
+  const auth=await service.access({role:'connector',ownerId,credentialId:'sites-mcp'},continuity);
+  assert.equal(await service.absoluteEvidence(continuity,earlierIntent,auth.continuity,auth.grant),null);
+  const proof=await service.absoluteEvidence(continuity,command(1,'set_actor_ability',second),auth.continuity,auth.grant);
+  assert.equal(proof.transactionId,correction.value.receipt.transactionId);
+  const current=(await l.rpc('get_cloud_state',{id:'inventor'})).records[0].data;
+  assert.equal(current.abilities.INT,18);
+  assert.deepEqual(current.abilitySources.INT,{source:second.source,commandId:correction.value.commandId});
+  assert.equal((await l.rpc('get_cloud_receipt',{commandId:approved.value.commandId})).receipt.outcome.source,first.source);
 });
 
 test('stale event receives a conflict disposition; scoped replacement binds original intent and requires a fresh owner decision',async t=>{
