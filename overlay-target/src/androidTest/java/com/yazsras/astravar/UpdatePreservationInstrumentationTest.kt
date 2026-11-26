@@ -15,7 +15,6 @@ import org.junit.Test
 import org.junit.Rule
 import org.junit.runner.RunWith
 import java.io.File
-import java.util.regex.Pattern
 
 /** Readback after adb install -r, without seeding or resetting the product. */
 @RunWith(AndroidJUnit4::class)
@@ -27,11 +26,10 @@ class UpdatePreservationInstrumentationTest {
         val product = InstrumentationRegistry.getArguments().getString("astravarPackage") ?: "com.yazsras.astravar"
         val files = instrumentation.targetContext.getExternalFilesDir(null)!!
         val ui = ObservedUi(device)
+        val ascension = ui.isAscension(product)
+        val partyTab = if (ascension) "Connections" else "Companions"
         fun find(text: String): Rect = ui.textBounds(text, product, scrollAttempts = 14)
-        fun tap(text: String, preferLast: Boolean = false) {
-            if (preferLast) ui.ensurePrimaryTab(product, text)
-            else ui.tapText(text, product, scrollAttempts = 14)
-        }
+        fun tap(text: String) = ui.tapText(text, product, scrollAttempts = 14)
         fun revealCaptureMarkers(markers: List<BySelector>, description: String) {
             val deadline = SystemClock.uptimeMillis() + 30_000
             val margin = maxOf(4, (8 * instrumentation.targetContext.resources.displayMetrics.density).toInt())
@@ -79,23 +77,42 @@ class UpdatePreservationInstrumentationTest {
             }
             error("No fully visible $description within 30 seconds: $lastObserved")
         }
-        fun captureArmor(name: String) {
-            find("Active element"); find("Change element")
-            val markers = listOf(By.text("Active element").pkg(product), By.text("Change element").pkg(product))
-            revealCaptureMarkers(markers, "active element summary and action")
-            ui.captureStablePage(File(files, name), product, "Character",
-                markers)
+        fun openActions() {
+            ui.ensurePrimaryTab(product, "Character")
+            ui.selectSection(product, if (ascension) "Actions" else "Combat")
+        }
+        fun openOriginalArmor() {
+            if (ascension) {
+                ui.openCharacterControls(product)
+                tap("Original armor configuration")
+                find("Original armor configuration")
+            }
+        }
+        fun captureActions(name: String) {
+            val markers = if (ascension) {
+                find("Attacks")
+                listOf(By.text("Attacks").pkg(product))
+            } else {
+                find("Active element"); find("Change element")
+                listOf(By.text("Active element").pkg(product), By.text("Change element").pkg(product))
+            }
+            revealCaptureMarkers(markers, "character action controls")
+            ui.captureStablePage(File(files, name), product, "Character", markers)
+        }
+        fun openParty() {
+            ui.ensurePrimaryTab(product, partyTab)
+            if (ascension) ui.selectSection(product, "Companions")
         }
         fun captureParty(name: String) {
             val markers = listOf(By.text("CI Native Ally").pkg(product))
             revealCaptureMarkers(markers, "saved companion name")
-            ui.captureStablePage(File(files, name), product, "Companions", markers)
+            ui.captureStablePage(File(files, name), product, partyTab, markers)
         }
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
         ui.awaitMainAfterSavedDialogs(product)
         assertTrue("The saved labeled demo survived", device.hasObject(By.text("DEMO").pkg(product)))
         ui.ensurePrimaryTab(product, "Character")
-        ui.tap(By.desc("Switch character").pkg(product), "Select the adopted armor owner")
+        ui.openCharacterPicker(product)
         tap("CI Native Hero Revised")
         ui.selectSection(product, "Sheet")
         ui.textBounds("Pinned · A–Z", product, scrollAttempts = 14, firstDirection = Direction.UP)
@@ -136,9 +153,17 @@ class UpdatePreservationInstrumentationTest {
         tap("CI FICTIONAL update-preservation crystal")
         find("Quantity not set")
         find("Status not set")
+        if (ascension) {
+            ui.expandDisclosure(product, "Sources & record details")
+            find(UPDATE_ITEM_SOURCE)
+            val id = File(files, UPDATE_ITEM_ID_EVIDENCE).readText()
+            find(id)
+            assertEquals(listOf(id), ui.texts(By.text(id).pkg(product), "Identical source item after the APK update"))
+            ui.textBounds("Quantity not set", product, scrollAttempts = 14, firstDirection = Direction.UP)
+        }
         assertTrue(device.takeScreenshot(File(files, "same-key-update-inventory.png")))
         tap("Close")
-        tap("Companions", preferLast = true)
+        openParty()
         if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
         find("Companions")
         // The previous native journey created this arbitrary companion through
@@ -157,10 +182,9 @@ class UpdatePreservationInstrumentationTest {
         for (scale in listOf("1.0", "1.3", "2.0")) {
             device.executeShellCommand("settings put system font_scale $scale")
             device.waitForIdle()
-            ui.ensurePrimaryTab(product, "Character")
-            ui.selectSection(product, "Combat")
-            captureArmor("armor-font-$scale.png")
-            tap("Companions", preferLast = true)
+            openActions()
+            captureActions("armor-font-$scale.png")
+            openParty()
             find("CI Native Ally")
             captureParty("party-font-$scale.png")
         }
@@ -175,10 +199,19 @@ class UpdatePreservationInstrumentationTest {
         for (width in listOf(1080, 972)) {
             device.executeShellCommand("wm size ${width}x2400")
             device.waitForIdle()
-            ui.ensurePrimaryTab(product, "Character")
-            ui.selectSection(product, "Combat")
-            captureArmor("element-width-$width-armor.png")
+            openActions()
+            captureActions("element-width-$width-armor.png")
             device.dumpWindowHierarchy(File(files, "element-width-$width-armor.xml"))
+            if (ascension) {
+                tap("Attacks")
+                find("Create attack")
+                find("Review source attacks")
+                tap("Close")
+                // This source keeps its historical active-element configuration.
+                // Opening its chooser must leave the ordinary Actions list and attack definitions intact.
+                openOriginalArmor()
+                find("Cold")
+            }
             tap("Change element")
             find("Choose an element")
             val outer = listOf("Fire", "Cold", "Lightning", "Acid", "Poison", "Thunder", "Necrotic", "Psychic", "Radiant")
@@ -190,14 +223,29 @@ class UpdatePreservationInstrumentationTest {
                 })
             }
             assertNotNull(ui.bounds(By.desc("Neutral Force").pkg(product), "Neutral Force at width $width"))
+            if (ascension) {
+                ui.snapshot(By.desc("Cold element").pkg(product), "Previously selected Cold variant", refreshCache = true) { node ->
+                    true.takeIf { (node.isSelected || node.isChecked) && node.isEnabled }
+                }
+                for (locked in listOf("Radiant", "Psychic", "Necrotic")) {
+                    ui.snapshot(By.desc("$locked locked element").pkg(product), "$locked remains locked", refreshCache = true) { node ->
+                        true.takeIf { !node.isEnabled }
+                    }
+                }
+            }
             assertTrue(device.takeScreenshot(File(files, "element-wheel-width-$width.png")))
             tap("Radiant, Psychic & Necrotic unlocks")
-            assertTrue(device.wait(Until.hasObject(By.textContains("Artificer level 8").pkg(product)), 5000))
+            val unlockWarning = ui.texts(By.textContains("Artificer level 8").pkg(product), "Advanced element eligibility warning").single()
+            if (ascension) assertTrue(unlockWarning.contains("confirmed Advanced Elements upgrade"))
             tap("Close")
             assertTrue("One Close must dismiss the element chooser before another display resize at width $width",
                 device.wait(Until.gone(By.text("Choose an element").pkg(product)), 5000))
             assertTrue(device.takeScreenshot(File(files, "element-wheel-closed-width-$width.png")))
             device.dumpWindowHierarchy(File(files, "element-wheel-closed-width-$width.xml"))
+            if (ascension) {
+                find("Original armor configuration")
+                tap("Close")
+            }
         }
         device.executeShellCommand("wm density reset")
         device.executeShellCommand("wm size reset")

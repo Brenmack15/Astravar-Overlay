@@ -187,13 +187,16 @@ class CloudProgressionInteropTest {
                 val use=saved.single();assertEquals(use,f.receipt(use.cloudText("commandId")))
                 val useId=use.getValue("receipt").jsonObject.getValue("outcome").jsonObject.cloudText("useId")
                 assertEquals("inspect-cipher",f.record(useId)!!.data().cloudText("actionId"))
-                fun prepareCondition(enabled:Boolean){
-                    press("Conditions");press("Manage condition");input("Key","prone")
-                    press("Select");press(if(enabled)"True" else "False");input("Source Id","confirmed-fall")
-                }
-                prepareCondition(true);press("Submit");compose.waitUntil(10000){saved.size==2}
+                press("Conditions");press("Manage condition")
+                input("Key","prone");input("Source Id","confirmed-fall")
+                node(hasText("true") and hasClickAction() and hasAnyAncestor(isDialog())).assertExists()
+                press("Submit");compose.waitUntil(10000){saved.size==2}
                 val added=saved.last();assertEquals(added,f.receipt(added.cloudText("commandId")))
-                prepareCondition(false)
+                val condition=f.record("reader")!!.data().getValue("conditionSources").jsonArray.single().jsonObject
+                assertEquals("prone",condition.cloudText("key"));assertEquals("manual:confirmed-fall",condition.cloudText("sourceId"))
+                press("Conditions");press("Prone · confirmed-fall");press("Remove this source")
+                node(hasText("confirmed-fall") and hasSetTextAction()).assertExists()
+                node(hasText("false") and hasClickAction() and hasAnyAncestor(isDialog())).assertExists()
                 seed(f,"enable_effect","""{"actorId":"reader","effectId":"field","enabled":false}""")
                 press("Submit");compose.waitUntil(10000){failures.isNotEmpty()}
                 assertEquals(listOf("EXPECTED_REVISION_CONFLICT"),failures);assertEquals(2,saved.size)

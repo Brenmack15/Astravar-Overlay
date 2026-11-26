@@ -37,7 +37,28 @@ class PlayerFirstJourneyInstrumentationTest {
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
         ui.awaitMainAfterSavedDialogs(product)
     }
-    private fun stat(prefix: String) = ui.descriptionBounds(prefix, product)
+    private val ascension get() = ui.isAscension(product)
+    private val companions get() = if (ascension) "Connections" else "Companions"
+    private fun stat(prefix: String) = ui.descriptionBounds(if(ascension && prefix.startsWith("STR ")) "Strength score "+prefix.substringAfter(' ') else prefix, product)
+    private fun openCompanionRoster() {
+        ui.ensurePrimaryTab(product, companions)
+        if (device.hasObject(By.text("Back to companions").pkg(product))) tap("Back to companions")
+        if (ascension) ui.selectSection(product, "Companions")
+        if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
+    }
+    private fun verifyLevelAndProficiency() {
+        if (!ascension) {
+            ui.textBounds("Level 5 · Proficiency +3", product, scrollAttempts = 18, firstDirection = Direction.UP)
+            return
+        }
+        tap("CI Native Hero Revised")
+        ui.expandDisclosure(product, "Proficiencies & Training")
+        find("Proficiency +3")
+        ui.expandDisclosure(product, "Background")
+        tap("Character source evidence")
+        find("Level 5 · AC 14")
+        tap("Close")
+    }
     private fun acceptSharedReview(role: String, alreadyAgree: Boolean = false) {
         find("Campaign membership")
         ui.textBounds(role, product, scrollAttempts = 18, preferLast = true)
@@ -56,10 +77,10 @@ class PlayerFirstJourneyInstrumentationTest {
         assertEquals("Fictional destructive fixtures require an emulator", "1", device.executeShellCommand("getprop ro.kernel.qemu").trim())
         restart()
         ui.ensurePrimaryTab(product, "Character")
-        if (device.hasObject(By.desc("Switch character").pkg(product))) {
+        if (device.hasObject(By.desc(if (ascension) "Character controls" else "Switch character").pkg(product))) {
             // The older-build retention fixture intentionally survives into
             // these new-character journeys; do not reset it to regain onboarding.
-            ui.tap(By.desc("Switch character").pkg(product), "Switch character")
+            ui.openCharacterPicker(product)
             tap("Create character or companion")
         } else tap("Create character")
         enter("Name", "CI Native Hero")
@@ -69,9 +90,9 @@ class PlayerFirstJourneyInstrumentationTest {
         assertTrue("Invalid level remains visible and does not save", device.wait(Until.hasObject(By.textContains("Level must be").pkg(product)), 10_000))
         tap("Edit Identity")
         enter("Level", "4")
-        tap("Ability scores")
+        tap(if (ascension) "Next" else "Ability scores")
         for ((ability, value) in listOf("STR" to "8", "DEX" to "14", "CON" to "14", "INT" to "16", "WIS" to "10", "CHA" to "12")) enter(ability, value)
-        tap("Health & defense")
+        tap(if (ascension) "Next" else "Health & defense")
         enter("Unequipped maximum HP", "30")
         enter("Current HP (blank = unknown)", "24")
         enter("Unequipped Armor Class", "14")
@@ -80,17 +101,23 @@ class PlayerFirstJourneyInstrumentationTest {
         find("CI Native Hero")
         stat("STR 8")
         capture("created-sheet")
-        ui.tap(By.desc("Switch character").pkg(product), "Switch character")
+        ui.openCharacterPicker(product)
         find("Characters & companions")
         ui.captureStableDialog(File(files, "player-first-character-selection.png"), product,
             "Characters & companions", listOf(By.text("CI Native Hero").pkg(product)))
         tap("Close")
+        if (ascension) ui.openCharacterControls(product)
         tap("Character setup")
         enter("Name", "CI Native Hero Revised")
         tap("Save character")
         find("CI Native Hero Revised")
-        ui.selectSection(product, "Features")
-        tap("Level up")
+        if (ascension) {
+            ui.openCharacterControls(product)
+            tap("Advancement")
+        } else {
+            ui.selectSection(product, "Features")
+            tap("Level up")
+        }
         enter("Hit Die roll or fixed gain (before Constitution)", "5")
         tap("Preview advancement")
         find("Level 4 → 5\nProficiency +2 → +3\nMaximum HP 30 → 37\nCurrent HP 24 → 31")
@@ -98,15 +125,16 @@ class PlayerFirstJourneyInstrumentationTest {
         tap("Confirm level 5")
         // The level-up action is below the sheet; its saved level is in the
         // header above it. Search that direction within the original deadline.
-        ui.textBounds("Level 5 · Proficiency +3", product, scrollAttempts = 18, firstDirection = Direction.UP)
+        verifyLevelAndProficiency()
         stat("HP 31 / 37")
         restart()
         ui.ensurePrimaryTab(product, "Character")
         find("CI Native Hero Revised")
-        assertTrue(device.wait(Until.hasObject(By.text("Level 5 · Proficiency +3").pkg(product)), 10_000))
+        verifyLevelAndProficiency()
         stat("HP 31 / 37")
         ui.selectSection(product, "Sheet")
-        tap("Campaign connections")
+        if (ascension) ui.openCharacterControls(product)
+        tap(if (ascension) "Campaign membership" else "Campaign connections")
         // The new actor already has one shared identity. Explicitly review its
         // source/playable values; no second name-only record should be created.
         acceptSharedReview("Character", alreadyAgree = true)
@@ -166,18 +194,21 @@ class PlayerFirstJourneyInstrumentationTest {
         ui.selectSection(product, "Sheet")
         stat("STR 8")
 
-        tap("Roll dice")
+        if (ascension) {
+            ui.tap(By.desc("Roll Manager").pkg(product), "Open Roll Manager without rolling")
+            tap("Advanced roll")
+        } else tap("Roll dice")
         tap("Enter physical dice faces")
         enter("Faces in order (comma separated)", "13")
         tap("Validate entered dice")
         find("13")
         tap("Save roll")
         assertTrue("Saving returns to the current sheet and confirms the committed roll",
-            device.wait(Until.hasObject(By.text("Roll saved · 13").pkg(product)), 10_000))
+            device.wait(Until.hasObject(By.text(if (ascension) "Custom roll · 13" else "Roll saved · 13").pkg(product)), 10_000))
         assertFalse("Saving a roll must not automatically navigate", device.hasObject(By.text("Roll history").pkg(product)))
         capture("roll-saved-on-sheet")
         tap("View history")
-        find("Roll history")
+        find(if(ascension) "All rolls" else "Roll history")
         find("1d20 · Manual · Player")
         tap("Dice details")
         find("13 on d20 · Modifier +0")
@@ -220,9 +251,7 @@ class PlayerFirstJourneyInstrumentationTest {
             putString("stream", "\nCHECKPOINT: native spellbook filtered by cantrip and name, reviewed casting, and reopened the saved concentration spell after restart\n")
         })
 
-        ui.ensurePrimaryTab(product, "Companions")
-        if (device.hasObject(By.text("Back to companions").pkg(product))) tap("Back to companions")
-        if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
+        openCompanionRoster()
         tap("+ Add companion")
         enter("Companion name", "CI Native Ally")
         tap("Association")
@@ -247,9 +276,7 @@ class PlayerFirstJourneyInstrumentationTest {
         find("Fictional native journey partner")
         capture("companion-relationship")
         restart()
-        ui.ensurePrimaryTab(product, "Companions")
-        // Saved navigation may retain the member; return to the roster before finding it again.
-        if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
+        openCompanionRoster()
         tap("CI Native Ally")
         find("4 / 12")
         ui.expandDisclosure(product, "Relationships")
@@ -286,7 +313,7 @@ class PlayerFirstJourneyInstrumentationTest {
         find("CI Native Ally")
         find("Turn economy")
         capture("companion-direct-combat")
-        tap("Damage / healing")
+        if(ascension) ui.tap(By.desc("HP 4 / 12").pkg(product), "Open companion health") else tap("Damage / healing")
         enter("Damage or healing amount", "2")
         // Native keyboard focus navigation leaves the entered amount intact and
         // stops the edit caret blinking during the unchanged full-frame capture.
@@ -319,7 +346,8 @@ class PlayerFirstJourneyInstrumentationTest {
         ui.ensurePrimaryTab(product, "Character")
         find("CI Native Hero Revised")
         stat("HP 31 / 37")
-        ui.ensurePrimaryTab(product, "Companions")
+        ui.ensurePrimaryTab(product, companions)
+        if (ascension) ui.selectSection(product, "Companions")
         if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
         tap("CI Native Ally")
         find("6 / 12")

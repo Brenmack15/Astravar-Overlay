@@ -29,9 +29,30 @@ class GenesisConsolidationInstrumentationTest {
     private val device get() = UiDevice.getInstance(instrumentation)
     private val product get() = InstrumentationRegistry.getArguments().getString("astravarPackage") ?: "com.yazsras.astravar"
     private val ui get() = ObservedUi(device)
+    private val ascension by lazy { ui.isAscension(product) }
     private val files get() = instrumentation.targetContext.getExternalFilesDir(null)!!
     private fun tap(label: String) = ui.tapText(label, product, scrollAttempts = 24, preferLast = true)
     private fun find(label: String) = ui.textBounds(label, product, scrollAttempts = 24)
+    private fun openArmor() {
+        if (ascension) {
+            ui.openCharacterControls(product)
+            tap("Original armor configuration")
+        } else ui.selectSection(product, "Combat")
+    }
+    private fun leaveArmor() {
+        if (ascension) tap("Close")
+    }
+    private fun addSkill() {
+        val label = if (ascension) "Skills" else "Add skill"
+        ui.touch(ui.textBounds(label, product, scrollAttempts = 24, interactive = true,
+            firstDirection = Direction.UP), label)
+    }
+    private fun editSkill(name: String) {
+        if (ascension) {
+            tap(name)
+            tap("Edit skill")
+        } else ui.tap(By.desc("Edit $name custom skill").pkg(product), "Edit persisted custom skill")
+    }
     private fun findPinnedHeading() = ui.textBounds("Pinned · A–Z", product,
         scrollAttempts = 24, firstDirection = Direction.UP)
     private fun assertPinnedSkill(name: String, custom: Boolean = false) {
@@ -91,7 +112,22 @@ class GenesisConsolidationInstrumentationTest {
     private fun committedArmorRoll() {
         assertTrue("Automatic roll transaction finishes before reading its saved result",
             device.wait(Until.gone(By.text("Armor roll").pkg(product)), 30_000))
+        if (ascension) {
+            // The retained configuration is a dialog. Check the one-shot toggle in the
+            // original instance, then read the commit status on the sheet underneath.
+            find("Latest result")
+            find("Advantage")
+            assertFalse("Committed attack clears one-shot advantage",
+                ui.snapshot(By.text("Advantage").pkg(product), "settled armor advantage", refreshCache = true) { label ->
+                    generateSequence(label) { it.parent }.firstOrNull { it.isCheckable }?.isChecked?.takeIf { !it }
+                })
+            leaveArmor()
+        }
         find("Armor roll saved")
+        if (ascension) {
+            openArmor()
+            ui.expandDisclosure(product, "Attack options")
+        }
     }
 
     @Test fun characterArmorSkillsAndRestart() {
@@ -116,7 +152,7 @@ class GenesisConsolidationInstrumentationTest {
         capture("consolidated-tools")
         tap("Close")
 
-        ui.selectSection(product, "Combat")
+        openArmor()
         tap("Connect saved Astravar systems")
         find("Connect Astravar to CI Native Hero Revised")
         tap("Use recorded armor slots for unknown levels")
@@ -127,8 +163,10 @@ class GenesisConsolidationInstrumentationTest {
         find("Active element")
         find("+7 to hit") // INT +3, proficiency +3, retained calibration +1.
         find("2d12+4 force · Weapon")
-        ui.descriptionBounds("HP 31 / 37", product)
         capture("connected-armor")
+        leaveArmor()
+        ui.descriptionBounds("HP 31 / 37", product)
+        if (ascension) openArmor()
 
         tap("Attack options")
         tap("Advantage")
@@ -186,9 +224,10 @@ class GenesisConsolidationInstrumentationTest {
         ui.tap(By.descStartsWith("Cold ").pkg(product), "Select cold on the retained element wheel")
         find("Cold")
         restart()
-        ui.selectSection(product, "Combat")
+        openArmor()
         find("Cold"); find(second)
         capture("element-and-roll-after-restart")
+        leaveArmor()
 
         ui.selectSection(product, "Spells")
         find("Spell reservoir"); find("0 / 1 stored spells")
@@ -210,11 +249,16 @@ class GenesisConsolidationInstrumentationTest {
         restart()
         ui.selectSection(product, "Spells")
         find("1 / 1 stored spells"); find("CI Native Stored Bolt")
-        ui.selectSection(product, "Combat")
+        openArmor()
         find("Cold")
-        ui.selectSection(product, "Features")
+        leaveArmor()
+        if (ascension) {
+            tap("CI Native Hero Revised")
+            ui.expandDisclosure(product, "Features & Traits")
+        } else ui.selectSection(product, "Features")
         find("Armor features"); find("Engineering upgrades")
         capture("connected-armor-features")
+        if (ascension) tap("Close")
 
         // Favorites are the next deferred slice: exercise the same physical
         // item and its persisted character state without changing equipment.
@@ -235,8 +279,7 @@ class GenesisConsolidationInstrumentationTest {
 
         ui.selectSection(product, "Sheet")
         assertFalse("No duplicate Health shortcut row", device.hasObject(By.text("Health").pkg(product)))
-        ui.textBounds("Add skill", product, scrollAttempts = 24, firstDirection = Direction.UP)
-        tap("Add skill")
+        addSkill()
         enter("Skill name", "Alchemy native")
         tap("Untrained"); tap("Proficient")
         enter("Additional bonus", "1")
@@ -257,7 +300,7 @@ class GenesisConsolidationInstrumentationTest {
         find("Alchemy native")
         ui.bounds(By.desc("Unpin Alchemy native custom skill").pkg(product), "persisted custom pin")
         ui.bounds(By.desc("Unpin Arcana").pkg(product), "persisted standard pin")
-        ui.tap(By.desc("Edit Alchemy native custom skill").pkg(product), "Edit persisted custom skill")
+        editSkill("Alchemy native")
         enter("Skill name", "Zoology native")
         tap("Save skill")
         findPinnedHeading()
@@ -267,18 +310,23 @@ class GenesisConsolidationInstrumentationTest {
         tap("Enter physical dice faces")
         enter("Faces in order (comma separated)", "13")
         tap("Validate entered dice")
-        find("20") // INT +3 + proficiency +3 + custom bonus +1.
+        find(if (ascension) "Zoology native · 20" else "20") // Physical 13 + INT 3 + proficiency 3 + custom 1.
         tap("Save roll")
         findPinnedHeading()
         find("Zoology native")
         ui.tap(By.desc("Unpin Zoology native custom skill").pkg(product), "Unpin custom skill")
         find("Zoology native")
-        ui.tap(By.desc("Edit Zoology native custom skill").pkg(product), "Remove custom skill through its editor")
+        editSkill("Zoology native")
         tap("Remove skill"); tap("Remove")
         assertTrue("The skill editor closes only after its removal is saved",
             device.wait(Until.gone(By.text("Edit custom skill").pkg(product)), 30_000))
         restart(); ui.selectSection(product, "Sheet")
-        assertFalse("Removed custom skill stays removed after restart",
+        if (ascension) {
+            find("Survival")
+            find("Passive scores & movement")
+            assertFalse("Removed custom skill is absent from the final alphabetical group",
+                device.hasObject(By.text("Zoology native").pkg(product)))
+        } else assertFalse("Removed custom skill stays removed after restart",
             device.hasObject(By.desc("Edit Zoology native custom skill").pkg(product)))
         findPinnedHeading()
         find("Arcana")
@@ -289,8 +337,7 @@ class GenesisConsolidationInstrumentationTest {
         ui.selectSection(product, "Sheet")
         // Leave a real custom record for the later independent complete-backup
         // and same-key-update stages, after separately proving deletion works.
-        ui.textBounds("Add skill", product, scrollAttempts = 24, firstDirection = Direction.UP)
-        tap("Add skill")
+        addSkill()
         enter("Skill name", "Alchemy native")
         enter("Notes (optional)", "Retained custom skill for complete backup verification")
         tap("Save skill")

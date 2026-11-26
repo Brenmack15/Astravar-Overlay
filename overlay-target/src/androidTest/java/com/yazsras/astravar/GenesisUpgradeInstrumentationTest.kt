@@ -34,19 +34,35 @@ class GenesisUpgradeInstrumentationTest {
         ui.awaitMainAfterSavedDialogs(product)
     }
 
+    private fun enterNamed(label: String, value: String) {
+        val field = By.clazz("android.widget.EditText").pkg(product).hasDescendant(By.text(label))
+        find(label)
+        ui.tap(field, "Focus $label")
+        ui.snapshot(field, "$label has focus", refreshCache = true) { box -> true.takeIf { box.isFocused } }
+        ui.setFocusedField(value, product, label)
+        device.pressBack()
+        ui.assertFocusedField(value, product, label)
+        ui.snapshot(field, "Saved input for $label", refreshCache = true) { box ->
+            box.text?.takeIf { it == value && box.isFocused }
+        }
+    }
+
     @Test fun seedAscensionCode58() {
         launch()
         assertTrue(device.executeShellCommand("dumpsys package $product").contains("versionCode=58 "))
         ui.ensurePrimaryTab(product, "Character")
         tap("Create character")
-        enter("Name", "Ascension upgrade fixture")
-        tap("Ability scores")
-        listOf("STR" to "8", "DEX" to "12", "CON" to "14", "INT" to "15", "WIS" to "10", "CHA" to "10").forEach { (stat,value) -> enter(stat, value) }
-        tap("Health, defense & movement")
-        enter("Unequipped maximum HP", "32")
-        enter("Current HP (blank = unknown)", "17")
-        enter("Temporary HP", "3")
-        enter("Unequipped Armor Class", "16")
+        enterNamed("Name", "Ascension upgrade fixture")
+        tap("Next")
+        listOf("STR" to "8", "DEX" to "12", "CON" to "14", "INT" to "15", "WIS" to "10", "CHA" to "10").forEach { (stat,value) -> enterNamed(stat, value) }
+        tap("Next")
+        enterNamed("Unequipped maximum HP", "32")
+        enterNamed("Current HP (blank = unknown)", "17")
+        enterNamed("Temporary HP", "3")
+        enterNamed("Unequipped Armor Class", "16")
+        tap("Review & save")
+        find("STR 8 · DEX 12 · CON 14 · INT 15 · WIS 10 · CHA 10")
+        find("17 / 32")
         tap("Save character")
         ui.descriptionBounds("HP 17 / 32", product)
         ui.captureStablePage(File(files, "api37-before-code58.png"), product, "Character",
@@ -68,6 +84,7 @@ class GenesisUpgradeInstrumentationTest {
         val intelligence = ui.descriptionBounds("Intelligence score 15", product)
         // The title lies above the independent check/save targets within the same card.
         assertTrue(device.click(intelligence.centerX(), intelligence.top + maxOf(1, intelligence.height() / 22)))
+        find("Permanent 15 → effective 15")
         tap("Character source evidence")
         find("INT · base 15 · effective 15")
         find("Ascension upgrade fixture")
@@ -143,7 +160,7 @@ class GenesisUpgradeInstrumentationTest {
         find("Fictional retained ally")
         ui.ensurePrimaryTab(product, "Character")
         ui.selectSection(product, "Sheet")
-        ui.descriptionBounds(retainedHp(17), product)
+        ui.descriptionBounds("HP 17 / 32", product)
         ui.captureStablePage(File(files, "genesis-before-code49-sheet.png"), product, "Character",
             listOf(By.text("Genesis Legacy Retention Actor").pkg(product)))
     }
@@ -168,6 +185,7 @@ class GenesisUpgradeInstrumentationTest {
         find("2 / 5")
         val companionTab = if (candidateVersion >= 59) "Connections" else "Companions"
         ui.ensurePrimaryTab(product, companionTab)
+        if (candidateVersion >= 59) ui.selectSection(product, "Companions")
         if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
         tap("Genesis Legacy Retention Ally")
         // Reopening a companion may restore the scroll offset from its Relationships
@@ -180,7 +198,7 @@ class GenesisUpgradeInstrumentationTest {
             listOf(By.text("Fictional retained ally").pkg(product)))
         ui.ensurePrimaryTab(product, "Character")
         ui.selectSection(product, "Sheet")
-        ui.descriptionBounds("HP 17 / 32", product)
+        ui.descriptionBounds(retainedHp(17), product)
     }
 
     /** Runs only after host comparison proves the untouched schema6→8 cutover. */

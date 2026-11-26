@@ -8,10 +8,15 @@ import androidx.test.uiautomator.Until
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityWindowInfo
 import java.io.File
+import java.util.UUID
+import java.util.regex.Pattern
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.Rule
 import org.junit.runner.RunWith
+
+internal const val UPDATE_ITEM_SOURCE = "Fictional emulator fixture; no real campaign data"
+internal const val UPDATE_ITEM_ID_EVIDENCE = "native-update-item-identity.txt"
 
 /** Creates fictional ledger data through ordinary product controls on a fresh CI emulator. */
 @RunWith(AndroidJUnit4::class)
@@ -23,10 +28,7 @@ class UpdateFixtureInstrumentationTest {
         val product = InstrumentationRegistry.getArguments().getString("astravarPackage") ?: "com.yazsras.astravar"
         val ui = ObservedUi(device)
         fun find(text: String) = ui.textBounds(text, product, scrollAttempts = 14)
-        fun tap(text: String, preferLast: Boolean = false) {
-            if (preferLast) ui.ensurePrimaryTab(product, text)
-            else ui.tapText(text, product, scrollAttempts = 14)
-        }
+        fun tap(text: String) = ui.tapText(text, product, scrollAttempts = 14)
         fun enter(label: String, value: String) {
             tap(label)
             // IME changes can leave UiAutomator's cached Compose focus stale.
@@ -52,11 +54,20 @@ class UpdateFixtureInstrumentationTest {
         tap("Add Item")
         enter("Item name", "CI FICTIONAL update-preservation crystal")
         tap("Sources & advanced details")
-        enter("Source / checkpoint (optional)", "Fictional emulator fixture; no real campaign data")
+        enter("Source / checkpoint (optional)", UPDATE_ITEM_SOURCE)
         tap("Save new item")
         assertTrue(device.wait(Until.hasObject(By.text("Item saved").pkg(product)), 15000))
         // The default blank quantity deliberately remains unknown through upgrade.
         find("Quantity not set")
         find("Status not set")
+        if (ui.isAscension(product)) {
+            ui.expandDisclosure(product, "Sources & record details")
+            find(UPDATE_ITEM_SOURCE)
+            find("Saved revision")
+            val uuid = Pattern.compile("[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}")
+            val id = ui.texts(By.text(uuid).pkg(product), "Exact selected source item identity").single()
+            assertEquals(id, UUID.fromString(id).toString())
+            File(instrumentation.targetContext.getExternalFilesDir(null), UPDATE_ITEM_ID_EVIDENCE).writeText(id)
+        }
     }
 }
