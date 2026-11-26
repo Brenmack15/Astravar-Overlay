@@ -13,7 +13,7 @@ async function confirm(service,principal,id,opened){
 }
 export async function cloudContext(service,principal,id,{actorId=null,sinceRevision=null}={}) {
   const opened=await service.access(principal,id),{grant,continuity:c}=opened,b=service.key(id);
-  if(!grant.scopes.includes('chronicle.read')||actorId&&!validCloudId(actorId)||sinceRevision!==null&&(!Number.isSafeInteger(sinceRevision)||sinceRevision<0||sinceRevision>c.revision))cloudFail(403,'CONTEXT_SCOPE_DENIED');
+  if(!grant.scopes.includes('chronicle.read')||actorId&&(!validCloudId(actorId)||!grant.actors.includes('*')&&!grant.actors.includes(actorId))||sinceRevision!==null&&(!Number.isSafeInteger(sinceRevision)||sinceRevision<0||sinceRevision>c.revision))cloudFail(403,'CONTEXT_SCOPE_DENIED');
   const vis=visible(service,grant,'e');
   const read=(kind,limit)=>service.s(`SELECT e.*,min(h.revision) AS cloud_revision FROM cloud_entities e
     JOIN cloud_changes h ON h.owner_id=e.owner_id AND h.continuity_id=e.continuity_id AND h.entity_id=e.id
@@ -29,16 +29,48 @@ export async function cloudContext(service,principal,id,{actorId=null,sinceRevis
   const actors=(await read('actor',16)).results.map(cloudEntity),objectives=(await read('objective',16)).results.map(cloudEntity);
   await confirm(service,principal,id,opened);
   return {continuityId:id,epoch:c.epoch,revision:c.revision,checkpoint:latest?cloudEntity(latest):null,checkpointRevision:latest?.cloud_revision??null,
-    actors,objectives,changesSince:after,recentChanges:changes.slice(0,25),moreChanges:changes.length>25};
+    actors,objectives,changesSince:after,recentChanges:changes.slice(0,25),moreChanges:changes.length>25,grantRevision:grant.revision,nextChangeAfter:changes.length>25?changes[24].revision+'~'+changes[24].ordinal:null};
 }
-export async function cloudRelationships(service,principal,id,entityId) {
+function checkPage(opened,options) {
+  const {grant,continuity:c}=opened,limit=options.limit??50;
+  if(!Number.isSafeInteger(limit)||limit<1||limit>100)cloudFail(400,'INVALID_PAGE');
+  if(options.after && [options.atEpoch,options.atRevision,options.grantRevision].some(x=>!Number.isSafeInteger(x)))cloudFail(400,'PAGE_BASELINE_REQUIRED');
+  if(options.atEpoch!==undefined&&options.atEpoch!==c.epoch || options.atRevision!==undefined&&options.atRevision!==c.revision ||
+      options.grantRevision!==undefined&&options.grantRevision!==grant.revision)cloudFail(409,'SNAPSHOT_CHANGED');
+  return limit;
+}
+
+export async function cloudChanges(service,principal,id,options={}) {
+  const opened=await service.access(principal,id),{grant,continuity:c}=opened,limit=checkPage(opened,options);
+  const {actorId,sinceRevision=0,after}=options, prev=visible(service,grant,'h'),current=visible(service,grant,'e');
+  if(!grant.scopes.includes('chronicle.read')||actorId&&(!validCloudId(actorId)||!grant.actors.includes('*')&&!grant.actors.includes(actorId)))cloudFail(403,'CONTEXT_SCOPE_DENIED');
+  if(!Number.isSafeInteger(sinceRevision)||sinceRevision<0||sinceRevision>c.revision)cloudFail(400,'INVALID_BASELINE');
+  const pair=after?.split('~');
+  if(after&&(pair.length!==2||pair.some(n=>!/^(0|[1-9][0-9]{0,15})$/.test(n)||!Number.isSafeInteger(Number(n)))))cloudFail(400,'INVALID_CURSOR');
+  const rows=(await service.s(`SELECT h.revision,h.ordinal,h.entity_id,h.kind,h.change_type FROM cloud_changes h
+    JOIN cloud_entities e ON e.owner_id=h.owner_id AND e.continuity_id=h.continuity_id AND e.id=h.entity_id
+    WHERE h.owner_id=? AND h.continuity_id=? AND e.life='active' AND h.revision>? AND ${prev.sql} AND ${current.sql}
+    ${actorId?'AND (h.actor_id=? OR h.actor_id IS NULL)':''}
+    ${after?'AND (h.revision,h.ordinal)<(?,?)':''} ORDER BY h.revision DESC,h.ordinal DESC LIMIT ?`,
+    ...service.key(id),sinceRevision,...prev.values,...current.values,...(actorId?[actorId]:[]),...(after?pair.map(Number):[]),limit+1).all()).results;
+  await confirm(service,principal,id,opened);
+  return {epoch:c.epoch,revision:c.revision,grantRevision:grant.revision,changes:rows.slice(0,limit),
+    nextAfter:rows.length>limit?rows[limit-1].revision+'~'+rows[limit-1].ordinal:null};
+}
+
+export async function cloudRelationships(service,principal,id,entityId,options={}) {
   if(!validCloudId(entityId))cloudFail(400,'INVALID_ENTITY_ID');
-  const opened=await service.access(principal,id),{grant,continuity:c}=opened,b=service.key(id),vis=visible(service,grant,'a'),other=visible(service,grant,'z');
+  const opened=await service.access(principal,id),{grant,continuity:c}=opened,limit=checkPage(opened,options),b=service.key(id);
+  const vis=visible(service,grant,'a'),other=visible(service,grant,'z'),after=options.after,tuple=after?.split('~');
+  if(after&&(tuple.length!==3||!validCloudId(tuple[0])||!/^[a-z0-9_]{1,80}$/.test(tuple[1])||!validCloudId(tuple[2])))cloudFail(400,'INVALID_CURSOR');
   const rows=(await service.s(`SELECT l.from_id,l.relation,l.to_id FROM cloud_links l
     JOIN cloud_entities a ON a.owner_id=l.owner_id AND a.continuity_id=l.continuity_id AND a.id=l.from_id
     JOIN cloud_entities z ON z.owner_id=l.owner_id AND z.continuity_id=l.continuity_id AND z.id=l.to_id
     WHERE l.owner_id=? AND l.continuity_id=? AND (l.from_id=? OR l.to_id=?) AND ${vis.sql} AND ${other.sql}
-    AND a.life='active' AND z.life='active' ORDER BY l.from_id,l.relation,l.to_id LIMIT 101`,...b,entityId,entityId,...vis.values,...other.values).all()).results;
+    AND a.life='active' AND z.life='active' ${after?'AND (l.from_id,l.relation,l.to_id)>(?,?,?)':''}
+    ORDER BY l.from_id,l.relation,l.to_id LIMIT ?`,...b,entityId,entityId,...vis.values,...other.values,...(after?tuple:[]),limit+1).all()).results;
   await confirm(service,principal,id,opened);
-  return {epoch:c.epoch,revision:c.revision,links:rows.slice(0,100),truncated:rows.length>100};
+  const links=rows.slice(0,limit),tail=links.at(-1);
+  return {epoch:c.epoch,revision:c.revision,grantRevision:grant.revision,links,truncated:rows.length>limit,
+    nextAfter:rows.length>limit?[tail.from_id,tail.relation,tail.to_id].join('~'):null};
 }

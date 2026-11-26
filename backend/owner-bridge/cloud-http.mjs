@@ -1,3 +1,4 @@
+import { cloudContinuitySettings } from './cloud-continuity.mjs';
 import { cloudAccessAdmin } from './cloud-admin.mjs';
 import { cloudActions } from './cloud-actions-view.mjs';
 import { cloudArchiveView } from './cloud-lifecycle.mjs';
@@ -7,7 +8,7 @@ import { cloudRecordView } from './cloud-records-query.mjs';
 import { BridgeError } from './core.mjs';
 import { cloudFail, validCloudId } from './cloud-validation.mjs';
 import { CloudPlan } from './cloud-plan.mjs';
-import { cloudContext, cloudRelationships } from './cloud-query.mjs';
+import { cloudContext, cloudChanges, cloudRelationships } from './cloud-query.mjs';
 import { mechanicActorSheet } from './cloud-mechanics.mjs';
 
 export async function cloudBody(request) {
@@ -47,6 +48,7 @@ export async function cloudHttp(request,bridge,service,ownerPrincipal) {
       if(method!=='GET' && origin!==url.origin)cloudFail(403,'SAME_ORIGIN_REQUIRED');
       principal=ownerPrincipal;
     }
+    if(action==='settings' && !item && method==='GET')return cloudResponse(await cloudContinuitySettings(service,principal,id));
     if(action==='media')return await handleCloudMedia(request,service,principal,id,parts.slice(1).join('/'));
     const options={};
     for(const [key,value] of url.searchParams){
@@ -68,11 +70,12 @@ export async function cloudHttp(request,bridge,service,ownerPrincipal) {
     else if(method==='GET'&&action==='state'&&!item)result=await service.state(principal,id,options);
     else if(method==='GET'&&action==='records'&&item&&!decision)result=await cloudRecordView(service,principal,id,item,options);
     else if(method==='GET'&&action==='archive'&&!item)result=await cloudArchiveView(service,principal,id,options);
+    else if(method==='GET'&&action==='changes'&&!item)result=await cloudChanges(service,principal,id,options);
     else if(method==='GET'&&action==='context'&&!item)result=await cloudContext(service,principal,id,options);
     else if(method==='GET'&&action==='spellbook'&&item&&!decision)result=await cloudSpellbook(service,principal,id,item,options);
     else if(method==='GET'&&action==='actions'&&item&&!decision)result=await cloudActions(service,principal,id,item,options);
     else if(method==='GET'&&action==='sheet'&&item&&!decision)result=await cloudSheet(service,principal,id,item);
-    else if(method==='GET'&&action==='links'&&item&&!decision)result=await cloudRelationships(service,principal,id,item);
+    else if(method==='GET'&&action==='links'&&item&&!decision)result=await cloudRelationships(service,principal,id,item,options);
     else if(method==='POST'&&action==='commands'&&!item)result=await service.submit(principal,id,await cloudBody(request));
     else if(method==='GET'&&action==='receipts'&&item&&!decision)result=await service.receipt(principal,id,item);
     else if(method==='GET'&&action==='review-status'&&!item)result=await service.reviewStatus(principal,id);

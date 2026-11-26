@@ -3,6 +3,7 @@ package com.yazsras.astravar.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
@@ -240,8 +241,20 @@ private val categoryScopes = mapOf(
             Text("Cloud campaign · ${snapshot.binding.continuity}")
             Text("Last cached revision ${snapshot.version.revision}")
             PlayerButton({ ownerPage() }) { Text("Open owner administration") }
+            PlayerTextButton({ tool="Device" }) { Text("Manage device connection") }
+            PlayerTextButton({ tool="Archive" },enabled=verified && !busy) { Text("Archive manager") }
+            PlayerTextButton({ tool="Recovery" }) { Text("Local backup and recovery") }
             PlayerTextButton({ tool="History" }) { Text("Check submitted commands") }
             PlayerTextButton({ menuScope=null; tool="Operations" },enabled=verified && !busy) { Text("All permitted operations") }
+        }
+        "Archive" -> if(snapshot.visible)CloudArchiveManager(client,snapshot,verified,::openOperation){tool=null}
+        "Device" -> RebuildToolSheet("Device connection",{tool=null}) { CampaignConnectionPage() }
+        "Recovery" -> RebuildToolSheet("Local recovery store",{tool=null}) {
+            Column {
+                Text("This backup contains pre-migration data stored on this device.",Modifier.padding(12.dp))
+                val app=context.applicationContext as? AstravarApp
+                if(app!=null) GenesisUnifiedBackupPage(app.genesisStorage.backup)
+            }
         }
         "Dice" -> actorId?.let { if (snapshot.visible) CloudRollManager(client,snapshot,it,verified) { tool=null } }
         "Inbox" -> PlayerSheet("Notification center",{tool=null}) {
@@ -267,14 +280,39 @@ private val categoryScopes = mapOf(
         }
         "Result" -> result?.let { r -> PlayerSheet("Transaction result",{ tool=null }) {
             Text(cloudLabel(r.cloudText("status").lowercase()))
-            RecordFields(r["receipt"] ?: r)
-            PlayerButton({ clipboard.setText(AnnotatedString(r.toString())) }) { Text("Copy result") }
+            val receipt=r["receipt"] as? JsonObject
+            val outcome=receipt?.get("outcome") as? JsonObject
+            val lines=outcome?.let(::namedCloudResults).orEmpty()
+            if(lines.isEmpty())RecordFields(outcome ?: r)
+            else lines.forEach { line->
+                Text(line,Modifier.fillMaxWidth().clickable(onClickLabel="Copy roll result"){
+                    clipboard.setText(AnnotatedString(line))
+                }.padding(vertical=12.dp),style=MaterialTheme.typography.titleMedium)
+            }
+            if(outcome!=null && "appliedDamage" in outcome && outcome["appliedDamage"]==JsonNull)
+                Text("Potential damage · awaiting target resolution")
+            PlayerButton({ clipboard.setText(AnnotatedString(if(lines.isEmpty()) (outcome ?: r).toString() else lines.joinToString("\n"))) }) {
+                Text(if(lines.size>1)"Copy All" else "Copy result")
+            }
+            receipt?.let { PlayerDisclosure("Transaction receipt"){RecordFields(it)} }
         } }
     }
     val target=operation
     val baseline=reviewed
     if (target!=null && baseline!=null)
-        CloudCommandForm(target,busy,{ operation=null },{ args -> command { client.submit(target.cloudText("name"),args,baseline) } },error,initialFields)
+        CloudCommandForm(target,busy,{ operation=null },{ args,id -> command { client.submit(target.cloudText("name"),args,baseline,id) } },error,initialFields)
+}
+
+internal fun namedCloudResults(outcome:JsonObject):List<String> {
+    val direct=(outcome["text"] as? JsonPrimitive)?.contentOrNull
+    if(!direct.isNullOrBlank())return listOf(direct)
+    return listOf("hit","damage","healing","rolls","results","components").flatMap { key->
+        when(val values=outcome[key]){
+            is JsonObject -> namedCloudResults(values)
+            is JsonArray -> values.mapNotNull { it as? JsonObject }.flatMap(::namedCloudResults)
+            else -> emptyList()
+        }
+    }
 }
 
 @Composable internal fun RecordFields(value: JsonElement) {

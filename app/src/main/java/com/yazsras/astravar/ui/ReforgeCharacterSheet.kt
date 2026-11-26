@@ -360,20 +360,10 @@ private enum class SpellbookFilter(val label: String) {
                                         }
                                     }
                                 }
-                                GenesisArmorAdoption(character, legacyArmor?.campaign, legacyArmor?.preferences?.elements.orEmpty(),
-                                    alreadyAdoptedBy = all.firstOrNull { it.character.id != character.id && it.character.armor != null }?.character?.name,
-                                    onSave = { next, label -> change(label, next, false) })
-                                GenesisArmorCombat(character,
-                                    onSave = { next, label -> change(label, next, false) },
-                                    onRoll = { next, record -> action("Armor roll saved") {
-                                        local.commitRoll(character.id, saved!!.revision, next, "Rolled Astravar attack and damage", record)
-                                        savedRoll = record
-                                    } },
-                                    onHistory = { openSection("History") }, saving = busy)
                                 RebirthSectionLabel("Attacks", onTitle = { dialog = "AttackManagement" })
                                 if (character.attacks.isEmpty()) PlayerEmpty("Set up your attacks", "Add an attack using your accepted damage dice and ability.", "Weapon")
                                 Column {
-                                    character.attacks.forEach { attack -> key(attack.id) {
+                                    character.attacks.filter { sheetAttackAvailable(character,it) }.forEach { attack -> key(attack.id) {
                                         val preview = remember(character, attack) { runCatching { AttackRules.preview(character, attack.id) } }
                                         val hit = preview.getOrNull()?.attackBonus?.value
                                         val damage = preview.getOrNull()?.components.orEmpty()
@@ -404,6 +394,8 @@ private enum class SpellbookFilter(val label: String) {
                                         HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .55f))
                                     } }
                                 }
+                                SheetAvailableActions(character, busy, onReview = { label, next -> proposedChange = label to next },
+                                    onError = { error = it })
                                 RebirthSectionLabel("Turn economy") { PlayerTextButton(onClick = { dialog = "Turn" }) { Text("Configure") } }
                                 if (character.turn.tracking) {
                                     Column {
@@ -525,8 +517,7 @@ private enum class SpellbookFilter(val label: String) {
                                             Column(Modifier.widthIn(min = 92.dp).clickable(role = Role.Button) { dialog = "Slots" }
                                                 .padding(vertical = 8.dp, horizontal = 4.dp)) {
                                                 Text("LEVEL $level", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelSmall)
-                                                Text("${character.spellSlots[level] ?: "Not set"} / $max", color = RebuildPalette.Purple,
-                                                    style = MaterialTheme.typography.titleMedium)
+                                                PoolCounter(character.spellSlots[level], max)
                                             }
                                         }
                                     }
@@ -592,8 +583,7 @@ private enum class SpellbookFilter(val label: String) {
                                                     Text(resource.recharge.name.lowercase().replace('_', ' '), color = RebuildPalette.Muted,
                                                         style = MaterialTheme.typography.bodySmall)
                                                 }
-                                                Text("${resource.current ?: "Not set"} / ${projection.resourceMaxima[resource.id] ?: "Not set"}",
-                                                    color = RebuildPalette.GoldBright, style = MaterialTheme.typography.titleLarge)
+                                                PoolCounter(resource.current, projection.resourceMaxima[resource.id])
                                             }
                                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                                 PlayerTextButton(onClick = { dialog = "Resource:${resource.id}" }) { Text("Edit") }
@@ -714,7 +704,23 @@ private enum class SpellbookFilter(val label: String) {
                 PlayerOutlinedButton(onClick = { dialog = "Setup" }) { Text("Character setup") }
                 PlayerOutlinedButton(onClick = { dialog = "Advance" }) { Text("Advancement") }
                 PlayerTextButton(onClick = { dialog = "CampaignConnections" }) { Text("Campaign membership") }
+                if (character.armor != null || legacyArmor?.campaign?.onboarded == true)
+                    PlayerTextButton(onClick = { dialog = "OriginalArmor" }) { Text("Original armor configuration") }
                 GenesisQuickActions(character.id, ::quickAction)
+            }
+            "OriginalArmor" -> PlayerSheet("Original armor configuration", { dialog = null }) {
+                Text("This view uses the saved legacy armor configuration. Current source-reviewed attacks appear in Actions.",
+                    color = RebuildPalette.Muted)
+                                GenesisArmorAdoption(character, legacyArmor?.campaign, legacyArmor?.preferences?.elements.orEmpty(),
+                                    alreadyAdoptedBy = all.firstOrNull { it.character.id != character.id && it.character.armor != null }?.character?.name,
+                                    onSave = { next, label -> change(label, next, false) })
+                                GenesisArmorCombat(character,
+                                    onSave = { next, label -> change(label, next, false) },
+                                    onRoll = { next, record -> action("Armor roll saved") {
+                                        local.commitRoll(character.id, saved!!.revision, next, "Rolled Astravar attack and damage", record)
+                                        savedRoll = record
+                                    } },
+                                    onHistory = { dialog = null; openSection("History") }, saving = busy)
             }
             "RollManager" -> AscensionRollManager(character, projection, local, { dialog = null }) {
                 dialog = null; openRoll(ReforgeRollRequest("Custom roll", null))

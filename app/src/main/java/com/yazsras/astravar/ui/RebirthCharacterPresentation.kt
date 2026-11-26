@@ -317,6 +317,47 @@ internal val Stat.fullLabel: String get() = when (this) {
     }
 }
 
+internal fun sheetAttackAvailable(character: ReforgeCharacter, attack: AttackDefinition): Boolean {
+    val form = CharacterCalculator.activeForm(character)?.id
+    if (attack.requiredFormId != null && attack.requiredFormId != form || form != null && form in attack.excludedFormIds) return false
+    val required = attack.requiredItemId ?: return true
+    return character.items.any { it.id == required && it.operating && it.quantity == 1 && it.state in setOf(ItemState.HELD, ItemState.WORN) } &&
+        character.items.none { required in it.donorInstanceIds }
+}
+
+@Composable internal fun SheetAvailableActions(character: ReforgeCharacter, busy: Boolean,
+    onReview: (String, ReforgeCharacter) -> Unit, onError: (String) -> Unit) {
+    val form = CharacterCalculator.activeForm(character)?.id
+    val active = character.features.filter { it.actionType.lowercase() in setOf("action", "bonus action", "reaction", "free") &&
+        (it.requiredFormId == null || it.requiredFormId == form) }
+    val equipment = character.items.filter { item -> item.operating && item.quantity == 1 && item.state in setOf(ItemState.WORN, ItemState.HELD) &&
+        character.items.none { item.id in it.donorInstanceIds }
+    }.mapNotNull { i -> character.itemDefinitions.firstOrNull { it.id == i.definitionId && (!it.requiresAttunement || i.attuned) }?.let { i to it } }
+    listOf("action" to "Actions", "bonus action" to "Bonus Actions", "reaction" to "Reactions", "free" to "Other").forEach { (timing, label) ->
+        val features = active.filter { it.actionType.equals(timing, true) }
+        val items = equipment.mapNotNull { (item, source) -> source.activations.filter {
+            it.actionType.equals(timing, true) || (timing=="free" && !it.actionType.lowercase().contains("action") && !it.actionType.equals("reaction", true))
+        }.takeIf { it.isNotEmpty() }?.let { Triple(item,source,it) } }
+        if (features.isNotEmpty() || items.isNotEmpty()) {
+            RebirthSectionLabel(label)
+            features.forEach { f -> key(f.id) {
+                PlayerDisclosure(f.name) {
+                    Text(f.source.name, color=RebuildPalette.Muted)
+                    if (f.description.isNotBlank()) ReforgeRichText(f.description)
+                    val resource = character.resources.firstOrNull { it.id == f.resourceId }
+                    if(resource!=null) Text("${resource.name} · ${resource.current ?: "?"}/${resource.maximum ?: "?"} · ${resource.recharge.name.lowercase().replace('_',' ')}")
+                    val use = runCatching { GameplayRules.useFeature(character, f.id) }
+                    use.exceptionOrNull()?.message?.let { Text(it,color=RebuildPalette.Muted) }
+                    PlayerOutlinedButton({ use.getOrNull()?.let { onReview("Use ${f.name}", it) } }, enabled=!busy && use.isSuccess) { Text("Use ${f.name}") }
+                }
+            } }
+            items.forEach { (item,definition,activations) -> key(item.id) {
+                PlayerDisclosure(definition.name) { NativeItemActions(character, item, definition.copy(activations=activations), busy, onReview, onError) }
+            } }
+        }
+    }
+}
+
 @Composable internal fun RebirthSectionLabel(title: String, onTitle: (() -> Unit)? = null, action: (@Composable () -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, Modifier.weight(1f).then(if (onTitle == null) Modifier else Modifier.clickable(role = Role.Button, onClick = onTitle)

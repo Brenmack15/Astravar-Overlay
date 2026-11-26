@@ -41,7 +41,7 @@ private fun formula(c: JsonObject): String {
     return "$base ${c.str("type").orEmpty()}"
 }
 
-@Composable private fun PoolCounter(value: Int?, max: Int?) {
+@Composable internal fun PoolCounter(value: Int?, max: Int?) {
     val balance = "${value ?: "?"}/${max ?: "?"}"
     Row(Modifier.semantics { contentDescription = "$balance remaining" }, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
         if (max != null && value != null && max in 1..10) repeat(max) { i ->
@@ -52,6 +52,57 @@ private fun formula(c: JsonObject): String {
         }
         Text(balance, style = MaterialTheme.typography.labelMedium)
     }
+}
+
+internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): String {
+    val receipt = value["receipt"] as? JsonObject
+    val outcome = value["savedReport"] as? JsonObject ?: receipt?.get("outcome") as? JsonObject ?: value
+    fun label(id: String?) = id?.let { names[it] ?: it } ?: "Unknown"
+    fun shown(o: JsonObject, key: String) = o.str(key) ?: "Unknown"
+    fun readable(term: String?) = term.orEmpty().replace('_', ' ')
+    val rest = outcome.str("kind") in setOf("long_rest", "short_rest")
+    val casting = outcome.containsKey("spellId")
+    return buildString {
+        appendLine(when {
+            rest -> readable(outcome.str("kind")).replaceFirstChar { it.uppercase() }
+            casting -> "Casting result · " + label(outcome.str("spellId"))
+            else -> readable(value.str("status") ?: "Gameplay result").replaceFirstChar { it.uppercase() }
+        })
+        val status = value.str("status") ?: outcome.str("status")
+        if (status != null) appendLine(readable(status))
+        if (outcome.containsKey("actorId")) appendLine("Actor · " + label(outcome.str("actorId")))
+        if (rest) {
+            appendLine("Elapsed · " + shown(outcome, "elapsedSeconds") + " seconds")
+            appendLine("HP · " + shown(outcome,"beforeHp") + " → " + shown(outcome,"afterHp") + " · healed " + shown(outcome,"actualHealing"))
+            for (die in outcome.rows("hitDice")) {
+                val mod = die.num("modifier")
+                val signed = if (mod == null) "Unknown" else if (mod >= 0) "+$mod" else mod.toString()
+                appendLine(label(die.str("poolId")) + " d" + shown(die,"sides") + " · (" + shown(die,"face") + ") " + signed +
+                    " · healed " + shown(die,"actual") + " · " + readable(die.str("origin")))
+            }
+            for (item in outcome.rows("deltas")) appendLine(label(item.str("poolId")) + " · " + shown(item,"before") + " → " + shown(item,"after") + " · " + readable(item.str("reason")))
+            for (pool in outcome.rows("remainingHitDice")) appendLine(label(pool.str("poolId")) + " · " + shown(pool,"remaining") + " Hit Dice remaining")
+            for (entry in outcome.rows("unresolved")) appendLine("Unresolved · " + readable(entry.str("reason")) +
+                (entry.str("poolId")?.let { " · " + label(it) } ?: ""))
+        }
+        if (casting) {
+            appendLine("Level " + shown(outcome,"level") + " · base level " + shown(outcome,"baseLevel") + " · " + readable(outcome.str("route")))
+            appendLine("Source · " + (outcome.str("source") ?: label(outcome.str("grantId"))))
+            appendLine("Time · " + readable(outcome.str("timing")))
+            if (outcome["concentration"]?.jsonPrimitive?.booleanOrNull == true) appendLine("Concentration required")
+            outcome.str("duration")?.let { appendLine("Duration · $it") }
+            val targets = outcome.strings("targets")
+            if (targets.isNotEmpty()) appendLine("Targets · " + targets.joinToString { label(it) })
+            for (cost in outcome.rows("costs")) appendLine(label(cost.str("poolId")) + " · " + shown(cost,"before") + " → " + shown(cost,"after"))
+            val hit = outcome["hit"] as? JsonObject
+            hit?.str("text")?.let { appendLine(it) }
+            for (damage in outcome.rows("damage")) appendLine(damage.str("text") ?: (label(damage.str("name")) + " · " + shown(damage,"total")))
+            appendLine("Target outcome · " + readable(outcome.str("outcome")))
+        }
+        outcome.str("reason")?.let { appendLine(readable(it)) }
+        (value.str("commandId") ?: outcome.str("commandId"))?.let { appendLine("Command · $it") }
+        if (receipt != null) appendLine("Receipt · " + receipt.str("transactionId") + " · revision " + receipt.str("revision"))
+    }.trimEnd()
 }
 
 @Composable internal fun CloudSpellRest(
@@ -125,21 +176,42 @@ private fun formula(c: JsonObject): String {
         }
         "Rest" -> RestPlan(actorId, actor?.details(), sheet, pools, online && !busy, ::submit)
     }
-    records.filter { it.str("kind") == if (tab == "Spells") "cast_instance" else "rest_report" }
+    val history = records.filter { it.str("kind") == if (tab == "Spells") "cast_instance" else "rest_report" }
         .sortedByDescending { it.details().get("recordedAt")?.jsonPrimitive?.longOrNull ?: 0L }
-        .take(5).forEach { r -> PlayerTextButton({result = r.details()}) { Text(r.str("title") ?: "View result") } }
+    var allHistory by remember(actorId, tab) { mutableStateOf(false) }
+    val names = records.associate { it.str("id").orEmpty() to it.str("title").orEmpty() }.toMutableMap()
+    actor?.str("title")?.let { names[actorId] = it }
+    history.take(if (allHistory) history.size else 5).forEach { r ->
+        PlayerTextButton({
+            val data = r.details()
+            result = data
+            val commandId = data.str("commandId")
+            if (online && commandId != null) scope.launch {
+                try {
+                    val checked = client.verify(commandId)
+                    if (result === data && checked.str("status") == "COMMITTED") {
+                        val receipt = checked["receipt"] as? JsonObject
+                        if(receipt != null) {
+                            result = JsonObject(checked + ("savedReport" to data))
+                        }
+                    }
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { error = "Showing the saved result. The receipt is unavailable." }
+            }
+        }) { Text(r.str("title") ?: "View result") }
+    }
+    if (history.size > 5) PlayerTextButton({allHistory = !allHistory}) { Text(if(allHistory) "Show recent results" else "Show all results") }
     error?.let { Text(it,color=MaterialTheme.colorScheme.error) }
     result?.let { value ->
         val clipboard = LocalClipboardManager.current
-        val receipt = value["receipt"] as? JsonObject
-        val actual = receipt?.get("outcome") as? JsonObject ?: value
-        val text = buildString {
-            appendLine(if (tab=="Spells") "Casting result" else "Rest result")
-            if(receipt!=null) appendLine("Revision ${receipt.num("revision")} · ${receipt.str("transactionId")}")
-            append(Json { prettyPrint=true }.encodeToString(JsonObject.serializer(),actual))
-        }
-        AlertDialog(onDismissRequest={result=null},title={Text(value.str("status") ?: if(tab=="Spells") "Casting result" else "Rest result")},
-            text={Column(Modifier.verticalScroll(rememberScrollState())) { Text(text) }},
+        var details by remember(value) { mutableStateOf(false) }
+        val text = cloudGameplayReport(value,names)
+        AlertDialog(onDismissRequest={result=null}, title={Text(if(tab=="Spells") "Casting result" else "Rest result")},
+            text={Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(text)
+                PlayerTextButton({details=!details}) { Text(if(details) "Hide technical details" else "Technical details") }
+                if(details) Text(Json { prettyPrint=true }.encodeToString(JsonObject.serializer(),value))
+            }},
             confirmButton={TextButton({clipboard.setText(AnnotatedString(text))}){Text(if(tab=="Spells") "Copy casting result" else "Copy rest result")}},
             dismissButton={TextButton({result=null}){Text("Close")}})
     }

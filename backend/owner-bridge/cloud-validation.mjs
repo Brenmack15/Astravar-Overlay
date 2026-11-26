@@ -2,7 +2,7 @@ import { BridgeError } from './core.mjs';
 
 export const CLOUD_SCOPES = Object.freeze([
   'character', 'inventory', 'economy', 'resources', 'combat', 'spells',
-  'rolls', 'crafting', 'world', 'chronicle', 'media', 'lifecycle',
+  'rolls', 'crafting', 'world', 'chronicle', 'media', 'lifecycle', 'campaign',
 ]);
 export const CLOUD_ID = Object.freeze({ type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' });
 export const CLOUD_REVISION = Object.freeze({ type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER - 1 });

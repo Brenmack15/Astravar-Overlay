@@ -1,4 +1,4 @@
-import { stats, identifier, boolean, named, whole, nullable, arrayOf, option, fields, evidence, mode, spellSchema, must, op, actor, owned, insert, save, gearEligible, numeric, sheet, rollPolicy, spend, useTiming } from './cloud-mechanics-core.mjs';
+import { checkDiceOwner, stats, identifier, boolean, named, whole, nullable, arrayOf, option, fields, evidence, mode, spellSchema, must, op, actor, owned, insert, save, gearEligible, numeric, sheet, rollPolicy, spend, useTiming } from './cloud-mechanics-core.mjs';
 import { damageEvidence, componentRules, snapshotComponents, rollComponents } from './cloud-mechanics-combat.mjs';
 import { observed } from './cloud-mechanics-rolls.mjs';
 
@@ -85,6 +85,9 @@ async function cast(ctx,x){
 }
 async function castRoll(ctx,x){
   const c=await owned(ctx,'cast_instance',x.castId,x.actorId),d=c.data;
+  const a=await actor(ctx,x.actorId);
+  if(x.hit)checkDiceOwner(ctx,a,'spell',x.hit.origin);
+  for(const part of x.damage??[])checkDiceOwner(ctx,a,'spell',part.evidence.origin);
   let hit=d.hit,damage=d.damage;
   must(x.hit||x.damage,'CAST_ROLL_EVIDENCE_REQUIRED');
   if(x.hit){

@@ -1,4 +1,4 @@
-import { stats, identifier, boolean, named, whole, arrayOf, option, fields, mode, evidence, attackSchema, must, op, actor, owned, insert, save, sheet, transferableSource, gearEligible, numeric, rollPolicy, spend, useTiming } from './cloud-mechanics-core.mjs';
+import { checkDiceOwner, stats, identifier, boolean, named, whole, arrayOf, option, fields, mode, evidence, attackSchema, must, op, actor, owned, insert, save, sheet, transferableSource, gearEligible, numeric, rollPolicy, spend, useTiming } from './cloud-mechanics-core.mjs';
 import { observed } from './cloud-mechanics-rolls.mjs';
 
 export const damageEvidence=arrayOf(fields({id:identifier,evidence},['id','evidence']),24);
@@ -33,7 +33,9 @@ async function validateAttack(ctx,x){
   componentRules(x.components);
   must((!x.requiresAttunement&&!x.requiresOperating) || x.sourceItemId,'ATTACK_ITEM_REQUIRED');
   must(x.resolution!=='attack'||x.fixedHit!=null||x.ability,'HIT_FORMULA_REQUIRED');
-  must(x.resolution!=='save'||x.saveAbility && x.saveDc!=null,'SAVE_FORMULA_REQUIRED');
+  must(x.resolution!=='save'||x.saveAbility && ((x.saveDc!=null)!==!!x.dcAbility),'SAVE_FORMULA_REQUIRED');
+  must(x.dcAbility || (x.dcBase==null && x.dcProficient==null && x.dcBonus==null),'SAVE_DC_ABILITY_REQUIRED');
+  must(x.resolution==='save' || (x.dcAbility==null && x.saveDc==null),'DC_ON_NON_SAVE');
   must(x.resolution==='attack'||(x.fixedHit==null&&x.hitBonus==null),'HIT_ON_NON_ATTACK');
   must(x.longRange==null||x.range!=null&&x.longRange>=x.range,'INVALID_LONG_RANGE');
   if(x.sourceItemId)must((await ctx.get('item_instance',x.sourceItemId))?.life==='active','ATTACK_SOURCE_MISSING');
@@ -102,8 +104,17 @@ export function attackModifier(attack,p) {
   return numeric(base,p.effects,'attack',attack.id).value;
 }
 
+export function attackSaveDc(d,p) {
+  if(d.saveDc!=null) return d.saveDc;
+  const modifier=p.abilities[d.dcAbility]?.modifier;
+  must(modifier!=null && (!d.dcProficient || p.proficiency!=null),'SAVE_DC_UNKNOWN');
+  return (d.dcBase??8)+modifier+(d.dcProficient?p.proficiency:0)+(d.dcBonus??0);
+}
+
 async function standaloneDamage(ctx,x) {
-  const {attack,p,components}=await loadAttack(ctx,x);
+  ctx.require('combat',x.actorId);
+  const {a,attack,p,components}=await loadAttack(ctx,x);
+  for(const part of x.damage)checkDiceOwner(ctx,a,'damage',part.evidence.origin);
   must(attack.data.resolution!=='manual','MANUAL_ADJUDICATION_REQUIRED');
   const results=rollComponents(components,x.damage,false);
   const result={kind:'attack_damage',status:'resolved',actorId:x.actorId,formId:p.formId,attackId:attack.id,
@@ -119,24 +130,50 @@ async function resolveAttack(ctx,x){
   const targets=x.targets??[];
   must(new Set(targets).size===targets.length && (d.resolution!=='attack'||targets.length<=1),'ATTACK_TARGETS_INVALID');
   for(const id of targets)await actor(ctx,id);
-  let hit=null,critical=false;
+  if(x.hit)checkDiceOwner(ctx,a,'attack',x.hit.origin);
+  for(const part of x.damage??[])checkDiceOwner(ctx,a,'damage',part.evidence.origin);
+  let hit=null,critical=false,substitution=null;
   if(d.resolution==='attack'){
-    must(x.hit,'ATTACK_DICE_REQUIRED');
-    const policy=rollPolicy(p.effects,'attack:'+attack.id,x.mode);
     const total=attackModifier(attack,p);
-    hit=observed(attack.title,policy.count,20,total,policy.mode==='normal'?'sum':policy.mode==='advantage'?'highest':'lowest',x.hit,true);
-    critical=hit.natural===20;
-  }else must(!x.hit&&x.mode==='normal','UNEXPECTED_ATTACK_ROLL');
+    if(x.substitutionId){
+      must(!x.hit && x.mode==='normal','SUBSTITUTION_REPLACES_DICE');
+      const rule=await owned(ctx,'action_definition',x.substitutionId,a.id),f=rule.data;
+      must(f.type==='fixed_attack_die' && f.cost && (!f.formId||f.formId===p.formId) &&
+        await gearEligible(ctx,f.sourceItemId,a.id,f.requiresAttunement,f.requiresOperating),'DIE_SUBSTITUTION_INELIGIBLE');
+      const cost=await spend(ctx,a.id,f.cost.poolId,f.cost.amount);
+      hit={name:attack.title,status:'resolved',origin:'source_substitution',faces:[],substitutedValue:f.fixedDieValue,modifier:total,
+        total:f.fixedDieValue+total,natural:null,mode:'fixed',text:`${attack.title}: (${f.fixedDieValue} fixed) ${total<0?'−':'+'} ${Math.abs(total)} = ${f.fixedDieValue+total}`};
+      substitution={ruleId:rule.id,sourceItemId:f.sourceItemId,cost};
+    }else{
+      must(x.hit,'ATTACK_DICE_REQUIRED');
+      const policy=rollPolicy(p.effects,'attack:'+attack.id,x.mode);
+      hit=observed(attack.title,policy.count,20,total,policy.mode==='normal'?'sum':policy.mode==='advantage'?'highest':'lowest',x.hit,true);
+      critical=hit.natural===20;
+    }
+  }else must(!x.hit && !x.substitutionId && x.mode==='normal','UNEXPECTED_ATTACK_ROLL');
   must(x.includeDamage || x.damage===undefined,'UNREQUESTED_DAMAGE');
   const damage=x.includeDamage?rollComponents(components,x.damage??[],critical):null;
-  await useTiming(ctx,a,d.timing);
+  if(x.actionUseId){
+    const use=await owned(ctx,'action_use',x.actionUseId,a.id),u=use.data;
+    const enc=a.data.encounterId?await ctx.get('encounter',a.data.encounterId):null;
+    must(u.type==='multiattack' && a.data.activeMultiattackId===use.id && u.formId===p.formId && u.encounterId===(enc?.id??null) &&
+      (enc?enc.data.active && enc.data.participants[enc.data.index]===a.id && u.turn[0]===enc.data.round && u.turn[1]===enc.data.index:
+        a.data.gameSeconds!=null && a.data.gameSeconds>=u.startedAt && a.data.gameSeconds<u.startedAt+6),'MULTIATTACK_WINDOW_CLOSED');
+    const remaining=[...u.remainingAttacks],index=remaining.indexOf(attack.id);
+    must(index>=0,'MULTIATTACK_ATTACK_UNAVAILABLE');remaining.splice(index,1);
+    await save(ctx,use,{...u,remainingAttacks:remaining,attemptIds:[...u.attemptIds,x.attemptId]});
+    if(remaining.length===0)await save(ctx,a,{...a.data,activeMultiattackId:null});
+  }else await useTiming(ctx,a,d.timing);
   const costs=d.cost?[await spend(ctx,a.id,d.cost.poolId,d.cost.amount)]:[];
-  const result={actorId:a.id,formId:p.formId,attackId:attack.id,sourceItemId:d.sourceItemId??null,resolution:d.resolution,
-    sourceRevision:attack.revision,hit,critical,components,damage,costs,timing:d.timing,appliedDamage:null,targets,targetResults:[],
-    save:d.resolution==='save'?{ability:d.saveAbility,dc:d.saveDc,success:d.saveSuccess??null}:null,outcome:hit?.natural===1?'miss':'pending',
+  if(substitution)costs.push(substitution.cost);
+  const result={actorId:a.id,formId:p.formId,attackId:attack.id,substitution,sourceItemId:d.sourceItemId??null,resolution:d.resolution,
+    sourceRevision:attack.revision,hit,critical,components,damage,costs,timing:x.actionUseId?'part_of_multiattack':d.timing,actionUseId:x.actionUseId??null,appliedDamage:null,targets,targetResults:[],
+    save:d.resolution==='save'?{ability:d.saveAbility,dc:attackSaveDc(d,p),success:d.saveSuccess??null}:null,outcome:hit?.natural===1?'miss':'pending',
     commandId:ctx.commandId,recordedAt:ctx.now};
   await insert(ctx,'attack_attempt',x.attemptId,a.id,attack.title,result);
   await ctx.link(x.attemptId,'used_attack',attack.id);
+  if(substitution)await ctx.link(x.attemptId,'used_substitution',substitution.ruleId);
+  if(x.actionUseId)await ctx.link(x.attemptId,'part_of_multiattack',x.actionUseId);
   for(const id of targets)await ctx.link(x.attemptId,'declared_target',id);
   return {attemptId:x.attemptId,...result};
 }
@@ -182,11 +219,13 @@ export const combatOperations=Object.freeze({
   update_attack:op('combat',fields({...attackSchema.properties,expectedAttackRevision:whole(1,Number.MAX_SAFE_INTEGER),
     discardUnavailableSelections:boolean},[...attackSchema.required,'expectedAttackRevision']),(ctx,x)=>writeAttack(ctx,x,true)),
   select_damage_variant:op('combat',fields({actorId:identifier,attackId:identifier,componentId:identifier,type:identifier},['actorId','attackId','componentId','type']),chooseVariant),
-  resolve_attack:op('combat',fields({actorId:identifier,attemptId:identifier,attackId:identifier,mode,hit:evidence,includeDamage:boolean,damage:damageEvidence,targets:arrayOf(identifier,16)},['actorId','attemptId','attackId','mode','includeDamage']),resolveAttack),
+  resolve_attack:op('combat',fields({actorId:identifier,attemptId:identifier,attackId:identifier,actionUseId:identifier,substitutionId:identifier,mode,hit:evidence,includeDamage:boolean,damage:damageEvidence,targets:arrayOf(identifier,16)},['actorId','attemptId','attackId','mode','includeDamage']),resolveAttack),
   roll_damage_only:op('combat',fields({actorId:identifier,attackId:identifier,rollId:identifier,damage:damageEvidence},['actorId','attackId','rollId','damage']),standaloneDamage),
   roll_attack_damage:op('combat',fields({actorId:identifier,attemptId:identifier,damage:damageEvidence},['actorId','attemptId','damage']),async(ctx,x)=>{
     const r=await owned(ctx,'attack_attempt',x.attemptId,x.actorId);
     must(r.data.damage===null,'ATTEMPT_DAMAGE_ALREADY_RECORDED');
+    const a=await actor(ctx,x.actorId);
+    for(const part of x.damage)checkDiceOwner(ctx,a,'damage',part.evidence.origin);
     const damage=rollComponents(r.data.components,x.damage,r.data.critical);
     await save(ctx,r,{...r.data,damage});return {attemptId:r.id,damage,outcome:r.data.outcome,appliedDamage:null};
   }),

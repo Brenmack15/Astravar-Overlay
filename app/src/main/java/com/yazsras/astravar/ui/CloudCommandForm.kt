@@ -13,13 +13,14 @@ internal fun cloudLabel(raw: String): String = raw.replace('_',' ')
 
 /** Fields come from the server's closed operation schema. Nothing is submitted by opening a field or choosing a variant. */
 @Composable internal fun CloudCommandForm(operation: JsonObject, busy: Boolean, dismiss: () -> Unit,
-    submit: (JsonObject) -> Unit, error: String?, initial: JsonObject = buildJsonObject {}) {
+    submit: (JsonObject,String) -> Unit, error: String?, initial: JsonObject = buildJsonObject {}) {
     val name = operation.getValue("name").jsonPrimitive.content
     val schema = operation.getValue("schema").jsonObject
     var draft by rememberSaveable(name,initial.toString()) { mutableStateOf(initial.toString()) }
+    val commandId=rememberSaveable(name,draft) { java.util.UUID.randomUUID().toString() }
     val args = remember(draft) { Json.parseToJsonElement(draft).jsonObject }
     PlayerSheet(cloudLabel(name), dismiss, dirty = args.isNotEmpty(), dismissEnabled = !busy, actions = {
-        PlayerButton(onClick = { submit(args) }, enabled = !busy && readyField(schema,args)) { Text("Submit") }
+        PlayerButton(onClick = { submit(args,commandId) }, enabled = !busy && readyField(schema,args)) { Text("Submit") }
     }) {
         SchemaFields(schema,args) { draft = it.toString() }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }

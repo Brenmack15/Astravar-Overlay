@@ -26,7 +26,7 @@ import kotlinx.serialization.json.Json
 internal data class ManagerOption(val check: QueuedCheck, val bonus: Int?)
 internal data class ManagerFormula(val formula: DiceFormula, val mode: DiceMode, val d20Count: Int = 1)
 @Serializable internal data class PreparedCheck(val id: String, val check: QueuedCheck, val result: DiceResult)
-@Serializable internal data class PreparedRollBatch(val id: String, val revision: String, val rolls: List<PreparedCheck>, val workshop: Boolean)
+@Serializable internal data class PreparedRollBatch(val id: String, val revision: String, val rolls: List<PreparedCheck>, val workshop: Boolean, val presetId: String? = null)
 internal data class SavedRollBatch(val lines: List<String>, val status: String)
 private val rollRandom = SecureRandom()
 private val modes = listOf(DiceMode.NORMAL, DiceMode.ADVANTAGE, DiceMode.DISADVANTAGE)
@@ -81,11 +81,12 @@ internal fun composeRollEvidence(formula: ManagerFormula, entered: String?, draw
         }, commit = { batch ->
             val revision = batch.revision.toLong()
             val form = CharacterCalculator.activeForm(character)?.id
-            val records = batch.rolls.map { r ->
+            val records = batch.rolls.mapIndexed { index, r ->
                 val result = r.result
                 val component = ReforgeRollComponent(r.check.label, result.faces.map { ReforgeRollDie(it.sides, it.face, it.kept, it.sign) },
-                    result.formula.flat, mode = result.mode, batchId = batch.id, subjectId = r.check.key, checkKind = r.check.kind.name, formId = form)
-                ReforgeRollRecord(id = r.id, profileId = character.id, characterRevision = revision, label = r.check.label,
+                    result.formula.flat, mode = result.mode, batchId = batch.id, subjectId = r.check.key, checkKind = r.check.kind.name, formId = form,
+                    batchMemberIds = if (index == 0) batch.rolls.mapIndexed { i, member -> if (i == 0) batch.id else member.id } else emptyList())
+                ReforgeRollRecord(id = if (index == 0) batch.id else r.id, profileId = character.id, characterRevision = revision, label = r.check.label,
                     formula = SecureDice.format(result.formula), components = listOf(component), manual = result.manual)
             }
             val saved = repository.appendRollBatch(batch.id, records)
@@ -158,7 +159,8 @@ internal fun composeRollEvidence(formula: ManagerFormula, entered: String?, draw
             val rows = queue.mapIndexed { index, check ->
                 PreparedCheck(UUID.randomUUID().toString(), check, composeRollEvidence(formulas[index], if (manual) entered[index] else null))
             }
-            PreparedRollBatch(UUID.randomUUID().toString(), revision, rows, workshop).also { preparedJson = Json.encodeToString(it) }
+            val presetId = presets.firstOrNull { it.id == selected && it.entries == queue && it.workshop == workshop }?.id
+            PreparedRollBatch(UUID.randomUUID().toString(), revision, rows, workshop, presetId).also { preparedJson = Json.encodeToString(it) }
         }
         val outcome = commit(batch)
         if (outcome.lines.isNotEmpty()) {

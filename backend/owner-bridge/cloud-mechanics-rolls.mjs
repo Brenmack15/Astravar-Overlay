@@ -1,4 +1,4 @@
-import { stats, identifier, named, whole, arrayOf, fields, option, boolean, checkSpec, evidence, must, op, owned, actor, insert, save, sheet, rollPolicy } from './cloud-mechanics-core.mjs';
+import { checkDiceOwner, stats, identifier, named, whole, arrayOf, fields, option, boolean, checkSpec, evidence, must, op, owned, actor, insert, save, sheet, rollPolicy } from './cloud-mechanics-core.mjs';
 
 export function observed(name,count,sides,flat,keeps,e,eligibleD20=false) {
   must(Number.isSafeInteger(flat) && count>=0 && count<=200 && e.faces.length===count && e.faces.every(v=>Number.isInteger(v)&&v>=1&&v<=sides),'INVALID_RECORDED_FACES');
@@ -41,6 +41,7 @@ async function calculate(ctx,actorId,s,e){
   assertSpecification(s);
   await validateContext(ctx,actorId,s);
   const a=await actor(ctx,actorId),projection=await sheet(ctx,actorId,s.contextTags??[]);
+  checkDiceOwner(ctx,a,s.kind,e.origin);
   const policy=rollPolicy(projection.effects,s.kind+':'+s.key,s.mode);
   const custom=s.kind==='custom';
   const signed=custom?(s.flat??0):s.kind==='ability'?projection.checks[s.key]?.value:
@@ -70,6 +71,12 @@ async function calculate(ctx,actorId,s,e){
 }
 async function recordCheck(ctx,x){
   const result=await calculate(ctx,x.actorId,x.check,x.evidence);
+  must([x.forUseId,x.forAttemptId,x.forConcentrationId].filter(Boolean).length<=1,'INCOMPATIBLE_ROLL_REQUESTS');
+  if(x.forConcentrationId){
+    const pending=await owned(ctx,'concentration_check',x.forConcentrationId,x.actorId),a=await actor(ctx,x.actorId);
+    must(pending.data.status==='pending' && a.data.concentrationCastId===pending.data.castId && x.check.kind==='save' && x.check.key==='CON','NO_MATCHING_CONCENTRATION_SAVE');
+    result.forConcentrationId=pending.id;
+  }
   if(x.forUseId){
     const use=await ctx.get('action_use',x.forUseId);
     must(use?.life==='active' && use.data.targets?.some(t=>t.actorId===x.actorId&&['pending_save','frightened'].includes(t.status)) &&
@@ -82,6 +89,7 @@ async function recordCheck(ctx,x){
     result.forAttemptId=x.forAttemptId;
   }
   await insert(ctx,'roll',x.rollId,x.actorId,result.name,result);
+  if(x.forConcentrationId)await ctx.link(x.rollId,'for_concentration',x.forConcentrationId);
   if(x.forUseId)await ctx.link(x.rollId,'for_use',x.forUseId);
   if(x.forAttemptId)await ctx.link(x.rollId,'for_attempt',x.forAttemptId);
   return {rollId:x.rollId,...result};
@@ -94,7 +102,11 @@ async function batch(ctx,x){
     must(!ids.has(entry.rollId),'DUPLICATE_ROLL_ID');ids.add(entry.rollId);
     if(!entry.evidence){
       assertSpecification(entry.check);
-      results.push({rollId:entry.rollId,status:'pending',check:entry.check});
+      const a=await actor(ctx,x.actorId);
+      const name=entry.check.kind==='custom'?entry.check.name:checkName(entry.check.kind,entry.check.key,a);
+      const pending={actorId:x.actorId,batchId:x.batchId,status:'pending',name,check:entry.check,requestedAt:ctx.now};
+      await insert(ctx,'roll',entry.rollId,x.actorId,name,pending);
+      results.push({rollId:entry.rollId,...pending});
     }else{
       results.push(await recordCheck(ctx,{actorId:x.actorId,...entry}));
     }
@@ -102,7 +114,7 @@ async function batch(ctx,x){
   must(results.length>0,'EMPTY_BATCH');
   const status=results.every(r=>r.status==='resolved')?'resolved':'pending';
   await insert(ctx,'roll_batch',x.batchId,x.actorId,'Roll batch',{actorId:x.actorId,results,status,commandId:ctx.commandId});
-  for(const r of results)if(r.status==='resolved')await ctx.link(x.batchId,'includes_roll',r.rollId);
+  for(const r of results)await ctx.link(x.batchId,'includes_roll',r.rollId);
   return {batchId:x.batchId,status,results};
 }
 async function savePreset(ctx,x){
@@ -125,7 +137,15 @@ export const rollOperations=Object.freeze({
     await save(ctx,a,{...a.data,contextTags:[...tags].sort()});
     return {actorId:a.id,tag:x.tag,active:x.active,source:x.source};
   }),ownerReview:true},
-  record_check:op('rolls',fields({actorId:identifier,rollId:identifier,check:checkSpec,evidence,forUseId:identifier,forAttemptId:identifier},['actorId','rollId','check','evidence']),recordCheck),
+  complete_pending_check:op('rolls',fields({actorId:identifier,batchId:identifier,rollId:identifier,evidence},['actorId','batchId','rollId','evidence']),async(ctx,x)=>{
+    const r=await owned(ctx,'roll',x.rollId,x.actorId),b=await owned(ctx,'roll_batch',x.batchId,x.actorId);
+    must(r.data.status==='pending' && r.data.batchId===b.id && b.data.results.some(e=>e.rollId===r.id&&e.status==='pending'),'ROLL_NOT_PENDING');
+    const result={...await calculate(ctx,x.actorId,r.data.check,x.evidence),rollId:r.id,batchId:b.id,requestedAt:r.data.requestedAt};
+    await save(ctx,r,result);
+    const results=b.data.results.map(e=>e.rollId===r.id?result:e),status=results.every(e=>e.status==='resolved')?'resolved':'pending';
+    await save(ctx,b,{...b.data,results,status});return {batchId:b.id,status,result};
+  }),
+  record_check:op('rolls',fields({actorId:identifier,rollId:identifier,check:checkSpec,evidence,forUseId:identifier,forAttemptId:identifier,forConcentrationId:identifier},['actorId','rollId','check','evidence']),recordCheck),
   record_roll_batch:op('rolls',fields({actorId:identifier,batchId:identifier,entries:arrayOf(fields({rollId:identifier,check:checkSpec,evidence},['rollId','check']),24)},['actorId','batchId','entries']),batch),
   save_roll_preset:op('rolls',fields({actorId:identifier,presetId:identifier,name:named(120),entries:arrayOf(checkSpec,24),update:boolean},['actorId','presetId','name','entries','update']),savePreset),
   execute_roll_preset:op('rolls',fields({actorId:identifier,presetId:identifier,batchId:identifier,rolls:arrayOf(fields({rollId:identifier,evidence},['rollId']),24)},['actorId','presetId','batchId','rolls']),async(ctx,x)=>{

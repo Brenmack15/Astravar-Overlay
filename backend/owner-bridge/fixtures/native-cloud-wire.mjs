@@ -9,7 +9,7 @@ import {sha256} from '../core.mjs';
 const db = new SqliteAdapter();
 db.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
 const origin = 'https://native-wire.example.test';
-const continuity = 'native-fixture';
+const continuity = 'qa-native-fixture';
 const owner = 'native-test-owner';
 const device = 'native-device';
 const bearer = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '');
@@ -33,8 +33,8 @@ async function setup(route, body) {
 }
 async function grant(subject, revision, revoked = false) {
     return setup(path + '/grants/' + subject, {
-        scopes: ['character.read','character.write','combat.read','combat.write','rolls.read','rolls.write'],
-        actors: ['*'], auto: ['character.write','combat.write','rolls.write'],
+        scopes: ['character','resources','inventory','economy','combat','chronicle','rolls'].flatMap(k=>[k+'.read',k+'.write']),
+        actors: ['*'], auto: ['character','resources','inventory','economy','combat','chronicle','rolls'].map(k=>k+'.write'),
         expiresAt, expectedGrantRevision: revision, revoked
     });
 }

@@ -69,17 +69,30 @@ const itemBase=`WITH party AS (${partyActors}), items AS (
  AND (json_extract(i.data_json,'$.ownerId') IN(SELECT id FROM party) OR json_extract(i.data_json,'$.custodianId') IN(SELECT id FROM party)
  OR (json_extract(i.data_json,'$.ownerId') IS NULL AND json_extract(i.data_json,'$.holding') IN('storage','unassigned')))) `;
 async function inventoryOverview(service,b,grant,opts) {
-  fullParty(grant,'inventory');
   if(opts.id) {
-    const definition=await subject(service,b,grant,opts.id,'item_definition');
-    const rows=(await service.s(itemBase+`SELECT i.id,i.title,i.data_json AS data,
+    const authorized=await subject(service,b,grant,opts.id);
+    if(authorized.kind==='actor') return actorEquipment(service,b,grant,authorized,opts);
+    if(authorized.kind==='item_instance'){
+      requireScope(grant,'inventory');
+      const row=await service.s(`SELECT d.* FROM cloud_entities i JOIN cloud_entities d
+        ON d.owner_id=i.owner_id AND d.continuity_id=i.continuity_id AND d.id=json_extract(i.data_json,'$.definitionId')
+        AND d.kind='item_definition' AND d.actor_id IS NULL AND d.life='active'
+        WHERE i.owner_id=? AND i.continuity_id=? AND i.kind='item_instance' AND i.id=?`,...b,authorized.id).first();
+      if(!row)cloudFail(404,'RECORD_UNAVAILABLE');
+      return {holding:cloudEntity(authorized),definition:cloudEntity(row),nextAfter:null};
+    }
+    if(authorized.kind!=='item_definition')cloudFail(404,'RECORD_UNAVAILABLE');
+    fullParty(grant,'inventory');
+    const definition=authorized;
+    const rows=(await service.s(itemBase+`SELECT i.id,i.title,i.group_key AS groupId,i.data_json AS data,
       (SELECT title FROM cloud_entities a WHERE a.owner_id=? AND a.continuity_id=? AND a.kind='actor' AND a.id=json_extract(i.data_json,'$.ownerId')) AS ownerName,
       (SELECT title FROM cloud_entities a WHERE a.owner_id=? AND a.continuity_id=? AND a.kind='actor' AND a.id=json_extract(i.data_json,'$.custodianId')) AS custodianName
       FROM items i WHERE definition_id=? AND i.id>? ORDER BY i.id LIMIT ?`,
       ...b,...b,...b,...b,definition.id,opts.after,opts.limit+1).all()).results;
-    const items=rows.slice(0,opts.limit).map(row=>({id:row.id,title:row.title,ownerName:row.ownerName,custodianName:row.custodianName,...JSON.parse(row.data)}));
+    const items=rows.slice(0,opts.limit).map(row=>({id:row.id,title:row.title,groupId:row.groupId,ownerName:row.ownerName,custodianName:row.custodianName,...JSON.parse(row.data)}));
     return {definitionId:definition.id,items,nextAfter:rows.length>opts.limit?items.at(-1).id:null};
   }
+  fullParty(grant,'inventory');
   const rows=(await service.s(itemBase+`SELECT group_key AS groupId,definition_id AS definitionId,min(title) AS title,
    count(*) AS instances,coalesce(sum(json_extract(data_json,'$.quantity')),0) AS knownQuantity,
    count(*)-count(json_extract(data_json,'$.quantity')) AS unknownQuantityCount
@@ -87,6 +100,21 @@ async function inventoryOverview(service,b,grant,opts) {
    ...b,...b,opts.after,opts.query,opts.limit+1).all()).results;
   const groups=rows.slice(0,opts.limit);
   return {groups,nextAfter:rows.length>opts.limit?groups.at(-1).groupId:null};
+}
+async function actorEquipment(service,b,grant,actor,opts) {
+  if(!cloudAllowed(grant,'inventory',actor.id) || actor.life!=='active' ||
+      !['player','companion'].includes(JSON.parse(actor.data_json).role))cloudFail(404,'RECORD_UNAVAILABLE');
+  const allowed=actorRule(grant,'i');
+  const rows=(await service.s(`SELECT i.*,CASE WHEN json_extract(i.data_json,'$.customized')=1 THEN i.title ELSE d.title END AS display_title
+    FROM cloud_entities i JOIN cloud_entities d ON d.owner_id=i.owner_id AND d.continuity_id=i.continuity_id
+        AND d.id=json_extract(i.data_json,'$.definitionId') AND d.kind='item_definition' AND d.actor_id IS NULL AND d.life='active'
+    WHERE i.owner_id=? AND i.continuity_id=? AND i.kind='item_instance' AND i.life='active' AND i.id>?
+        AND ${allowed.sql} AND json_extract(i.data_json,'$.custodianId')=? AND json_extract(i.data_json,'$.partyAccess')=1
+        AND json_extract(i.data_json,'$.holding')='carried'
+        AND instr(lower(CASE WHEN json_extract(i.data_json,'$.customized')=1 THEN i.title ELSE d.title END),lower(?))>0
+    ORDER BY i.id LIMIT ?`,...b,opts.after,...allowed.values,actor.id,opts.query,opts.limit+1).all()).results;
+  const items=rows.slice(0,opts.limit).map(row=>({...cloudEntity(row),title:row.display_title}));
+  return {actorId:actor.id,items,nextAfter:rows.length>opts.limit?items.at(-1).id:null};
 }
 function chronologicalCursor(after) {
   if(!after)return [Number.MAX_SAFE_INTEGER,''];

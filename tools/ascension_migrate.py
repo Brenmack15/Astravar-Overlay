@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Offline, single-continuity migration and recovery for tool-created rehearsal stores."""
 import argparse
+import base64
+import binascii
 import fcntl
 import hashlib
 import io
@@ -24,6 +26,7 @@ SQL = ROOT / "backend/owner-bridge/schema.sql"
 FORMAT = "astravar-cloud-recovery"
 LAB = "astravar-isolated-migration-v1"
 TABLES = {
+    "cloud_grant_audit": ("event_id",),
     "cloud_media_uploads": ("upload_id",),
     "cloud_media_previews": ("upload_id",),
     "cloud_entities": ("id",),
@@ -258,8 +261,12 @@ def protect(source, destination, key_file, decrypt=False):
         raise ValueError("Invalid recovery key format") from error
     if decrypt:
         try:
-            output = cipher.decrypt(read_limited(source, 2 * (LIMIT + (2 << 20))))
-        except InvalidToken as error:
+            token = read_limited(source, 2 * (LIMIT + (2 << 20)))
+            binary = base64.b64decode(token, altchars=b"-_", validate=True)
+            if base64.urlsafe_b64encode(binary) != token:
+                raise InvalidToken
+            output = cipher.decrypt(token)
+        except (InvalidToken, binascii.Error) as error:
             raise ValueError("Backup authentication failed") from error
     else:
         # Validate the exact original bytes that enter encryption even if the source changes concurrently.
@@ -453,6 +460,7 @@ def stage(db, bundle):
       LIMIT 1""", tenant).fetchone()
     verify(not mismatch, "Requests and immutable terminal outcomes disagree")
     verify(all(r["epoch"] <= origin["epoch"] and r["revision"] <= origin["revision"] for r in rows["cloud_receipts"])
+           and all(1 <= r["epoch"] <= origin["epoch"] and r["grant_revision"] > 0 for r in rows["cloud_grant_audit"])
            and all(r["revision"] <= origin["revision"] for r in rows["cloud_changes"])
            and all(r["deleted_revision"] <= origin["revision"] for r in rows["cloud_tombstones"]),
            "Receipt, change or deletion exceeds the source authority boundary")
@@ -593,6 +601,8 @@ def control(folder, action, approval=None, carry_pending=False):
         verify(not carry_pending or (action == "cutover" and marker["receipt"].get("sourceAuthority") == "cloud" and pending),
                "Carrying pending approvals requires a verified prior cloud snapshot with outstanding requests")
         if action == "cutover":
+            verify(not any(r["kind"] == "continuity_profile" and r["id"] == tenant[1] and r["life"] == "archived"
+                           for r in rows["cloud_entities"]), "Archived continuity requires separate owner restoration before cutover")
             verify(not pending or carry_pending, "Resolve pending cloud requests or review carrying prior cloud requests into a new epoch")
             # Run the actual legacy fences under a savepoint even on preview.
             db.execute("SAVEPOINT authority_check")

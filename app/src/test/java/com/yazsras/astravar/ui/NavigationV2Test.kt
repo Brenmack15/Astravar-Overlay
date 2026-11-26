@@ -49,15 +49,6 @@ class NavigationV2Test {
         }
     }
 
-    private fun awaitJournalReady() {
-        compose.onNodeWithTag("section-Journal").assertIsSelected()
-        // Restored route tabs precede Room's first combined journal emission.
-        // Observe the real loaded reading surface before using its destinations.
-        compose.waitUntil(10_000) {
-            compose.onAllNodesWithTag("genesis-campaign-scroll-Journal").fetchSemanticsNodes().size == 1
-        }
-    }
-
     /** Recreate from parcelled state so retained hub state is not just a live composition object. */
     private fun savedState(controller: ActivityController<ComponentActivity>): Bundle {
         val state = Bundle()
@@ -116,60 +107,50 @@ class NavigationV2Test {
             compose.waitUntil(10_000) { compose.onAllNodes(hasText("Add Item") and hasClickAction()).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Add Item").assertExists()
             capture("v2-inventory", activity.get())
-            compose.onNodeWithTag("navigation-Campaign").performClick()
-            compose.onNodeWithTag("section-Journal").performClick()
-            awaitJournalReady()
-            compose.onNodeWithText("Connections").performClick()
+            compose.onNodeWithTag("navigation-Connections").performClick()
+            compose.onNodeWithTag("section-World").performClick()
             compose.onNodeWithContentDescription("Add connection").assertExists()
             capture("v2-connections", activity.get())
-            // A retained campaign detail must not intercept Back from another
-            // destination. Inventory closes its source records before leaving.
             compose.onNodeWithTag("navigation-Inventory").performClick()
-            compose.waitUntil(10_000) { compose.onAllNodesWithTag("genesis-inventory-list").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("Campaign items").performClick()
-            compose.waitUntil(10_000) { compose.onAllNodes(hasText("Add Item") and hasClickAction()).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("Add Item").assertExists()
-            compose.runOnIdle { activity.get().onBackPressedDispatcher.onBackPressed() }
             compose.onNodeWithTag("navigation-Inventory").assertIsSelected()
-            compose.onNodeWithText("Campaign items").assertExists()
-            compose.onNodeWithText("‹ Inventory").assertDoesNotExist()
             compose.runOnIdle { activity.get().onBackPressedDispatcher.onBackPressed() }
             compose.onNodeWithTag("navigation-Character").assertIsSelected()
-            compose.onNodeWithTag("navigation-Campaign").performClick()
-            compose.onNodeWithContentDescription("Add connection").assertExists()
-            compose.runOnIdle { activity.get().onBackPressedDispatcher.onBackPressed() }
-            compose.onNodeWithText("‹ Campaign").assertDoesNotExist()
-            compose.onNodeWithTag("section-Journal").assertIsSelected()
+            compose.onNodeWithTag("navigation-Chronicle").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Your living world").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Checkpoints").performScrollTo().performClick()
+            compose.onNodeWithText("‹ Chronicle").assertExists()
             val restoredState = savedState(activity)
             activity.pause().stop().destroy()
             activity = Robolectric.buildActivity(ComponentActivity::class.java).create(restoredState).start().resume().visible()
             mount()
-            compose.waitUntil(10_000) { compose.onAllNodesWithTag("section-Journal").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("navigation-Campaign").assertIsSelected()
-            compose.onNodeWithTag("section-Journal").assertIsSelected()
-            compose.onNodeWithText("‹ Campaign").assertDoesNotExist()
-            awaitJournalReady()
-            compose.onNodeWithText("Inventions").performClick()
-            compose.onNodeWithText("Add Invention").assertExists()
-            compose.onNodeWithText("‹ Campaign").performClick()
-            compose.onNodeWithTag("navigation-Companions").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("‹ Chronicle").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("navigation-Chronicle").assertIsSelected()
+            compose.onNodeWithText("‹ Chronicle").performClick()
+            compose.onNodeWithText("Inventions").performScrollTo().performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Add Invention").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("navigation-Inventory").assertIsSelected()
+            compose.onNodeWithTag("navigation-Connections").performClick()
+            compose.onNodeWithTag("section-Companions").performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithText("Fictional owl").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("Fictional owl").assertExists()
-            listOf("Zerg Hasma", "Korr", "Veyrath").forEach { compose.onNodeWithText(it).assertDoesNotExist() }
             capture("v2-party", activity.get())
             compose.onNodeWithText("Fictional owl").performClick()
-            capture("v2-eek-sheet", activity.get())
             compose.onNodeWithText("Eek's specialized companion tools").performScrollTo().performClick()
             compose.onNodeWithText("Condition unknown").assertExists()
-            compose.runOnIdle { captureNativeTestWindows("v2-eek", activity.get(), modal = true) }
+            compose.runOnIdle { captureNativeTestWindows("v2-companion", activity.get(), modal = true) }
+            compose.onAllNodesWithText("Close").onLast().performClick()
+            compose.onNodeWithText("Tools").performClick()
+            compose.onNodeWithText("Campaign management").performScrollTo().performClick()
+            compose.onNodeWithTag("section-Journal").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("genesis-campaign-scroll-Journal").fetchSemanticsNodes().isNotEmpty() }
             compose.onAllNodesWithText("Close").onLast().performClick()
             compose.onNodeWithText("Tools").performClick()
             compose.onNodeWithText("Records, backups & connection").performScrollTo().performClick()
+            compose.onNodeWithText("Owner connection").performScrollTo().performClick()
+            compose.onNodeWithText("Backups and recovery").performScrollTo().performClick()
             compose.onNodeWithText("Campaign backup").performScrollTo().performClick()
             compose.onNodeWithText("Export campaign backup").assertExists()
             compose.onAllNodesWithText("Close").onLast().performClick()
             compose.onNodeWithTag("navigation-Character").performClick()
-            compose.onNodeWithTag("navigation-Character").assertIsSelected()
             compose.onNodeWithText("Tools").performClick()
             listOf("Armor systems", "Advanced combat & magic", "Armor weapon", "Spell reservoir",
                 "Spell library", "Rules & profile", "Resources & recovery", "Roll history").forEach {
@@ -177,16 +158,6 @@ class NavigationV2Test {
             }
             compose.onNodeWithText("Appearance").assertExists()
             compose.onAllNodesWithText("Close").onLast().performClick()
-            compose.onNodeWithTag("navigation-Campaign").performClick()
-            awaitJournalReady()
-            compose.onNodeWithText("Checkpoints").assertExists()
-            compose.onNodeWithTag("navigation-Companions").performClick()
-            // Tab state restores the already-open Eek sheet. Do not click a name
-            // again: both its heading and roster context legitimately say "Eek".
-            compose.waitUntil(10_000) {
-                compose.onAllNodesWithText("Eek's specialized companion tools").fetchSemanticsNodes().isNotEmpty()
-            }
-            compose.onNodeWithText("Eek's specialized companion tools").performScrollTo().assertExists()
             compose.runOnIdle { assertEquals(before, app.repository.state.value) }
             assertEquals(0, overlayStarts)
             assertEquals(0, permissionRequests)
@@ -211,11 +182,11 @@ class NavigationV2Test {
                 AstravarTheme { RebuildPrimaryNavigation(selected) { selected = it; visited += it } }
             }
             compose.onNodeWithTag("navigation-Character").assertIsSelected()
-            listOf("Inventory", "Companions", "Campaign", "Character").forEach { destination ->
+            listOf("Inventory", "Connections", "Chronicle", "Character").forEach { destination ->
                 compose.onNodeWithTag("navigation-$destination").performClick()
                 compose.onNodeWithTag("navigation-$destination").assertIsSelected()
             }
-            assertEquals(listOf("Inventory", "Companions", "Campaign", "Character"), visited)
+            assertEquals(listOf("Inventory", "Connections", "Chronicle", "Character"), visited)
         } finally { activity.pause().stop().destroy() }
     }
 }

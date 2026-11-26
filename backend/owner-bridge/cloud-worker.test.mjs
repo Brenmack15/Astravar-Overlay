@@ -167,3 +167,83 @@ test('spellbook inspection and level previews calculate scaling without casting 
   assert.equal((await l.request(path+'/state')).value.revision,rev);
   assert.deepEqual(r.value.slots.map(s=>s.current),[2,2]);
 });
+
+test('permission history is owner-only and the badge counts only proposals still eligible for approval',async t=>{
+  const l=await lab(t);
+  await l.connect();
+  assert.equal((await l.request(path+'/access',{as:'device'})).status,403);
+  assert.equal((await l.post(path+'/grants/sites-mcp',{scopes:[]},'device')).status,403);
+  assert.equal((await l.request(path+'/review-status',{as:'device'})).status,403);
+  await l.grant('device:paired-fixture',[...baseScopes,'approval.read'],[],['*'],1);
+  await l.grant('sites-mcp',baseScopes,[],['*'],1);
+  const proposal=command(0,'define_actor',player);
+  const queued=await l.rpc('submit_cloud_command',{command:proposal});
+  assert.equal(queued.status,'PENDING_APPROVAL');
+  const badge=async()=> (await l.request(path+'/review-status',{as:'device'})).value.actionableCount;
+  assert.equal(await badge(),1);
+  await l.grant('sites-mcp',baseScopes,[],['*'],2,true);
+  assert.equal(await badge(),0);
+  const queue=(await l.request(path+'/approvals')).value;
+  assert.deepEqual([queue.pendingCount,queue.actionableCount,queue.requests[0].readiness],[1,0,'SUBMITTER_GRANT_INACTIVE']);
+  const terminal=await l.post(path+'/approvals/'+proposal.commandId+'/verify',{digest:queued.digest});
+  assert.equal(terminal.value.status,'REFUSED');
+  assert.equal((await l.request(path+'/state')).value.records.length,0);
+  const admin=(await l.request(path+'/access')).value;
+  assert.equal(admin.grants.find(g=>g.subject==='sites-mcp').revoked,true);
+  assert.deepEqual(admin.audit.filter(e=>e.subject==='sites-mcp').map(e=>e.grant_revision).sort(),[1,2,3]);
+  assert.throws(()=>l.db.db.exec('DELETE FROM cloud_grant_audit'),/IMMUTABLE_GRANT_AUDIT/);
+  assert.equal((await l.request('/v3/continuities/qa-other/access',{as:'device'})).status,403);
+});
+
+test('a fresh DM pages earlier changes and links with a scoped stable cursor',async t=>{
+  const l=await lab(t);
+  const operations=[['define_actor',player]];
+  for(const tag of ['a','b','c']){
+    operations.push(['record_chronicle_event',{eventId:'discovery-'+tag,title:'Fixture discovery '+tag,narrative:'Measured marks on a fixture.',category:'discovery',status:'confirmed',worldTime:null,subjects:[{id:player.actorId,kind:'actor'}],correctsId:null,source:'engineering fixture'}]);
+  }
+  for(const [i,[op,args]] of operations.entries()){
+    const r=await l.post(path+'/commands',command(i,op,args));
+    assert.equal(r.value.status,'COMMITTED',JSON.stringify(r.value));
+  }
+  const page=await l.rpc('get_cloud_changes',{limit:2,sinceRevision:0});
+  assert.equal(page.changes.length,2);
+  const anchor={grantRevision:page.grantRevision,atEpoch:page.epoch,atRevision:page.revision};
+  const tail=await l.rpc('get_cloud_changes',{limit:2,sinceRevision:0,after:page.nextAfter,...anchor});
+  assert.deepEqual([...page.changes,...tail.changes].map(x=>x.revision),[4,3,2,1]);
+  assert.equal(tail.nextAfter,null);
+  const first=await l.rpc('get_cloud_record_links',{id:player.actorId,limit:2});
+  const second=await l.rpc('get_cloud_record_links',{id:player.actorId,limit:2,after:first.nextAfter,...anchor});
+  assert.deepEqual([first.links.length,second.links.length,second.nextAfter],[2,1,null]);
+  await l.grant('sites-mcp',baseScopes,[],['another-actor'],1);
+  assert.equal((await l.rpc('get_cloud_record_links',{id:player.actorId,limit:2,after:first.nextAfter,...anchor})).error,'SNAPSHOT_CHANGED');
+  assert.equal((await l.rpc('get_cloud_changes',{actorId:player.actorId})).error,'CONTEXT_SCOPE_DENIED');
+  assert.deepEqual((await l.rpc('get_cloud_changes',{})).changes,[]);
+});
+
+test('equipment review is safely superseded, whereas an independent same-price purchase receives a conflict',async t=>{
+  const l=await lab(t);let revision=0;
+  async function owner(op,args){
+    const r=await l.post(path+'/commands',command(revision,op,args));
+    assert.equal(r.value.status,'COMMITTED',JSON.stringify(r));revision++;return r.value;
+  }
+  await owner('define_actor',player);
+  await owner('define_wallet',{walletId:'purse',title:'Fixture purse',holderId:'inventor',shared:false,coins:gp(30),source:'test grant'});
+  await owner('define_item_definition',{definitionId:'clip-type',name:'Fixture Clip',category:'tool',description:'Fixture clip',rarity:null,stackable:false,wearable:true,handheld:true,attunement:'none',source:'fixture catalog'});
+  const purchase=itemId=>({itemId,definitionId:'clip-type',ownerId:'inventor',quantity:1,source:'resolved fixture purchase',walletId:'purse',price:gp(5),sellerId:null});
+  await owner('purchase_item',purchase('fixture-clip-one'));
+  await l.grant('sites-mcp',baseScopes,[],['*'],1);
+  const equip={itemId:'fixture-clip-one',equipment:'worn',source:'fixture fit confirmed'};
+  const old=command(revision,'equip_item',equip);
+  assert.equal((await l.rpc('submit_cloud_command',{command:old})).status,'PENDING_APPROVAL');
+  const edit=await owner('equip_item',equip);
+  const disposition=await l.rpc('get_cloud_receipt',{commandId:old.commandId});
+  assert.equal(disposition.status,'SUPERSEDED');
+  assert.equal(disposition.receipt.evidence.transactionId,edit.receipt.transactionId);
+  const pending=command(revision,'purchase_item',purchase('fixture-clip-two'));
+  const queued=await l.rpc('submit_cloud_command',{command:pending});
+  await owner('purchase_item',purchase('fixture-clip-three'));
+  const refused=await l.post(path+'/approvals/'+pending.commandId+'/verify',{digest:queued.digest});
+  assert.equal(refused.value.status,'CONFLICT');
+  assert.equal((await l.request(path+'/state?id=purse')).value.records[0].data.coins.gp,20);
+  assert.deepEqual((await l.request(path+'/state?id=fixture-clip-two')).value.records,[]);
+});

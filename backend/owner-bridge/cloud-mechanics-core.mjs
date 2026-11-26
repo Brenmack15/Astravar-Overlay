@@ -71,7 +71,8 @@ export const attackSchema = fields({
   requiresAttunement:boolean, requiresOperating:boolean, formId:identifier, excludedForms:arrayOf(identifier,16), classification:named(60),
   delivery:option('melee','ranged','area','other'), resolution:option('attack','save','automatic','manual'),
   timing:actionCost, ability:option(...stats), proficient:boolean, hitBonus:whole(-200,200),
-  fixedHit:whole(-200,200), saveAbility:option(...stats), saveDc:whole(1,100),saveSuccess:option('none','half','full'),
+  fixedHit:whole(-200,200), saveAbility:option(...stats), saveDc:whole(1,100), dcAbility:option(...stats),
+  dcBase:whole(0,100), dcProficient:boolean, dcBonus:whole(-100,100),saveSuccess:option('none','half','full'),
   reach:whole(0,10000), range:whole(0,10000), longRange:whole(0,10000), area:named(160),
   components:arrayOf(component,24), cost:costSchema, description:named(2000),
   riders:arrayOf(fields({id:identifier,trigger:option('hit','failed_save','prepared_charge','custom'),effect:named(500),
@@ -100,6 +101,12 @@ export async function insert(ctx,kind,id,actorId,title,data) {
   return row;
 }
 export async function save(ctx,row,data) { return ctx.put({...row,data}); }
+export const diceCategories=['ability','save','skill','initiative','custom','attack','damage','spell','hit_dice'];
+export function checkDiceOwner(ctx,a,category,source){
+  if(source==='dm')must(a.data.role==='npc'||a.data.role==='creature','PLAYER_DICE_REQUIRE_PLAYER_OR_DELEGATION');
+  if(source==='delegated')must((a.data.diceDelegations??[]).includes(category),'DICE_DELEGATION_REQUIRED');
+  if(source==='app')must(ctx.grant.subject==='sites-owner'||ctx.grant.subject.startsWith('device:'),'APP_DICE_REQUIRE_DEVICE_ORIGIN');
+}
 export async function transferableSource(ctx,config){
   if(!config.transfersWithItem)return;
   const item=config.sourceItemId?await ctx.get('item_instance',config.sourceItemId):null;

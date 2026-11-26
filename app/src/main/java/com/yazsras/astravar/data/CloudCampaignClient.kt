@@ -19,7 +19,7 @@ internal fun validCloudDevicePath(path: String): Boolean {
     if (path.contains("..")) return false
     val prefix = cloudPrefix.matchAt(path, 0) ?: return false
     val route = path.substring(prefix.range.last + 1)
-    return cloudReadRoute.matches(route) || actorProjectionPath.matches(route) || validRecordViewSuffix(route)
+    return cloudReadRoute.matches(route) || actorProjectionPath.matches(route) || validRecordViewSuffix(route) || validArchiveSuffix(route)
 }
 
 internal class CloudSession(val credential: OwnerSyncCredential, val access: String?) {
@@ -65,7 +65,16 @@ internal class CloudCampaignClient(
         throw OwnerSyncFailure(code?.takeIf { it.matches(Regex("[A-Z0-9_]{1,80}")) } ?: "CLOUD_HTTP_${result.status}")
     }
 
-    suspend fun workspace(): CloudSnapshot? = withContext(Dispatchers.IO) { cache.workspace() }
+    suspend fun workspace(): CloudSnapshot? = withContext(Dispatchers.IO) {
+        lock.withLock {
+            if(cache.workspace()?.visible==true) {
+                try { current() } catch (_: OwnerSyncFailure) { /* current() concealed the unbound snapshot */ }
+                val checked=cache.workspace()
+                if(checked?.visible==true && checked.version.grantExpiresAt<=now()){cache.hide();notifyCache()}
+            }
+            cache.workspace()
+        }
+    }
 
     suspend fun refresh(openExisting: Boolean = false): CloudSnapshot = withContext(Dispatchers.IO) {
         lock.withLock {
@@ -141,14 +150,22 @@ internal class CloudCampaignClient(
     }
 
     /** Re-read the submitted command and current state separately. A dropped response leaves the original local intent for inspection. */
-    suspend fun submit(operation: String, args: JsonObject, reviewed: CloudSnapshot): JsonObject = withContext(Dispatchers.IO) {
+    suspend fun submit(operation: String, args: JsonObject, reviewed: CloudSnapshot, commandId:String=UUID.randomUUID().toString()): JsonObject = withContext(Dispatchers.IO) {
         lock.withLock {
             val s = current()
+            require(cloudIdentifier.matches(commandId))
+            val previous=cache.command(s.binding,commandId)
+            if(previous!=null){
+                require(previous.cloudText("operation")==operation && previous["args"]==args &&
+                    previous.getValue("epoch").jsonPrimitive.long==reviewed.version.epoch &&
+                    previous.getValue("expectedRevision").jsonPrimitive.long==reviewed.version.revision && reviewed.binding==s.binding)
+                return@withLock retryLocked(s,previous)
+            }
             val w = cache.workspace() ?: throw OwnerSyncFailure("CLOUD_NOT_SELECTED")
             if (!w.visible || w.version != reviewed.version || w.binding != reviewed.binding ||
                 w.version.grantExpiresAt <= now()) throw OwnerSyncFailure("CLOUD_REVIEW_STALE")
             val command = buildJsonObject {
-                put("version", 1); put("commandId", UUID.randomUUID().toString())
+                put("version", 1); put("commandId", commandId)
                 put("epoch", w.version.epoch); put("expectedRevision", w.version.revision)
                 put("operation", operation); put("args", args)
             }
@@ -163,19 +180,23 @@ internal class CloudCampaignClient(
     suspend fun retry(id: String): JsonObject = withContext(Dispatchers.IO) {
         lock.withLock {
             val s = current()
-            val command = cache.pending(s.binding).firstOrNull { it.cloudText("commandId") == id }
-                ?: throw OwnerSyncFailure("COMMAND_UNKNOWN")
-            try { return@withLock verifyLocked(s, id) } catch (failure: OwnerSyncFailure) {
-                if (failure.code != "COMMAND_UNKNOWN") throw failure
-            }
-            val state = refreshLocked(s, false)
-            if (state.version.epoch != command.getValue("epoch").jsonPrimitive.long ||
-                state.version.revision != command.getValue("expectedRevision").jsonPrimitive.long)
-                throw OwnerSyncFailure("CLOUD_REVIEW_STALE")
-            val result = request(s, "commands", command.toString())
-            require(result.cloudText("commandId") == id)
-            if (result.cloudText("status") == "PENDING_APPROVAL") result else verifyLocked(s, id)
+            val command = cache.command(s.binding,id) ?: throw OwnerSyncFailure("COMMAND_UNKNOWN")
+            retryLocked(s,command)
         }
+    }
+
+    private suspend fun retryLocked(s:CloudSession,command:JsonObject):JsonObject {
+        val id=command.cloudText("commandId")
+        try { return verifyLocked(s,id) } catch (failure: OwnerSyncFailure) {
+            if (failure.code != "COMMAND_UNKNOWN") throw failure
+        }
+        val state = refreshLocked(s,false)
+        if (state.version.epoch != command.getValue("epoch").jsonPrimitive.long ||
+            state.version.revision != command.getValue("expectedRevision").jsonPrimitive.long)
+            throw OwnerSyncFailure("CLOUD_REVIEW_STALE")
+        val result = request(s,"commands",command.toString())
+        require(result.cloudText("commandId")==id)
+        return if(result.cloudText("status")=="PENDING_APPROVAL") result else verifyLocked(s,id)
     }
 
     suspend fun reviewCount(): Int = withContext(Dispatchers.IO) {
@@ -205,6 +226,14 @@ internal class CloudCampaignClient(
         val revision = receipt.getValue("revision").jsonPrimitive.long
         require(state.version.epoch == epoch && state.version.revision >= revision)
         if (receipt.cloudText("status") == "COMMITTED") {
+            val erased=receipt["deletedIds"] as? JsonArray ?: (receipt["outcome"] as? JsonObject)?.get("deletedIds") as? JsonArray
+            for (marker in erased.orEmpty()) {
+                val recordId=marker.jsonPrimitive.content
+                require(cloudIdentifier.matches(recordId))
+                val v=state.version
+                val body=request(s,"state?limit=1&id=$recordId&activeOnly=false&atRevision=${v.revision}&atEpoch=${v.epoch}&grantRevision=${v.grantRevision}")
+                require(cloudPage(body,s.binding,null,v,now()).records.isEmpty())
+            }
             for (change in receipt.getValue("changes").jsonArray) {
                 val after = change.jsonObject.getValue("after")
                 val before = change.jsonObject["before"] as? JsonObject
@@ -236,7 +265,7 @@ internal class CloudCampaignClient(
             val w = cache.workspace() ?: throw OwnerSyncFailure("CLOUD_NOT_SELECTED")
             if (!w.visible || w.version.grantExpiresAt <= now() || snapshot.binding != s.binding || w.version != snapshot.version)
                 throw OwnerSyncFailure("CLOUD_REVIEW_STALE")
-            require(suffix == "context" || suffix.startsWith("sheet/") || actorProjectionPath.matches(suffix) || suffix.startsWith("links/") || validRecordViewSuffix(suffix))
+            require(suffix == "context" || suffix.startsWith("sheet/") || actorProjectionPath.matches(suffix) || suffix.startsWith("links/") || validRecordViewSuffix(suffix) || validArchiveSuffix(suffix))
             val result = request(s, suffix)
             if (result.getValue("epoch").jsonPrimitive.long != w.version.epoch ||
                 result.getValue("revision").jsonPrimitive.long != w.version.revision) throw OwnerSyncFailure("SNAPSHOT_CHANGED")
@@ -247,6 +276,10 @@ internal class CloudCampaignClient(
             }
             result
         }
+    }
+
+    suspend fun cachedImage(id:String):ByteArray? = withContext(Dispatchers.IO) {
+        lock.withLock { cache.image(current().binding,id,now()) }
     }
 
     suspend fun image(snapshot: CloudSnapshot, target: String, kind: String, uploadId: String? = null, bytes: ByteArray? = null): ByteArray =
@@ -262,6 +295,7 @@ internal class CloudCampaignClient(
             }
             if(read.getValue("epoch").jsonPrimitive.long!=w.version.epoch || read.getValue("revision").jsonPrimitive.long!=w.version.revision)
                 throw OwnerSyncFailure("SNAPSHOT_CHANGED")
+            if(uploadId==null)cache.saveImage(w,target,result)
             result
         } }
 

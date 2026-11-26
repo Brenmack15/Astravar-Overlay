@@ -2,7 +2,7 @@ import { CloudPlan } from './cloud-plan.mjs';
 import { BridgeError } from './core.mjs';
 import { cloudFail, validCloudId } from './cloud-validation.mjs';
 import { sheet, gearEligible, rollPolicy } from './cloud-mechanics-core.mjs';
-import { attackModifier, snapshotComponents } from './cloud-mechanics-combat.mjs';
+import { attackModifier, attackSaveDc, snapshotComponents } from './cloud-mechanics-combat.mjs';
 
 export async function cloudActions(service,principal,id,actorId,options={}) {
   if(!validCloudId(actorId))cloudFail(400,'INVALID_ACTOR_ID');
@@ -31,13 +31,14 @@ export async function cloudActions(service,principal,id,actorId,options={}) {
       if(!e?.data.active || !t || (d.timing!=='reaction'&&e.data.participants[e.data.index]!==actorId) ||
           (d.timing==='attack'?(!t.action||t.attacks<1):(!t[d.timing]||d.timing==='action'&&t.attacks!==a.data.attacksPerAction)))reasons.push('ACTION_UNAVAILABLE');
     }
-    let components=[],hit=null;
+    let components=[],hit=null,resolvedSaveDc=null;
     if(entity.kind==='attack'){
       const chosen=Object.fromEntries((d.selections??[]).filter(s=>(s.actorId??entity.actorId)===a.id && s.formId===p.formId).map(s=>[s.componentId,s.type]));
-      try { components=snapshotComponents(d.components,p,chosen);if(d.resolution==='attack')hit=attackModifier(entity,p); }
+      try { components=snapshotComponents(d.components,p,chosen);if(d.resolution==='attack')hit=attackModifier(entity,p);
+        if(d.resolution==='save')resolvedSaveDc=attackSaveDc(d,p); }
       catch(e){if(!(e instanceof BridgeError))throw e;reasons.push(e.code);}
     }
-    rows.push({id:entity.id,title:entity.title,kind:entity.kind,configuration:d,components,hit,reasons,
+    rows.push({id:entity.id,title:entity.title,kind:entity.kind,configuration:d,components,hit,resolvedSaveDc,reasons,
       modes:Object.fromEntries(['normal','advantage','disadvantage'].map(m=>[m,rollPolicy(p.effects,'attack:'+entity.id,m)]))});
   }
   const end=await service.access(principal,id);

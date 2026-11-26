@@ -112,6 +112,24 @@ def source_families(value):
 
 def convert_row(family, row, owner, continuity, shared_ids, reviewed):
     """Only convert rows whose full gameplay meaning the native source evidence resolves."""
+    if family == "authority.campaigns":
+        if row["id"] != continuity:
+            return None, "campaign administration record belongs to another continuity"
+        allowed = {"id", "name", "notes", "revision", "archived", "createdAt", "updatedAt", "commandId"}
+        if set(row) - allowed or not isinstance(row.get("commandId"), str) or not row["commandId"].strip():
+            return None, "campaign metadata requires stable native command provenance"
+        title, revision, archived = row.get("name"), row.get("revision"), row.get("archived")
+        verify(isinstance(title, str) and 0 < len(title.strip()) <= 180 and type(revision) is int and revision >= 1,
+               "Invalid native campaign identity, title or revision")
+        verify(type(archived) is bool and (row.get("notes") is None or isinstance(row["notes"], str) and len(row["notes"]) <= 4000),
+               "Unknown campaign archive status or invalid notes")
+        for key in ("createdAt", "updatedAt"):
+            verify(row.get(key) is None or type(row[key]) is int and row[key] >= 0, "Invalid native campaign timestamp")
+        data = {"notes": row.get("notes"), "source": "Genesis campaign record", "sourceCommandId": row["commandId"],
+                "sourceArchived": archived, "createdAt": row.get("createdAt"),
+                "sourceUpdatedAt": row.get("updatedAt"), "editedAt": None}
+        return {"owner_id": owner, "continuity_id": continuity, "id": continuity, "kind": "continuity_profile", "actor_id": None,
+                "title": title, "data_json": encode(data).decode(), "life": "archived" if archived else "active", "revision": revision}, None
     if family in REVIEW_SCOPE and not reviewed:
         return None, "record needs explicit player-known continuity membership review"
     if family not in REVIEW_SCOPE and family not in ("records.wallets", "records.checkpoints"):

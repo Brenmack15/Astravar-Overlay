@@ -121,7 +121,7 @@ private fun formula(c:JsonObject):String{
                         }
                         if(row.cloudText("kind")=="attack"){
                             val hit=row.textValue("hit")?.toIntOrNull()
-                            val hitText=if(hit!=null){if(hit>=0)"+$hit" else "$hit"} else cfg.textValue("saveDc")?.let{"DC $it"} ?: "Resolve"
+                            val hitText=if(hit!=null){if(hit>=0)"+$hit" else "$hit"} else (row.textValue("resolvedSaveDc") ?: cfg.textValue("saveDc"))?.let{"DC $it"} ?: "Resolve"
                             Box(Modifier.sizeIn(minHeight=48.dp,minWidth=48.dp).combinedClickable(enabled=enabled,role=Role.Button,onClickLabel="Roll attack only",
                                 onLongClickLabel="Attack options",onLongClick={selection=id;mode="normal";details="Attack options"},onClick={perform(row,false)}),contentAlignment=Alignment.Center){Text(hitText)}
                             val formula=row.rowsAt("components").joinToString(" + ",transform=::formula)
@@ -152,7 +152,7 @@ private fun formula(c:JsonObject):String{
     more?.let{cursor->PlayerTextButton({scope.launch{load(cursor)}},enabled=!loading){Text("More")}}
     error?.let{Text(it,color=MaterialTheme.colorScheme.error)}
     if(details=="Manage attacks")PlayerSheet("Manage attacks",{details=null}){
-        PlayerButton({open("define_attack",buildJsonObject{put("attackId",UUID.randomUUID().toString())})},enabled=online){Text("Create Attack")}
+        PlayerButton({selection=null;details="Build attack"},enabled=online){Text("Create Attack")}
         PlayerTextButton({details="Source attacks"}){Text("Review Source Attacks")}
         PlayerTextButton({open("define_action",buildJsonObject{put("actionId",UUID.randomUUID().toString())})},enabled=online){Text("Create action")}
     }
@@ -160,7 +160,15 @@ private fun formula(c:JsonObject):String{
         records.filter{it.cloudText("kind")=="attack"}.forEach{r->
             val data=(r["configuration"]?:r["data"])!!.jsonObject
             PlayerEntry(r.cloudText("title"),data.textValue("source").orEmpty(),"Emblem",{details=null;inspect(r.cloudText("id"))})
+            PlayerTextButton({selection=r.cloudText("id");details="Build attack"},enabled=online){Text("Edit ${r.cloudText("title")}")}
         }
+    }
+    if(details=="Build attack")key(selection) {
+        val id=selection
+        var source by remember { mutableStateOf<JsonObject?>(null) }
+        LaunchedEffect(id,snapshot.version) { if(id!=null)source=client.record(id) }
+        if(id==null || source!=null)CloudAttackBuilder(actorId,source,online,{details=null;selection=null},
+            {op,body->details=null;selection=null;commit(op,body)},client)
     }
     val row=records.find{it.cloudText("id")==selection}
     if(row!=null && details in setOf("Attack options","Damage options","Preview form"))PlayerSheet(details!!,{details=null;selection=null}){

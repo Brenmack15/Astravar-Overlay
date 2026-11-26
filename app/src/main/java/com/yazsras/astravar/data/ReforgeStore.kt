@@ -63,7 +63,8 @@ data class ReforgeChange(
     @EncodeDefault(EncodeDefault.Mode.NEVER) val batchId: String? = null,
     @EncodeDefault(EncodeDefault.Mode.NEVER) val subjectId: String? = null,
     @EncodeDefault(EncodeDefault.Mode.NEVER) val checkKind: String? = null,
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val formId: String? = null
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val formId: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val batchMemberIds: List<String> = emptyList()
 ) {
     val total: Int get() = dice.filter { it.kept }.sumOf { it.face * it.sign } + modifier
 }
@@ -384,6 +385,9 @@ class ReforgeRepository private constructor(private val db: RoomDatabase, privat
         checkId(batchId)
         require(rolls.size in 1..24 && rolls.distinctBy { it.id }.size == rolls.size)
         val first = rolls.first()
+        val memberIds = rolls.map { it.id }
+        require(first.id == batchId && first.components.firstOrNull()?.batchMemberIds == memberIds &&
+            rolls.drop(1).all { row -> row.components.all { it.batchMemberIds.isEmpty() } }) { "The batch identity and original membership must agree." }
         require(rolls.all { roll -> roll.profileId == first.profileId && roll.characterRevision == first.characterRevision &&
             roll.components.isNotEmpty() && roll.components.all { it.batchId == batchId } })
         rolls.map { appendRoll(it) }

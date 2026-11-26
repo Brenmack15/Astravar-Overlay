@@ -73,7 +73,9 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                             page.rows("groups").forEach { item ->
                                 val quantity=amount(item.s("knownQuantity"))+if(item.s("unknownQuantityCount")!="0") " + unknown" else ""
                                 PlayerEntry(item.s("title").orEmpty(),"Party quantity · $quantity","Bag",{
-                                    detail="definition";selected=item.s("definitionId")
+                                    val instance=item.s("groupId")?.takeIf{it.startsWith("i:")}?.removePrefix("i:")
+                                    detail=if(instance==null)"distribution" else "item"
+                                    selected=instance?:item.s("definitionId")
                                 },item.s("instances")?.let { "$it holdings" })
                             }
                             if(page.rows("groups").isEmpty()) Text("No matching party items.")
@@ -146,8 +148,8 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
         if(selectedId!=null){
             val close={ selected=null;detail=null }
             when(detail){
-                "definition" -> DefinitionSheet(client,snapshot,selectedId,online,close,openOperation) { record -> detail="item";selected=record }
-                "item" -> HoldingSheet(client,snapshot,selectedId,online,close,openOperation) { record -> detail="definition";selected=record }
+                "definition","distribution" -> DefinitionSheet(client,snapshot,selectedId,detail=="distribution",online,close,openOperation) { record -> detail="item";selected=record }
+                "item" -> HoldingSheet(client,snapshot,selectedId,online,close,openOperation,inspect) { record -> detail="definition";selected=record }
                 "wallet" -> WalletSheet(client,snapshot,selectedId,online,close,openOperation)
                 "project" -> ProjectSheet(client,snapshot,selectedId,online,close,openOperation,inspect)
             }
@@ -244,7 +246,7 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
     PlayerTextButton({openOperation("define_wallet",args("walletId" to id(),"holderId" to word(actorId),"shared" to JsonPrimitive(false),"source" to manual))}, enabled=online){Text("Add personal wallet")}
     PlayerTabs(listOf("All gear","Equipped","Attuned","Favorites"),filter,{filter=it})
     PlayerSearch(query,{query=it.take(120)},"Search equipment")
-    CachedRecordList(client,snapshot,setOf("item_instance"),null,query,allowed={ row ->
+    val eligible:(JsonObject)->Boolean={ row ->
         val d=row.data()
         d.s("custodianId")==actorId && d.s("holding")=="carried" && d.s("partyAccess")=="true" && when(filter){
             "Equipped"->d.s("equipment") in setOf("worn","held")
@@ -252,7 +254,16 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
             "Favorites"->d.s("favorite")=="true"
             else->true
         }
-    }) { select("item",it.cloudText("id")) }
+    }
+    if(online)key(filter) {RemoteRecordPage(client,snapshot,"inventory",id=actorId,query=query){page->
+        val entries=page.rows("items").filter(eligible)
+        entries.forEach{row->
+            val d=row.data()
+            PlayerEntry(row.cloudText("title"),"${amount(d.s("quantity"))} · ${cloudLabel(d.s("equipment")?:"Unknown")}",
+                "Bag",{select("item",row.cloudText("id"))},if(d.s("attuned")=="true")"Attuned" else null)
+        }
+        if(entries.isEmpty())Text(if(page.s("nextAfter")==null)"No matching equipment." else "No matching equipment on this page.")
+    }} else CachedRecordList(client,snapshot,setOf("item_instance"),null,query,allowed=eligible){select("item",it.cloudText("id"))}
 }
 
 @Composable private fun WalletRow(wallet:JsonObject,onClick:()->Unit) {
@@ -261,7 +272,7 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
         if (d.s("shared")=="true") "Shared" else null)
 }
 
-@Composable private fun DefinitionSheet(client:CloudCampaignClient,snapshot:CloudSnapshot,definitionId:String,online:Boolean,
+@Composable private fun DefinitionSheet(client:CloudCampaignClient,snapshot:CloudSnapshot,definitionId:String,compatibleOnly:Boolean,online:Boolean,
     dismiss:()->Unit,open:RecordOperation,holding:(String)->Unit) {
     PlayerSheet("Inventory item",dismiss) {
         SelectedRecord(client,snapshot,definitionId){ entity->
@@ -284,7 +295,7 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
         }
         PlayerHeading("Carried by")
         if(online) RemoteRecordPage(client,snapshot,"inventory",id=definitionId){page->
-            page.rows("items").forEach { item->
+            page.rows("items").filter { !compatibleOnly || it.s("groupId")==null || it.s("groupId")=="d:$definitionId" }.forEach { item->
                 val label=item.s("custodianName")?:item.s("ownerName")?:"Unassigned party holding"
                 val quantity=amount(item.s("quantity"))
                 PlayerEntry(label,"$quantity · ${cloudLabel(item.s("holding")?:"Unknown")}","Bag",{holding(item.cloudText("id"))})
@@ -296,14 +307,23 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
 }
 
 @Composable private fun HoldingSheet(client:CloudCampaignClient,snapshot:CloudSnapshot,itemId:String,online:Boolean,
-    dismiss:()->Unit,open:RecordOperation,manage:(String)->Unit) {
+    dismiss:()->Unit,open:RecordOperation,inspect:(String)->Unit,manage:(String)->Unit) {
     var pane by rememberSaveable(itemId){mutableStateOf("Details")}
     PlayerSheet("Item inspection",dismiss) {
         SelectedRecord(client,snapshot,itemId){ item->
             val d=item.data()
             val def=d.s("definitionId")
-            CloudEntityImage(client,snapshot,online,itemId,"item_instance",item.cloudText("title"))
-            Text(item.cloudText("title"),style=MaterialTheme.typography.titleLarge)
+            var catalogVisible by remember(snapshot.version,itemId){mutableStateOf(false)}
+            val definition by produceState<JsonObject?>(null,snapshot.binding,snapshot.version,itemId,online){
+                if(def!=null)try{
+                    val catalog=client.record(def)
+                    catalogVisible=catalog!=null
+                    value=catalog?:if(online)client.projection(snapshot,recordViewSuffix("inventory",snapshot.version,itemId))["definition"] as? JsonObject else null
+                }catch(e:CancellationException){throw e}catch(_:Exception){value=null}
+            }
+            val name=if(d.s("customized")=="true") item.cloudText("title") else definition?.s("title")?:item.cloudText("title")
+            CloudEntityImage(client,snapshot,online,itemId,"item_instance",name)
+            Text(name,style=MaterialTheme.typography.titleLarge)
             Text("${amount(d.s("quantity"))} · ${cloudLabel(d.s("holding")?:"Unknown")} · ${cloudLabel(d.s("equipment")?:"Unknown")}",color=RebuildPalette.Gold)
             PlayerTabs(listOf("Details","Transfer","History","Components"),pane,{pane=it})
             when(pane) {
@@ -311,8 +331,8 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                     page.rows("events").forEach { event->
                         val body=event.data()
                         PlayerCard {
-                            Text("Previous Owner · ${ownerCaption(body.obj("before"))}")
-                            Text("New Owner · ${ownerCaption(body.obj("after"))}")
+                            Text("Previous Owner · ${ownerCaption(client,snapshot,body.obj("before"))}")
+                            Text("New Owner · ${ownerCaption(client,snapshot,body.obj("after"))}")
                             Text("Reason · ${event.cloudText("title")}",style=MaterialTheme.typography.titleSmall)
                         }
                     }
@@ -322,24 +342,27 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                     page.rows("events").forEach { event->
                         val data=event.data()
                         Text("${cloudLabel(data.s("method")?:"component")} · ${amount(data.s("quantity"))}")
-                        Text("${data.s("donorItemId")} → ${data.s("outputItemId")}",color=RebuildPalette.Muted)
+                        val donor=data.s("donorItemId")
+                        val result=data.s("outputItemId")
+                        if(donor!=null) PlayerTextButton({inspect(donor)}){Text("Component · "+recordName(client,snapshot,donor,"Historical component"))}
+                        if(result!=null) PlayerTextButton({inspect(result)}){Text("Result · "+recordName(client,snapshot,result,"Resulting item"))}
                         data.s("evidence")?.let {Text(it)}
                     }
                     if(page.rows("events").isEmpty())Text("No linked component events.")
                 }else Text("Connect to retrieve component history.")
                 "Transfer" -> HoldingTransfer(client,snapshot,item,online,open)
                 else->{
-                    d.s("description")?.let{Text(it)}
-                    Text("Owner · ${ownerCaption(d)}")
-                    d.s("custodianId")?.let{Text("Carried by · $it")}
-                    d.s("locationId")?.let{Text("Stored at · $it")}
+                    (d.s("description")?:definition?.data()?.s("description"))?.let{Text(it)}
+                    Text("Owner · ${ownerCaption(client,snapshot,d)}")
+                    d.s("custodianId")?.let{Text("Carried by · "+recordName(client,snapshot,it,"Unknown"))}
+                    d.s("locationId")?.let{Text("Stored at · "+recordName(client,snapshot,it,"Unknown"))}
                     Text(if(d.s("attuned")=="true") "Attuned" else "Unattuned")
-                    if(def!=null)PlayerOutlinedButton({manage(def)}){Text("Manage in Inventory")}
+                    if(def!=null && catalogVisible)PlayerOutlinedButton({manage(def)}){Text("Manage in Inventory")}
                     PlayerTextButton({open("customize_item",args("itemId" to word(itemId),"name" to item.getValue("title"),
                         "condition" to word(d.s("condition")?:"standard"),"source" to manual))},enabled=online && d.s("quantity")=="1"){Text("Customize this instance")}
                     if(d.s("holding")=="carried" && d.s("quantity")=="1"){
-                        if(def!=null)SelectedRecord(client,snapshot,def){ definition->
-                            val spec=definition.data()
+                        definition?.let{ linked->
+                            val spec=linked.data()
                             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                                 val options=if(d.s("equipment") in setOf("held","worn")) listOf("packed")
                                     else listOfNotNull("held".takeIf{spec.s("handheld")=="true"},"worn".takeIf{spec.s("wearable")=="true"})
@@ -360,13 +383,37 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                     PlayerTextButton({open("set_item_favorite",args("itemId" to word(itemId),"favorite" to JsonPrimitive(d.s("favorite")!="true")))},enabled=online) {
                         Text(if(d.s("favorite")=="true")"Remove favorite" else "Favorite")
                     }
+                    PlayerDisclosure("Effects and actions"){
+                        CachedRecordList(client,snapshot,setOf("attack","action_definition","effect","form","spell_grant"),null,"",
+                            allowed={it.data().s("sourceItemId")==itemId}){inspect(it.cloudText("id"))}
+                        val holder=d.s("custodianId")
+                        if(holder!=null && d.s("quantity")=="1") {
+                            for((label,operation,identity) in listOf(Triple("Add item attack","define_attack","attackId"),
+                                Triple("Add item action","define_action","actionId"),Triple("Add item effect","define_effect","effectId"))){
+                                PlayerTextButton({open(operation,args("actorId" to word(holder),"sourceItemId" to word(itemId),
+                                    "transfersWithItem" to JsonPrimitive(true),identity to id(),"source" to manual))},enabled=online){Text(label)}
+                            }
+                            val pool=d.s("resourcePoolId")
+                            if(pool!=null)PlayerTextButton({inspect(pool)}){Text("Inspect charges")}
+                            else PlayerTextButton({open("bind_item_charge_pool",args("itemId" to word(itemId),"source" to manual))},enabled=online){Text("Link charge pool")}
+                        }
+                    }
                     PlayerDisclosure("Source"){Text(d.s("source")?:"Unknown");Text("Instance · $itemId")}
                 }
             }
         }
     }
 }
-private fun ownerCaption(data:JsonObject):String = data.s("ownerId")?:data.s("externalRecipientName")?:data.s("externalRecipientId")?:"Unknown"
+@Composable private fun recordName(client:CloudCampaignClient,snapshot:CloudSnapshot,id:String?,fallback:String):String {
+    if(id==null)return fallback
+    val label by produceState(fallback,snapshot.binding,snapshot.version,id) {
+        value=try { client.record(id)?.s("title")?:fallback }
+        catch(e:CancellationException){throw e} catch(_:Exception){fallback}
+    }
+    return label
+}
+@Composable private fun ownerCaption(client:CloudCampaignClient,snapshot:CloudSnapshot,data:JsonObject):String =
+    recordName(client,snapshot,data.s("ownerId")?:data.s("externalRecipientId"),data.s("externalRecipientName")?:"Unknown")
 
 @Composable private fun HoldingTransfer(client:CloudCampaignClient,snapshot:CloudSnapshot,item:JsonObject,online:Boolean,open:RecordOperation) {
     val itemId=item.cloudText("id")
@@ -410,7 +457,7 @@ private fun ownerCaption(data:JsonObject):String = data.s("ownerId")?:data.s("ex
         }
         else->Text("The party retains this holding with its physical location unresolved.")
     }
-    if(target!=null)Text("Selected · $target",color=RebuildPalette.Gold)
+    if(target!=null)Text("Selected · "+recordName(client,snapshot,target,"Party destination"),color=RebuildPalette.Gold)
     Field("Reason",reason,{reason=it.take(180)})
     val destination = when(type) {
         "Party member"->"party_actor";"Storage"->"storage";"External"->when(disposition){"Gift"->"external_gift";"Lost"->"lost";else->"dropped"};else->"unassigned"
@@ -442,7 +489,7 @@ private fun ownerCaption(data:JsonObject):String = data.s("ownerId")?:data.s("ex
                 Field("Amount",entered,{entered=it.take(12)})
                 Text("Destination wallet",style=MaterialTheme.typography.titleSmall)
                 CachedRecordList(client,snapshot,setOf("wallet"),null,"",allowed={it.s("id")!=walletId}){recipient=it.s("id")}
-                recipient?.let{Text("Selected · $it",color=RebuildPalette.Gold)}
+                recipient?.let{Text("Selected · "+recordName(client,snapshot,it,"Destination wallet"),color=RebuildPalette.Gold)}
                 Field("Reason",reason,{reason=it.take(180)})
                 val q=entered.toLongOrNull()
                 val current=balance.s(selected)?.toLongOrNull()

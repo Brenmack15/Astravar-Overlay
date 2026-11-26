@@ -227,6 +227,24 @@ class OfflineMigrationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Stale"):
             legacy_review(self.source, *self.tenant, [self.wallet["id"]], tokens)
 
+    def test_genesis_continuity_metadata_is_scoped_and_archived_cutover_is_held(self):
+        campaign = {"id": self.tenant[1], "name":"Synthetic campaign", "notes":None,
+                    "revision":3, "createdAt":None, "updatedAt":89, "commandId":"legacy-command", "archived":True}
+        playable = {"format":"astravar-reforge", "schema":2, "exportedAt":100, "characters":[], "changes":[], "rolls":[]}
+        connected = {"format":"astravar-connected-campaign", "schema":1, "exportedAt":102,
+                     "campaign":self.native, "playable":playable, "authority":{"campaigns":[campaign]}}
+        self.source.write_bytes(encode(connected))
+        self.convert()
+        self.apply()
+        meta = next(r for r in self.rows()["cloud_entities"] if r["kind"] == "continuity_profile")
+        self.assertEqual(meta["id"],self.tenant[1])
+        self.assertEqual("archived",meta["life"])
+        data = json.loads(meta["data_json"])
+        self.assertEqual({"sourceCommandId":"legacy-command","sourceUpdatedAt":89,"createdAt":None},
+                         {k:data[k] for k in ("sourceCommandId","sourceUpdatedAt","createdAt")})
+        with self.assertRaisesRegex(ValueError, "Archived continuity"):
+            migration.control(self.lab,"cutover")
+
     def test_receipt_segment_corruption_or_erasure_without_matching_deletion_is_refused(self):
         body = encode({"reason":"Fixture result."}).decode()
         digest = sha(body.encode())
@@ -267,6 +285,9 @@ class OfflineMigrationTest(unittest.TestCase):
         proof = migration.control(rebuilt, "cutover")["approvalSha256"]
         migration.control(rebuilt, "cutover", proof)
         self.assertEqual(committed, run_worker(rebuilt, "read", 3))
+        grants = self.rows(rebuilt)["cloud_grant_audit"]
+        self.assertEqual([2, 3], sorted(r["epoch"] for r in grants))
+        self.assertEqual(2, len({r["event_id"] for r in grants}))
 
     def test_native_weapon_zip_hash_and_unindexed_asset(self):
         original = b'{"campaign":{}}'

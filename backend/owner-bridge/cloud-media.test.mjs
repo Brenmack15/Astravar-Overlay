@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { handleWorker } from './worker.mjs';
 import { SqliteAdapter } from './sqlite-adapter.mjs';
 import { CloudService } from './cloud-service.mjs';
 import { CLOUD_MEDIA_KINDS, CLOUD_MEDIA_OPERATIONS, handleCloudMedia, stageCloudMcpImage } from './cloud-media.mjs';
@@ -187,4 +188,59 @@ test('deleting an owner-selected target and its exclusive image removes reviewed
   await assert.rejects(request(dm,'media/primary/actor-a/original'),{code:'IMAGE_UNAVAILABLE'});
   await assert.rejects(request(owner,'media/uploads/attached','PUT',bytes,hash,'actor','actor-b'),{code:'TRANSACTION_PRECONDITION_FAILED'});
   assert.deepEqual(db.db.prepare('PRAGMA foreign_key_check').all(),[]);
+});
+
+test('the registered Worker accepts a scoped MCP image attachment and serves the exact approved bytes through the owner route',async t=>{
+  const {db,service}=await fixture(t),{bytes,hash}=await fixtureImage();
+  const origin='https://synthetic-ui.example', path='/v3/continuities/'+id;
+  const env={DB:db,OWNER_SITE_USER_ID:ownerId,ASTRAVAR_CLOUD_ENABLED:'1',ASTRAVAR_CLOUD_ENV:'isolated',ASTRAVAR_MEDIA:service.mediaBucket};
+  const request=(url,method='GET',body=null,authenticated=true)=>handleWorker(new Request(origin+url,{method,
+    headers:{...(authenticated?{'oai-authenticated-user-id':ownerId}:{}),
+      ...(method==='GET'?{}:{Origin:origin,'Content-Type':'application/json'})},...(body===null?{}:{body:JSON.stringify(body)})}),env);
+  const rpc=async(name,args)=>{
+    const response=await request('/mcp','POST',{jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:{continuityId:id,...args}}});
+    const output=await response.json();
+    assert.equal(output.result?.isError,false,JSON.stringify(output));
+    return output.result.structuredContent;
+  };
+  const args={targetId:'actor-a',targetKind:'actor',uploadId:'routed-image',sha256:hash};
+  assert.equal((await rpc('stage_cloud_image',{...args,bytesBase64:Buffer.from(bytes).toString('base64')})).status,'CANDIDATE_READY');
+  const command={version:1,epoch:1,expectedRevision:0,commandId:'registered-media',operation:'assign_primary_image',args:{...args,assetId:'through-worker'}};
+  const pending=await rpc('submit_cloud_command',{command});
+  assert.equal(pending.status,'PENDING_APPROVAL');
+  const target=path+'/media/uploads/routed-image/original';
+  assert.equal((await request(target,'GET',null,false)).status,401);
+  assert.equal((await request('/owner/ascension/'+id)).status,200);
+  const actual=await request(target);
+  assert.equal(actual.headers.get('content-type'),'image/png');
+  assert.deepEqual(new Uint8Array(await actual.arrayBuffer()),bytes);
+  const review=await request(path+'/approvals/'+command.commandId+'/verify','POST',{digest:pending.digest});
+  assert.equal((await review.json()).status,'COMMITTED');
+  const proof=await rpc('get_cloud_receipt',{commandId:command.commandId});
+  assert.equal(proof.receipt.outcome.assetId,'through-worker');
+  const shown=await request(path+'/media/primary/actor-a/original');
+  assert.equal(shown.headers.get('x-astravar-content-sha256'),hash);
+  assert.deepEqual(new Uint8Array(await shown.arrayBuffer()),bytes);
+});
+
+test('one uploader writes a reservation and failed partial writes allow a clean exact retry',async t=>{
+  const {service,request,db}=await fixture(t),{bytes,hash}=await fixtureImage();
+  const bucket=service.mediaBucket,put=bucket.put.bind(bucket);
+  let signal,unlock;
+  const started=new Promise(resolve=>signal=resolve), gate=new Promise(resolve=>unlock=resolve);
+  let writes=0;
+  bucket.put=async(key,value,options)=>{writes++;if(writes===1){signal();await gate;}return put(key,value,options);};
+  const first=request(dm,'media/uploads/concurrent','PUT',bytes,hash);
+  await started;
+  try {await assert.rejects(request(dm,'media/uploads/concurrent','PUT',bytes,hash),{code:'IMAGE_UPLOAD_IN_PROGRESS'});}
+  finally {unlock();}
+  assert.equal((await first).status,200);
+  assert.equal(writes,2);
+  bucket.put=async(key,value,options)=>{if(key.endsWith('thumbnail.png'))throw Error('private fixture outage');return put(key,value,options);};
+  await assert.rejects(request(dm,'media/uploads/try-again','PUT',bytes,hash),/private fixture outage/);
+  assert.equal(db.db.prepare("SELECT count(*) AS n FROM cloud_media_uploads WHERE upload_id='try-again'").get().n,0);
+  assert.equal(bucket.keys.size,2);
+  bucket.put=put;
+  assert.equal((await request(dm,'media/uploads/try-again','PUT',bytes,hash)).status,200);
+  assert.equal(bucket.keys.size,4);
 });

@@ -90,14 +90,16 @@ async function putUpload(request,service,principal,id,uploadId) {
   if(length && Number(length)!==bytes.length)cloudFail(400,'IMAGE_LENGTH_MISMATCH');
   if(await mediaDigest(bytes)!==expected)cloudFail(422,'IMAGE_DIGEST_MISMATCH');
   const {meta,thumbnail}=await inspectMediaPng(bytes), metadata=canonical(meta);
+  let createdHere=false;
   if(!prior){
     const now=service.now();
     try {
       await service.transact([...service.batchGuards(id,continuity,grant),
         service.s(`INSERT INTO cloud_media_uploads
           (owner_id,continuity_id,upload_id,subject,epoch,target_id,target_kind,target_revision,actor_id,digest,metadata_json,state,created_at,expires_at)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,'uploading',?,?) ON CONFLICT(owner_id,continuity_id,upload_id) DO NOTHING`,
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,'uploading',?,?)`,
           ...b,uploadId,grant.subject,continuity.epoch,targetId,kind,target.revision,target.actor_id,expected,metadata,now,now+ageLimit)]);
+      createdHere=true;
     } catch(error) {
       if(!await uploadById(service,b,uploadId))throw error;
     }
@@ -105,17 +107,30 @@ async function putUpload(request,service,principal,id,uploadId) {
   }
   if(prior.metadata_json!==metadata)cloudFail(409,'IMAGE_METADATA_CONFLICT');
   const objectKeys=await keys(b,uploadId,expected);
-  if(prior.state!=='ready'){
-    await bucket.put(objectKeys.original,bytes,{sha256:expected,httpMetadata:{contentType:'image/png'}});
-    await bucket.put(objectKeys.thumbnail,thumbnail,{sha256:meta.thumbnailSha256,httpMetadata:{contentType:'image/png'}});
+  try {
+    // Only the request that won the SQL reservation writes objects. A retry
+    // can verify and publish a fully uploaded pair after a lost response.
+    if(createdHere){
+      await bucket.put(objectKeys.original,bytes,{sha256:expected,httpMetadata:{contentType:'image/png'}});
+      await bucket.put(objectKeys.thumbnail,thumbnail,{sha256:meta.thumbnailSha256,httpMetadata:{contentType:'image/png'}});
+    } else if(prior.state==='uploading' && (!await bucket.head(objectKeys.original)||!await bucket.head(objectKeys.thumbnail))){
+      cloudFail(409,'IMAGE_UPLOAD_IN_PROGRESS');
+    }
     await checkObject(bucket,objectKeys.original,expected,meta.byteLength);
     await checkObject(bucket,objectKeys.thumbnail,meta.thumbnailSha256,meta.thumbnailByteLength);
-    await service.transact([...service.batchGuards(id,continuity,grant),
+    if(prior.state!=='ready')await service.transact([...service.batchGuards(id,continuity,grant),
       service.guard("EXISTS(SELECT 1 FROM cloud_media_uploads WHERE owner_id=? AND continuity_id=? AND upload_id=? AND state IN('ready','uploading') AND digest=?)",...b,uploadId,expected),
       service.s("UPDATE cloud_media_uploads SET state='ready' WHERE owner_id=? AND continuity_id=? AND upload_id=?",...b,uploadId)]);
-  } else {
-    await checkObject(bucket,objectKeys.original,expected,meta.byteLength);
-    await checkObject(bucket,objectKeys.thumbnail,meta.thumbnailSha256,meta.thumbnailByteLength);
+  }catch(error){
+    if(createdHere){
+      try{
+        await service.transact([service.guard("EXISTS(SELECT 1 FROM cloud_media_uploads WHERE owner_id=? AND continuity_id=? AND upload_id=? AND state='uploading')",...b,uploadId),
+          service.s("UPDATE cloud_media_uploads SET state='cleaning' WHERE owner_id=? AND continuity_id=? AND upload_id=?",...b,uploadId)]);
+        await purgeCloudMediaObjects(service,b,uploadId,expected);
+        await service.s("DELETE FROM cloud_media_uploads WHERE owner_id=? AND continuity_id=? AND upload_id=? AND state='cleaning'",...b,uploadId).run();
+      }catch{ /* Owner cleanup can resume a retained reservation after an outage. */ }
+    }
+    throw error;
   }
   return Response.json(uploadResult(id,uploadId,meta,target),{headers});
 }

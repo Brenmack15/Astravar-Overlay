@@ -36,8 +36,11 @@ import java.util.UUID
     var error by remember { mutableStateOf<String?>(null) }
     var pending by remember(targetId) { mutableStateOf(false) }
     LaunchedEffect(snapshot.version,snapshot.visible,online,targetId) {
-        if(!snapshot.visible || !online){primary=null;candidate=null;return@LaunchedEffect}
-        try { primary=client.image(snapshot,targetId,targetKind) }
+        if(!snapshot.visible){primary=null;candidate=null;return@LaunchedEffect}
+        try {
+            primary=client.cachedImage(targetId)
+            if(online)primary=client.image(snapshot,targetId,targetKind)
+        }
         catch(e:CancellationException){throw e}
         catch(e:Exception){ if((e as? OwnerSyncFailure)?.code in setOf("MEDIA_HTTP_401","MEDIA_HTTP_403","MEDIA_HTTP_404"))primary=null }
     }
@@ -78,7 +81,7 @@ import java.util.UUID
                         proof.cloudText("targetKind")==targetKind && proof.cloudText("sha256")==hash && proof.getValue("byteLength").jsonPrimitive.int==data.size)
                     val result=client.submit("assign_primary_image",buildJsonObject{
                         put("uploadId",id);put("assetId",assetId);put("targetId",targetId);put("targetKind",targetKind);put("sha256",hash)
-                    },snapshot)
+                    },snapshot,"assign-$id")
                     pending=result.cloudText("status")=="PENDING_APPROVAL"
                     candidate=null
                     if(!pending)dialog=false

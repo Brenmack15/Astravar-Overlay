@@ -1,13 +1,14 @@
-import { stats, damageTypes, standardSkills, identifier, boolean, whole, nullable, named, option, fields, actorSchema, resourceSchema, formSchema, effectSchema, restSchema, must, op, owned, actor, insert, save, transferableSource, gearEligible, activeForm, sheet, spend, useTiming, addClock } from './cloud-mechanics-core.mjs';
+import { checkDiceOwner, diceCategories, stats, damageTypes, standardSkills, identifier, boolean, whole, nullable, named, option, fields, actorSchema, resourceSchema, formSchema, effectSchema, restSchema, must, op, owned, actor, insert, save, transferableSource, gearEligible, activeForm, sheet, spend, useTiming, addClock } from './cloud-mechanics-core.mjs';
+import { profileOperations } from './cloud-mechanics-profile.mjs';
 import { rollOperations } from './cloud-mechanics-rolls.mjs';
 import { combatOperations } from './cloud-mechanics-combat.mjs';
 import { actionOperations } from './cloud-mechanics-actions.mjs';
 import { spellOperations } from './cloud-mechanics-spells.mjs';
 
 export const MECHANIC_KINDS=Object.freeze({
-  actor:'character', form:'character', effect:'character', resource_pool:'resources', rest_report:'resources',
+  actor:'character',feature:'character',progression_event:'character', form:'character', effect:'character', resource_pool:'resources', rest_report:'resources',recovery_event:'resources',
   roll:'rolls',roll_batch:'rolls',roll_preset:'rolls',attack:'combat',attack_attempt:'combat',encounter:'combat',
-  action_definition:'combat',action_use:'combat',spell:'spells',spell_grant:'spells',cast_instance:'spells'
+  action_definition:'combat',action_use:'combat',concentration_check:'spells',spell:'spells',spell_grant:'spells',cast_instance:'spells'
 });
 export async function mechanicActorSheet(ctx,actorId){
   const {effects,...projection}=await sheet(ctx,actorId);
@@ -22,7 +23,7 @@ async function defineActor(ctx,x){
   const {actorId,name,source,role,rulesProfile,level}=x;
   must(x.currentHp==null||x.maxHp==null||x.currentHp<=x.maxHp,'HP_EXCEEDS_CAPACITY');
   must(new Set(x.saveProficiencies??[]).size===(x.saveProficiencies??[]).length,'DUPLICATE_SAVE_PROFICIENCY');
-  const data={role,rulesProfile,level,source:source??null,proficiency:x.proficiency===undefined?
+  const data={role,rulesProfile,level,proficiencyMethod:x.proficiency===undefined && role==='player' && rulesProfile!=='custom'?'level':x.proficiency!=null?'reviewed':'unknown',source:source??null,proficiency:x.proficiency===undefined?
     (role==='player' && rulesProfile!=='custom'?2+Math.floor((level-1)/4):null):x.proficiency,
     abilities:Object.fromEntries(stats.map(stat=>[stat,x.abilities?.[stat]??null])),
     baseAc:x.baseAc??null,maxHp:x.maxHp??null,currentHp:x.currentHp??null,temporaryHp:x.temporaryHp??null,
@@ -142,7 +143,18 @@ async function hp(ctx,x){
     after.temporaryHp=x.amount;
   }
   await save(ctx,a,after);
-  return {actorId:a.id,kind:x.kind,beforeHp:before.currentHp,afterHp:after.currentHp,temporaryHp:after.temporaryHp,absorbedByTemporaryHp:absorbed,absorbedByIntegrity:shell,activeFormId:after.activeFormId};
+  let concentrationCheckId=null;
+  const qualifyingDamage=x.kind==='damage'?x.amount-shell:0;
+  if(qualifyingDamage>0 && before.concentrationCastId){
+    const cast=await owned(ctx,'cast_instance',before.concentrationCastId,a.id);
+    // Revised core caps this DC at 30; the legacy rule has no such cap.
+    const dc=a.data.rulesProfile==='custom'?null:Math.min(a.data.rulesProfile==='revised_2024'?30:Infinity,Math.max(10,Math.floor(qualifyingDamage/2)));
+    concentrationCheckId=ctx.commandId;
+    await insert(ctx,'concentration_check',concentrationCheckId,a.id,'Concentration saving throw',{
+      castId:cast.id,dc,damage:qualifyingDamage,status:'pending',source:ctx.commandId});
+    await ctx.link(concentrationCheckId,'for_cast',cast.id);
+  }
+  return {actorId:a.id,kind:x.kind,concentrationCheckId,beforeHp:before.currentHp,afterHp:after.currentHp,temporaryHp:after.temporaryHp,absorbedByTemporaryHp:absorbed,absorbedByIntegrity:shell,activeFormId:after.activeFormId};
 }
 async function applyAttackTarget(ctx,x){
   const attempt=await owned(ctx,'attack_attempt',x.attemptId,x.actorId), d=attempt.data;
@@ -200,6 +212,7 @@ async function completeRest(ctx,x){
   const selected=new Set();
   for(const entry of x.hitDice){
     const p=pools.get(entry.poolId);
+    checkDiceOwner(ctx,a,'hit_dice',entry.origin);
     must(!selected.has(entry.poolId)&&p?.data.type==='hit_die'&&p.data.dieSides!=null,'HIT_DIE_SELECTION_INVALID');
     selected.add(entry.poolId);
     must(entry.faces.length>0&&p.data.current!=null&&p.data.current>=entry.faces.length&&con!=null&&hp!=null&&max!=null,'HIT_DICE_OR_HP_UNKNOWN');
@@ -263,6 +276,12 @@ async function completeRest(ctx,x){
   return {reportId,...report};
 }
 export const MECHANIC_OPERATIONS=Object.freeze({
+  set_dice_delegation:{...op('character',fields({actorId:identifier,category:option(...diceCategories),enabled:boolean,source:named(300)},['actorId','category','enabled','source']),async(ctx,x)=>{
+    const a=await actor(ctx,x.actorId), categories=new Set(a.data.diceDelegations??[]);
+    if(x.enabled)categories.add(x.category);else categories.delete(x.category);
+    await save(ctx,a,{...a.data,diceDelegations:[...categories].sort()});
+    return {actorId:a.id,category:x.category,enabled:x.enabled,source:x.source};
+  }),ownerReview:true},
   define_actor:op('character',actorSchema,defineActor),
   set_actor_ability:op('character',fields({actorId:identifier,ability:option(...stats),score:nullable(whole(0,100))},['actorId','ability','score']),async(ctx,x)=>{
     const a=await actor(ctx,x.actorId);const before=a.data.abilities[x.ability];
@@ -278,6 +297,23 @@ export const MECHANIC_OPERATIONS=Object.freeze({
   }),
   define_resource:op('resources',resourceSchema,defineResource),
   spend_resource:op('resources',fields({actorId:identifier,poolId:identifier,amount:whole(1)},['actorId','poolId','amount']),async(ctx,x)=>spend(ctx,x.actorId,x.poolId,x.amount)),
+  complete_dawn_recovery:op('resources',fields({actorId:identifier,eventId:identifier,gameSeconds:whole(0,100000000000),confirmed:{const:true},source:named(300)},['actorId','eventId','gameSeconds','confirmed','source']),async(ctx,x)=>{
+    const a=await actor(ctx,x.actorId);
+    must(a.data.gameSeconds===x.gameSeconds && (a.data.lastDawnAt==null||a.data.lastDawnAt<x.gameSeconds),'DAWN_TIME_UNCONFIRMED_OR_RECORDED');
+    const deltas=[],unresolved=[];
+    for(const id of a.data.poolIds){
+      const p=await owned(ctx,'resource_pool',id,a.id),d=p.data;
+      if(d.recovery!=='dawn')continue;
+      if(d.current==null||d.maximum==null){unresolved.push(id);continue;}
+      const after=Math.min(d.maximum,d.current+(d.recoveryAmount??d.maximum));
+      if(after!==d.current){await save(ctx,p,{...d,current:after});deltas.push({id,before:d.current,after});}
+    }
+    await save(ctx,a,{...a.data,lastDawnAt:x.gameSeconds});
+    const report={actorId:a.id,trigger:'dawn',gameSeconds:x.gameSeconds,source:x.source,deltas,unresolved,commandId:ctx.commandId};
+    await insert(ctx,'recovery_event',x.eventId,a.id,'Dawn recovery',report);
+    for(const d of deltas)await ctx.link(x.eventId,'affected_pool',d.id);
+    return {eventId:x.eventId,...report};
+  }),
   complete_rest:op('resources',restSchema,completeRest),
   define_form:op('character',formSchema,defineForm),
   change_form:op('character',fields({actorId:identifier,formId:nullable(identifier),elapsedSeconds:whole(0,86400),uninterrupted:boolean},['actorId','formId','elapsedSeconds']),changeForm),
@@ -290,7 +326,17 @@ export const MECHANIC_OPERATIONS=Object.freeze({
   enable_effect:op('character',fields({actorId:identifier,effectId:identifier,enabled:boolean},['actorId','effectId','enabled']),async(ctx,x)=>{
     const e=await owned(ctx,'effect',x.effectId,x.actorId);await save(ctx,e,{...e.data,enabled:x.enabled});return {effectId:e.id,enabled:x.enabled};
   }),
+  resolve_concentration_check:op('spells',fields({actorId:identifier,checkId:identifier,rollId:identifier},['actorId','checkId','rollId']),async(ctx,x)=>{
+    const a=await actor(ctx,x.actorId),pending=await owned(ctx,'concentration_check',x.checkId,a.id),r=await owned(ctx,'roll',x.rollId,a.id);
+    must(pending.data.status==='pending' && pending.data.dc!=null && pending.data.castId===a.data.concentrationCastId,'CONCENTRATION_CHECK_UNAVAILABLE');
+    must(r.data.forConcentrationId===pending.id && r.data.status==='resolved' && r.data.kind==='save' && r.data.key==='CON' && !r.data.adjudicated,'CONCENTRATION_SAVE_REQUIRED');
+    const success=r.data.total>=pending.data.dc;
+    if(!success){await ctx.unlink(a.id,'concentrates_on',pending.data.castId);await save(ctx,a,{...a.data,concentrationCastId:null});}
+    const status=success?'maintained':'ended';
+    await save(ctx,r,{...r.data,adjudicated:true});await save(ctx,pending,{...pending.data,status,rollId:r.id});
+    await ctx.link(pending.id,'resolved_save',r.id);return {actorId:a.id,checkId:pending.id,castId:pending.data.castId,status,dc:pending.data.dc,total:r.data.total};
+  }),
   resolve_attack_target:op('combat',fields({actorId:identifier,attemptId:identifier,targetActorId:identifier,saveRollId:identifier,source:named(300)},['actorId','attemptId','targetActorId','source']),applyAttackTarget),
   apply_hp_change:op('combat',fields({actorId:identifier,kind:option('damage','heal','temporary'),amount:whole(),replaceTemporary:boolean},['actorId','kind','amount']),hp),
-  ...rollOperations,...combatOperations,...spellOperations,...actionOperations
+  ...profileOperations,...rollOperations,...combatOperations,...spellOperations,...actionOperations
 });

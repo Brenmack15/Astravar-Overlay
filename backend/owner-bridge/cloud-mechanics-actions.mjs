@@ -3,17 +3,28 @@ import { stats, identifier, named, whole, nullable, arrayOf, option, boolean, fi
 const sizeOrder=['tiny','small','medium','large','huge','gargantuan'];
 const actionSchema=fields({
   actorId:identifier,actionId:identifier,name:named(120),source:named(300),
-  type:option('use','teleport','frighten','roll_bonus'),timing:actionCost,formId:identifier,sourceItemId:identifier,transfersWithItem:boolean,
+  type:option('use','teleport','frighten','roll_bonus','multiattack','fixed_attack_die'),fixedDieValue:whole(1,20),attackSequence:arrayOf(identifier,12),timing:actionCost,formId:identifier,sourceItemId:identifier,transfersWithItem:boolean,
   requiresOperating:boolean,requiresAttunement:boolean,cost:costSchema,range:whole(0,1200),saveDc:whole(1,100),
   saveAbility:option(...stats),durationSeconds:whole(1,86400),bonusAbility:option(...stats),fixedBonus:whole(-100,100)
 },['actorId','actionId','name','source','type','timing']);
 async function define(ctx,x){
-  await actor(ctx,x.actorId);
+  const a=await actor(ctx,x.actorId);
   must((!x.requiresOperating&&!x.requiresAttunement)||x.sourceItemId,'ACTION_SOURCE_REQUIRED');
   if(x.sourceItemId)must(await ctx.get('item_instance',x.sourceItemId),'ACTION_SOURCE_MISSING');
   await transferableSource(ctx,x);
   if(x.formId)await owned(ctx,'form',x.formId,x.actorId);
   if(x.cost)await owned(ctx,'resource_pool',x.cost.poolId,x.actorId);
+  must((x.type==='multiattack')===(x.attackSequence!==undefined),'MULTIATTACK_SEQUENCE_REQUIRED');
+  if(x.type==='multiattack'){
+    must(x.timing==='action' && x.attackSequence.length>=2 && !x.transfersWithItem,'MULTIATTACK_CONFIGURATION_INVALID');
+    for(const id of new Set(x.attackSequence)){
+      const attack=await owned(ctx,'attack',id,a.id);
+      must(attack.data.resolution==='attack' && ['attack','action'].includes(attack.data.timing) &&
+        (!attack.data.formId||attack.data.formId===x.formId),'MULTIATTACK_COMPONENT_UNAVAILABLE');
+    }
+  }
+  must((x.fixedDieValue!==undefined)===(x.type==='fixed_attack_die'),'FIXED_DIE_CONFIGURATION_INVALID');
+  if(x.type==='fixed_attack_die')must(x.cost && x.sourceItemId && x.timing==='other','FIXED_DIE_ITEM_AND_COST_REQUIRED');
   if(x.type==='teleport')must(x.range!=null,'TELEPORT_RANGE_REQUIRED');
   if(x.type==='frighten')must(x.range!=null&&x.durationSeconds!=null&&x.saveDc!=null&&x.saveAbility,'SAVE_CONFIGURATION_REQUIRED');
   if(x.type==='roll_bonus')must(x.timing==='reaction'&&x.range!=null&&(x.bonusAbility!=null)!==(x.fixedBonus!=null),'REACTION_RULE_REQUIRED');
@@ -22,6 +33,7 @@ async function define(ctx,x){
   if(x.formId)await ctx.link(actionId,'requires_form',x.formId);
   if(x.sourceItemId)await ctx.link(actionId,'requires_item',x.sourceItemId);
   if(x.cost)await ctx.link(actionId,'uses_pool',x.cost.poolId);
+  for(const id of new Set(x.attackSequence??[]))await ctx.link(actionId,'includes_attack',id);
   return {actionId};
 }
 export async function applyCondition(ctx,actorId,key,enabled,sourceId,expiresAt=null){
@@ -46,12 +58,19 @@ const reaction=fields({rollId:identifier,targetActorId:identifier,distanceFeet:w
 async function execute(ctx,x){
   const a=await actor(ctx,x.actorId),action=await owned(ctx,'action_definition',x.actionId,a.id),d=action.data,p=await sheet(ctx,a.id);
   must(!p.conditions.some(c=>['incapacitated','unconscious','stunned','paralyzed','petrified'].includes(c)),'ACTOR_CANNOT_ACT');
+  must(d.type!=='fixed_attack_die','DECLARE_SUBSTITUTION_WITH_ATTACK');
   must(!d.formId||p.formId===d.formId,'ACTION_FORM_INELIGIBLE');
   must(await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating),'ACTION_ITEM_INELIGIBLE');
   must((x.destination!=null)===(d.type==='teleport') && (x.targets!=null)===(d.type==='frighten') && (x.reaction!=null)===(d.type==='roll_bonus'),'ACTION_ARGUMENT_MISMATCH');
   const data={actionId:action.id,actorId:a.id,formId:p.formId,type:d.type,timing:d.timing,sourceItemId:d.sourceItemId??null,
     recordedAt:ctx.now,commandId:ctx.commandId,costs:[]};
-  if(d.type==='teleport'){
+  if(d.type==='multiattack'){
+    const encounter=a.data.encounterId?await ctx.get('encounter',a.data.encounterId):null;
+    must(encounter||a.data.gameSeconds!=null,'GAME_CLOCK_UNKNOWN');
+    data.remainingAttacks=[...d.attackSequence];data.attemptIds=[];data.encounterId=encounter?.id??null;
+    data.turn=encounter?[encounter.data.round,encounter.data.index]:null;data.startedAt=a.data.gameSeconds;
+    await save(ctx,a,{...a.data,activeMultiattackId:x.useId});
+  }else if(d.type==='teleport'){
     const dest=x.destination;
     const form=p.formId?await owned(ctx,'form',p.formId,a.id):null;
     must(dest.visible&&dest.unoccupied&&dest.permittedByBarriers&&dest.passengers===0&&dest.distanceFeet<=d.range,'TELEPORT_DESTINATION_INVALID');

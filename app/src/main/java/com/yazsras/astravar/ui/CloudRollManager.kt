@@ -93,7 +93,7 @@ private fun rollStatus(result: JsonObject): String {
             if (decoded.any { it.isFailure }) loadError = "Some saved presets use contextual rules that require the structured preset inspector."
             if (online) loadedAt = revision else loadError = "Offline · previously cached roll records"
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (failure: Exception) { sheet = null; loadError = failure.message ?: "Unable to read authoritative roll options." }
+        catch (failure: Exception) { sheet = null; presets = emptyList(); history = emptyList(); loadError = failure.message ?: "Unable to read authoritative roll options." }
     }
     val options = remember(sheet) { buildList {
         val s = sheet ?: return@buildList
@@ -119,16 +119,20 @@ private fun rollStatus(result: JsonObject): String {
             }
         }, commit = { batch ->
             val already = client.record(batch.id)
-            val pending = if (already == null) client.pending().firstOrNull { it.field("operation") == "record_roll_batch" && (it["args"] as? JsonObject)?.field("batchId") == batch.id } else null
+            val pending = if (already == null) client.pending().firstOrNull { it.field("operation") in setOf("record_roll_batch", "execute_roll_preset") && (it["args"] as? JsonObject)?.field("batchId") == batch.id } else null
             val result = when {
                 already != null -> null
                 pending != null -> client.retry(requireNotNull(pending.field("commandId")))
                 else -> {
                     require(batch.revision == revision) { "The reviewed revision changed. Inspect the pending command or review a new batch." }
-                    client.submit("record_roll_batch", buildJsonObject {
+                    val usesPreset = batch.presetId != null
+                    client.submit(if (usesPreset) "execute_roll_preset" else "record_roll_batch", buildJsonObject {
                         put("actorId", actorId); put("batchId", batch.id)
-                        put("entries", buildJsonArray { batch.rolls.forEach { r -> add(buildJsonObject {
-                            put("rollId", r.id); put("check", cloudCheckArgs(r.check, batch.workshop)); put("evidence", buildJsonObject {
+                        if (usesPreset) put("presetId", batch.presetId)
+                        put(if (usesPreset) "rolls" else "entries", buildJsonArray { batch.rolls.forEach { r -> add(buildJsonObject {
+                            put("rollId", r.id)
+                            if (!usesPreset) put("check", cloudCheckArgs(r.check, batch.workshop))
+                            put("evidence", buildJsonObject {
                                 put("origin", if (r.result.manual) "player_physical" else "app"); put("faces", buildJsonArray { r.result.faces.forEach { add(it.face) } })
                             })
                         }) } })

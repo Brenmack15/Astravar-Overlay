@@ -8,6 +8,16 @@ import android.os.Looper
 import android.os.Parcel
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.material3.Scaffold
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Modifier
+import kotlinx.coroutines.flow.map
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
@@ -30,7 +40,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.annotation.LooperMode
 
-/** Reproduces the 400dp-wide native failure with the actual app header, routes and bottom navigation. */
+/** The retained campaign administration hub at double text size, exercised independently of Chronicle's new landing page. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w400dp-h889dp-xxhdpi", application = AstravarApp::class)
 @LooperMode(LooperMode.Mode.PAUSED)
@@ -93,7 +103,25 @@ class GenesisCampaignResponsiveTest {
         shadowOf(app).setComponentNameAndServiceForBindServiceForIntent(invalidationIntent,
             ComponentName(app, MultiInstanceInvalidationService::class.java), invalidationService.get().onBind(invalidationIntent))
         var activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
-        fun mount() { activity.get().setContent { AstravarScreen(app, {}, {}, {}) } }
+        fun mount() { activity.get().setContent {
+            AstravarTheme {
+                val preferences = remember { ReforgePreferences.open(app) }
+                val selection by remember { preferences.selectedCampaignId.map { true to it } }.collectAsState(initial = false to null)
+                val environment = GenesisConnectedEnvironment(app.genesisStorage.authority,app.campaignLedger,app.genesisStorage.playable,preferences,selection.second,selection.first)
+                val states = rememberSaveableStateHolder()
+                var tab by rememberSaveable { mutableStateOf("Character") }
+                var detail by rememberSaveable { mutableStateOf<String?>(null) }
+                BackHandler(detail != null) { detail = null }
+                Scaffold(topBar = { RebuildAppHeader(false,{},{},{}) },
+                    bottomBar = { RebuildPrimaryNavigation(tab) { tab=it } }) { insets ->
+                    Box(Modifier.fillMaxSize().padding(insets)) {
+                        if(tab=="Chronicle" && detail==null) states.SaveableStateProvider("campaign-administration") {
+                            GenesisCampaignHub(environment,{ detail=it },{_,_->})
+                        } else if(tab=="Chronicle" && detail=="Connections") ConnectionsPageV2(app.campaignLedger)
+                    }
+                }
+            }
+        } }
         val campaignName = "Genesis Fictional Coast of the Amber Observatory"
         fun awaitCampaignContext() = compose.waitUntil(10_000) {
             compose.onAllNodesWithText(campaignName).fetchSemanticsNodes().isNotEmpty()
@@ -117,12 +145,11 @@ class GenesisCampaignResponsiveTest {
                 app.repository.error.value?.let { error("Weapon repository could not open: $it") }
                 app.repository.state.value != null
             }
-            compose.onNodeWithTag("navigation-Campaign").performClick()
+            compose.onNodeWithTag("navigation-Chronicle").performClick()
             compose.onNodeWithTag("section-Journal").assertIsDisplayed().performClick()
             awaitCampaignContext()
-            // There is one page heading plus the bottom navigation label, never a
-            // second nested Campaign heading taking space above the journal.
-            compose.onAllNodesWithText("Campaign", useUnmergedTree = true).assertCountEquals(2)
+            // The administrative hub has one page heading.
+            compose.onAllNodesWithText("Campaign", useUnmergedTree = true).assertCountEquals(1)
             // Bring-into-view scrolls only as far as necessary; it need not hide
             // the selector. Prove that campaign chrome moves with this viewport
             // using actual pixel geometry, while the section tabs stay fixed.
@@ -184,8 +211,8 @@ class GenesisCampaignResponsiveTest {
             awaitCampaignContext()
             compose.onNodeWithTag("section-Journal").assertIsSelected()
             assertEquals(beforeDetail, scrollPosition("Journal"), 1f)
-            compose.onNodeWithTag("navigation-Companions").performClick()
-            compose.onNodeWithTag("navigation-Campaign").performClick()
+            compose.onNodeWithTag("navigation-Connections").performClick()
+            compose.onNodeWithTag("navigation-Chronicle").performClick()
             awaitCampaignContext()
             compose.onNodeWithTag("section-Journal").assertIsSelected()
             assertEquals(beforeDetail, scrollPosition("Journal"), 1f)
@@ -196,7 +223,7 @@ class GenesisCampaignResponsiveTest {
             mount()
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("genesis-campaign-scroll-Journal").fetchSemanticsNodes().isNotEmpty() }
             awaitCampaignContext()
-            compose.onNodeWithTag("navigation-Campaign").assertIsSelected()
+            compose.onNodeWithTag("navigation-Chronicle").assertIsSelected()
             compose.onNodeWithTag("section-Journal").assertIsSelected()
             assertEquals(beforeDetail, scrollPosition("Journal"), 1f)
             compose.onNodeWithText("Your living world").performScrollTo()
@@ -211,8 +238,8 @@ class GenesisCampaignResponsiveTest {
             compose.onNode(hasText("Campaign import") and hasClickAction()).assertIsDisplayed()
             assertEquals("An expanded library and its reading position survive section changes",
                 expandedLibraryPosition, scrollPosition("Journal"), 1f)
-            compose.onNodeWithTag("navigation-Companions").performClick()
-            compose.onNodeWithTag("navigation-Campaign").performClick()
+            compose.onNodeWithTag("navigation-Connections").performClick()
+            compose.onNodeWithTag("navigation-Chronicle").performClick()
             awaitCampaignContext()
             compose.onNodeWithTag("section-Journal").assertIsSelected()
             compose.onNode(hasText("Campaign import") and hasClickAction()).assertIsDisplayed()
@@ -223,7 +250,7 @@ class GenesisCampaignResponsiveTest {
             activity = Robolectric.buildActivity(ComponentActivity::class.java).create(expandedState).start().resume().visible()
             mount()
             awaitCampaignContext()
-            compose.onNodeWithTag("navigation-Campaign").assertIsSelected()
+            compose.onNodeWithTag("navigation-Chronicle").assertIsSelected()
             compose.onNodeWithTag("section-Journal").assertIsSelected()
             compose.onNode(hasText("Campaign import") and hasClickAction()).assertIsDisplayed()
             assertEquals("Process-style recreation must retain the expanded library position after records load",

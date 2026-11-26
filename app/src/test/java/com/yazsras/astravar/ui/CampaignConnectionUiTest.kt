@@ -179,9 +179,9 @@ class CampaignConnectionUiTest {
             decision = { _, _ -> decisions++ }).use {
             compose.onNodeWithText("Current currentHp: 20").performScrollTo().assertExists()
             compose.onNodeWithText("Proposed currentHp: 17").performScrollTo().assertExists()
-            compose.onNodeWithText("Approve reviewed transaction").performScrollTo().assertIsNotEnabled()
+            compose.onNodeWithText("Verify").performScrollTo().assertIsNotEnabled()
             assertEquals(0, decisions)
-            compose.onNodeWithText("Reject transaction").performScrollTo().performClick()
+            compose.onNodeWithText("Refuse").performScrollTo().performClick()
             assertEquals(1, decisions)
         }
     }
@@ -238,7 +238,7 @@ class CampaignConnectionUiTest {
         show(view, decision = { id, approved -> decision = id to approved }).use {
             compose.onNodeWithText("Proposed currentHp: 17").performScrollTo().assertExists()
             compose.onAllNodesWithText("Proposed delta: -3").assertCountEquals(0)
-            compose.onNodeWithText("Approve reviewed transaction").performScrollTo().assertIsEnabled().performClick()
+            compose.onNodeWithText("Verify").performScrollTo().assertIsEnabled().performClick()
             assertEquals("cmd-exact" to true, decision)
         }
     }

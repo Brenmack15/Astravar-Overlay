@@ -1,10 +1,11 @@
-import { recordsFail, recordObject, recordId, recordText, recordSource, recordTitle, recordChoice, recordMaybe, recordArray, recordsOperation, recordRead, recordNew, recordEdit, partyActor, uniqueRecordIds, RECORD_DOMAIN_KINDS } from './cloud-records-contract.mjs';
+import { recordsFail, recordObject, recordId, recordText, recordSource, recordTitle, recordChoice, recordMaybe, recordInt, recordArray, recordsOperation, recordRead, recordNew, recordEdit, partyActor, uniqueRecordIds, RECORD_DOMAIN_KINDS } from './cloud-records-contract.mjs';
 
 const maybeId = recordMaybe(recordId);
 const maybeText = recordMaybe(recordText);
 const worldKinds = recordChoice('person','being','faction','place','organization');
 const credence = recordChoice('confirmed','rumor','interpretation','disputed','unknown');
-const allowedTargets = [...Object.keys(RECORD_DOMAIN_KINDS),'actor','form','roll','encounter'];
+const allowedTargets = [...Object.keys(RECORD_DOMAIN_KINDS),'actor','form','effect','resource_pool','roll','roll_batch',
+  'encounter','attack','attack_attempt','action_definition','action_use','rest_report','spell','spell_grant','cast_instance'];
 const subject = recordObject({ kind: recordChoice(...allowedTargets), id: recordId });
 const subjectList = recordArray(subject, 12);
 const worldFields = { entityId: recordId, name: recordTitle, category: worldKinds,
@@ -25,7 +26,9 @@ const milestone = recordObject({ objectiveId: recordId, eventId: recordId, statu
 const checkpointFields = { checkpointId: recordId, title: recordTitle, scene: recordText, locationId: maybeId, worldTime: maybeText,
   lastEventId: maybeId, unresolved: maybeText, pendingRollId: maybeId, encounterId: maybeId, objectiveIds: recordArray(recordId,16),
   actorIds: recordArray(recordId,16), source: recordSource };
-const checkpoint = recordObject({ ...checkpointFields, pendingRollPrompt: maybeText }, Object.keys(checkpointFields));
+const lastEventKind=recordChoice('timeline_event','item_event','coin_transaction','component_event','rest_report');
+const checkpoint = recordObject({ ...checkpointFields, pendingRollPrompt: maybeText, lastEventKind }, Object.keys(checkpointFields));
+const expectedRevision=recordInt(1,Number.MAX_SAFE_INTEGER);
 
 async function reference(ctx, value) {
   return recordRead(ctx, value.kind, value.id);
@@ -79,8 +82,12 @@ async function checkpointRecord(ctx,args) {
     const loc=await recordRead(ctx,'world_entity',args.locationId);
     if(loc.data.category!=='place') recordsFail('PLACE_REQUIRED');
   }
-  if(args.lastEventId) await recordRead(ctx,'timeline_event',args.lastEventId);
-  if(args.encounterId) await recordRead(ctx,'encounter',args.encounterId);
+  if(args.lastEventKind&&!args.lastEventId) recordsFail('LAST_EVENT_REQUIRED',409);
+  if(args.lastEventId) {
+    const last=await recordRead(ctx,args.lastEventKind??'timeline_event',args.lastEventId);
+    if((last.kind==='timeline_event' && last.data.status!=='confirmed') || (last.kind==='item_event' && last.data.evidence==='uncertain')) recordsFail('CONFIRMED_EVENT_REQUIRED',409);
+  }
+  if(args.encounterId && (await recordRead(ctx,'encounter',args.encounterId)).data.active!==true) recordsFail('ACTIVE_ENCOUNTER_REQUIRED',409);
   if(args.pendingRollId) {
     const roll=await recordRead(ctx,'roll',args.pendingRollId);
     if(roll.data.status!=='pending') recordsFail('ROLL_ALREADY_RESOLVED',409);
@@ -109,6 +116,14 @@ export const WORLD_OPERATIONS=Object.freeze({
     await ctx.link(args.factId,'known_about',about.id);
     return {factId:args.factId,evidence:args.evidence};
   }),
+  revise_known_fact:recordsOperation('world',recordObject({factId:recordId,expectedRevision,title:recordTitle,detail:recordText,
+    evidence:credence,learnedAt:maybeText,originalWorldTime:maybeText,reason:recordTitle,source:recordSource}),async(ctx,args)=>{
+    const current=await recordRead(ctx,'known_fact',args.factId);
+    if(current.revision!==args.expectedRevision) recordsFail('FACT_REVISION_CHANGED',409);
+    const {factId,title,expectedRevision,reason,...changes}=args;
+    await ctx.put(recordEdit(current,{...current.data,...changes,revisionReason:reason,revisedAt:ctx.now},{title}));
+    return {factId,previousRevision:expectedRevision,reason};
+  }),
   record_chronicle_event:recordsOperation('chronicle',chronicle,recordTimeline),
   define_objective:recordsOperation('chronicle',goal,async(ctx,args)=>{
     await recordNew(ctx,'objective',args.objectiveId);
@@ -122,9 +137,20 @@ export const WORLD_OPERATIONS=Object.freeze({
     if(args.linkedProjectId) await ctx.link(args.objectiveId,'linked_project',args.linkedProjectId);
     return {objectiveId:args.objectiveId};
   }),
+  revise_objective:recordsOperation('chronicle',recordObject({objectiveId:recordId,expectedRevision,title:recordTitle,
+    knownRequirements:recordArray(recordTitle,16),reason:recordTitle,source:recordSource}),async(ctx,args)=>{
+    const current=await recordRead(ctx,'objective',args.objectiveId);
+    if(current.revision!==args.expectedRevision) recordsFail('OBJECTIVE_REVISION_CHANGED',409);
+    await ctx.put(recordEdit(current,{...current.data,knownRequirements:args.knownRequirements,source:args.source,
+      revisionReason:args.reason,revisedAt:ctx.now},{title:args.title}));
+    return {objectiveId:current.id,status:current.data.status,reason:args.reason};
+  }),
   record_objective_milestone:recordsOperation('chronicle',milestone,async(ctx,args)=>{
     const goal=await recordRead(ctx,'objective',args.objectiveId),event=await recordRead(ctx,'timeline_event',args.eventId);
     if(event.data.status!=='confirmed' || goal.data.lastMilestoneId===event.id) recordsFail('CONFIRMED_NEW_MILESTONE_REQUIRED',409);
+    const previous=await ctx.service.s("SELECT 1 AS existing FROM cloud_links WHERE owner_id=? AND continuity_id=? AND from_id=? AND relation='milestone' AND to_id=?",
+      ...ctx.binding,goal.id,event.id).first();
+    if(previous) recordsFail('MILESTONE_ALREADY_RECORDED',409);
     await ctx.put(recordEdit(goal,{...goal.data,status:args.status,lastMilestoneId:event.id,source:args.source}));
     await ctx.link(goal.id,'milestone',event.id);
     return {objectiveId:goal.id,eventId:event.id,status:args.status};

@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit
 @Config(sdk = [35])
 class CloudWorkerInteropTest {
     @Test fun nativeCacheAndActualWorkerConvergeAcrossDisconnectRetryAndRevocation(): Unit = runBlocking {
-        val driver = generateSequence(File(System.getProperty("user.dir")).absoluteFile) { it.parentFile }
+        val driver = generateSequence(File(requireNotNull(System.getProperty("user.dir"))).absoluteFile) { it.parentFile }
             .map { File(it,"backend/owner-bridge/fixtures/native-cloud-wire.mjs") }.first(File::isFile)
         val process = ProcessBuilder("node",driver.absolutePath).redirectError(ProcessBuilder.Redirect.INHERIT).start()
         val input = process.inputStream.bufferedReader()
@@ -64,13 +64,46 @@ class CloudWorkerInteropTest {
             }
             fun client() = CloudCampaignClient(cache,{ CloudSession(credential,null) },transport)
             assertEquals("COMMITTED",dmCommit(0,"define_actor",defineActor("person")).cloudText("status"))
+            fun gp(n:Int) = buildJsonObject { put("cp",0);put("sp",0);put("ep",0);put("gp",n);put("pp",0) }
+            fun commitFromDm(rev:Int,op:String,properties:JsonObject): JsonObject {
+                val result=dmCommit(rev,op,properties)
+                assertEquals("COMMITTED",result.cloudText("status"))
+                assertEquals(result,dm("get_cloud_receipt",buildJsonObject { put("commandId",result.cloudText("commandId")) }))
+                return result
+            }
+            commitFromDm(1,"define_wallet",buildJsonObject {
+                put("walletId","wallet");put("title","Test coins");put("holderId","person");put("shared",false)
+                put("coins",gp(11));put("source","Fixture")
+            })
+            commitFromDm(2,"define_item_definition",buildJsonObject {
+                put("definitionId","lens-type");put("name","Fixture lens");put("category","tool");put("description","Test lens");put("rarity",JsonNull)
+                put("stackable",false);put("wearable",false);put("handheld",true);put("attunement","none");put("source","Fixture")
+            })
+            commitFromDm(3,"purchase_item",buildJsonObject {
+                put("itemId","lens");put("definitionId","lens-type");put("ownerId","person");put("quantity",1);put("source","Fixture purchase")
+                put("walletId","wallet");put("price",gp(4));put("sellerId",JsonNull)
+            })
+            commitFromDm(4,"define_resource",buildJsonObject {
+                put("actorId","person");put("poolId","charge");put("name","Fixture charge");put("type","charge")
+                put("maximum",4);put("current",3);put("recovery","none");put("source","Fixture")
+            })
+            commitFromDm(5,"spend_resource",buildJsonObject { put("actorId","person");put("poolId","charge");put("amount",1) })
+            commitFromDm(6,"record_chronicle_event",buildJsonObject {
+                put("eventId","visit");put("title","Fixture visit");put("narrative","An isolated visitor returned the lens.")
+                put("category","conversation");put("status","confirmed");put("worldTime",JsonNull);put("correctsId",JsonNull)
+                putJsonArray("subjects"){addJsonObject{put("kind","actor");put("id","person")}};put("source","Fixture")
+            })
             assertEquals(0, deviceRequests)
             var android = client()
             val first = android.refresh(openExisting=true)
-            assertEquals(1L,first.version.revision)
+            assertEquals(7L,first.version.revision)
+            assertEquals(7,android.record("wallet")!!.getValue("data").jsonObject.getValue("coins").jsonObject.getValue("gp").jsonPrimitive.int)
+            assertEquals(2,android.record("charge")!!.getValue("data").jsonObject.getValue("current").jsonPrimitive.int)
+            assertEquals(1,android.records(kinds=setOf("item_instance")).count{it.cloudText("id")=="lens"})
+            assertEquals(1,android.records(kinds=setOf("timeline_event")).count{it.cloudText("id")=="visit"})
             assertEquals("person",android.records(kinds=setOf("actor")).single().cloudText("id"))
             cache.close()
-            dmCommit(1,"set_actor_ability",change(15))
+            dmCommit(7,"set_actor_ability",change(15))
             cache = CloudSnapshotCache(context,cacheFile)
             android = client()
             assertEquals(13,android.record("person")!!.getValue("data").jsonObject.getValue("abilities").jsonObject.getValue("INT").jsonPrimitive.int)
@@ -82,7 +115,7 @@ class CloudWorkerInteropTest {
             val id = android.pending().single().cloudText("commandId")
             val receipt = android.retry(id)
             assertEquals("COMMITTED",receipt.cloudText("status"))
-            assertEquals(3L,receipt.getValue("revision").jsonPrimitive.long)
+            assertEquals(9L,receipt.getValue("revision").jsonPrimitive.long)
             assertEquals(receipt,dm("get_cloud_receipt",buildJsonObject { put("commandId",id) }))
             assertEquals(17,android.record("person")!!.getValue("data").jsonObject.getValue("abilities").jsonObject.getValue("INT").jsonPrimitive.int)
             assertTrue(android.pending().isEmpty())
@@ -93,7 +126,7 @@ class CloudWorkerInteropTest {
                     put("id","c1");put("name","Fixture damage");put("type","force");put("dice",1);put("sides",6);put("flat",2)
                 } }
             }
-            assertEquals("COMMITTED",dmCommit(3,"define_attack",definition).cloudText("status"))
+            assertEquals("COMMITTED",dmCommit(9,"define_attack",definition).cloudText("status"))
             val actionState=android.refresh()
             val action=android.projection(actionState,"actions/person").getValue("rows").jsonArray.single().jsonObject
             assertEquals(3,action.getValue("hit").jsonPrimitive.int)

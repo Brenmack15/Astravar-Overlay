@@ -77,7 +77,9 @@ private fun JsonObjectBuilder.optionalId(key: String, id: String) {
     val reach: String = "", val range: String = "", val longRange: String = "", val area: String = "",
     val item: String = "", val attuned: Boolean = false, val operating: Boolean = false, val form: String = "",
     val exclude: String = "", val pool: String = "", val cost: String = "",
-    val components: List<AttackDamageDraft> = emptyList(), val riders: List<AttackRiderDraft> = emptyList()) {
+    val components: List<AttackDamageDraft> = emptyList(), val riders: List<AttackRiderDraft> = emptyList(),
+    val calculatedDc: Boolean = false, val dcAbility: String = "", val dcBase: String = "8",
+    val dcProficient: Boolean = false, val dcBonus: String = "") {
     fun payload(actorId: String, revision: Long? = null, discardSelections: Boolean = false): JsonObject = buildJsonObject {
         require(name.trim().length in 1..160 && source.trim().length in 1..300) { "Enter the attack name and source." }
         put("actorId", actorId); put("attackId", id); put("name", name.trim()); put("source", source.trim())
@@ -90,7 +92,12 @@ private fun JsonObjectBuilder.optionalId(key: String, id: String) {
             }
             "save" -> {
                 require(saveAbility in abilityCodes) { "Select the target saving throw." }
-                put("saveAbility", saveAbility); put("saveDc", number(dc, "Save DC", 1..100)); optional("saveSuccess", onSave)
+                put("saveAbility", saveAbility); optional("saveSuccess", onSave)
+                if (calculatedDc) {
+                    require(dcAbility in abilityCodes) { "Select the source ability used for the DC." }
+                    put("dcAbility", dcAbility); put("dcBase", number(dcBase, "Base DC", 0..100)); put("dcProficient", dcProficient)
+                    optionalNumber("dcBonus", dcBonus, "Additional DC modifier", -100..100)
+                } else put("saveDc", number(dc, "Save DC", 1..100))
             }
         }
         optionalNumber("reach", reach, "Reach", 0..10000); optionalNumber("range", range, "Normal range", 0..10000)
@@ -130,7 +137,9 @@ private fun JsonObjectBuilder.optionalId(key: String, id: String) {
                 d.rows("components").map { c -> AttackDamageDraft(c.str("id"), c.str("name"), c.str("type"), c.str("dice"),
                     c.str("sides"), c.str("flat"), c.str("abilityBonus"), c.str("critical") != "false", c.strings("variants")) },
                 d.rows("riders").map { r -> AttackRiderDraft(r.str("id"), r.str("trigger"), r.str("effect"), r.str("duration"),
-                    r.str("componentId"), r.str("saveAbility"), r.str("saveDc")) })
+                    r.str("componentId"), r.str("saveAbility"), r.str("saveDc")) },
+                calculatedDc="dcAbility" in d, dcAbility=d.str("dcAbility"), dcBase=d.str("dcBase").ifBlank { "8" },
+                dcProficient=d.str("dcProficient")=="true", dcBonus=d.str("dcBonus"))
         }
     }
 }
@@ -164,7 +173,7 @@ private fun <T> List<T>.move(index: Int, target: Int): List<T> = toMutableList()
     val recordId = attack.str("id")
     val initial = rememberSaveable(actorId,recordId) { Json.encodeToString(CloudAttackDraft.serializer(),
         attack?.let(CloudAttackDraft::read) ?: CloudAttackDraft(newId())) }
-    val startingRevision = rememberSaveable(actorId,recordId) { attack.str("revision").toLongOrNull() }
+    val startingRevision = rememberSaveable(actorId,recordId) { attack.str("revision") }.toLongOrNull()
     val draftState = rememberReforgeDraft(Json.decodeFromString(CloudAttackDraft.serializer(), initial), CloudAttackDraft.serializer())
     var d by draftState
     var discard by rememberSaveable(actorId,recordId) { mutableStateOf(false) }
@@ -231,7 +240,13 @@ private fun <T> List<T>.move(index: Int, target: Int): List<T> = toMutableList()
                 }
                 if(d.resolution=="save"){
                     BuilderChoice("Target save",d.saveAbility,abilityCodes){d=d.copy(saveAbility=it)}
-                    Field("Save DC",d.dc,{d=d.copy(dc=it)})
+                    Toggle("Calculate save DC from this actor",d.calculatedDc){d=d.copy(calculatedDc=it)}
+                    if(d.calculatedDc) {
+                        Field("Base DC",d.dcBase,{d=d.copy(dcBase=it)})
+                        BuilderChoice("Source ability for DC",d.dcAbility,abilityCodes){d=d.copy(dcAbility=it)}
+                        Toggle("Add proficiency to DC",d.dcProficient){d=d.copy(dcProficient=it)}
+                        Field("Additional DC modifier",d.dcBonus,{d=d.copy(dcBonus=it)})
+                    } else Field("Save DC",d.dc,{d=d.copy(dc=it)})
                     BuilderChoice("Damage on successful save",d.onSave,listOf("","none","half","full")){d=d.copy(onSave=it)}
                 }
                 if(d.resolution=="manual") Text("The DM adjudicates this configured outcome.")
@@ -296,7 +311,9 @@ private fun <T> List<T>.move(index: Int, target: Int): List<T> = toMutableList()
                 GenesisReviewSection("Resolution",{select(1)}) {
                     Text(when(d.resolution) {
                         "attack" -> if(d.fixed)"1d20 + (${d.hit})" else "1d20 + ${d.ability} modifier" + (if(d.proficient)" + proficiency" else "") + d.bonus.takeIf(String::isNotBlank)?.let { " + ($it)" }.orEmpty()
-                        "save" -> "${d.saveAbility} save DC ${d.dc} · ${cloudLabel(d.onSave.ifBlank { "unresolved" })} on success"
+                        "save" -> "${d.saveAbility} save DC " + (if(d.calculatedDc) "${d.dcBase} + ${d.dcAbility} modifier" +
+                            (if(d.dcProficient)" + proficiency" else "") + d.dcBonus.takeIf(String::isNotBlank)?.let { " + ($it)" }.orEmpty()
+                            else d.dc) + " · ${cloudLabel(d.onSave.ifBlank { "unresolved" })} on success"
                         else -> cloudLabel(d.resolution)
                     })
                 }

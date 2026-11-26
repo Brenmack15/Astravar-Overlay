@@ -22,28 +22,28 @@ async function dependencies(ctx,ids) {
   const links=(await ctx.service.s(`SELECT from_id,relation,to_id FROM cloud_links WHERE owner_id=? AND continuity_id=?
     AND (from_id IN(SELECT value FROM json_each(?)) OR to_id IN(SELECT value FROM json_each(?))) ORDER BY from_id,relation,to_id LIMIT 257`,
   ...b,selected,selected).all()).results;
-  const references=(await ctx.service.s(`SELECT e.id,e.kind,e.actor_id,e.life,e.data_json FROM cloud_entities e WHERE e.owner_id=? AND e.continuity_id=?
+  const references=(await ctx.service.s(`SELECT e.id,e.kind,e.title,e.actor_id,e.life,e.data_json FROM cloud_entities e WHERE e.owner_id=? AND e.continuity_id=?
     AND e.id NOT IN(SELECT value FROM json_each(?))
     AND (e.actor_id IN(SELECT value FROM json_each(?)) OR EXISTS(
       SELECT 1 FROM json_tree(e.data_json) j WHERE j.type='text' AND j.atom IN(SELECT value FROM json_each(?))
     )) ORDER BY e.id LIMIT 257`,...b,selected,selected,selected).all()).results;
   if(links.length>256||references.length>256)cloudFail(409,'DEPENDENCY_REVIEW_LIMIT');
   for(const row of references)ctx.require(ctx.service.kinds[row.kind],row.actor_id,false);
-  const endpoints= new Set(links.flatMap(link=>[link.from_id,link.to_id]));
+  const names=new Map(),endpoints=new Set(links.flatMap(link=>[link.from_id,link.to_id]));
   for(const id of endpoints){
     const end=await ctx.current(id);
     if(!end)cloudFail(409,'INCOMPLETE_DEPENDENCY');
-    ctx.require(ctx.service.kinds[end.kind],end.actorId,false);
+    ctx.require(ctx.service.kinds[end.kind],end.actorId,false);names.set(id,end.title);
   }
   const protectedFields=['activeFormId','concentrationCastId','encounterId','resourcePoolId','chargePoolId'];
   const selectedIds=new Set(ids);
-  return {links,references:references.map(r=>{
+  return {links:links.map(l=>({...l,fromTitle:names.get(l.from_id),toTitle:names.get(l.to_id)})),references:references.map(r=>{
     const d=JSON.parse(r.data_json);
     const gameplayUse=r.life==='active' && (protectedFields.some(f=>selectedIds.has(d[f])) ||
       (r.kind==='actor' && [d.poolIds??[],d.effectIds??[]].some(values=>values.some(id=>selectedIds.has(id)))) ||
       (r.kind==='item_instance' && (selectedIds.has(d.ownerId)||selectedIds.has(d.custodianId))&&(d.attuned||d.operating||d.equipment!=='packed')) ||
       (r.kind==='encounter' && d.active && (d.participants??[]).some(id=>selectedIds.has(id))));
-    return {id:r.id,kind:r.kind,life:r.life,actorId:r.actor_id,gameplayUse};
+    return {id:r.id,kind:r.kind,title:r.title,life:r.life,actorId:r.actor_id,gameplayUse};
   })};
 }
 async function legacyCount(ctx,ids) {

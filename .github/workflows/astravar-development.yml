@@ -99,7 +99,7 @@ jobs:
       - name: Critical protocol and source safety before Android compilation
         run: |
           node --test backend/owner-bridge/*.test.mjs
-          python3 -m unittest discover -s scripts/tests -v
+          bash scripts/ci-python-tests.sh
           python3 scripts/verify_v2_protected_source.py
           python3 scripts/verify_ui_foundation.py
           python3 scripts/verify_upgrade_integrity.py

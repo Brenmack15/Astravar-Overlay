@@ -4,12 +4,26 @@ import { CloudPlan, cloudAllowed, cloudEntity } from './cloud-plan.mjs';
 import { requestEvidence, resultEvidence, readRequestEvidence, readResultEvidence } from './cloud-evidence.mjs';
 import { deletionTail, completeMediaCleanup } from './cloud-lifecycle.mjs';
 
+// Only assignment operations can be retired by a different command. Economic
+// transactions, damage, rests, transformations and other events require their
+// original identities even if they happen to produce an identical balance.
+const absoluteAssignments = {
+  set_actor_ability:{kind:'actor',key:'actorId',matches:(data,args)=>Object.hasOwn(data.abilities??{},args.ability)&&data.abilities[args.ability]===args.score},
+  set_skill_training:{kind:'actor',key:'actorId',matches:(data,args)=>{
+    const row=data.skills?.[args.skillId];
+    return row?.name===args.name && row.ability===args.ability && row.rank===args.rank;
+  }},
+  prepare_spell:{kind:'spell_grant',key:'grantId',matches:(data,args)=>data.preparation===(args.prepared?'prepared':'known')},
+  // A changed owner, condition or activation invalidates proof for this holding.
+  equip_item:{kind:'item_instance',key:'itemId',matches:(data,args,applied)=>data.equipment===args.equipment&&canonical(data)===canonical(applied)},
+};
+
 const utcMillis = "CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)";
 const grantScope = { type:'string', enum:[...CLOUD_SCOPES.flatMap(s=>[s+'.read', s+'.write']),'approval.read'] };
 const grantSpec = cloudObject({
-  scopes:{type:'array',items:grantScope,uniqueItems:true,maxItems:25},
+  scopes:{type:'array',items:grantScope,uniqueItems:true,maxItems:grantScope.enum.length},
   actors:{type:'array',items:{anyOf:[CLOUD_ID,{const:'*'}]},uniqueItems:true,minItems:1,maxItems:100},
-  auto:{type:'array',items:grantScope,uniqueItems:true,maxItems:12},
+  auto:{type:'array',items:grantScope,uniqueItems:true,maxItems:CLOUD_SCOPES.length},
   expiresAt:{type:'integer',minimum:1},revoked:{type:'boolean'},expectedGrantRevision:{type:'integer',minimum:0},
 });
 function subjectFor(principal, ownerId, id) {
@@ -53,7 +67,7 @@ export class CloudService {
     await this.continuity(id);
     if(!(subject==='sites-mcp'||(subject.startsWith('device:')&&validCloudId(subject.slice(7)))) || !cloudMatches(grant,grantSpec))cloudFail(400,'INVALID_GRANT');
     if(!grant.revoked && (grant.expiresAt<=this.now()||grant.expiresAt>this.now()+366*86400000) ||
-      grant.scopes.some(s=>s.endsWith('.write')&&!grant.scopes.includes(s.replace('.write','.read'))) ||
+      grant.scopes.includes('campaign.write') || grant.scopes.some(s=>s.endsWith('.write')&&!grant.scopes.includes(s.replace('.write','.read'))) ||
       grant.auto.some(s=>!s.endsWith('.write')||!grant.scopes.includes(s)) ||
       grant.actors.includes('*')&&grant.actors.length!==1)cloudFail(400,'INVALID_GRANT');
     const b=this.key(id),v=[JSON.stringify(grant.scopes),JSON.stringify(grant.actors),JSON.stringify(grant.auto),grant.expiresAt,Number(grant.revoked)];
@@ -91,7 +105,7 @@ export class CloudService {
       scopes:grant.scopes,actors:grant.actors,automatic:grant.auto,
       kindScopes:Object.fromEntries(Object.entries(this.kinds).filter(([,scope])=>grant.scopes.includes(scope+'.read'))),
       kinds:Object.keys(this.kinds).filter(k=>grant.scopes.includes(this.kinds[k]+'.read')),
-      operations:Object.entries(this.operations).filter(([,d])=>grant.scopes.includes(d.scope+'.write')).map(([name,d])=>({name,scope:d.scope,schema:d.schema,eligibleForAutoSync:!d.ownerReview&&grant.auto.includes(d.scope+'.write')}))};
+      operations:Object.entries(this.operations).filter(([,d])=>(!d.ownerOnly||grant.subject==='sites-owner')&&grant.scopes.includes(d.scope+'.write')).map(([name,d])=>({name,scope:d.scope,schema:d.schema,eligibleForAutoSync:!d.ownerReview&&grant.auto.includes(d.scope+'.write')}))};
   }
   async state(principal,id,opts={}) {
     const {grant,continuity:c}=await this.access(principal,id), b=this.key(id),after=opts.after??'',limit=opts.limit??50;
@@ -179,45 +193,41 @@ export class CloudService {
       ...b,commandId,crypto.randomUUID(),status,c.epoch,c.revision,evidence.stored,canonical(access),now),...evidence.writes];
   }
   async absoluteEvidence(id,command,continuity,grant) {
-    if(command.operation!=='set_actor_ability' || command.epoch!==continuity.epoch)return null;
-    const {actorId,ability,score}=command.args;
-    if(!cloudAllowed(grant,'character',actorId,true))return null;
-    const b=this.key(id),actor=await this.s("SELECT data_json FROM cloud_entities WHERE owner_id=? AND continuity_id=? AND id=? AND kind='actor' AND life='active'",...b,actorId).first();
-    if(!actor || JSON.parse(actor.data_json).abilities?.[ability]!==score)return null;
+    const rule=Object.hasOwn(absoluteAssignments,command.operation)?absoluteAssignments[command.operation]:null;
+    if(!rule||command.epoch!==continuity.epoch)return null;
+    const b=this.key(id),entityId=command.args[rule.key];
+    const current=await this.s("SELECT actor_id,data_json FROM cloud_entities WHERE owner_id=? AND continuity_id=? AND id=? AND kind=? AND life='active'",...b,entityId,rule.kind).first();
+    if(!current || !cloudAllowed(grant,this.kinds[rule.kind],current.actor_id,true))return null;
     const fingerprint=await sha256(canonical(command.args));
-    const row=await this.s(`SELECT r.command_id,r.revision,r.transaction_id,q.request_json,r.access_json FROM cloud_receipts r
-      JOIN cloud_requests q USING(owner_id,continuity_id,command_id)
+    const proof=await this.s(`SELECT r.*,q.request_json FROM cloud_receipts r JOIN cloud_requests q USING(owner_id,continuity_id,command_id)
       WHERE r.owner_id=? AND r.continuity_id=? AND r.status='COMMITTED' AND r.epoch=? AND r.revision>?
-        AND json_extract(q.request_json,'$.command.operation')='set_actor_ability'
-        AND (json_extract(q.request_json,'$.argsHash')=? OR (json_extract(q.request_json,'$.evidenceVersion') IS NULL
-          AND json_extract(q.request_json,'$.command.args.actorId')=? AND json_extract(q.request_json,'$.command.args.ability')=?
-          AND json_extract(q.request_json,'$.command.args.score') IS ?)) ORDER BY r.revision DESC LIMIT 1`,
-        ...b,continuity.epoch,command.expectedRevision,fingerprint,actorId,ability,score).first();
-    if(!row)return null;
-    const stored=JSON.parse(row.request_json);
-    if(stored.evidenceVersion===1?stored.argsHash!==fingerprint:canonical(stored.command.args)!==canonical(command.args))return null;
-    assertAccess(grant,JSON.parse(row.access_json));
-    return {commandId:row.command_id,transactionId:row.transaction_id,revision:row.revision};
+      AND json_extract(q.request_json,'$.command.operation')=?
+      AND (json_extract(q.request_json,'$.argsHash')=? OR json(json_extract(q.request_json,'$.command.args'))=?)
+      ORDER BY r.revision DESC LIMIT 1`,...b,continuity.epoch,command.expectedRevision,command.operation,fingerprint,canonical(command.args)).first();
+    if(!proof)return null;
+    const required=JSON.parse(proof.access_json);
+    if(!required.every(e=>cloudAllowed(grant,e.scope,e.actorId)))return null;
+    const evidence=await readResultEvidence(this,b,proof);
+    const after=evidence.changes?.find(change=>change.after?.id===entityId)?.after;
+    if(evidence.evidenceErased || !after || after.actorId!==current.actor_id || !rule.matches(JSON.parse(current.data_json),command.args,after.data))return null;
+    return {commandId:proof.command_id,transactionId:proof.transaction_id,revision:proof.revision};
   }
   async retireEquivalent(id,accepted) {
-    if(accepted.operation!=='set_actor_ability')return;
-    const b=this.key(id),fingerprint=await sha256(canonical(accepted.args));
-    const pending=(await this.s(`SELECT command_id,digest,request_json FROM cloud_requests WHERE owner_id=? AND continuity_id=?
-      AND status='PENDING_APPROVAL' AND json_extract(request_json,'$.command.operation')='set_actor_ability'
-      AND (json_extract(request_json,'$.argsHash')=? OR (json_extract(request_json,'$.evidenceVersion') IS NULL
-        AND json_extract(request_json,'$.command.args.actorId')=? AND json_extract(request_json,'$.command.args.ability')=?
-        AND json_extract(request_json,'$.command.args.score') IS ?)) ORDER BY submitted_at LIMIT 32`,
-      ...b,fingerprint,accepted.args.actorId,accepted.args.ability,accepted.args.score).all()).results;
+    if(!Object.hasOwn(absoluteAssignments,accepted.operation))return;
+    const b=this.key(id),fingerprint=await sha256(canonical(accepted.args)),owner={role:'owner',ownerId:this.ownerId,credentialId:'sites-owner'};
+    const pending=(await this.s(`SELECT command_id,digest FROM cloud_requests WHERE owner_id=? AND continuity_id=?
+      AND status='PENDING_APPROVAL' AND json_extract(request_json,'$.command.operation')=?
+      AND (json_extract(request_json,'$.argsHash')=? OR json(json_extract(request_json,'$.command.args'))=?)
+      ORDER BY submitted_at,command_id LIMIT 32`,...b,accepted.operation,fingerprint,canonical(accepted.args)).all()).results;
     for(const row of pending){
-      const old=JSON.parse(row.request_json);
-      if(old.evidenceVersion===1?old.argsHash!==fingerprint:canonical(old.command.args)!==canonical(accepted.args))continue;
-      try{await this.review({role:'owner',ownerId:this.ownerId,credentialId:'sites-owner'},id,row.command_id,row.digest,'reconcile');}
+      try{await this.review(owner,id,row.command_id,row.digest,'reconcile');}
       catch(e){if(!(e instanceof BridgeError))throw e;}
     }
   }
   async submit(principal,id,command) {
     const {grant,continuity:c}=await this.access(principal,id),b=this.key(id);
     const def=validateCloudCommand(command,this.operations),digest=await sha256(canonical(command));
+    if(def.ownerOnly&&grant.subject!=='sites-owner')cloudFail(403,'OWNER_REQUIRED');
     if(!grant.scopes.includes(def.scope+'.write'))cloudFail(403,'CLOUD_GRANT_DENIED');
     const replay=async()=>{
       const existing=await this.s('SELECT digest,subject FROM cloud_requests WHERE owner_id=? AND continuity_id=? AND command_id=?',...b,command.commandId).first();
@@ -260,21 +270,45 @@ export class CloudService {
     return this.receipt(principal,id,command.commandId);
   }
   outcome(plan){return {outcome:plan.result,changes:plan.changes,relationships:plan.edges};}
+  // The badge and owner inbox use identical eligibility checks. A stale request stays
+  // inspectable until a decision records its durable terminal disposition.
+  pendingRequests() {
+    return `SELECT q.*,
+      CASE
+        WHEN q.subject <> 'sites-owner' AND (g.subject IS NULL OR g.revoked OR g.expires_at <= ?)
+          THEN 'SUBMITTER_GRANT_INACTIVE'
+        WHEN substr(q.subject,1,7)='device:' AND (d.id IS NULL OR d.revoked OR d.expires_at <= ?)
+          THEN 'SUBMITTER_GRANT_INACTIVE'
+        WHEN q.subject <> 'sites-owner' AND g.revision <> json_extract(q.request_json,'$.grantRevision')
+          THEN 'SUBMITTER_GRANT_CHANGED'
+        WHEN c.epoch <> json_extract(q.request_json,'$.command.epoch')
+          OR c.revision <> json_extract(q.request_json,'$.command.expectedRevision') THEN 'REVIEW_BASELINE_CHANGED'
+        ELSE 'READY'
+      END AS readiness
+      FROM cloud_requests q JOIN cloud_continuities c USING(owner_id,continuity_id)
+      LEFT JOIN cloud_grants g ON g.owner_id=q.owner_id AND g.continuity_id=q.continuity_id AND g.subject=q.subject
+      LEFT JOIN bridge_credentials d ON d.owner_id=q.owner_id AND d.campaign_id=q.continuity_id AND d.id=substr(q.subject,8)
+      WHERE q.owner_id=? AND q.continuity_id=? AND q.status='PENDING_APPROVAL'`;
+  }
   async reviewStatus(principal,id) {
     const {grant}=await this.access(principal,id);
     if(principal.role==='connector'||!grant.scopes.includes('approval.read')||!grant.actors.includes('*'))cloudFail(403,'OWNER_INBOX_DENIED');
-    const total=await this.s("SELECT count(*) AS n FROM cloud_requests WHERE owner_id=? AND continuity_id=? AND status='PENDING_APPROVAL'",...this.key(id)).first();
+    const sql=this.pendingRequests(),now=this.now();
+    const total=await this.s("SELECT count(*) AS n FROM ("+sql+") WHERE readiness='READY'",now,now,...this.key(id)).first();
+    const current=await this.access(principal,id);
+    if(current.grant.revision!==grant.revision)cloudFail(409,'SNAPSHOT_CHANGED');
     return {actionableCount:total.n};
   }
   async approvals(principal,id,opts={}) {
     this.owner(principal,id);await this.continuity(id);
     const b=this.key(id),limit=opts.limit??30,after=opts.after??'';
     if(!Number.isInteger(limit)||limit<1||limit>50||after&&!validCloudId(after))cloudFail(400,'INVALID_PAGE');
-    const rows=(await this.s("SELECT * FROM cloud_requests WHERE owner_id=? AND continuity_id=? AND status='PENDING_APPROVAL' AND command_id>? ORDER BY command_id LIMIT ?",...b,after,limit+1).all()).results;
-    const total=await this.s("SELECT count(*) AS n FROM cloud_requests WHERE owner_id=? AND continuity_id=? AND status='PENDING_APPROVAL'",...b).first();
+    const sql=this.pendingRequests(),now=this.now(),params=[now,now,...b];
+    const rows=(await this.s('SELECT * FROM ('+sql+') WHERE command_id>? ORDER BY command_id LIMIT ?',...params,after,limit+1).all()).results;
+    const total=await this.s("SELECT count(*) AS pending,count(CASE WHEN readiness='READY' THEN 1 END) AS actionable FROM ("+sql+")",...params).first();
     const requests=await Promise.all(rows.slice(0,limit).map(async r=>({commandId:r.command_id,digest:r.digest,subject:r.subject,
-      submittedAt:r.submitted_at,...await readRequestEvidence(this,b,r)})));
-    return {actionableCount:total.n,requests,nextAfter:rows.length>limit?rows[limit-1].command_id:null};
+      readiness:r.readiness,submittedAt:r.submitted_at,...await readRequestEvidence(this,b,r)})));
+    return {actionableCount:total.actionable,pendingCount:total.pending,requests,nextAfter:rows.length>limit?rows[limit-1].command_id:null};
   }
   async review(principal,id,commandId,digest,action) {
     this.owner(principal,id);

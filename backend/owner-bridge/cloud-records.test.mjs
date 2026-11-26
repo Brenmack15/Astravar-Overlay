@@ -165,6 +165,31 @@ test('wrong actor or category blocks both wallet legs and the acquired holding',
   assert.equal((await f.record('ally-purse')).data.coins.gp,8);
   assert.equal(await f.record('no-item'),undefined);
 });
+test('a personal inventory grant inspects and equips a possession without exposing the catalog or another holder',async t=>{
+  const f=await fixture(t);
+  await f.run('define_item_definition',definition('publicly-held',false));
+  await f.run('define_item_definition',{...definition('other-definition',false),name:'Unrelated catalog item'});
+  await f.run('acquire_item',{itemId:'mine',definitionId:'publicly-held',ownerId:'hero',quantity:1,source});
+  await f.run('acquire_item',{itemId:'theirs',definitionId:'other-definition',ownerId:'ally',quantity:1,source});
+  await f.run('edit_item_definition',{definitionId:'publicly-held',name:'Current shared name',description:'Current description',category:'gear',rarity:null,source});
+  await f.grant(['character.read','inventory.read','inventory.write'],['hero']);
+  const view=options=>cloudRecordView(f.service,dm,continuity,'inventory',options);
+  const mine=await view({id:'hero',query:'Current'});
+  assert.deepEqual(mine.items.map(row=>row.id),['mine']);
+  assert.equal(mine.items[0].title,'Current shared name');
+  const inspected=await view({id:'mine'});
+  assert.equal(inspected.definition.id,'publicly-held');
+  assert.equal(inspected.definition.data.description,'Current description');
+  assert.equal(await f.record('publicly-held',dm),undefined);
+  for(const id of ['ally','theirs','other-definition','publicly-held']) await assert.rejects(view({id}),/RECORD_UNAVAILABLE/);
+  await assert.rejects(view({}),/PARTY_AGGREGATE_SCOPE_REQUIRED/);
+  await f.run('equip_item',{itemId:'mine',equipment:'held',source});
+  await assert.rejects(f.run('equip_item',{itemId:'theirs',equipment:'held',source}),/CLOUD_GRANT_DENIED/);
+  await assert.rejects(f.run('edit_item_definition',{definitionId:'publicly-held',name:'Invalid',description:'Invalid',category:'gear',rarity:null,source}),/CLOUD_GRANT_DENIED/);
+  assert.equal((await f.record('mine')).data.equipment,'held');
+  assert.equal((await f.record('theirs')).data.equipment,'packed');
+  assert.equal((await f.record('publicly-held')).title,'Current shared name');
+});
 test('a failed commit rolls back the real SQL item, accounting, history and request, then the same request succeeds',async t=>{
   const f=await fixture(t);
   await f.run('define_item_definition',definition());

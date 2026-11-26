@@ -45,6 +45,14 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
     var actorAfter by remember { mutableStateOf("") }
     var sheet by remember(snapshot.binding,actorId) { mutableStateOf<JsonObject?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
+    var features by remember(actorId,snapshot.version.grantRevision) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var featureCursor by remember { mutableStateOf<String?>(null) }
+    suspend fun loadFeatures(after:String="") {
+        val id=actorId ?: return
+        val page=client.records(after,kinds=setOf("feature"),actorId=id)
+        features=if(after.isEmpty())page else features+page
+        featureCursor=page.lastOrNull()?.cloudText("id")?.takeIf{page.size==50}
+    }
     var overlay by rememberSaveable { mutableStateOf<String?>(null) }
     var rollOption by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedAbility by rememberSaveable { mutableStateOf<String?>(null) }
@@ -74,6 +82,7 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
     LaunchedEffect(snapshot.version,snapshot.visible) {
         try { loadActors() } catch(e:CancellationException){throw e} catch(e:Exception){ actors=emptyList(); select(null); notice=cloudError(e) }
     }
+    LaunchedEffect(actorId,snapshot.version,overlay){if(overlay=="Profile")try{loadFeatures()}catch(e:CancellationException){throw e}catch(e:Exception){notice=cloudError(e);features=emptyList()}}
     val selected=actors.firstOrNull { it.cloudText("id")==actorId }
     val data=selected.obj("data")
     LaunchedEffect(actorId,snapshot.version,online) {
@@ -173,6 +182,7 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
                 { select(row.cloudText("id"));overlay=null }) }
             if(actorMore) PlayerTextButton({scope.launch { loadActors(actorAfter) }}) {Text("More characters")}
             PlayerButton({overlay=null;openOperation("define_actor",buildJsonObject {})},enabled=online){Text("Create character")}
+            if(actorId!=null)PlayerTextButton({overlay=null;openOperation("advance_actor_level",args("actorId" to actorId))},enabled=online){Text("Advance selected character")}
         }
         "Rest" -> if(actorId!=null) PlayerSheet("Rest",{overlay=null}) { CloudSpellRest("Rest",actorId,client,snapshot,online,openOperation) }
         "AC" -> PlayerSheet("Armor class",{overlay=null}) { RecordFields(sheet.obj("ac") ?: JsonNull) }
@@ -182,10 +192,16 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
             PlayerTabs(listOf("Defenses","Features & Traits","Proficiencies & Training","Background"),profileTab,{profileTab=it})
             when(profileTab){
                 "Defenses" -> RecordFields(sheet?.get("defenses") ?: JsonNull)
-                "Features & Traits" -> RecordFields(sheet?.get("effects") ?: JsonNull)
-                "Proficiencies & Training" -> { RecordFields(data?.get("skills") ?: JsonNull)
+                "Features & Traits" -> {
+                    features.forEach { row->PlayerEntry(row.cloudText("title"),row.obj("data").value("source").orEmpty(),"Emblem",{overlay=null;inspect(row.cloudText("id"))}) }
+                    featureCursor?.let { c->PlayerTextButton({scope.launch{loadFeatures(c)}}){Text("More features")} }
+                    if(actorId!=null)PlayerTextButton({overlay=null;openOperation("define_feature",args("actorId" to actorId))},enabled=online){Text("Add feature")}
+                }
+                "Proficiencies & Training" -> { RecordFields(data?.get("training") ?: JsonNull);RecordFields(data?.get("skills") ?: JsonNull)
+                    if(actorId!=null)PlayerTextButton({overlay=null;openOperation("set_actor_training",args("actorId" to actorId))},enabled=online){Text("Manage proficiencies")}
                     if(actorId!=null)PlayerTextButton({overlay=null;openOperation("set_skill_training",args("actorId" to actorId))},enabled=online){Text("Manage training")} }
-                else -> { Text(selected?.cloudText("title").orEmpty()); RecordFields(data?.get("background") ?: JsonNull); data.value("source")?.let { Text(it) } }
+                else -> { Text(selected?.cloudText("title").orEmpty()); RecordFields(data?.get("biography") ?: JsonNull); data.value("source")?.let { Text(it) }
+                    if(actorId!=null)PlayerOutlinedButton({overlay=null;openOperation("set_actor_profile",args("actorId" to actorId))},enabled=online){Text("Edit background")} }
             }
         }
     }

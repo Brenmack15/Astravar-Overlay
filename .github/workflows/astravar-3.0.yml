@@ -13,8 +13,8 @@ jobs:
     timeout-minutes: 100
     env:
       GENESIS_GATE: 'true'
-      EXPECTED_VERSION_NAME: '4.0.0-convergence5'
-      EXPECTED_VERSION_CODE: '58'
+      EXPECTED_VERSION_NAME: '4.1.0-ascension-dev'
+      EXPECTED_VERSION_CODE: '59'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -37,7 +37,7 @@ jobs:
         run: bash scripts/ci-android-sdk.sh
       - name: Verify migration boundaries and retained provenance
         run: |
-          python3 -m unittest discover -s scripts/tests -v
+          bash scripts/ci-python-tests.sh
           python3 scripts/verify_v2_protected_source.py
           python3 scripts/verify_ui_foundation.py
           python3 scripts/verify_upgrade_integrity.py

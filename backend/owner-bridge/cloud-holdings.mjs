@@ -31,6 +31,11 @@ const splitItem = recordObject({ itemId: recordId, splitId: recordId, quantity: 
 const mergeItem = recordObject({ keepId: recordId, mergeId: recordId, source: recordSource });
 const recoverItem = recordObject({ itemId: recordId, ownerId: recordId, source: recordSource, reason: recordTitle });
 const equipItem = recordObject({ itemId: recordId, equipment: equipmentState, source: recordSource });
+const historicalOwner = recordObject({kind:recordChoice('actor','world_entity','named','unknown'),id:nullableId,name:recordMaybe(recordTitle)});
+const historicalItemEvent = recordObject({eventId:recordId,itemId:recordId,
+  eventType:recordChoice('acquisition','purchase','gift','transfer','sale','storage','retrieval','borrowing','return','loss','recovery','modification','integration','other'),
+  previousOwner:recordMaybe(historicalOwner),newOwner:recordMaybe(historicalOwner),reason:recordTitle,worldTime:recordMaybe(recordTitle),
+  sourceEventId:recordId,sourcePublishedAt:recordMaybe(recordTitle),source:recordSource,evidence:recordChoice('confirmed','uncertain'),correctsId:nullableId});
 
 function assertPositive(payment) {
   if (denominations.every(key => payment[key] === 0)) recordsFail('NONZERO_COINS_REQUIRED');
@@ -71,6 +76,53 @@ function portable(item, def) {
   if (!def.data.stackable || item.data.attuned || item.data.operating || item.data.equipment !== 'packed' ||
       item.data.resourcePoolId !== null || item.data.customized || !Number.isSafeInteger(item.data.quantity)) recordsFail('STACK_INCOMPATIBLE', 409);
 }
+/** A visible physical holding authorizes reading its linked definition for the
+ * operation on that holding. It grants no direct access to the shared catalog. */
+async function definitionForHolding(ctx,item) {
+  const held=await ctx.get('item_instance',item.id);
+  if(!held) recordsFail('RECORD_UNAVAILABLE',409);
+  if(held.life!=='active' && ctx.changes.get(held.id)?.before?.life!=='active') ctx.require('lifecycle',held.actorId,false);
+  if(held.data.definitionId!==item.data.definitionId) recordsFail('ITEM_DEFINITION_MISMATCH',409);
+  const def=await ctx.current(held.data.definitionId);
+  if(!def || def.kind!=='item_definition' || def.actorId!==null || def.life!=='active') recordsFail('RECORD_UNAVAILABLE',409);
+  return def;
+}
+async function historicalOwnerRef(ctx,owner) {
+  if(owner===null) return null;
+  const linked=owner.kind==='actor'||owner.kind==='world_entity';
+  if(linked!==Boolean(owner.id) || (owner.kind==='named')!==Boolean(owner.name)) recordsFail('HISTORICAL_OWNER_REFERENCE');
+  const row=linked?await recordRead(ctx,owner.kind,owner.id,true):null;
+  return {row,summary:{ownerId:owner.kind==='actor'?owner.id:null,externalRecipientId:owner.kind==='world_entity'?owner.id:null,
+    externalRecipientName:owner.name,kind:owner.kind}};
+}
+async function recordHistoricalItemEvent(ctx,args) {
+  await recordNew(ctx,'item_event',args.eventId);
+  const item=await recordRead(ctx,'item_instance',args.itemId,true);
+  if(['storage','retrieval','borrowing','return','loss','modification','integration'].includes(args.eventType) && args.newOwner!==null)
+    recordsFail('HISTORICAL_EVENT_DID_NOT_CONVEY_OWNERSHIP');
+  const previous=await historicalOwnerRef(ctx,args.previousOwner),next=await historicalOwnerRef(ctx,args.newOwner);
+  if(args.correctsId) {
+    await recordRead(ctx,'item_event',args.correctsId);
+    const prior=await ctx.service.s("SELECT 1 AS linked FROM cloud_links WHERE owner_id=? AND continuity_id=? AND from_id=? AND relation='item_subject' AND to_id=?",
+      ...ctx.binding,args.correctsId,item.id).first();
+    if(!prior) recordsFail('ITEM_HISTORY_SUBJECT_MISMATCH',409);
+  }
+  const duplicate=await ctx.service.s(`SELECT 1 AS existing FROM cloud_entities e JOIN cloud_links l
+    ON e.owner_id=l.owner_id AND e.continuity_id=l.continuity_id AND e.id=l.from_id
+    WHERE l.owner_id=? AND l.continuity_id=? AND l.to_id=? AND l.relation='item_subject' AND e.kind='item_event'
+      AND json_extract(e.data_json,'$.sourceEventId')=? LIMIT 1`,...ctx.binding,item.id,args.sourceEventId).first();
+  if(duplicate) recordsFail('ITEM_SOURCE_EVENT_ALREADY_RECORDED',409);
+  const scopes=new Set([item.actorId,...[previous?.row,next?.row].filter(Boolean).map(row=>row.actorId)]);
+  await ctx.put({id:args.eventId,kind:'item_event',actorId:scopes.size===1?item.actorId:null,title:args.reason,data:{
+    type:args.eventType,historical:true,before:previous?.summary??null,after:next?.summary??null,evidence:args.evidence,
+    worldTime:args.worldTime,sourceEventId:args.sourceEventId,sourcePublishedAt:args.sourcePublishedAt,source:args.source,
+    recordedAt:ctx.now,commandId:ctx.commandId}});
+  await ctx.link(args.eventId,'item_subject',item.id);
+  if(previous?.row)await ctx.link(args.eventId,'historical_previous_owner',previous.row.id);
+  if(next?.row)await ctx.link(args.eventId,'historical_new_owner',next.row.id);
+  if(args.correctsId)await ctx.link(args.eventId,'corrects_history',args.correctsId);
+  return {eventId:args.eventId,itemId:item.id,historical:true,holdingRevision:item.revision};
+}
 
 async function walletRecord(ctx, id) {
   const wallet = await recordRead(ctx, 'wallet', id);
@@ -99,7 +151,7 @@ async function itemEvent(ctx, type, before, after, reason, source, relatedIds = 
   const summarize = row => row ? { ownerId: row.data.ownerId, custodianId: row.data.custodianId, locationId: row.data.locationId,
     holding: row.data.holding, quantity: row.data.quantity, equipment: row.data.equipment,
     externalRecipientId:row.data.externalRecipientId??null,externalRecipientName:row.data.externalRecipientName??null } : null;
-  const definition=await recordRead(ctx,'item_definition',after.data.definitionId);
+  const definition=await definitionForHolding(ctx,after);
   await ctx.put({ id, kind: 'item_event', title: reason, actorId: owners.every(actor => actor === after.actorId) ? after.actorId : null,
     data: { type, definitionId:definition.id, definitionRevision:definition.revision, before: summarize(before), after: summarize(after), source, commandId: ctx.commandId, recordedAt: ctx.now } });
   for (const itemId of new Set([after.id,...relatedIds])) await ctx.link(id, 'item_subject', itemId);
@@ -153,7 +205,7 @@ async function buy(ctx,args) {
 async function divide(ctx, original, quantity, newId) {
   if (newId === original.id || quantity >= original.data.quantity) recordsFail('INVALID_STACK_SPLIT');
   await recordNew(ctx,'item_instance',newId);
-  const def = await recordRead(ctx,'item_definition',original.data.definitionId);
+  const def = await definitionForHolding(ctx,original);
   portable(original,def);
   await ctx.put(recordEdit(original,{...original.data,quantity:original.data.quantity-quantity}));
   const child = { ...recordEdit(original,{...original.data,quantity}), id:newId };
@@ -280,6 +332,7 @@ async function guardForm(ctx, item, next) {
       (item.data.operating && !next.data.operating) || (form.data.requiresAttunement && !next.data.attuned))) recordsFail('FORM_REVERSION_REQUIRED',409);
 }
 export const HOLDING_OPERATIONS = Object.freeze({
+  record_historical_item_event:recordsOperation('inventory',historicalItemEvent,recordHistoricalItemEvent),
   define_wallet: recordsOperation('economy',defineWallet,createWallet),
   transfer_coins: recordsOperation('economy',transferCoins,async (ctx,args) => {
     if (args.fromWalletId === args.toWalletId) recordsFail('DISTINCT_WALLETS_REQUIRED');
@@ -360,7 +413,7 @@ export const HOLDING_OPERATIONS = Object.freeze({
     if (args.keepId === args.mergeId) recordsFail('DISTINCT_STACKS_REQUIRED');
     const first = await recordRead(ctx,'item_instance',args.keepId);
     const other = await recordRead(ctx,'item_instance',args.mergeId);
-    const def = await recordRead(ctx,'item_definition',first.data.definitionId);
+    const def = await definitionForHolding(ctx,first);
     portable(first,def); portable(other,def);
     const quantity = first.data.quantity + other.data.quantity;
     if (!compareStack(first,other) || quantity > 1_000_000) recordsFail('STACK_INCOMPATIBLE',409);
@@ -387,7 +440,7 @@ export const HOLDING_OPERATIONS = Object.freeze({
     usable(item);
     if(!args.confirmed || item.data.holding!=='carried' || item.data.quantity!==1 || !item.data.custodianId) recordsFail('CONFIRMED_ATTUNEMENT_REQUIRED',409);
     const actor=await partyActor(ctx,item.data.custodianId);
-    const def=await recordRead(ctx,'item_definition',item.data.definitionId);
+    const def=await definitionForHolding(ctx,item);
     if(def.data.attunement!=='required' || def.data.attunementSeconds==null || args.elapsedSeconds<def.data.attunementSeconds || actor.data.encounterId)
       recordsFail('ATTUNEMENT_PREREQUISITES',409);
     if(item.data.attuned===args.attuned) recordsFail('ATTUNEMENT_ALREADY_SET',409);
@@ -406,7 +459,7 @@ export const HOLDING_OPERATIONS = Object.freeze({
   set_item_operating: recordsOperation('inventory',recordObject({itemId:recordId,operating:recordBool,source:recordSource}),async(ctx,args)=>{
     const item=await recordRead(ctx,'item_instance',args.itemId);
     usable(item);
-    const def=await recordRead(ctx,'item_definition',item.data.definitionId);
+    const def=await definitionForHolding(ctx,item);
     if(def.data.activation!=='manual' || item.data.holding!=='carried' || item.data.quantity!==1 || !item.data.custodianId ||
        (args.operating && (item.data.equipment==='packed'|| (def.data.attunement==='required'&&!item.data.attuned)))) recordsFail('ACTIVATION_PREREQUISITES',409);
     if(args.operating===item.data.operating) recordsFail('ACTIVATION_ALREADY_SET',409);
@@ -427,7 +480,7 @@ export const HOLDING_OPERATIONS = Object.freeze({
     const item = await recordRead(ctx,'item_instance',args.itemId);
     usable(item);
     if (item.data.holding !== 'carried' || item.data.custodianId === null || item.data.quantity !== 1) recordsFail('SINGLE_CARRIED_ITEM_REQUIRED',409);
-    const def = await recordRead(ctx,'item_definition',item.data.definitionId);
+    const def = await definitionForHolding(ctx,item);
     if ((args.equipment === 'held' && !def.data.handheld) || (args.equipment === 'worn' && !def.data.wearable) ||
         def.data.attunement === 'configured_review') recordsFail('EQUIPMENT_REVIEW_REQUIRED',409);
     if (item.data.equipment === args.equipment) recordsFail('EQUIPMENT_ALREADY_SET',409);

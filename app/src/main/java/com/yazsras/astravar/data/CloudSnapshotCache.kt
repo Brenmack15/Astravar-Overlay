@@ -51,7 +51,7 @@ internal fun cloudPage(body: JsonObject, binding: CloudBinding, after: String?, 
 
 /** Disposable, credential-bound read model. This database has no gameplay mutation API. */
 internal class CloudSnapshotCache(context: Context, name: String? = "astravar-cloud-cache.db") :
-    SQLiteOpenHelper(context.applicationContext, name, null, 1) {
+    SQLiteOpenHelper(context.applicationContext, name, null, 2) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE workspace(slot INTEGER PRIMARY KEY CHECK(slot=1), origin TEXT NOT NULL,
@@ -59,14 +59,32 @@ internal class CloudSnapshotCache(context: Context, name: String? = "astravar-cl
             grant_revision INTEGER NOT NULL, grant_expiry INTEGER NOT NULL, checked_at INTEGER NOT NULL, token TEXT)""")
         db.execSQL("""CREATE TABLE records(token TEXT NOT NULL,id TEXT NOT NULL,kind TEXT NOT NULL,life TEXT NOT NULL,
             actor TEXT,title TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(token,id))""")
+        createMediaCache(db)
         db.execSQL("CREATE TABLE fenced(continuity TEXT PRIMARY KEY)")
         db.execSQL("CREATE INDEX cloud_cache_list ON records(token,life,kind,id)")
         db.execSQL("""CREATE TABLE commands(id TEXT PRIMARY KEY,origin TEXT NOT NULL,continuity TEXT NOT NULL,
             subject TEXT NOT NULL,envelope TEXT NOT NULL)""")
     }
 
+    private fun createMediaCache(db:SQLiteDatabase) = db.execSQL(
+        "CREATE TABLE image_cache(id TEXT PRIMARY KEY,body BLOB NOT NULL CHECK(length(body)<=4194304))"
+    )
+
     override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) {
-        error("This cloud cache version needs a supported upgrade.")
+        if(old==1 && new==2) createMediaCache(db) else error("Unsupported cloud cache version.")
+    }
+
+    fun image(binding:CloudBinding,id:String,now:Long):ByteArray? = readableDatabase.rawQuery(
+        "SELECT i.body FROM image_cache i,workspace w WHERE i.id=? AND w.token IS NOT NULL AND w.origin=? AND w.continuity=? AND w.subject=? AND w.grant_expiry>?",
+        arrayOf(id,binding.origin,binding.continuity,binding.subject,now.toString())
+    ).use { if(it.moveToFirst())it.getBlob(0) else null }
+
+    fun saveImage(snapshot:CloudSnapshot,id:String,bytes:ByteArray) = transaction { db ->
+        val current=workspace()
+        require(current?.visible==true && current.version==snapshot.version && current.binding==snapshot.binding && bytes.size in 1..cloudMediaMax)
+        db.execSQL("INSERT OR REPLACE INTO image_cache VALUES(?,?)",arrayOf(id,bytes))
+        // Thumbnails are reconstructible and share an installation-wide cap.
+        db.execSQL("DELETE FROM image_cache WHERE rowid NOT IN(SELECT rowid FROM image_cache ORDER BY rowid DESC LIMIT 100)")
     }
 
     fun workspace(): CloudSnapshot? = readableDatabase.rawQuery(
@@ -86,6 +104,7 @@ internal class CloudSnapshotCache(context: Context, name: String? = "astravar-cl
     fun hide() = transaction { db ->
         db.execSQL("UPDATE workspace SET token=NULL")
         db.delete("records", null, null)
+        db.delete("image_cache",null,null)
         db.delete("commands", null, null)
     }
 
@@ -120,6 +139,7 @@ internal class CloudSnapshotCache(context: Context, name: String? = "astravar-cl
                 require(version.revision >= previous.version.revision && version.grantRevision >= previous.version.grantRevision)
             }
         }
+        if(previous?.version!=version || previous?.binding!=binding)db.delete("image_cache",null,null)
         if (previous == null || previous.version.grantRevision != version.grantRevision || previous.version.epoch != version.epoch)
             db.delete("commands", null, null)
         db.execSQL("INSERT OR IGNORE INTO fenced VALUES(?)", arrayOf(binding.continuity))
@@ -159,6 +179,11 @@ internal class CloudSnapshotCache(context: Context, name: String? = "astravar-cl
             put("subject", binding.subject); put("envelope", command.toString())
         })
     }
+
+    fun command(binding:CloudBinding,id:String):JsonObject? = readableDatabase.rawQuery(
+        "SELECT envelope FROM commands WHERE origin=? AND continuity=? AND subject=? AND id=?",
+        arrayOf(binding.origin,binding.continuity,binding.subject,id)
+    ).use { if(it.moveToFirst()) Json.parseToJsonElement(it.getString(0)).jsonObject else null }
 
     fun pending(binding: CloudBinding): List<JsonObject> = readableDatabase.rawQuery(
         "SELECT envelope FROM commands WHERE origin=? AND continuity=? AND subject=? ORDER BY rowid LIMIT 100",

@@ -2,6 +2,7 @@ import { cloudAccessPage } from './cloud-admin.mjs';
 import { CLOUD_LIFECYCLE_OPERATIONS } from './cloud-lifecycle.mjs';
 import { CLOUD_MEDIA_KINDS, CLOUD_MEDIA_OPERATIONS } from './cloud-media.mjs';
 import { CloudService } from './cloud-service.mjs';
+import { CONTINUITY_KINDS, CONTINUITY_OPERATIONS } from './cloud-continuity.mjs';
 import { MECHANIC_KINDS, MECHANIC_OPERATIONS } from './cloud-mechanics.mjs';
 import { RECORD_KINDS, RECORD_OPERATIONS } from './cloud-records.mjs';
 import { cloudHttp } from './cloud-http.mjs';
@@ -88,7 +89,7 @@ async function handleWorkerRequest(request, env, context) {
   }}):null;
   const cloudService=configured && env.ASTRAVAR_CLOUD_ENABLED==='1' ? new CloudService(
     typeof env.DB.withSession==='function'?env.DB.withSession('first-primary'):env.DB,
-    {ownerId,kinds:{...MECHANIC_KINDS,...RECORD_KINDS,...CLOUD_MEDIA_KINDS},operations:{...MECHANIC_OPERATIONS,...RECORD_OPERATIONS,...CLOUD_MEDIA_OPERATIONS,...CLOUD_LIFECYCLE_OPERATIONS},isolated:env.ASTRAVAR_CLOUD_ENV==='isolated'}) : null;
+    {ownerId,kinds:{...CONTINUITY_KINDS,...MECHANIC_KINDS,...RECORD_KINDS,...CLOUD_MEDIA_KINDS},operations:{...CONTINUITY_OPERATIONS,...MECHANIC_OPERATIONS,...RECORD_OPERATIONS,...CLOUD_MEDIA_OPERATIONS,...CLOUD_LIFECYCLE_OPERATIONS},isolated:env.ASTRAVAR_CLOUD_ENV==='isolated'}) : null;
   if(cloudService)cloudService.mediaBucket=env.ASTRAVAR_MEDIA;
   // Tool schemas contain no private data and are needed for plugin provisioning.
   // Actual tools/call still requires the configured owner and verified identity.

@@ -345,13 +345,15 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
             Choices("Effect type", listOf("Statistic", "Damage dice", "Damage defense", "Advantage / Disadvantage"), effectType) { effectType = it }
             when (effectType) {
                 "Statistic" -> {
-                    Choices("Statistic", listOf(NumericTarget.ABILITY, NumericTarget.SKILL, NumericTarget.SAVE, NumericTarget.ARMOR_CLASS, NumericTarget.MAX_HP, NumericTarget.INITIATIVE, NumericTarget.SPEED, NumericTarget.SPELL_ATTACK, NumericTarget.SPELL_DC), target) {
+                    Choices("Statistic", listOf(NumericTarget.ABILITY, NumericTarget.ABILITY_CHECK, NumericTarget.SKILL, NumericTarget.PASSIVE, NumericTarget.SAVE, NumericTarget.ARMOR_CLASS, NumericTarget.MAX_HP, NumericTarget.INITIATIVE, NumericTarget.SPEED, NumericTarget.SPELL_ATTACK, NumericTarget.SPELL_DC), target) {
                         target = it
                         if (it == NumericTarget.SAVE) operation = NumberOperation.ADD
+                        if (it == NumericTarget.PASSIVE && selectedSkill !in listOf("Perception","Investigation","Insight")) selectedSkill = "Perception"
                     }
-                    if (target == NumericTarget.ABILITY) Choices("Ability", Stat.entries, ability) { ability = it }
-                    if (target == NumericTarget.SKILL) {
-                        Choices("Skill", skillTargets.map { it.id }, selectedSkill, display = { id ->
+                    if (target in setOf(NumericTarget.ABILITY, NumericTarget.ABILITY_CHECK)) Choices("Ability", Stat.entries, ability) { ability = it }
+                    if (target == NumericTarget.SKILL || target == NumericTarget.PASSIVE) {
+                        val available = if (target == NumericTarget.PASSIVE) listOf("Perception","Investigation","Insight") else skillTargets.map { it.id }
+                        Choices("Skill", available, selectedSkill, display = { id ->
                             val entry = skillTargets.first { it.id == id }
                             if (entry.custom) "${entry.name} (custom · $id)" else entry.name
                         }) { selectedSkill = it }
@@ -388,8 +390,8 @@ internal fun reforgeEffectSummary(effect: EffectDefinition): String = when (val 
                     val id = UUID.randomUUID().toString()
                     val payload = when (effectType) {
                         "Statistic" -> EffectPayload.Number(target, operation, optionalInt(amount, "Effect value", -100, 10000) ?: error("Enter a value"), when (target) {
-                            NumericTarget.ABILITY -> ability.name
-                            NumericTarget.SKILL -> selectedSkill
+                            NumericTarget.ABILITY, NumericTarget.ABILITY_CHECK -> ability.name
+                            NumericTarget.SKILL, NumericTarget.PASSIVE -> selectedSkill
                             NumericTarget.SAVE -> saveKey
                             NumericTarget.SPEED -> "walk"
                             else -> ""
