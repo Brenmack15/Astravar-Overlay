@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.yazsras.astravar.data.*
@@ -84,6 +85,7 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                     }
                     "Wallets" -> {
                         PlayerTextButton({ openOperation("define_wallet",args("walletId" to id(),"source" to manual)) }, enabled=online) { Text("Add wallet") }
+                        PlayerOutlinedButton({detail="exchange";selected="party-trade"},enabled=online){Text("Trade between party members")}
                         if (online) RemoteRecordPage(client,snapshot,"wallets",query=query) { page ->
                             val totals=page.obj("totals")
                             PlayerCard {
@@ -98,9 +100,11 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                         PlayerTextButton({ openOperation("record_chronicle_event",args("eventId" to id(),"source" to manual,"worldTime" to JsonNull,"correctsId" to JsonNull)) },enabled=online) {Text("Record event")}
                         if(online) RemoteRecordPage(client,snapshot,"timeline",query=query) { page ->
                             page.rows("events").forEach { event -> PlayerEntry(event.s("title").orEmpty(),
-                                event.data().s("worldTime") ?: cloudLabel(event.s("kind").orEmpty()),"Journal",{inspect(event.cloudText("id"))}) }
+                                event.data().s("worldTime") ?: cloudLabel(event.s("kind").orEmpty()),"Journal",{
+                                    if(event.s("kind")=="timeline_event"){detail="known";selected=event.s("id")}else inspect(event.cloudText("id"))
+                                }) }
                             if(page.rows("events").isEmpty()) Text("No matching events.")
-                        } else CachedRecordList(client,snapshot,setOf("timeline_event","item_event","coin_transaction","component_event"),null,query){ inspect(it.cloudText("id")) }
+                        } else CachedRecordList(client,snapshot,setOf("timeline_event","item_event","coin_transaction","component_event","rest_report"),null,query){ inspect(it.cloudText("id")) }
                     }
                     else -> {
                         val kind=when(panel) {
@@ -137,8 +141,11 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                                 else->true
                             }
                         }) { row ->
-                            if(kind=="invention_project"){detail="project";selected=row.s("id")}
-                            else inspect(row.cloudText("id"))
+                            when(kind){
+                                "invention_project"->{detail="project";selected=row.s("id")}
+                                "world_entity","relationship","known_fact","objective","research_note"->{detail="known";selected=row.s("id")}
+                                else->inspect(row.cloudText("id"))
+                            }
                         }
                     }
                 }
@@ -152,6 +159,8 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                 "item" -> HoldingSheet(client,snapshot,selectedId,online,close,openOperation,inspect) { record -> detail="definition";selected=record }
                 "wallet" -> WalletSheet(client,snapshot,selectedId,online,close,openOperation)
                 "project" -> ProjectSheet(client,snapshot,selectedId,online,close,openOperation,inspect)
+                "known" -> KnownRecordSheet(client,snapshot,selectedId,online,close,openOperation,inspect)
+                "exchange" -> PartyTradeSheet(client,snapshot,online,close,openOperation)
             }
         }
     }
@@ -327,17 +336,22 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
             Text("${amount(d.s("quantity"))} · ${cloudLabel(d.s("holding")?:"Unknown")} · ${cloudLabel(d.s("equipment")?:"Unknown")}",color=RebuildPalette.Gold)
             PlayerTabs(listOf("Details","Transfer","History","Components"),pane,{pane=it})
             when(pane) {
-                "History" -> if(online) RemoteRecordPage(client,snapshot,"item_history",id=itemId){page->
+                "History" -> if(online) {
+                    PlayerTextButton({open("record_historical_item_event",args("eventId" to id(),"itemId" to word(itemId),
+                        "worldTime" to JsonNull,"sourcePublishedAt" to JsonNull,"previousOwner" to JsonNull,"newOwner" to JsonNull,"correctsId" to JsonNull))}){Text("Add sourced history")}
+                    RemoteRecordPage(client,snapshot,"item_history",id=itemId){page->
                     page.rows("events").forEach { event->
                         val body=event.data()
                         PlayerCard {
-                            Text("Previous Owner · ${ownerCaption(client,snapshot,body.obj("before"))}")
-                            Text("New Owner · ${ownerCaption(client,snapshot,body.obj("after"))}")
-                            Text("Reason · ${event.cloudText("title")}",style=MaterialTheme.typography.titleSmall)
+                            val component=event.s("kind")=="component_event"
+                            Text("Previous Owner · ${if(component)recordName(client,snapshot,event.s("actorId"),"Unknown")else ownerCaption(client,snapshot,body.obj("before"))}")
+                            Text("New Owner · ${if(component)"Unchanged"else ownerCaption(client,snapshot,body.obj("after"))}")
+                            Text("Reason · ${if(component)cloudLabel(event.cloudText("title"))else event.cloudText("title")}",style=MaterialTheme.typography.titleSmall)
+                            if(body.s("historical")=="true") Text(listOfNotNull(body.s("evidence")?.let(::cloudLabel),body.s("worldTime")).joinToString(" · "),color=RebuildPalette.Muted)
                         }
                     }
                     if(page.rows("events").isEmpty())Text("No recorded item history.")
-                } else Text("Connect to retrieve linked item history.")
+                }} else Text("Connect to retrieve linked item history.")
                 "Components" -> if(online) RemoteRecordPage(client,snapshot,"genealogy",id=itemId){page->
                     page.rows("events").forEach { event->
                         val data=event.data()
@@ -413,7 +427,7 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
     return label
 }
 @Composable private fun ownerCaption(client:CloudCampaignClient,snapshot:CloudSnapshot,data:JsonObject):String =
-    recordName(client,snapshot,data.s("ownerId")?:data.s("externalRecipientId"),data.s("externalRecipientName")?:"Unknown")
+    if(data.s("ownerType")=="party")"Party" else recordName(client,snapshot,data.s("ownerId")?:data.s("externalRecipientId"),data.s("externalRecipientName")?:"Unknown")
 
 @Composable private fun HoldingTransfer(client:CloudCampaignClient,snapshot:CloudSnapshot,item:JsonObject,online:Boolean,open:RecordOperation) {
     val itemId=item.cloudText("id")
@@ -435,9 +449,15 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
     var recipient by rememberSaveable(itemId,type){mutableStateOf("")}
     var reason by rememberSaveable(itemId,type){mutableStateOf("")}
     var disposition by rememberSaveable(itemId,type){mutableStateOf("Gift")}
+    var ownership by rememberSaveable(itemId,type){mutableStateOf("Give")}
+    var shared by rememberSaveable(itemId,type){mutableStateOf(false)}
     if(stock>1){
         PlayerOutlinedButton({open("split_stack",args("itemId" to word(itemId),"splitId" to word(splitId),"quantity" to JsonPrimitive(quantity),"source" to manual))},
             enabled=online && selectable && quantity!=stock){Text("Split stack")}
+    }
+    if(type=="Storage" || type=="Unassigned")Row(verticalAlignment=Alignment.CenterVertically){
+        Checkbox(checked=shared,onCheckedChange={shared=it},enabled=online)
+        Text("Party-owned after transfer")
     }
     PlayerDisclosure("Merge compatible stack") {
         CachedRecordList(client,snapshot,setOf("item_instance"),null,"",allowed={
@@ -449,7 +469,10 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
     PlayerHeading("Destination")
     PlayerTabs(destinations,type,{type=it})
     when(type) {
-        "Party member" -> CachedRecordList(client,snapshot,setOf("actor"),null,"",allowed={it.data().s("role") in setOf("player","companion")}){target=it.s("id")}
+        "Party member" -> {
+            PlayerTabs(listOf("Give","Lend"),ownership,{ownership=it})
+            CachedRecordList(client,snapshot,setOf("actor"),null,"",allowed={it.data().s("role") in setOf("player","companion")}){target=it.s("id")}
+        }
         "Storage" -> CachedRecordList(client,snapshot,setOf("world_entity"),null,"",allowed={it.data().s("category")=="place" && it.data().s("partyStorage")=="true"}){target=it.s("id")}
         "External" -> {
             PlayerTabs(listOf("Gift","Lost","Dropped"),disposition,{disposition=it})
@@ -460,15 +483,20 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
     if(target!=null)Text("Selected · "+recordName(client,snapshot,target,"Party destination"),color=RebuildPalette.Gold)
     Field("Reason",reason,{reason=it.take(180)})
     val destination = when(type) {
-        "Party member"->"party_actor";"Storage"->"storage";"External"->when(disposition){"Gift"->"external_gift";"Lost"->"lost";else->"dropped"};else->"unassigned"
+        "Party member"->if(ownership=="Lend")"loan" else "party_actor";"Storage"->"storage";"External"->when(disposition){"Gift"->"external_gift";"Lost"->"lost";else->"dropped"};else->"unassigned"
     }
     PlayerButton({
         val dest=args("type" to word(destination),"actorId" to (target?.takeIf{type=="Party member"}?.let(::word)?:JsonNull),
             "locationId" to (target?.takeIf{type=="Storage"}?.let(::word)?:JsonNull),"recipientId" to JsonNull,
             "recipientName" to (recipient.takeIf{destination=="external_gift" && it.isNotBlank()}?.let(::word)?:JsonNull))
+        val chosen=if(shared && type in setOf("Storage","Unassigned")) JsonObject(dest+("partyOwned" to JsonPrimitive(true))) else dest
         open("transfer_item",args("itemId" to word(itemId),"quantity" to JsonPrimitive(quantity),
-            "splitId" to (if(quantity==stock)JsonNull else word(splitId)),"destination" to dest,"reason" to word(reason),"source" to manual))
+            "splitId" to (if(quantity==stock)JsonNull else word(splitId)),"destination" to chosen,"reason" to word(reason),"source" to manual))
     },enabled=online && selectable && reason.isNotBlank() && (type !in setOf("Party member","Storage") || target!=null)) {Text("Review transfer")}
+    if(type=="External")PlayerOutlinedButton({
+        open("sell_item",args("itemId" to word(itemId),"quantity" to JsonPrimitive(quantity),"splitId" to (if(quantity==stock)JsonNull else word(splitId)),
+            "buyerId" to JsonNull,"buyerName" to (recipient.takeIf{it.isNotBlank()}?.let(::word)?:JsonNull),"source" to manual))
+    },enabled=online && selectable){Text("Record sale")}
 }
 
 @Composable private fun WalletSheet(client:CloudCampaignClient,snapshot:CloudSnapshot,walletId:String,online:Boolean,
@@ -484,6 +512,14 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
             Text(coins.joinToString("  ·  "){key->"${amount(balance.s(key))} ${key.uppercase()}"})
             PlayerTextButton({open("adjust_coins",args("walletId" to word(walletId),"source" to manual))},enabled=online){Text("Record income or expense")}
             PlayerTextButton({open("exchange_coins",args("walletId" to word(walletId),"source" to manual))},enabled=online){Text("Exchange denominations")}
+            PlayerDisclosure("Confirm a recorded balance"){
+                coins.forEach{coin->
+                    PlayerTextButton({open("reconcile_wallet_denomination",args("walletId" to word(walletId),
+                        "denomination" to word(coin),"previous" to (balance[coin]?:JsonNull),"expectedRevision" to wallet.getValue("revision")))},enabled=online){
+                        Text("${coin.uppercase()} · ${amount(balance.s(coin))}")
+                    }
+                }
+            }
             PlayerDisclosure("Transfer coins") {
                 PlayerTabs(coins.map {it.uppercase()},selected.uppercase(),{selected=it.lowercase()})
                 Field("Amount",entered,{entered=it.take(12)})
@@ -528,6 +564,10 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                 }
             }
             if(d.s("status")!="completed") {
+                PlayerTextButton({open("revise_invention_plan",args("projectId" to word(projectId),"expectedRevision" to project.getValue("revision"),
+                    "title" to project.getValue("title"),"intent" to d.getValue("intent"),"requirements" to (d["requirements"]?:JsonArray(emptyList())),
+                    "additionalResearchIds" to JsonArray(emptyList()),"source" to manual))},enabled=online){Text("Edit project plan")}
+                PlayerTextButton({open("link_project_dependency",args("projectId" to word(projectId),"source" to manual))},enabled=online){Text("Link prerequisite project")}
                 for((label,op,identity) in listOf(Triple("Record blueprint","record_blueprint_version","blueprintId"),Triple("Add construction stage","define_construction_stage","stageId"),
                     Triple("Record component integration","integrate_component","eventId"))) {
                     PlayerTextButton({open(op,args("projectId" to word(projectId),identity to id(),"source" to manual))},enabled=online){Text(label)}
@@ -536,6 +576,162 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                 PlayerTextButton({open("link_completed_invention",args("projectId" to word(projectId),"source" to manual))},enabled=online){Text("Link completed invention")}
             }
             d.s("outputId")?.let{output->PlayerOutlinedButton({inspect(output)}){Text("Open resulting item")}}
+        }
+    }
+}
+
+@Composable private fun KnownRecordSheet(client:CloudCampaignClient,snapshot:CloudSnapshot,recordId:String,online:Boolean,
+    dismiss:()->Unit,open:RecordOperation,inspect:(String)->Unit) {
+    PlayerSheet("Campaign record",dismiss){
+        SelectedRecord(client,snapshot,recordId){row->
+            val d=row.data()
+            val kind=row.cloudText("kind")
+            val title=row.cloudText("title")
+            if(kind=="world_entity") CloudEntityImage(client,snapshot,online,recordId,kind,title)
+            Text(title,style=MaterialTheme.typography.titleLarge)
+            listOf("category","status","evidence","worldTime","originalWorldTime").mapNotNull { d.s(it) }
+                .takeIf{it.isNotEmpty()}?.let{Text(it.joinToString(" · "){s->cloudLabel(s)},color=RebuildPalette.Gold)}
+            for(key in listOf("knownDescription","terms","detail","finding","narrative")) d.s(key)?.let{Text(it)}
+            val requirements=(d["knownRequirements"] as? JsonArray).orEmpty().mapNotNull{(it as? JsonPrimitive)?.contentOrNull}
+            if(requirements.isNotEmpty()){PlayerHeading("Known requirements");requirements.forEach{Text(it)}}
+            fun prefill(identity:String,fields:List<String>,revision:Boolean=false):MutableMap<String,JsonElement> {
+                val values=mutableMapOf<String,JsonElement>(identity to word(recordId),"source" to manual)
+                for(field in fields)d[field]?.let{values[field]=it}
+                if(revision)values["expectedRevision"]=row.getValue("revision")
+                return values
+            }
+            val labels=when(kind){
+                "world_entity"->"Edit connection";"known_fact"->"Revise known lore";"research_note"->"Revise finding";
+                "objective"->"Edit objective";"timeline_event"->"Record correction";else->null
+            }
+            if(labels!=null)PlayerOutlinedButton({
+                val operation: String
+                val values:MutableMap<String,JsonElement>
+                when(kind){
+                    "world_entity"->{operation="edit_connection";values=prefill("entityId",listOf("category","knownDescription","partyStorage"))
+                        values["name"]=word(title);values["actorId"]=row["actorId"]?:JsonNull}
+                    "known_fact"->{operation="revise_known_fact";values=prefill("factId",listOf("detail","evidence","learnedAt","originalWorldTime"),true);values["title"]=word(title)}
+                    "research_note"->{operation="revise_research_finding";values=prefill("researchId",listOf("finding","evidence"),true);values["title"]=word(title)}
+                    "objective"->{operation="revise_objective";values=prefill("objectiveId",listOf("knownRequirements"),true);values["title"]=word(title)}
+                    else->{operation="record_chronicle_event";values=prefill("correctsId",listOf("category","worldTime"))
+                        values["eventId"]=id();values["subjects"]=JsonArray(emptyList())}
+                }
+                open(operation,JsonObject(values))
+            },enabled=online){Text(labels)}
+            if(kind=="objective")PlayerTextButton({
+                open("record_objective_milestone",args("objectiveId" to word(recordId),"source" to manual))
+            },enabled=online){Text("Record confirmed milestone")}
+            if(kind=="relationship"){
+                val from=d.s("fromId");val to=d.s("toId")
+                if(from!=null)PlayerTextButton({inspect(from)}){Text("From · "+recordName(client,snapshot,from,"Known subject"))}
+                if(to!=null)PlayerTextButton({inspect(to)}){Text("To · "+recordName(client,snapshot,to,"Known subject"))}
+                val endpoints by produceState<Pair<String,String>?>(null,snapshot.version,recordId){
+                    if(from!=null && to!=null)try{
+                        val first=client.record(from)?.s("kind")
+                        val second=client.record(to)?.s("kind")
+                        if(first!=null && second!=null)value=first to second
+                    }catch(e:CancellationException){throw e}catch(_:Exception){value=null}
+                }
+                endpoints?.let{(first,second)-> PlayerOutlinedButton({
+                    open("update_relationship",args("relationshipId" to word(recordId),"relationship" to word(title),
+                        "from" to args("id" to word(requireNotNull(from)),"kind" to word(first)),
+                        "to" to args("id" to word(requireNotNull(to)),"kind" to word(second)),
+                        "terms" to (d["terms"]?:JsonNull),"status" to d.getValue("status"),"source" to manual))
+                },enabled=online){Text("Edit relationship")} }
+            }
+            d.s("source")?.let{PlayerDisclosure("Source"){Text(it)}}
+            PlayerTextButton({inspect(recordId)}){Text("Inspect linked records")}
+        }
+    }
+}
+
+private fun emptyTradeSide(actor:String?=null)=buildJsonObject {
+    put("actorId",actor?.let(::word)?:JsonNull);put("walletId",JsonNull)
+    put("coins",buildJsonObject{coins.forEach{put(it,0)}});put("items",JsonArray(emptyList()))
+}
+private fun hasTradeCoins(side:JsonObject)=coins.any{(side.obj("coins").s(it)?.toLongOrNull()?:0L)>0}
+
+@Composable private fun PartyTradeSheet(client:CloudCampaignClient,snapshot:CloudSnapshot,online:Boolean,
+    dismiss:()->Unit,open:RecordOperation) {
+    var leftJson by rememberSaveable { mutableStateOf(emptyTradeSide().toString()) }
+    var rightJson by rememberSaveable { mutableStateOf(emptyTradeSide().toString()) }
+    var reason by rememberSaveable { mutableStateOf("") }
+    val left=remember(leftJson){Json.parseToJsonElement(leftJson).jsonObject}
+    val right=remember(rightJson){Json.parseToJsonElement(rightJson).jsonObject}
+    val sides=listOf(left,right)
+    val needsWallet=sides.any(::hasTradeCoins)
+    val valid=sides.all{it.s("actorId")!=null && (hasTradeCoins(it) || it.rows("items").isNotEmpty()) && (!needsWallet || it.s("walletId")!=null)} &&
+        left.s("actorId")!=right.s("actorId") && reason.isNotBlank()
+    PlayerSheet("Party exchange",dismiss) {
+        for((index,side) in sides.withIndex())key(index){
+            TradeOffer(client,snapshot,if(index==0)"First offer" else "Second offer",side,sides[1-index].s("actorId"),online){
+                if(index==0)leftJson=it.toString() else rightJson=it.toString()
+            }
+        }
+        Field("Reason",reason,{reason=it.take(180)})
+        PlayerButton({
+            fun prepared(s:JsonObject)=if(needsWallet)s else JsonObject(s+("walletId" to JsonNull))
+            open("exchange_party_assets",args("left" to prepared(left),"right" to prepared(right),"reason" to word(reason),"source" to manual))
+        },enabled=online && valid){Text("Review exchange")}
+    }
+}
+
+@Composable private fun TradeOffer(client:CloudCampaignClient,snapshot:CloudSnapshot,label:String,side:JsonObject,
+    otherActor:String?,online:Boolean,update:(JsonObject)->Unit) {
+    val actor=side.s("actorId")
+    PlayerHeading(label)
+    PlayerDisclosure(if(actor==null)"Choose party member" else recordName(client,snapshot,actor,"Selected party member"),initiallyOpen=actor==null){
+        CachedRecordList(client,snapshot,setOf("actor"),null,"",allowed={it.s("id")!=otherActor && it.data().s("role") in setOf("player","companion")}){row->
+            if(row.s("id")!=actor)update(emptyTradeSide(row.s("id")))
+        }
+    }
+    if(actor==null)return
+    val selected=side.rows("items")
+    selected.forEach { leg->
+        PlayerEntry(recordName(client,snapshot,leg.s("itemId"),"Selected holding"),
+            "Quantity · ${amount(leg.s("quantity"))}","Bag",{
+                update(JsonObject(side+("items" to JsonArray(selected.filterNot{it.s("itemId")==leg.s("itemId")}))))
+            },"Remove")
+    }
+    PlayerDisclosure("Offer a holding"){
+        var id by rememberSaveable(actor){mutableStateOf<String?>(null)}
+        var maximum by rememberSaveable(actor){mutableStateOf<Int?>(null)}
+        var quantity by rememberSaveable(actor,id){mutableStateOf("")}
+        CachedRecordList(client,snapshot,setOf("item_instance"),null,"",allowed={row->
+            val d=row.data()
+            d.s("ownerId")==actor && d.s("partyAccess")=="true" && (d.s("custodianId")==null||d.s("custodianId")==actor) &&
+                    selected.none{it.s("itemId")==row.s("id")}
+        }){row->id=row.s("id");maximum=row.data().s("quantity")?.toIntOrNull()}
+        id?.let{item->
+            Text(recordName(client,snapshot,item,"Selected holding"))
+            Text("Available · ${amount(maximum?.toString())}")
+            Field("Quantity offered",quantity,{quantity=it.take(7)})
+            val n=quantity.toIntOrNull()
+            PlayerOutlinedButton({
+                val leg=args("itemId" to word(item),"quantity" to JsonPrimitive(n),"splitId" to if(n==maximum)JsonNull else word(UUID.randomUUID().toString()))
+                update(JsonObject(side+("items" to JsonArray(selected+leg))));id=null
+            },enabled=online && n!=null && maximum?.let{n in 1..it}==true && selected.size<8){Text("Add to offer")}
+        }
+    }
+    PlayerDisclosure("Wallet and offered coins"){
+        CachedRecordList(client,snapshot,setOf("wallet"),actor,""){wallet->
+            update(JsonObject(side+("walletId" to wallet.getValue("id"))))
+        }
+        side.s("walletId")?.let{walletId->
+            SelectedRecord(client,snapshot,walletId){wallet->
+                Text(wallet.cloudText("title"),style=MaterialTheme.typography.titleSmall)
+                for(coin in coins){
+                    val amount=side.obj("coins").s(coin)?:"0"
+                    val available=wallet.data().obj("coins").s(coin)?.toLongOrNull()
+                    Field("${coin.uppercase()} offered · ${available?.toString()?:"unknown"} available",if(amount=="0")"" else amount,{raw->
+                        val n=if(raw.isBlank())0L else raw.toLongOrNull()
+                        if(n!=null && n in 0..(available?:0L)){
+                            val changed=JsonObject(side.obj("coins")+(coin to JsonPrimitive(n)))
+                            update(JsonObject(side+("coins" to changed)))
+                        }
+                    })
+                }
+            }
         }
     }
 }

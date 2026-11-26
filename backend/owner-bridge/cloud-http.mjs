@@ -9,7 +9,7 @@ import { BridgeError } from './core.mjs';
 import { cloudFail, validCloudId } from './cloud-validation.mjs';
 import { CloudPlan } from './cloud-plan.mjs';
 import { cloudContext, cloudChanges, cloudRelationships } from './cloud-query.mjs';
-import { mechanicActorSheet } from './cloud-mechanics.mjs';
+import { mechanicActorSheet, mechanicFormPreview } from './cloud-mechanics.mjs';
 
 export async function cloudBody(request) {
   if(request.headers.get('content-type')?.split(';')[0].trim()!=='application/json')cloudFail(415,'JSON_REQUIRED');
@@ -20,12 +20,13 @@ export async function cloudBody(request) {
   for(const chunk of chunks){data.set(chunk,offset);offset+=chunk.length;}
   try{return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(data));}catch{cloudFail(400,'INVALID_JSON');}
 }
-export async function cloudSheet(service,principal,id,actorId) {
+export async function cloudSheet(service,principal,id,actorId,formId=null) {
   const opened=await service.access(principal,id);
   const ctx=new CloudPlan(service,service.key(id),opened.grant,{commandId:'preview-actor-sheet',operation:'inspect_actor'},service.now());
-  const sheet=await mechanicActorSheet(ctx,actorId), again=await service.access(principal,id);
+  const view=formId===null ? {sheet:await mechanicActorSheet(ctx,actorId)} : {preview:await mechanicFormPreview(ctx,actorId,formId)};
+  const again=await service.access(principal,id);
   if(again.continuity.epoch!==opened.continuity.epoch||again.continuity.revision!==opened.continuity.revision||again.grant.revision!==opened.grant.revision)cloudFail(409,'SNAPSHOT_CHANGED');
-  return {epoch:opened.continuity.epoch,revision:opened.continuity.revision,sheet};
+  return {epoch:opened.continuity.epoch,revision:opened.continuity.revision,grantRevision:opened.grant.revision,...view};
 }
 export function cloudResponse(value,status=200) {
   return Response.json(value,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}});
@@ -74,6 +75,7 @@ export async function cloudHttp(request,bridge,service,ownerPrincipal) {
     else if(method==='GET'&&action==='context'&&!item)result=await cloudContext(service,principal,id,options);
     else if(method==='GET'&&action==='spellbook'&&item&&!decision)result=await cloudSpellbook(service,principal,id,item,options);
     else if(method==='GET'&&action==='actions'&&item&&!decision)result=await cloudActions(service,principal,id,item,options);
+    else if(method==='GET'&&action==='forms'&&validCloudId(item)&&validCloudId(decision))result=await cloudSheet(service,principal,id,item,decision);
     else if(method==='GET'&&action==='sheet'&&item&&!decision)result=await cloudSheet(service,principal,id,item);
     else if(method==='GET'&&action==='links'&&item&&!decision)result=await cloudRelationships(service,principal,id,item,options);
     else if(method==='POST'&&action==='commands'&&!item)result=await service.submit(principal,id,await cloudBody(request));

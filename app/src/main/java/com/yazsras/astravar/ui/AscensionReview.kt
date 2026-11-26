@@ -19,6 +19,13 @@ import kotlinx.coroutines.withContext
     return remember(db) { db.connection().actionableReviews() }.collectAsState(initial = null).value
 }
 
+private fun reviewField(name:String):String = when(name){
+    "currentHp" -> "HP"
+    "maxHp" -> "maximum HP"
+    "temporaryHp" -> "temporary HP"
+    else -> cloudLabel(name).lowercase()
+}
+
 @Composable internal fun CampaignRequestCard(pending: CampaignPendingView, enabled: Boolean, onDecision: (String, Boolean) -> Unit) {
     PlayerCard {
         Text(pending.operations.firstOrNull()?.type?.replace('_',' ') ?: "Campaign request",
@@ -38,8 +45,8 @@ import kotlinx.coroutines.withContext
         if (pending.message.isNotBlank()) Text(pending.message, color = RebuildPalette.Muted)
         pending.operations.forEach { op ->
             Text("${op.type.replace('_',' ')} · ${op.recordId}", style = MaterialTheme.typography.labelLarge)
-            op.current.forEach { (name, value) -> Text("Current $name · $value") }
-            op.proposed.forEach { (name, value) -> Text("Proposed $name · $value") }
+            op.current.forEach { (name, value) -> Text("Current ${reviewField(name)} · $value") }
+            op.proposed.forEach { (name, value) -> Text("Proposed ${reviewField(name)} · $value") }
             Text("Reviewed revision ${op.expectedRevision ?: "unknown"} · current ${op.currentRevision ?: "unknown"}",
                 style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
         }

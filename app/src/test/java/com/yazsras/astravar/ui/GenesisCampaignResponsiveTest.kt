@@ -60,7 +60,7 @@ class GenesisCampaignResponsiveTest {
         .fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
 
     private fun assertWholeText(label: String) {
-        val node = compose.onNodeWithText(label, useUnmergedTree = true).assertIsDisplayed()
+        val node = compose.onNode(hasText(label) and hasAnyAncestor(hasTestTag("genesis-campaign-viewport")), useUnmergedTree = true).assertIsDisplayed()
         val layouts = mutableListOf<TextLayoutResult>()
         node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
         val layout = layouts.single()
@@ -183,7 +183,7 @@ class GenesisCampaignResponsiveTest {
 
             // Every old route remains reachable through the same scroll surface.
             for (label in listOf("Search everything", "Connections", "Inventions", "Checkpoints")) {
-                compose.onNode(hasText(label) and hasClickAction()).performScrollTo().assertIsDisplayed()
+                compose.onNode(hasText(label) and hasClickAction() and hasAnyAncestor(hasTestTag("genesis-campaign-viewport"))).performScrollTo().assertIsDisplayed()
                 assertWholeText(label)
             }
             compose.onNodeWithText("Fictional observatory pause").performScrollTo()
@@ -203,9 +203,9 @@ class GenesisCampaignResponsiveTest {
             compose.onNodeWithTag("section-Journal").performClick()
 
             // Open a real detail route, then return through the real Android Back handler.
-            compose.onNode(hasText("Connections") and hasClickAction()).performScrollTo()
+            compose.onNode(hasText("Connections") and hasClickAction() and hasAnyAncestor(hasTestTag("genesis-campaign-viewport"))).performScrollTo()
             val beforeDetail = scrollPosition("Journal")
-            compose.onNode(hasText("Connections") and hasClickAction()).performClick()
+            compose.onNode(hasText("Connections") and hasClickAction() and hasAnyAncestor(hasTestTag("genesis-campaign-viewport"))).performClick()
             compose.onNodeWithContentDescription("Add connection").assertExists()
             compose.runOnIdle { activity.get().onBackPressedDispatcher.onBackPressed() }
             awaitCampaignContext()

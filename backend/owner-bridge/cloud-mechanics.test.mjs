@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { CloudService } from './cloud-service.mjs';
+import { cloudParity } from './fixtures/cloud-parity.mjs';
 import { CloudPlan } from './cloud-plan.mjs';
 import { SqliteAdapter } from './sqlite-adapter.mjs';
-import { MECHANIC_KINDS,MECHANIC_OPERATIONS,mechanicActorSheet } from './cloud-mechanics.mjs';
+import { MECHANIC_KINDS,MECHANIC_OPERATIONS,mechanicActorSheet,mechanicFormPreview } from './cloud-mechanics.mjs';
 import { RECORD_KINDS,RECORD_OPERATIONS } from './cloud-records.mjs';
 
 const schema=await readFile(new URL('./schema.sql',import.meta.url),'utf8');
@@ -19,11 +20,12 @@ async function setup(t){
   await service.createIsolated(owner,cid);
   const cats=['character','resources','rolls','spells','combat','inventory'];
   await service.setGrant(owner,cid,'sites-mcp',{scopes:cats.flatMap(k=>[k+'.read',k+'.write']),auto:cats.map(k=>k+'.write'),actors:['*'],expiresAt:Date.now()+3600000,revoked:false,expectedGrantRevision:0});
+  const paritySubmit=cloudParity(()=>db,ownerId,cid);
   let count=0;
   async function command(operation,args){
     const expectedRevision=(await service.continuity(cid)).revision;
     const cmd={version:1,commandId:'fixture-cmd-'+(++count),epoch:1,expectedRevision,operation,args};
-    const result=await service.submit(dm,cid,cmd);
+    const result=await paritySubmit(cmd);
     assert.equal(result.status,'COMMITTED');
     assert.deepEqual((await service.receipt(dm,cid,cmd.commandId)).receipt,result.receipt);
     return {command:cmd,out:result.receipt.outcome,result};
@@ -33,7 +35,8 @@ async function setup(t){
   const pool=async(poolId,type,current,maximum,recovery,extra={})=>command('define_resource',{actorId:base.actorId,poolId,name:poolId,type,current,maximum,recovery,source:'fixture configuration',...extra});
   const effect=async(effectId,target,key,operation,extra={})=>command('define_effect',{actorId:base.actorId,effectId,name:effectId,source:'reviewed fixture effect',target,key,operation,...extra});
   const sheet=async(id=base.actorId)=>mechanicActorSheet(new CloudPlan(service,service.key(cid),await service.grantForSubject(cid,'sites-mcp'),{commandId:'read-only'},Date.now()),id);
-  return {db,service,command,read,defined,pool,effect,sheet};
+  const preview=async formId=>mechanicFormPreview(new CloudPlan(service,service.key(cid),await service.grantForSubject(cid,'sites-mcp'),{commandId:'preview-only'},Date.now()),base.actorId,formId);
+  return {db,service,command,retry:paritySubmit,read,defined,pool,effect,sheet,preview};
 }
 const who=base.actorId;
 const dice=(...faces)=>({origin:'player_physical',faces});
@@ -83,7 +86,7 @@ test('timed form spends one deployment; unknown ordinary HP stays independent of
   assert.equal((await f.read('shell')).data.current,25);assert.equal((await f.read(who)).data.currentHp,60);
   const dam=await f.command('apply_hp_change',{actorId:who,kind:'damage',amount:30});
   assert.deepEqual([dam.out.absorbedByIntegrity,dam.out.afterHp,dam.out.activeFormId],[25,55,null]);
-  assert.equal((await f.service.submit(dm,cid,dam.command)).receipt.transactionId,dam.result.receipt.transactionId);
+  assert.equal((await f.retry(dam.command)).receipt.transactionId,dam.result.receipt.transactionId);
   assert.equal((await f.read(who)).data.currentHp,55);assert.equal((await f.sheet()).movement.fly,60);
   await assert.rejects(f.command('change_form',transform),/FORM_INTEGRITY_UNAVAILABLE/);
 });
@@ -128,7 +131,7 @@ test('short/long rest report contains actual dice, HP and pool deltas; separate 
   assert.equal((await f.read('d8')).data.current,9);assert.equal((await f.read('short')).data.current,1);
   assert.equal((await f.read('long')).data.current,1);
   assert.deepEqual((await f.read(r.out.reportId)).data.hitDice,r.out.hitDice);
-  await f.service.submit(dm,cid,r.command);
+  await f.retry(r.command);
   assert.equal((await f.read('short')).data.current,1);
   const z=await f.command('complete_rest',{...short,hitDice:[]});assert.equal(z.out.hitDice.length,0);
   const lr=await f.command('complete_rest',{actorId:who,kind:'long_rest',elapsedSeconds:28800,confirmed:true,hitDice:[]});
@@ -292,7 +295,7 @@ test('target resolution validates linked saves, source defenses, pending damage 
   await f.command('roll_attack_damage',{actorId:who,attemptId:'area-hit',damage:[{id:'cold',evidence:dice(7,7)}]});
   const first=await f.command('resolve_attack_target',request);
   assert.deepEqual([first.out.decision,first.out.amount,first.out.hp.absorbedByTemporaryHp,first.out.hp.afterHp],['save_succeeded',3,2,29]);
-  await f.service.submit(dm,cid,first.command);await assert.rejects(f.command('resolve_attack_target',request),/TARGET_UNDECLARED_OR_ALREADY_RESOLVED/);
+  await f.retry(first.command);await assert.rejects(f.command('resolve_attack_target',request),/TARGET_UNDECLARED_OR_ALREADY_RESOLVED/);
   assert.equal((await f.read('listener')).data.currentHp,29);
 });
 
@@ -355,7 +358,7 @@ test('profile and feature edits reference existing mechanics; progression advanc
   const args={actorId:who,eventId:'level-event',fromLevel:4,toLevel:5,source:'confirmed fixture milestone',abilityGains:{STR:1},hitPointGain:5,capacities:[{poolId:'dice-pool',previous:4,maximum:5,granted:1}]};
   const promoted=await f.command('advance_actor_level',args);assert.equal(promoted.out.proficiency,3);assert.equal(promoted.out.hp,42);
   assert.deepEqual([(await f.read('dice-pool')).data.current,(await f.read('dice-pool')).data.maximum],[2,5]);
-  await f.service.submit(dm,cid,promoted.command);await assert.rejects(f.command('advance_actor_level',{...args,eventId:'another-event'}),/ADVANCEMENT_LEVEL_CHANGED/);
+  await f.retry(promoted.command);await assert.rejects(f.command('advance_actor_level',{...args,eventId:'another-event'}),/ADVANCEMENT_LEVEL_CHANGED/);
   assert.equal((await f.read(who)).data.abilities.STR,9);assert.equal((await f.read(who)).data.biography.background.value,'Former artisan');
 });
 
@@ -387,10 +390,114 @@ test('a worn optional die substitution creates no roll face and recovers only on
   await f.command('equip_item',{itemId:'physical-gear',equipment:'worn',source:'fixture'});
   const result=await f.command('resolve_attack',req);
   assert.deepEqual([result.out.hit.total,result.out.hit.natural,result.out.hit.faces,result.out.critical],[20,null,[],false]);
-  await f.service.submit(dm,cid,result.command);assert.equal((await f.read('dawn-use')).data.current,0);
+  await f.retry(result.command);assert.equal((await f.read('dawn-use')).data.current,0);
   await f.command('complete_rest',{actorId:who,kind:'long_rest',elapsedSeconds:28800,confirmed:true,hitDice:[]});
   assert.equal((await f.read('dawn-use')).data.current,0);
   const dawn={actorId:who,eventId:'dawn-event',gameSeconds:(await f.read(who)).data.gameSeconds,confirmed:true,source:'fictional observed dawn'};
   await f.command('complete_dawn_recovery',dawn);assert.equal((await f.read('dawn-use')).data.current,1);
   await assert.rejects(f.command('complete_dawn_recovery',{...dawn,eventId:'another-dawn'}),/DAWN_TIME_UNCONFIRMED_OR_RECORDED/);
+});
+
+test('three sourced forms and read-only previews keep one actor, shared resources and distinct physical equipment',async t=>{
+  const f=await setup(t);await f.defined({role:'companion',proficiency:4,maxHp:154,currentHp:141,baseAc:19,speeds:{walk:30},senses:{darkvision:60},size:'large',creatureType:'dragon'});
+  await f.pool('breath','ordinary',1,1,'none');await f.pool('strike','ordinary',2,3,'long_rest');
+  await f.command('define_item_definition',{definitionId:'focus-def',name:'Focus',category:'focus',description:'Fictional test article',rarity:null,stackable:false,wearable:true,handheld:false,attunement:'none',source:'fixture'});
+  for(const itemId of ['main-focus','spare-focus'])await f.command('acquire_item',{itemId,definitionId:'focus-def',ownerId:who,quantity:1,source:'fixture'});
+  await f.command('equip_item',{itemId:'main-focus',equipment:'worn',source:'fixture'});
+  await f.effect('focus-aid','skill','perception','add',{amount:1,sourceItemId:'main-focus'});
+  const form={actorId:who,name:'Fictional form',source:'fixture',sourceItemId:'main-focus',timing:'action',activationSeconds:6,requiresWilling:true};
+  for(const [id,size] of [['winged','large'],['guise','medium'],['hybrid','large']])await f.command('define_form',{...form,formId:id,size,...(id==='guise'?{senses:{darkvision:null},speeds:{fly:null}}:{})});
+  const before=await f.service.continuity(cid);
+  const original=await f.read(who);
+  const preview=await f.preview('guise');assert.equal(preview.projection.senses.darkvision,null);assert.equal(preview.activeFormId,null);
+  assert.deepEqual(await f.read(who),original);assert.equal((await f.service.continuity(cid)).revision,before.revision);
+  await assert.rejects(f.command('change_form',{actorId:who,formId:'guise',elapsedSeconds:6}),/FORM_TRANSFORMATION_INELIGIBLE/);
+  for(const id of ['winged','guise','hybrid'])await f.command('change_form',{actorId:who,formId:id,elapsedSeconds:6,willing:true});
+  assert.equal((await f.read(who)).data.currentHp,141);assert.equal((await f.read('strike')).data.current,2);assert.equal((await f.read('breath')).data.current,1);
+  assert.equal((await f.read('spare-focus')).data.equipment,'packed');assert.equal((await f.read('main-focus')).data.equipment,'worn');
+  await f.command('define_form',{actorId:who,formId:'suppressed-gear',name:'Inactive equipment configuration',timing:'other',source:'fixture',activationSeconds:0,suppressedItemIds:['main-focus']});
+  const p=await f.preview('suppressed-gear');assert.equal(p.projection.suppressedEffects.includes('focus-aid'),true);assert.equal((await f.sheet()).activeEffects.includes('focus-aid'),true);
+  await f.command('change_form',{actorId:who,formId:'suppressed-gear',elapsedSeconds:0});assert.equal((await f.sheet()).suppressedEffects.includes('focus-aid'),true);
+  await f.command('change_form',{actorId:who,formId:null,elapsedSeconds:0});assert.equal((await f.sheet()).activeEffects.includes('focus-aid'),true);
+  assert.equal((await f.read('main-focus')).data.equipment,'worn');
+});
+
+test('spell-specific protection and configured scaling share cast identity and never debit for a linked outcome',async t=>{
+  const f=await setup(t);await f.defined();await f.defined({actorId:'patient',name:'Test patient',role:'creature',maxHp:20,currentHp:13});
+  await f.pool('higher-slot','spell_slot',2,2,'long_rest',{slotLevel:3});
+  const spell={actorId:who,spellId:'synthetic-bolts',name:'Synthetic bolts',source:'fixture',baseLevel:1,concentration:false,ritual:false,resolution:'automatic',timing:'action',
+    scaling:{targets:1,targetsPerLevel:1,durationSeconds:10,durationPerLevel:5,areaFeet:5,areaPerLevel:5,source:'fixture scaling'},components:[component('bolt','force',1,4,1)]};
+  await f.command('define_spell',spell);
+  await f.command('grant_spell',{actorId:who,spellId:spell.spellId,grantId:'bolts',source:'fixture grant',route:'slot',levels:[1,3],preparation:'prepared'});
+  await f.command('define_effect',{actorId:'patient',effectId:'specific-ward',name:'Ward',source:'fixture protection',target:'spell_damage_immunity',key:spell.spellId,operation:'immunity'});
+  const cast=await f.command('cast_spell',{actorId:who,grantId:'bolts',castId:'shielded-cast',level:3,slotPoolId:'higher-slot',targets:['patient']});
+  assert.deepEqual(cast.out.scaling,{targets:3,durationSeconds:20,areaFeet:15,source:'fixture scaling'});
+  await f.command('link_cast_roll',{actorId:who,castId:'shielded-cast',damage:[{id:'bolt',evidence:dice(3)}]});
+  const target={actorId:who,castId:'shielded-cast',targetActorId:'patient',source:'confirmed fixture target'};
+  const resolved=await f.command('resolve_cast_target',target);
+  assert.equal(resolved.out.amount,0);assert.equal((await f.read('patient')).data.currentHp,13);
+  assert.equal((await f.read('higher-slot')).data.current,1);await assert.rejects(f.command('resolve_cast_target',target),/TARGET_UNDECLARED_OR_ALREADY_RESOLVED/);
+  await f.command('define_spell',{...spell,spellId:'repair-spell',name:'Repair fixture',baseLevel:0,components:[component('repair','healing',1,10,5)]});
+  await f.command('grant_spell',{actorId:who,spellId:'repair-spell',grantId:'repair',source:'fixture grant',route:'at_will',levels:[0],preparation:'not_required'});
+  await f.command('cast_spell',{actorId:who,grantId:'repair',castId:'repair-cast',level:0,targets:['patient']});
+  await f.command('link_cast_roll',{actorId:who,castId:'repair-cast',damage:[{id:'repair',evidence:dice(9)}]});
+  const healed=await f.command('resolve_cast_target',{...target,castId:'repair-cast'});
+  assert.equal(healed.out.healing,14);assert.equal(healed.out.actualHealing,7);assert.equal((await f.read('patient')).data.currentHp,20);
+});
+
+test('correcting an effect retains one source; a spell edit leaves an already committed cast frozen',async t=>{
+  const f=await setup(t);await f.defined();await f.effect('typed','initiative','all','add',{amount:1});
+  await f.command('revise_effect',{actorId:who,effectId:'typed',name:'Corrected',source:'verified fixture source',target:'initiative',key:'all',operation:'add',amount:2});
+  assert.deepEqual([(await f.sheet()).initiative.value,(await f.read(who)).data.effectIds],[4,['typed']]);
+  const s={actorId:who,spellId:'timed',name:'Timed test',source:'fixture',baseLevel:0,concentration:true,ritual:false,resolution:'automatic',timing:'action',scaling:{durationSeconds:60,source:'fixture duration'},components:[component('roll','force',1,4,0)]};
+  await f.command('define_spell',s);await f.command('grant_spell',{actorId:who,spellId:'timed',grantId:'timed-grant',source:'fixture',route:'at_will',levels:[0],preparation:'not_required'});
+  await f.command('cast_spell',{actorId:who,grantId:'timed-grant',castId:'timed-cast',level:0});
+  await f.command('revise_spell',{...s,components:[component('roll','force',3,4,0)],scaling:{durationSeconds:3600,source:'later fixture design'}});
+  const first=await f.command('link_cast_roll',{actorId:who,castId:'timed-cast',damage:[{id:'roll',evidence:dice(2)}]});assert.equal(first.out.damage[0].total,2);
+  await f.command('advance_actor_time',{actorId:who,elapsedSeconds:60,confirmed:true});assert.equal((await f.read(who)).data.concentrationCastId,null);
+});
+
+test('condition and equipment projections adjust check modes, movement and senses reversibly',async t=>{
+  const f=await setup(t);await f.defined({speeds:{walk:30,fly:60}});
+  await f.effect('vision','sense','darkvision','set',{amount:90});
+  await f.effect('mobility','speed','walk','add',{amount:10});
+  assert.equal((await f.sheet()).movement.walk,40);assert.equal((await f.sheet()).senses.darkvision,90);
+  const cond=key=>({actorId:who,key,enabled:true,sourceId:'fixture'});
+  await f.command('set_condition',cond('Poisoned'));
+  const p=await f.sheet();assert.deepEqual(p.rollModes['skill:insight'].normal,{mode:'disadvantage',count:2});
+  assert.equal(p.rollModes['skill:insight'].advantage.mode,'normal');
+  await f.command('set_condition',cond('restrained'));
+  assert.equal((await f.sheet()).movement.walk,0);assert.equal((await f.sheet()).movement.fly,0);
+  await f.command('set_condition',{...cond('restrained'),enabled:false});assert.equal((await f.sheet()).movement.walk,40);
+});
+
+test('automatic save failure resolves from condition provenance without inventing a player-facing die',async t=>{
+  const f=await setup(t);await f.defined();await f.defined({actorId:'affected',name:'Test target'});
+  await f.command('set_condition',{actorId:'affected',key:'stunned',enabled:true,sourceId:'synthetic-hit'});
+  await f.command('define_attack',{actorId:who,attackId:'saving-attack',name:'Test effect',source:'fixture',timing:'action',delivery:'area',resolution:'save',saveAbility:'DEX',saveDc:13,saveSuccess:'none',components:[component('force','force',0,4,4)]});
+  await f.command('resolve_attack',{actorId:who,attackId:'saving-attack',attemptId:'no-roll',targets:['affected'],mode:'normal',includeDamage:true,damage:[{id:'force',evidence:dice()}]});
+  await assert.rejects(f.command('record_check',{actorId:'affected',rollId:'forbidden',check:check('save','DEX'),evidence:dice(19),forAttemptId:'no-roll'}),/AUTOMATIC_SAVE_FAILURE/);
+  const r=await f.command('resolve_attack_target',{actorId:who,attemptId:'no-roll',targetActorId:'affected',source:'verified automatic failure'});
+  assert.equal(r.out.decision,'automatic_save_failure');assert.equal(r.out.saveRollId,null);assert.equal(r.out.amount,4);
+});
+
+test('registered updates, separate damage and shared pool expenditure are independently readable in both client directions',async t=>{
+  const f=await setup(t);await f.defined();await f.pool('battery','ordinary',4,4,'none');
+  const debit=await f.command('spend_resource',{actorId:who,poolId:'battery',amount:2});
+  assert.equal(debit.out.after,2);assert.equal((await f.read('battery')).data.current,2);
+  await f.effect('evidence-effect','ability_check','STR','add',{amount:2});
+  const effect=await f.command('enable_effect',{actorId:who,effectId:'evidence-effect',enabled:false});
+  assert.equal(effect.out.enabled,false);assert.equal((await f.read('evidence-effect')).data.enabled,false);
+  const feature={actorId:who,featureId:'historical-feature',kind:'homebrew',name:'Fixture training',description:'Original fixture explanation',source:'fixture',references:[{id:'battery',kind:'resource_pool'}]};
+  await f.command('define_feature',feature);
+  const revision=await f.command('revise_feature',{...feature,description:'Revised source',references:[{id:'evidence-effect',kind:'effect'}]});
+  assert.deepEqual(revision.out.references,[{id:'evidence-effect',kind:'effect'}]);assert.equal((await f.read('historical-feature')).data.description,'Revised source');
+  const shape={actorId:who,formId:'reviewed-form',name:'Fixture form',source:'fixture',timing:'other',activationSeconds:0,speeds:{walk:40}};
+  await f.command('define_form',shape);
+  await f.command('revise_form',{...shape,speeds:{walk:35},description:'Reviewed body'});
+  assert.equal((await f.preview('reviewed-form')).projection.movement.walk,35);assert.equal((await f.read(who)).data.activeFormId,null);
+  await f.command('define_attack',{actorId:who,attackId:'standalone-weapon',name:'Fixture impact',source:'fixture',timing:'attack',delivery:'melee',resolution:'attack',fixedHit:4,cost:{poolId:'battery',amount:1},components:[component('impact','bludgeoning',1,6,2)]});
+  const damage=await f.command('roll_damage_only',{actorId:who,attackId:'standalone-weapon',rollId:'standalone-damage',damage:[{id:'impact',evidence:dice(4)}]});
+  assert.equal(damage.out.components[0].total,6);assert.equal((await f.read('standalone-damage')).data.appliedDamage,null);
+  assert.equal((await f.read('battery')).data.current,2);assert.equal((await f.read(who)).data.currentHp,base.currentHp);
 });

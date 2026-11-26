@@ -1,7 +1,7 @@
 import { CloudPlan } from './cloud-plan.mjs';
 import { BridgeError } from './core.mjs';
 import { cloudFail, validCloudId } from './cloud-validation.mjs';
-import { sheet, gearEligible, rollPolicy } from './cloud-mechanics-core.mjs';
+import { sheet, gearEligible, rollPolicy, checkTiming } from './cloud-mechanics-core.mjs';
 import { attackModifier, attackSaveDc, snapshotComponents } from './cloud-mechanics-combat.mjs';
 
 export async function cloudActions(service,principal,id,actorId,options={}) {
@@ -26,19 +26,17 @@ export async function cloudActions(service,principal,id,actorId,options={}) {
     if(p.conditions.some(s=>['incapacitated','unconscious','stunned','paralyzed','petrified'].includes(s)))reasons.push('ACTOR_CANNOT_ACT');
     if(d.resolution==='manual')reasons.push('MANUAL_ADJUDICATION_REQUIRED');
     if(d.cost){const pool=await ctx.get('resource_pool',d.cost.poolId);if(pool?.data.current==null||pool.data.current<d.cost.amount)reasons.push('RESOURCE_EMPTY_OR_UNKNOWN');}
-    if(a.data.encounterId && d.timing!=='other'){
-      const e=await ctx.get('encounter',a.data.encounterId),t=e?.data.economy?.[actorId];
-      if(!e?.data.active || !t || (d.timing!=='reaction'&&e.data.participants[e.data.index]!==actorId) ||
-          (d.timing==='attack'?(!t.action||t.attacks<1):(!t[d.timing]||d.timing==='action'&&t.attacks!==a.data.attacksPerAction)))reasons.push('ACTION_UNAVAILABLE');
-    }
+    const damageReasons=[...reasons];
+    try { await checkTiming(ctx,a,d.timing); }
+    catch(e){if(!(e instanceof BridgeError)||e.status===403)throw e;reasons.push(e.code);}
     let components=[],hit=null,resolvedSaveDc=null;
     if(entity.kind==='attack'){
       const chosen=Object.fromEntries((d.selections??[]).filter(s=>(s.actorId??entity.actorId)===a.id && s.formId===p.formId).map(s=>[s.componentId,s.type]));
       try { components=snapshotComponents(d.components,p,chosen);if(d.resolution==='attack')hit=attackModifier(entity,p);
         if(d.resolution==='save')resolvedSaveDc=attackSaveDc(d,p); }
-      catch(e){if(!(e instanceof BridgeError))throw e;reasons.push(e.code);}
+      catch(e){if(!(e instanceof BridgeError))throw e;reasons.push(e.code);damageReasons.push(e.code);}
     }
-    rows.push({id:entity.id,title:entity.title,kind:entity.kind,configuration:d,components,hit,resolvedSaveDc,reasons,
+    rows.push({id:entity.id,title:entity.title,kind:entity.kind,configuration:d,components,hit,resolvedSaveDc,reasons,damageReasons,
       modes:Object.fromEntries(['normal','advantage','disadvantage'].map(m=>[m,rollPolicy(p.effects,'attack:'+entity.id,m)]))});
   }
   const end=await service.access(principal,id);

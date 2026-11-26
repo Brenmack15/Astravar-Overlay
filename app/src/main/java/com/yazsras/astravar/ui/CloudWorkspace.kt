@@ -88,7 +88,7 @@ private val categoryScopes = mapOf(
     "Inventory" to setOf("inventory","economy","crafting"), "Connections" to setOf("world"), "Chronicle" to setOf("chronicle","combat")
 )
 
-@Composable private fun CloudWorkspace(client: CloudCampaignClient, snapshot: CloudSnapshot) {
+@Composable internal fun CloudWorkspace(client: CloudCampaignClient, snapshot: CloudSnapshot) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle

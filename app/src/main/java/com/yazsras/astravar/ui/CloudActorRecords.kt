@@ -48,13 +48,15 @@ private fun formula(c:JsonObject):String{
     var mode by rememberSaveable{mutableStateOf("normal")}
     var error by remember {mutableStateOf<String?>(null)}
     var loading by remember {mutableStateOf(false)}
+    var currentForm by remember(actorId){mutableStateOf<String?>(null)}
+    var latestAttempts by rememberSaveable(actorId,snapshot.binding){mutableStateOf("{}")}
     suspend fun load(after:String?=null){
         loading=true
         try{
             val rows=if(section=="Actions"&&online){
                 val v=snapshot.version
                 val suffix="actions/$actorId"+(after?.let{"?after=$it&atRevision=${v.revision}&atEpoch=${v.epoch}&grantRevision=${v.grantRevision}"}?:"")
-                val page=client.projection(snapshot,suffix); more=page.textValue("nextAfter")
+                val page=client.projection(snapshot,suffix); more=page.textValue("nextAfter");currentForm=page.textValue("formId")
                 page.rowsAt("rows")
             }else{
                 val kinds=when(section){
@@ -78,11 +80,13 @@ private fun formula(c:JsonObject):String{
         val id=row.cloudText("id");val d=row.getValue("configuration").jsonObject
         val components=row.rowsAt("components")
         val operation=if(standalone)"roll_damage_only" else "resolve_attack"
+        val newAttempt=UUID.randomUUID().toString()
+        if(!standalone && !withDamage) latestAttempts=JsonObject(Json.parseToJsonElement(latestAttempts).jsonObject+(id to JsonPrimitive(newAttempt))).toString()
         val body=buildJsonObject{
             put("actorId",actorId);put("attackId",id)
             if(standalone){put("rollId",UUID.randomUUID().toString());put("damage",damageEvidence(components,false))}
             else{
-                put("attemptId",UUID.randomUUID().toString());put("includeDamage",withDamage)
+                put("attemptId",newAttempt);put("includeDamage",withDamage)
                 val attack=d.textValue("resolution")=="attack";put("mode",if(attack)requested else "normal")
                 var natural:Int?=null
                 if(attack){
@@ -96,6 +100,24 @@ private fun formula(c:JsonObject):String{
             }
         }
         details=null;selection=null;commit(operation,body)
+    }
+    fun damageClick(row:JsonObject){
+        val attack=row.cloudText("id")
+        val prior=Json.parseToJsonElement(latestAttempts).jsonObject.textValue(attack)
+        if(prior==null){perform(row,true,true);return}
+        scope.launch{
+            try{
+                val attempt=client.record(prior)
+                val data=attempt?.get("data") as? JsonObject
+                if(attempt==null || data==null){error="The preceding attack has no verified result yet. Check the submitted command.";return@launch}
+                if(data.textValue("attackId")==attack && data.textValue("formId")==currentForm && data["damage"]==JsonNull){
+                    commit("roll_attack_damage",buildJsonObject{
+                        put("actorId",actorId);put("attemptId",prior)
+                        put("damage",damageEvidence(data.rowsAt("components"),data["critical"]?.jsonPrimitive?.booleanOrNull==true))
+                    })
+                }else perform(row,true,true)
+            }catch(e:CancellationException){throw e}catch(e:Exception){error=cloudError(e)}
+        }
     }
     if(section=="Actions"){
         Text("Attacks",Modifier.clickable(role=Role.Button){details="Manage attacks"}.padding(vertical=8.dp),style=MaterialTheme.typography.titleLarge)
@@ -126,7 +148,7 @@ private fun formula(c:JsonObject):String{
                                 onLongClickLabel="Attack options",onLongClick={selection=id;mode="normal";details="Attack options"},onClick={perform(row,false)}),contentAlignment=Alignment.Center){Text(hitText)}
                             val formula=row.rowsAt("components").joinToString(" + ",transform=::formula)
                             Box(Modifier.widthIn(min=48.dp,max=128.dp).heightIn(min=48.dp).combinedClickable(enabled=enabled,role=Role.Button,onClickLabel="Roll damage",
-                                onLongClickLabel="Damage options",onLongClick={selection=id;details="Damage options"},onClick={perform(row,true,true)}),contentAlignment=Alignment.Center){Text(formula.ifBlank{"Damage"},style=MaterialTheme.typography.labelMedium)}
+                                onLongClickLabel="Damage options",onLongClick={selection=id;details="Damage options"},onClick={damageClick(row)}),contentAlignment=Alignment.Center){Text(formula.ifBlank{"Damage"},style=MaterialTheme.typography.labelMedium)}
                         }else PlayerTextButton({open("use_action",buildJsonObject{put("actionId",id);put("useId",UUID.randomUUID().toString())})},enabled=enabled){Text("Use")}
                     }
                 }
@@ -174,7 +196,22 @@ private fun formula(c:JsonObject):String{
     if(row!=null && details in setOf("Attack options","Damage options","Preview form"))PlayerSheet(details!!,{details=null;selection=null}){
         Text(row.cloudText("title"),style=MaterialTheme.typography.titleLarge)
         when(details){
-            "Preview form"->{CloudEntityImage(client,snapshot,online,row.cloudText("id"),"form",row.cloudText("title"));RecordFields(row.getValue("data"))
+            "Preview form"->{
+                var evaluated by remember(snapshot.version,row.cloudText("id")){mutableStateOf<JsonObject?>(null)}
+                var previewError by remember { mutableStateOf<String?>(null) }
+                LaunchedEffect(online,actorId,row.cloudText("id"),snapshot.version){
+                    if(online)try{evaluated=client.projection(snapshot,"forms/$actorId/${row.cloudText("id")}")}catch(e:CancellationException){throw e}catch(e:Exception){previewError=cloudError(e)}
+                }
+                evaluated?.let{projection->PlayerDisclosure("Effective and retained values",initiallyOpen=true){
+                    projection.filterKeys{it !in setOf("epoch","revision","grantRevision","actorId")}.forEach{(name,v)->
+                        Text(cloudLabel(name),style=MaterialTheme.typography.titleSmall);RecordFields(v)
+                    }
+                }}
+                previewError?.let{Text(it,color=MaterialTheme.colorScheme.error)}
+                CloudEntityImage(client,snapshot,online,row.cloudText("id"),"form",row.cloudText("title"));RecordFields(row.getValue("data"))
+                PlayerOutlinedButton({open("revise_form",buildJsonObject{
+                    put("formId",row.cloudText("id"));put("name",row.cloudText("title"))
+                })},enabled=online){Text("Edit form")}
                 PlayerButton({open("change_form",buildJsonObject{put("formId",row.cloudText("id"))})},enabled=online){Text("Review transformation")}}
             "Attack options"->{val d=row.getValue("configuration").jsonObject
                 if(d.textValue("resolution")=="attack"){PlayerTabs(listOf("Normal","Advantage","Disadvantage"),cloudLabel(mode),{mode=it.lowercase()})

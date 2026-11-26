@@ -140,6 +140,6 @@ export const actionOperations=Object.freeze({
   set_condition:op('combat',fields({actorId:identifier,key:identifier,enabled:boolean,sourceId:identifier},['actorId','key','enabled','sourceId']),async(ctx,x)=>{
     ctx.require('combat',x.actorId);
     // Manually entered declarations carry an independent namespace from effect-generated conditions.
-    return applyCondition(ctx,x.actorId,x.key,x.enabled,'manual:'+x.sourceId);
+    return applyCondition(ctx,x.actorId,x.key.toLowerCase(),x.enabled,'manual:'+x.sourceId);
   })
 });

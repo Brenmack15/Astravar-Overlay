@@ -216,9 +216,13 @@ internal fun ReforgeRollComponent.copyResult(title: String = label): String {
 internal val ReforgeRollRecord.displayTotal: String
     get() = if (components.firstOrNull()?.damageType == null && components.any { it.damageType != null }) "Attack ${components.first().total}" else total.toString()
 
+internal fun ReforgeRollRecord.resultLines(): List<String> = components.map { part ->
+    part.copyResult(if (components.size == 1) label else "$label · ${part.label}")
+}
+
 @Composable internal fun ReforgeSavedRollCard(roll: ReforgeRollRecord) {
     val clipboard = LocalClipboardManager.current
-    val lines = roll.components.map { component -> component.copyResult(if (roll.components.size == 1) roll.label else "${roll.label} · ${component.label}") }
+    val lines = roll.resultLines()
     PlayerCard {
         Text(roll.label, style = MaterialTheme.typography.titleMedium)
         Text(roll.displayTotal, style = MaterialTheme.typography.headlineMedium, color = RebuildPalette.GoldBright,

@@ -18,11 +18,13 @@ const exchangeCoins = recordObject({ walletId: recordId, give: coins, receive: c
 const definitionFields = { definitionId: recordId, name: recordTitle, category: recordTitle, description: recordText,
   rarity: recordMaybe(recordTitle), stackable: recordBool, wearable: recordBool, handheld: recordBool, attunement: attunementRule, source: recordSource };
 const definition = recordObject({ ...definitionFields, activation: recordChoice('passive','manual','review'), attunementSeconds: recordMaybe(recordInt(0,604800)) },Object.keys(definitionFields));
-const acquisitionFields = { itemId: recordId, definitionId: recordId, ownerId: recordId, quantity: count, source: recordSource };
-const acquireItem = recordObject(acquisitionFields);
-const purchaseItem = recordObject({ ...acquisitionFields, walletId: recordId, price: coins, sellerId: nullableId });
-const destination = recordObject({ type: recordChoice('party_actor','storage','unassigned','external_gift','lost','dropped','loan'),
-  actorId: nullableId, locationId: nullableId, recipientId: nullableId, recipientName: recordMaybe(recordTitle) });
+const acquisitionFields = { itemId: recordId, definitionId: recordId, ownerId: nullableId, quantity: count, source: recordSource };
+const acquireItem = recordObject({...acquisitionFields,storageId:recordId},Object.keys(acquisitionFields));
+const buyFields={ ...acquisitionFields, walletId: recordId, price: coins, sellerId: nullableId };
+const purchaseItem = recordObject({...buyFields,storageId:recordId},Object.keys(buyFields));
+const destinationFields={ type: recordChoice('party_actor','storage','unassigned','external_gift','lost','dropped','loan'),
+  actorId: nullableId, locationId: nullableId, recipientId: nullableId, recipientName: recordMaybe(recordTitle) };
+const destination = recordObject({...destinationFields,partyOwned:recordBool},Object.keys(destinationFields));
 const sellItem = recordObject({ itemId: recordId, quantity: count, splitId: nullableId, walletId: recordId,
   proceeds: coins, buyerId: nullableId, buyerName: recordMaybe(recordTitle), source: recordSource });
 const transferItem = recordObject({ itemId: recordId, quantity: count, splitId: nullableId, destination,
@@ -31,6 +33,9 @@ const splitItem = recordObject({ itemId: recordId, splitId: recordId, quantity: 
 const mergeItem = recordObject({ keepId: recordId, mergeId: recordId, source: recordSource });
 const recoverItem = recordObject({ itemId: recordId, ownerId: recordId, source: recordSource, reason: recordTitle });
 const equipItem = recordObject({ itemId: recordId, equipment: equipmentState, source: recordSource });
+const giveItem=recordObject({itemId:recordId,quantity:count,splitId:nullableId});
+const tradeSide=recordObject({actorId:recordId,walletId:nullableId,coins,items:recordArray(giveItem,8)});
+const partyTrade=recordObject({left:tradeSide,right:tradeSide,reason:recordTitle,source:recordSource});
 const historicalOwner = recordObject({kind:recordChoice('actor','world_entity','named','unknown'),id:nullableId,name:recordMaybe(recordTitle)});
 const historicalItemEvent = recordObject({eventId:recordId,itemId:recordId,
   eventType:recordChoice('acquisition','purchase','gift','transfer','sale','storage','retrieval','borrowing','return','loss','recovery','modification','integration','other'),
@@ -69,6 +74,7 @@ function usable(item) {
 }
 function compareStack(first, second) {
   const fields = ['definitionId','ownerId','custodianId','locationId','holding','equipment','attuned','operating','condition','customized','resourcePoolId'];
+  if((first.data.ownerType??(first.data.ownerId?'actor':'unknown'))!==(second.data.ownerType??(second.data.ownerId?'actor':'unknown')))return false;
   return fields.every(key => first.data[key] === second.data[key]);
 }
 function portable(item, def) {
@@ -144,11 +150,11 @@ async function recordPayment(ctx, type, legs, reason, source) {
   }
   return { transactionRecordId: id, wallets: lines };
 }
-async function itemEvent(ctx, type, before, after, reason, source, relatedIds = []) {
-  const id = await historyRecordId('holding', ctx.commandId);
+async function itemEvent(ctx, type, before, after, reason, source, relatedIds = [],leg = null) {
+  const id = await historyRecordId('holding', leg===null ? ctx.commandId : JSON.stringify([ctx.commandId,leg]));
   await recordNew(ctx, 'item_event', id);
   const owners = [before?.actorId, after.actorId].filter(value => value !== undefined);
-  const summarize = row => row ? { ownerId: row.data.ownerId, custodianId: row.data.custodianId, locationId: row.data.locationId,
+  const summarize = row => row ? { ownerId: row.data.ownerId, ownerType:row.data.ownerType??(row.data.ownerId?'actor':'unknown'),custodianId: row.data.custodianId, locationId: row.data.locationId,
     holding: row.data.holding, quantity: row.data.quantity, equipment: row.data.equipment,
     externalRecipientId:row.data.externalRecipientId??null,externalRecipientName:row.data.externalRecipientName??null } : null;
   const definition=await definitionForHolding(ctx,after);
@@ -167,17 +173,24 @@ async function itemEvent(ctx, type, before, after, reason, source, relatedIds = 
 }
 async function outputItem(ctx, args) {
   await recordNew(ctx, 'item_instance', args.itemId);
-  await partyActor(ctx, args.ownerId);
+  if(args.ownerId!==null)await partyActor(ctx,args.ownerId);
+  if(args.storageId){
+    const place=await recordRead(ctx,'world_entity',args.storageId);
+    if(args.ownerId!==null || place.data.category!=='place' || !place.data.partyStorage) recordsFail('SHARED_STORAGE_REQUIRED',409);
+  }
   const def = await recordRead(ctx, 'item_definition', args.definitionId);
   if ((!def.data.stackable || def.data.attunement !== 'none') && args.quantity !== 1) recordsFail('UNIQUE_ITEM_QUANTITY');
   const item = { kind:'item_instance', id:args.itemId, actorId:args.ownerId, title:def.title, life:'active',
-    data: { definitionId:def.id, ownerId:args.ownerId, custodianId:args.ownerId, locationId:null, quantity:args.quantity,
-      holding:'carried', partyAccess:true, equipment:'packed', attuned:false, operating:false, resourcePoolId:null,
+    data: { definitionId:def.id, ownerId:args.ownerId, ownerType:args.ownerId===null?'party':'actor',custodianId:args.ownerId, locationId:args.storageId??null, quantity:args.quantity,
+      holding:args.ownerId!==null?'carried':args.storageId?'storage':'unassigned', partyAccess:true, equipment:'packed', attuned:false, operating:false, resourcePoolId:null,
       customized:false, favorite:false, condition:'standard', source:args.source } };
   await ctx.put(item);
   await ctx.link(item.id,'definition',def.id);
-  await ctx.link(item.id,'owned_by',args.ownerId);
-  await ctx.link(item.id,'held_by',args.ownerId);
+  if(args.ownerId!==null){
+    await ctx.link(item.id,'owned_by',args.ownerId);
+    await ctx.link(item.id,'held_by',args.ownerId);
+  }
+  if(args.storageId)await ctx.link(item.id,'located_at',args.storageId);
   return item;
 }
 async function createWallet(ctx, args) {
@@ -284,12 +297,12 @@ async function moveItemRules(ctx,item,next) {
 }
 function validateDestination(d) {
   const outside = ['external_gift','external_sale','lost','dropped'].includes(d.type);
-  if (['party_actor','loan'].includes(d.type) !== (d.actorId !== null) ||
+  if ((d.partyOwned && !['storage','unassigned'].includes(d.type)) || ['party_actor','loan'].includes(d.type) !== (d.actorId !== null) ||
       (d.type === 'storage' && d.locationId === null) ||
       (!outside && d.type !== 'storage' && d.locationId !== null) ||
       (!['external_gift','external_sale'].includes(d.type) && (d.recipientId !== null || d.recipientName !== null))) recordsFail('INVALID_DESTINATION');
 }
-async function moveItem(ctx,args,eventType = 'transfer') {
+async function moveItem(ctx,args,eventType = 'transfer',leg = null) {
   validateDestination(args.destination);
   const item = await recordRead(ctx,'item_instance',args.itemId);
   usable(item);
@@ -306,11 +319,13 @@ async function moveItem(ctx,args,eventType = 'transfer') {
   if (d.recipientId !== null) await recordRead(ctx,'world_entity',d.recipientId);
   const external = ['external_gift','external_sale','lost','dropped'].includes(d.type);
   const holding = external ? 'external' : d.type === 'storage' ? 'storage' : d.type === 'unassigned' ? 'unassigned' : 'carried';
-  const ownerId = d.type === 'party_actor' ? d.actorId : ['external_gift','external_sale'].includes(d.type) ? null : sourceItem.data.ownerId;
+  const conveysOutside=['external_gift','external_sale'].includes(d.type);
+  const ownerId = d.type === 'party_actor' ? d.actorId : (d.partyOwned || conveysOutside) ? null : sourceItem.data.ownerId;
   const custodianId = ['party_actor','loan'].includes(d.type) ? d.actorId : null;
   const scopeActor = external || (custodianId && ownerId && custodianId !== ownerId) ? null : (custodianId ?? ownerId);
   if (d.actorId !== null) await ctx.require('inventory',d.actorId,true);
-  const data = { ...sourceItem.data, ownerId, custodianId, locationId:d.locationId, holding,
+  const ownerType=d.partyOwned?'party':conveysOutside?'external':d.type==='party_actor'?'actor':sourceItem.data.ownerType??(ownerId?'actor':'unknown');
+  const data = { ...sourceItem.data, ownerId, ownerType, custodianId, locationId:d.locationId, holding,
     partyAccess:!external, equipment:'packed', attuned:false, operating:false, source:args.source,
     externalRecipientId:d.recipientId, externalRecipientName:d.recipientName,
     lastPossessorId:sourceItem.data.custodianId, disposition:d.type };
@@ -319,7 +334,7 @@ async function moveItem(ctx,args,eventType = 'transfer') {
   await guardForm(ctx,sourceItem,moved);
   await applyPlacement(ctx,sourceItem,moved);
   if (d.recipientId !== null) await ctx.link(moved.id,'external_recipient',d.recipientId);
-  const eventId = await itemEvent(ctx,eventType,sourceItem,moved,args.reason,args.source,[item.id]);
+  const eventId = await itemEvent(ctx,eventType,sourceItem,moved,args.reason,args.source,[item.id],leg);
   return { itemId:moved.id, fromItemId:item.id, quantity:args.quantity, holding, itemEventId:eventId };
 }
 
@@ -331,8 +346,65 @@ async function guardForm(ctx, item, next) {
   if (form.data.sourceItemId === item.id && (item.data.custodianId !== next.data.custodianId || next.data.equipment === 'packed' ||
       (item.data.operating && !next.data.operating) || (form.data.requiresAttunement && !next.data.attuned))) recordsFail('FORM_REVERSION_REQUIRED',409);
 }
+async function exchangePartyAssets(ctx,args){
+  const sides=[args.left,args.right];
+  if(args.left.actorId===args.right.actorId)recordsFail('DISTINCT_TRADE_PARTIES_REQUIRED');
+  const needsMoney=sides.some(side=>denominations.some(k=>side.coins[k]>0));
+  if(!sides.some(side=>side.items.length) && denominations.every(key=>args.left.coins[key]===args.right.coins[key]))recordsFail('EMPTY_TRADE_RESULT');
+  const unique=new Set();
+  for(const side of sides){
+    await partyActor(ctx,side.actorId);
+    if(!side.items.length && !denominations.some(k=>side.coins[k]>0))recordsFail('BOTH_TRADE_LEGS_REQUIRED');
+    if(needsMoney!==Boolean(side.walletId))recordsFail('TRADE_WALLET_REQUIREMENT');
+    for(const offered of side.items){
+      for(const id of [offered.itemId,offered.splitId].filter(Boolean)){
+        if(unique.has(id))recordsFail('REPEATED_TRADE_ITEM');
+        unique.add(id);
+      }
+      const item=await recordRead(ctx,'item_instance',offered.itemId);
+      if(item.data.ownerId!==side.actorId || (item.data.custodianId!==null && item.data.custodianId!==side.actorId))
+        recordsFail('TRADE_HOLDING_NOT_CONTROLLED',409);
+    }
+  }
+  let payment=null;
+  if(needsMoney){
+    const legs=[];
+    for(const [i,side] of sides.entries()){
+      const wallet=await walletRecord(ctx,side.walletId);
+      if(wallet.actorId!==side.actorId)recordsFail('TRADE_WALLET_HOLDER_MISMATCH',409);
+      const afterDebit=changedCoins(wallet.data.coins,debit(side.coins));
+      legs.push({wallet,next:changedCoins(afterDebit,sides[1-i].coins)});
+    }
+    payment=await recordPayment(ctx,'party_exchange',legs,args.reason,args.source);
+  }
+  const moved=[];
+  for(const [i,side] of sides.entries()){
+    for(const offered of side.items){
+      const recipient=sides[1-i].actorId;
+      const move=await moveItem(ctx,{...offered,reason:args.reason,source:args.source,
+        destination:{type:'party_actor',actorId:recipient,locationId:null,recipientId:null,recipientName:null}},'party_exchange',offered.itemId);
+      moved.push({fromActorId:side.actorId,toActorId:recipient,...move});
+    }
+  }
+  const tradeId=await historyRecordId('exchange',ctx.commandId);
+  await recordNew(ctx,'party_exchange',tradeId);
+  await ctx.put({id:tradeId,kind:'party_exchange',actorId:null,title:args.reason,data:{parties:sides.map(s=>({actorId:s.actorId,walletId:s.walletId,
+    coins:s.coins})),holdings:moved,paymentId:payment?.transactionRecordId??null,source:args.source,recordedAt:ctx.now,commandId:ctx.commandId}});
+  for(const side of sides){
+    await ctx.link(tradeId,'trade_party',side.actorId);
+    if(side.walletId)await ctx.link(tradeId,'trade_wallet',side.walletId);
+  }
+  for(const leg of moved){
+    await ctx.link(leg.itemEventId,'part_of_trade',tradeId);
+    await ctx.link(tradeId,'trade_holding',leg.itemId);
+    if(leg.fromItemId!==leg.itemId)await ctx.link(tradeId,'trade_holding',leg.fromItemId);
+  }
+  if(payment)await ctx.link(payment.transactionRecordId,'part_of_trade',tradeId);
+  return {tradeId,holdings:moved,paymentId:payment?.transactionRecordId??null};
+}
 export const HOLDING_OPERATIONS = Object.freeze({
   record_historical_item_event:recordsOperation('inventory',historicalItemEvent,recordHistoricalItemEvent),
+  exchange_party_assets:recordsOperation('economy',partyTrade,exchangePartyAssets),
   define_wallet: recordsOperation('economy',defineWallet,createWallet),
   transfer_coins: recordsOperation('economy',transferCoins,async (ctx,args) => {
     if (args.fromWalletId === args.toWalletId) recordsFail('DISTINCT_WALLETS_REQUIRED');
@@ -346,6 +418,15 @@ export const HOLDING_OPERATIONS = Object.freeze({
     assertPositive(args.change);
     const wallet = await walletRecord(ctx,args.walletId);
     return recordPayment(ctx,'adjustment',[{wallet,next:changedCoins(wallet.data.coins,args.change)}],args.reason,args.source);
+  }),
+  reconcile_wallet_denomination:recordsOperation('economy',recordObject({walletId:recordId,expectedRevision:recordInt(1,Number.MAX_SAFE_INTEGER),
+    denomination:recordChoice(...denominations),previous:recordMaybe(recordInt(0,maximumCoins)),confirmedBalance:recordInt(0,maximumCoins),
+    reason:recordTitle,source:recordSource}),async(ctx,args)=>{
+    const wallet=await walletRecord(ctx,args.walletId);
+    if(wallet.revision!==args.expectedRevision || wallet.data.coins[args.denomination]!==args.previous)recordsFail('WALLET_RECONCILIATION_CONFLICT',409);
+    if(args.previous===args.confirmedBalance) recordsFail('WALLET_BALANCE_ALREADY_SATISFIED',409);
+    const next={...wallet.data.coins,[args.denomination]:args.confirmedBalance};
+    return recordPayment(ctx,'balance_correction',[{wallet,next}],args.reason,args.source);
   }),
   exchange_coins: recordsOperation('economy',exchangeCoins,async (ctx,args) => {
     assertPositive(args.give); assertPositive(args.receive);
@@ -427,7 +508,7 @@ export const HOLDING_OPERATIONS = Object.freeze({
     const item = await recordRead(ctx,'item_instance',args.itemId,true);
     if (item.data.holding !== 'external' || item.data.partyAccess || !(item.data.quantity > 0)) recordsFail('EXTERNAL_HOLDING_REQUIRED',409);
     await partyActor(ctx,args.ownerId);
-    const result = recordEdit(item,{...item.data,ownerId:args.ownerId,custodianId:args.ownerId,locationId:null,holding:'carried',
+    const result = recordEdit(item,{...item.data,ownerId:args.ownerId,ownerType:'actor',custodianId:args.ownerId,locationId:null,holding:'carried',
       partyAccess:true,equipment:'packed',attuned:false,operating:false,source:args.source,externalRecipientId:null,
       externalRecipientName:null,disposition:'recovered'}, {actorId:args.ownerId,life:'active'});
     await applyPlacement(ctx,item,result);

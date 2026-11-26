@@ -96,6 +96,12 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
+      - name: Validate cloud requirements and real D1 runtime
+        run: |
+          mkdir -p validation
+          node scripts/verify-ascension-parity.mjs validation/ascension-protocol-parity.json
+          python3 tools/ascension_trace_check.py
+          bash scripts/ci-ascension-provider.sh
       - name: Critical protocol and source safety before Android compilation
         run: |
           node --test backend/owner-bridge/*.test.mjs

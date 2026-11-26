@@ -88,6 +88,7 @@ private enum class SpellbookFilter(val label: String) {
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     val rollNotice = remember { SnackbarHostState() }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var savedRoll by remember { mutableStateOf<ReforgeRollRecord?>(null) }
     // A roster shortcut must never fall through to another character or change the default actor.
     val pendingNavigation = navigationRequest?.takeIf { it.token != consumedNavigation }
@@ -628,7 +629,15 @@ private enum class SpellbookFilter(val label: String) {
                 .semantics { contentDescription = "Roll Manager" }) {
             ArcaneIcon("d20", Modifier.size(24.dp), RebuildPalette.Canvas)
         }
-        SnackbarHost(rollNotice, Modifier.align(Alignment.BottomCenter).widthIn(max = 600.dp))
+        SnackbarHost(rollNotice, Modifier.align(Alignment.BottomCenter).widthIn(max = 600.dp)) { notice ->
+            Snackbar(action = { TextButton(onClick = notice::performAction) { Text("View history") } },
+                dismissAction = { IconButton(onClick = notice::dismiss, modifier = Modifier.semantics { contentDescription = "Dismiss roll result" }) { Text("×") } }) {
+                val result = savedRoll
+                Text(notice.visuals.message, Modifier.clickable(enabled = result != null, role = Role.Button, onClickLabel = "Copy roll result") {
+                    result?.let { clipboard.setText(androidx.compose.ui.text.AnnotatedString(it.resultLines().joinToString("\n"))) }
+                })
+            }
+        }
         }
     }
     if (dialog == "Create") {

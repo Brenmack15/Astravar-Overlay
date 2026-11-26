@@ -42,6 +42,7 @@ async function calculate(ctx,actorId,s,e){
   await validateContext(ctx,actorId,s);
   const a=await actor(ctx,actorId),projection=await sheet(ctx,actorId,s.contextTags??[]);
   checkDiceOwner(ctx,a,s.kind,e.origin);
+  const restriction=projection.rollRestrictions[s.kind+':'+s.key];must(!restriction,restriction);
   const policy=rollPolicy(projection.effects,s.kind+':'+s.key,s.mode);
   const custom=s.kind==='custom';
   const signed=custom?(s.flat??0):s.kind==='ability'?projection.checks[s.key]?.value:
@@ -71,7 +72,7 @@ async function calculate(ctx,actorId,s,e){
 }
 async function recordCheck(ctx,x){
   const result=await calculate(ctx,x.actorId,x.check,x.evidence);
-  must([x.forUseId,x.forAttemptId,x.forConcentrationId].filter(Boolean).length<=1,'INCOMPATIBLE_ROLL_REQUESTS');
+  must([x.forUseId,x.forAttemptId,x.forCastId,x.forConcentrationId].filter(Boolean).length<=1,'INCOMPATIBLE_ROLL_REQUESTS');
   if(x.forConcentrationId){
     const pending=await owned(ctx,'concentration_check',x.forConcentrationId,x.actorId),a=await actor(ctx,x.actorId);
     must(pending.data.status==='pending' && a.data.concentrationCastId===pending.data.castId && x.check.kind==='save' && x.check.key==='CON','NO_MATCHING_CONCENTRATION_SAVE');
@@ -83,6 +84,12 @@ async function recordCheck(ctx,x){
       x.check.kind==='save' && x.check.key===use.data.save?.ability,'NO_MATCHING_SAVE_REQUEST');
     result.forUseId=x.forUseId;
   }
+  if(x.forCastId){
+    const cast=await ctx.get('cast_instance',x.forCastId);
+    must(cast?.life==='active' && cast.data.resolution==='save' && cast.data.targets.includes(x.actorId) && !cast.data.targetResults?.some(r=>r.targetActorId===x.actorId) &&
+      x.check.kind==='save' && cast.data.save.ability===x.check.key,'NO_MATCHING_SAVE_REQUEST');
+    result.forCastId=x.forCastId;
+  }
   if(x.forAttemptId){
     const attempt=await ctx.get('attack_attempt',x.forAttemptId);
     must(attempt?.life==='active' && attempt.data.resolution==='save' && attempt.data.targets?.includes(x.actorId) && !attempt.data.targetResults?.some(r=>r.targetActorId===x.actorId) && x.check.kind==='save' && attempt.data.save.ability===x.check.key,'NO_MATCHING_SAVE_REQUEST');
@@ -91,6 +98,7 @@ async function recordCheck(ctx,x){
   await insert(ctx,'roll',x.rollId,x.actorId,result.name,result);
   if(x.forConcentrationId)await ctx.link(x.rollId,'for_concentration',x.forConcentrationId);
   if(x.forUseId)await ctx.link(x.rollId,'for_use',x.forUseId);
+  if(x.forCastId)await ctx.link(x.rollId,'for_cast',x.forCastId);
   if(x.forAttemptId)await ctx.link(x.rollId,'for_attempt',x.forAttemptId);
   return {rollId:x.rollId,...result};
 }
@@ -145,7 +153,7 @@ export const rollOperations=Object.freeze({
     const results=b.data.results.map(e=>e.rollId===r.id?result:e),status=results.every(e=>e.status==='resolved')?'resolved':'pending';
     await save(ctx,b,{...b.data,results,status});return {batchId:b.id,status,result};
   }),
-  record_check:op('rolls',fields({actorId:identifier,rollId:identifier,check:checkSpec,evidence,forUseId:identifier,forAttemptId:identifier,forConcentrationId:identifier},['actorId','rollId','check','evidence']),recordCheck),
+  record_check:op('rolls',fields({actorId:identifier,rollId:identifier,check:checkSpec,evidence,forUseId:identifier,forAttemptId:identifier,forCastId:identifier,forConcentrationId:identifier},['actorId','rollId','check','evidence']),recordCheck),
   record_roll_batch:op('rolls',fields({actorId:identifier,batchId:identifier,entries:arrayOf(fields({rollId:identifier,check:checkSpec,evidence},['rollId','check']),24)},['actorId','batchId','entries']),batch),
   save_roll_preset:op('rolls',fields({actorId:identifier,presetId:identifier,name:named(120),entries:arrayOf(checkSpec,24),update:boolean},['actorId','presetId','name','entries','update']),savePreset),
   execute_roll_preset:op('rolls',fields({actorId:identifier,presetId:identifier,batchId:identifier,rolls:arrayOf(fields({rollId:identifier,evidence},['rollId']),24)},['actorId','presetId','batchId','rolls']),async(ctx,x)=>{

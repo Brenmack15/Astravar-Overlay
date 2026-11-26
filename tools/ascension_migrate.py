@@ -18,7 +18,7 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
-from ascension_migrate_legacy import (HASH, MAX_BYTES, encode, file_hash, legacy_review, loads,
+from ascension_migrate_legacy import (HASH, MAX_BYTES, compare_legacy, encode, file_hash, legacy_review, loads,
                                      read_limited, review_bytes, sha, verify, weapon_review)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -483,7 +483,8 @@ def check_database(bundle):
                sorted(mapped, key=lambda r: r["id"]) == bundle["rows"]["cloud_entities"],
                "Native conversion differs from independently mapped source records")
     with closing(make_database(":memory:")) as scratch:
-        scratch.execute("INSERT INTO cloud_continuities VALUES (?,?,'staged',1,0,1)", bundle["tenant"])
+        scratch.execute("INSERT INTO cloud_continuities VALUES (?,?,'staged',?,0,1)",
+                        (*bundle["tenant"], bundle["manifest"]["source"]["epoch"]))
         scratch.execute("BEGIN")
         stage(scratch, bundle)
         scratch.commit()
@@ -544,6 +545,25 @@ def install_objects(folder, bundle):
         verify(read_limited(path) == body, "Existing private asset differs")
 
 
+def clone_staging(before, staged, bundle):
+    # Enroll the new physical generation at the recovered epoch. Preserve local legacy tables,
+    # triggers and sequence state without temporarily relaxing the active DB's writer fences.
+    verify(before.execute("SELECT count(*) FROM cloud_continuities").fetchone()[0] == 1 and
+           not before.execute("PRAGMA foreign_key_check").fetchone(), "Invalid isolated staging source")
+    enrolled = False
+    for statement in before.iterdump():
+        if statement.startswith('INSERT INTO "cloud_continuities" VALUES('):
+            verify(not enrolled, "Unexpected second continuity in staging source")
+            staged.execute("INSERT INTO cloud_continuities VALUES (?,?,'staged',?,0,1)",
+                           (*bundle["tenant"], bundle["manifest"]["source"]["epoch"]))
+            enrolled = True
+        else:
+            staged.execute(statement)
+            if statement == 'BEGIN TRANSACTION;':
+                staged.execute('PRAGMA defer_foreign_keys=ON')
+    verify(enrolled, "Missing initial staged continuity")
+
+
 def apply(folder, path, approval):
     bundle = read_bundle(path)
     check_database(bundle)
@@ -556,7 +576,7 @@ def apply(folder, path, approval):
         new_path = folder / dest
         # Backup a consistent old generation. The separate connection can read while the old writer is reserved.
         with closing(db_connect(folder / marker["current"])) as before, closing(db_connect(new_path)) as staged:
-            before.backup(staged)
+            clone_staging(before, staged, bundle)
             staged.execute("BEGIN IMMEDIATE")
             try:
                 stage(staged, bundle)
@@ -639,6 +659,11 @@ def control(folder, action, approval=None, carry_pending=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="operation", required=True)
+    compare = sub.add_parser("compare-legacy", help="Reconcile two native snapshots by stable identity and exact row digest")
+    compare.add_argument("earlier", type=Path)
+    compare.add_argument("later", type=Path)
+    compare.add_argument("--owner", required=True)
+    compare.add_argument("--continuity", required=True)
     for op in ("seal", "unseal"):
         p = sub.add_parser(op)
         p.add_argument("file", type=Path)
@@ -665,6 +690,8 @@ def main():
             p.add_argument("--carry-pending-for-review", action="store_true",
                            help="Preserve exact pending cloud approvals for separate review under the recovered epoch")
     args = parser.parse_args()
+    if args.operation == "compare-legacy":
+        return compare_legacy(args.earlier, args.later, args.owner, args.continuity)
     if args.operation in ("seal", "unseal"):
         return protect(args.file, args.output, args.key_file, args.operation == "unseal")
     if args.operation == "init": return init(args.directory, args.owner, args.continuity)

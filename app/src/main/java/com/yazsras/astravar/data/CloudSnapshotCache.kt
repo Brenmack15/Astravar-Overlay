@@ -12,6 +12,13 @@ internal data class CloudVersion(val epoch: Long, val revision: Long, val grantR
 
 internal data class CloudSnapshot(val binding: CloudBinding, val version: CloudVersion, val checkedAt: Long, val visible: Boolean)
 
+internal data class CloudHistoryCursor(val recordedAt: Long?, val id: String)
+
+internal fun cloudHistoryCursor(row: JsonObject): CloudHistoryCursor {
+    val stamp = (row["data"] as? JsonObject)?.get("recordedAt") as? JsonPrimitive
+    return CloudHistoryCursor(stamp?.takeUnless { it.isString }?.longOrNull, row.cloudText("id"))
+}
+
 internal data class CloudPage(val version: CloudVersion, val records: List<JsonObject>, val nextAfter: String?)
 
 internal val cloudIdentifier = Regex("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
@@ -33,7 +40,7 @@ internal fun cloudPage(body: JsonObject, binding: CloudBinding, after: String?, 
         body.cloudNumber("grantExpiresAt"))
     require(version.epoch > 0 && version.grantExpiresAt > now)
     if (expected != null && version != expected) throw OwnerSyncFailure("SNAPSHOT_CHANGED")
-    val records = body.getValue("records").jsonArray.map { it.jsonObject }
+    val records = body.getValue("records").jsonArray.also { require(it.size<=100) }.map { it.jsonObject }
     var priorId = after.orEmpty()
     records.forEach { row ->
         val id = row.cloudText("id")
@@ -51,15 +58,16 @@ internal fun cloudPage(body: JsonObject, binding: CloudBinding, after: String?, 
 
 /** Disposable, credential-bound read model. This database has no gameplay mutation API. */
 internal class CloudSnapshotCache(context: Context, name: String? = "astravar-cloud-cache.db") :
-    SQLiteOpenHelper(context.applicationContext, name, null, 2) {
+    SQLiteOpenHelper(context.applicationContext, name, null, 3) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE workspace(slot INTEGER PRIMARY KEY CHECK(slot=1), origin TEXT NOT NULL,
             continuity TEXT NOT NULL, subject TEXT NOT NULL, epoch INTEGER NOT NULL, revision INTEGER NOT NULL,
             grant_revision INTEGER NOT NULL, grant_expiry INTEGER NOT NULL, checked_at INTEGER NOT NULL, token TEXT)""")
         db.execSQL("""CREATE TABLE records(token TEXT NOT NULL,id TEXT NOT NULL,kind TEXT NOT NULL,life TEXT NOT NULL,
-            actor TEXT,title TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(token,id))""")
+            actor TEXT,title TEXT NOT NULL,body TEXT NOT NULL,recorded_at INTEGER,PRIMARY KEY(token,id))""")
         createMediaCache(db)
+        createHistoryIndex(db)
         db.execSQL("CREATE TABLE fenced(continuity TEXT PRIMARY KEY)")
         db.execSQL("CREATE INDEX cloud_cache_list ON records(token,life,kind,id)")
         db.execSQL("""CREATE TABLE commands(id TEXT PRIMARY KEY,origin TEXT NOT NULL,continuity TEXT NOT NULL,
@@ -70,8 +78,26 @@ internal class CloudSnapshotCache(context: Context, name: String? = "astravar-cl
         "CREATE TABLE image_cache(id TEXT PRIMARY KEY,body BLOB NOT NULL CHECK(length(body)<=4194304))"
     )
 
+    private fun createHistoryIndex(db: SQLiteDatabase) = db.execSQL(
+        "CREATE INDEX cloud_actor_history ON records(token,actor,life,recorded_at DESC,id DESC)"
+    )
+
     override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) {
-        if(old==1 && new==2) createMediaCache(db) else error("Unsupported cloud cache version.")
+        require(old in 1..2 && new == 3) { "Unsupported cloud cache version." }
+        if (old == 1) createMediaCache(db)
+        db.execSQL("ALTER TABLE records ADD COLUMN recorded_at INTEGER")
+        db.rawQuery("SELECT token,id,body FROM records", null).use { cursor ->
+            val update = db.compileStatement("UPDATE records SET recorded_at=? WHERE token=? AND id=?")
+            try {
+                while (cursor.moveToNext()) {
+                    val row = Json.parseToJsonElement(cursor.getString(2)).jsonObject
+                    val time = cloudHistoryCursor(row).recordedAt ?: continue
+                    update.bindLong(1,time); update.bindString(2,cursor.getString(0)); update.bindString(3,cursor.getString(1))
+                    update.executeUpdateDelete()
+                }
+            } finally { update.close() }
+        }
+        createHistoryIndex(db)
     }
 
     fun image(binding:CloudBinding,id:String,now:Long):ByteArray? = readableDatabase.rawQuery(
@@ -112,6 +138,10 @@ internal class CloudSnapshotCache(context: Context, name: String? = "astravar-cl
         "SELECT 1 FROM fenced WHERE continuity=?", arrayOf(continuity)
     ).use { it.moveToFirst() }
 
+    fun checked(at:Long) {
+        writableDatabase.execSQL("UPDATE workspace SET checked_at=? WHERE token IS NOT NULL",arrayOf(at))
+    }
+
     fun clearIncomplete() {
         writableDatabase.execSQL("DELETE FROM records WHERE token NOT IN (SELECT token FROM workspace WHERE token IS NOT NULL)")
     }
@@ -121,6 +151,7 @@ internal class CloudSnapshotCache(context: Context, name: String? = "astravar-cl
             put("token", token); put("id", row.cloudText("id")); put("kind", row.cloudText("kind"))
             put("actor", row["actorId"]?.jsonPrimitive?.contentOrNull)
             put("life", row.cloudText("life")); put("title", row.cloudText("title")); put("body", row.toString())
+            cloudHistoryCursor(row).recordedAt?.let { put("recorded_at", it) }
         })
     }
 
@@ -165,6 +196,29 @@ internal class CloudSnapshotCache(context: Context, name: String? = "astravar-cl
             clauses.joinToString(" AND ") + " ORDER BY r.id LIMIT ?"
         return readableDatabase.rawQuery(sql, args.toTypedArray())
             .use { cursor -> buildList { while (cursor.moveToNext()) add(Json.parseToJsonElement(cursor.getString(0)).jsonObject) } }
+    }
+
+    fun actorHistory(binding: CloudBinding, now: Long, actorId: String, kinds: Set<String>, limit: Int,
+        before: CloudHistoryCursor?): List<JsonObject> {
+        require(cloudIdentifier.matches(actorId) && kinds.isNotEmpty() && kinds.size <= 30 && kinds.all(cloudIdentifier::matches) && limit in 1..100)
+        val args = mutableListOf(binding.origin,binding.continuity,binding.subject,now.toString(),actorId)
+        val where = mutableListOf("w.origin=?", "w.continuity=?", "w.subject=?", "w.grant_expiry>?", "r.actor=?", "r.life='active'",
+            "r.kind IN (${kinds.joinToString(",") { "?" }})")
+        args.addAll(kinds)
+        before?.let { cursor ->
+            require(cloudIdentifier.matches(cursor.id))
+            if (cursor.recordedAt == null) { where.add("r.recorded_at IS NULL AND r.id<?"); args.add(cursor.id) }
+            else {
+                where.add("(r.recorded_at IS NULL OR r.recorded_at<? OR (r.recorded_at=? AND r.id<?))")
+                args.add(cursor.recordedAt.toString()); args.add(cursor.recordedAt.toString()); args.add(cursor.id)
+            }
+        }
+        args.add(limit.toString())
+        val sql = "SELECT r.body FROM records r JOIN workspace w ON w.token=r.token WHERE " + where.joinToString(" AND ") +
+            " ORDER BY r.recorded_at DESC,r.id DESC LIMIT ?"
+        return readableDatabase.rawQuery(sql,args.toTypedArray()).use { cursor -> buildList {
+            while (cursor.moveToNext()) add(Json.parseToJsonElement(cursor.getString(0)).jsonObject)
+        } }
     }
 
     fun record(binding: CloudBinding, now: Long, id: String): JsonObject? = readableDatabase.rawQuery(

@@ -76,7 +76,8 @@ object CharacterCalculator {
             val grants = active.mapNotNull { it.effect.payload as? EffectPayload.Proficiency }.filter { it.skill.equals(skill.id, true) }
             val multiplier = when { training.expertise || grants.any { it.expertise } -> 2; training.proficient || grants.isNotEmpty() -> 1; else -> 0 }
             val prof = if (multiplier > 0) pb * multiplier else if (training.halfProficiency) pb / 2 else 0
-            val baseline = skill.baselineOverride ?: checks.getValue(training.ability).value?.let { it + prof + skill.bonus }
+            val baseline = if (skill.baselineOverride != null) number(skill.baselineOverride, NumericTarget.ABILITY_CHECK,
+                training.ability.name, active, "Explicit skill baseline").value else checks.getValue(training.ability).value?.let { it + prof + skill.bonus }
             val label = if (skill.baselineOverride != null) "Explicit skill baseline override (active effects still apply)"
                 else "${training.ability.name} modifier + training $prof + bonus ${skill.bonus}"
             skill.id to number(baseline, NumericTarget.SKILL, skill.id, active, label)

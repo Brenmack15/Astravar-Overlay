@@ -193,13 +193,13 @@ jobs:
           sha256sum app/build/outputs/apk/release/app-release.apk >> validation/product-provenance.txt
           chmod +x gradlew
           timeout -k 10s 210s ./gradlew --console=plain --build-cache --profile :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
-      - name: Native authorization upgrade, Notion import and independent campaign readback
+      - name: Android 17 authorization, code 58 upgrade, visual journeys and independent campaign readback
         if: env.GENESIS_GATE == 'true'
-        timeout-minutes: 25
+        timeout-minutes: 40
         env:
           ASTRAVAR_BOOTSTRAP_GATE: 'true'
           ASTRAVAR_VERSION_CODE: ${{ env.EXPECTED_VERSION_CODE }}
-        run: timeout -k 10s 1440s bash scripts/ci-owner-hp-native.sh
+        run: timeout -k 10s 2280s bash scripts/ci-owner-hp-native.sh
       - name: Ordered release UI, import, recovery and in-place update on Android 16
         if: env.INVENTORY_BETA != 'true'
         timeout-minutes: 90

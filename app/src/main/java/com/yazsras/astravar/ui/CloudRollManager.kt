@@ -88,8 +88,8 @@ private fun rollStatus(result: JsonObject): String {
             val configs = client.rollRecordPages(actorId, "roll_preset")
             val decoded = configs.map { runCatching { readCloudPreset(it, fresh) } }
             presets = decoded.mapNotNull { it.getOrNull() }
-            val saved = client.rollRecordPages(actorId, "roll")
-            history = saved.sortedByDescending { it["revision"]?.jsonPrimitive?.long }.take(30).mapNotNull { it["data"]?.jsonObject?.field("text") }
+            val saved = client.actorHistory(actorId, setOf("roll"), limit = 30, reviewed = snapshot)
+            history = saved.mapNotNull { it["data"]?.jsonObject?.field("text") }
             if (decoded.any { it.isFailure }) loadError = "Some saved presets use contextual rules that require the structured preset inspector."
             if (online) loadedAt = revision else loadError = "Offline · previously cached roll records"
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -112,7 +112,9 @@ private fun rollStatus(result: JsonObject): String {
             else {
                 val normal = requireNotNull(sheet) { "Current calculation unavailable." }
                 val s = if (useWorkshop) requireNotNull((normal["rollContexts"] as? JsonObject)?.get("pocket-workshop") as? JsonObject) { "Workshop context unverified." } else normal
-                val modeTable = s.getValue("rollModes").jsonObject.getValue("${cloudCheckNames.getValue(entry.kind)}:${entry.key}").jsonObject
+                val subject = "${cloudCheckNames.getValue(entry.kind)}:${entry.key}"
+                (s["rollRestrictions"] as? JsonObject)?.field(subject)?.let { reason -> error(reason.lowercase().replace('_', ' ')) }
+                val modeTable = s.getValue("rollModes").jsonObject.getValue(subject).jsonObject
                 val policy = modeTable.getValue(entry.mode.name.lowercase()).jsonObject
                 ManagerFormula(DiceFormula(listOf(DiceTerm(1, 20)), requireNotNull(rollValue(s, entry)) { "Current modifier unknown." }),
                     DiceMode.valueOf(requireNotNull(policy.field("mode")).uppercase()), policy.getValue("count").jsonPrimitive.int)

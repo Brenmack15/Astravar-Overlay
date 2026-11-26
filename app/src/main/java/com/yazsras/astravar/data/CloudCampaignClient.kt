@@ -13,13 +13,14 @@ import java.util.UUID
 private val cloudPrefix = Regex("/v3/continuities/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/")
 private val cloudReadRoute = Regex("(?:capabilities|commands|review-status|context|(?:receipts|sheet|links)/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}|state\\?limit=[0-9]{1,3}(?:&after=[A-Za-z0-9][A-Za-z0-9._:-]{0,127}&atRevision=[0-9]+&atEpoch=[0-9]+&grantRevision=[0-9]+|&id=[A-Za-z0-9][A-Za-z0-9._:-]{0,127}&activeOnly=false&atRevision=[0-9]+&atEpoch=[0-9]+&grantRevision=[0-9]+)?)")
 
+private val formProjectionPath = Regex("forms/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
 private val actorProjectionPath = Regex("(?:spellbook|actions)/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?:\\?after=[A-Za-z0-9][A-Za-z0-9._:-]{0,127}&atRevision=[0-9]+&atEpoch=[0-9]+&grantRevision=[0-9]+)?")
 
 internal fun validCloudDevicePath(path: String): Boolean {
-    if (path.contains("..")) return false
+    if (path.substringBefore('?').split('/').any { it == "." || it == ".." }) return false
     val prefix = cloudPrefix.matchAt(path, 0) ?: return false
     val route = path.substring(prefix.range.last + 1)
-    return cloudReadRoute.matches(route) || actorProjectionPath.matches(route) || validRecordViewSuffix(route) || validArchiveSuffix(route)
+    return cloudReadRoute.matches(route) || formProjectionPath.matches(route) || actorProjectionPath.matches(route) || validRecordViewSuffix(route) || validArchiveSuffix(route)
 }
 
 internal class CloudSession(val credential: OwnerSyncCredential, val access: String?) {
@@ -58,11 +59,31 @@ internal class CloudCampaignClient(
         require(validCloudDevicePath(path))
         val result = transport.request(s.binding.origin, path, s.credential, s.access, body)
         if (result.status in 200..299) return result.json
-        if (result.status == 401 || result.status in setOf(403, 404) && suffix.startsWith("state?limit=20")) {
-            if (cache.workspace()?.visible == true) { cache.hide(); notifyCache() }
+        val baselineRequest=suffix=="capabilities" || suffix.startsWith("state?limit=20")
+        if(result.status==401 || baselineRequest && result.status in setOf(403,404)) conceal()
+        else if(result.status==403 && cache.workspace()?.visible==true) {
+            // An operation-level denial may simply reflect a narrower grant. Verify the grant before retaining its old rows.
+            try {
+                val check=request(s,"capabilities")
+                validateGrant(s,check)
+            } catch(e:kotlinx.coroutines.CancellationException){throw e}
+            catch(_:Exception){conceal()}
         }
         val code = (result.json["error"] as? JsonObject)?.get("code")?.jsonPrimitive?.contentOrNull
         throw OwnerSyncFailure(code?.takeIf { it.matches(Regex("[A-Z0-9_]{1,80}")) } ?: "CLOUD_HTTP_${result.status}")
+    }
+
+    private fun conceal() {
+        if(cache.workspace()?.visible==true){cache.hide();notifyCache()}
+    }
+
+    private fun validateGrant(s:CloudSession,proof:JsonObject) {
+        val saved=cache.workspace() ?: throw OwnerSyncFailure("CLOUD_NOT_SELECTED")
+        if(saved.binding!=s.binding || proof.cloudText("subject")!=s.binding.subject ||
+            proof.cloudText("continuityId")!=s.binding.continuity || proof.getValue("grantRevision").jsonPrimitive.long!=saved.version.grantRevision ||
+            proof.getValue("epoch").jsonPrimitive.long!=saved.version.epoch) {
+            conceal();throw OwnerSyncFailure("CLOUD_GRANT_UNVERIFIED")
+        }
     }
 
     suspend fun workspace(): CloudSnapshot? = withContext(Dispatchers.IO) {
@@ -101,6 +122,11 @@ internal class CloudCampaignClient(
                 val response = request(s, path)
                 val page = cloudPage(response, s.binding, after, v, now())
                 val old = cache.workspace()
+                if(v==null && old?.visible==true && old.binding==s.binding && old.version==page.version) {
+                    if(current(explicit).binding!=s.binding)throw OwnerSyncFailure("CLOUD_BINDING_CHANGED")
+                    cache.checked(now())
+                    return requireNotNull(cache.workspace())
+                }
                 if (old?.visible == true && (old.binding != s.binding ||
                     page.version.grantRevision != old.version.grantRevision || page.version.epoch != old.version.epoch)) {
                     cache.hide(); notifyCache()
@@ -138,6 +164,17 @@ internal class CloudCampaignClient(
                 throw OwnerSyncFailure("CLOUD_GRANT_UNVERIFIED")
             }
             cache.records(s.binding, now(), after, kinds = kinds, actorId = actorId, query = query)
+        }
+    }
+
+    suspend fun actorHistory(actorId: String, kinds: Set<String>, limit: Int = 50, before: CloudHistoryCursor? = null,
+        reviewed: CloudSnapshot? = null): List<JsonObject> = withContext(Dispatchers.IO) {
+        lock.withLock {
+            val s = current()
+            val w = cache.workspace() ?: throw OwnerSyncFailure("CLOUD_NOT_SELECTED")
+            if (!w.visible || w.version.grantExpiresAt <= now()) throw OwnerSyncFailure("CLOUD_GRANT_UNVERIFIED")
+            if (reviewed != null && (reviewed.binding != w.binding || reviewed.version != w.version)) throw OwnerSyncFailure("CLOUD_REVIEW_STALE")
+            cache.actorHistory(s.binding,now(),actorId,kinds,limit,before)
         }
     }
 
@@ -202,10 +239,8 @@ internal class CloudCampaignClient(
     suspend fun reviewCount(): Int = withContext(Dispatchers.IO) {
         lock.withLock {
             val s = current()
-            val path = "/v3/continuities/${s.binding.continuity}/review-status"
-            val response = transport.request(s.binding.origin, path, s.credential, s.access, null)
-            if (response.status != 200) throw OwnerSyncFailure("REVIEW_COUNT_UNAVAILABLE")
-            response.json.getValue("actionableCount").jsonPrimitive.int.also { require(it >= 0) }
+            val response=request(s,"review-status")
+            response.getValue("actionableCount").jsonPrimitive.int.also { require(it >= 0) }
         }
     }
 
@@ -265,15 +300,13 @@ internal class CloudCampaignClient(
             val w = cache.workspace() ?: throw OwnerSyncFailure("CLOUD_NOT_SELECTED")
             if (!w.visible || w.version.grantExpiresAt <= now() || snapshot.binding != s.binding || w.version != snapshot.version)
                 throw OwnerSyncFailure("CLOUD_REVIEW_STALE")
-            require(suffix == "context" || suffix.startsWith("sheet/") || actorProjectionPath.matches(suffix) || suffix.startsWith("links/") || validRecordViewSuffix(suffix) || validArchiveSuffix(suffix))
+            require(suffix == "context" || formProjectionPath.matches(suffix) || suffix.startsWith("sheet/") || actorProjectionPath.matches(suffix) || suffix.startsWith("links/") || validRecordViewSuffix(suffix) || validArchiveSuffix(suffix))
             val result = request(s, suffix)
             if (result.getValue("epoch").jsonPrimitive.long != w.version.epoch ||
                 result.getValue("revision").jsonPrimitive.long != w.version.revision) throw OwnerSyncFailure("SNAPSHOT_CHANGED")
             val check = request(s, "capabilities")
-            if (check.cloudText("subject") != s.binding.subject || check.cloudText("continuityId") != s.binding.continuity ||
-                check.getValue("grantRevision").jsonPrimitive.long != w.version.grantRevision) {
-                cache.hide(); notifyCache(); throw OwnerSyncFailure("CLOUD_GRANT_UNVERIFIED")
-            }
+            validateGrant(s,check)
+            if(check.getValue("revision").jsonPrimitive.long!=w.version.revision)throw OwnerSyncFailure("SNAPSHOT_CHANGED")
             result
         }
     }
@@ -288,11 +321,13 @@ internal class CloudCampaignClient(
             val w=cache.workspace() ?: throw OwnerSyncFailure("CLOUD_NOT_SELECTED")
             if (!w.visible || w.binding!=snapshot.binding || w.version!=snapshot.version || w.version.grantExpiresAt<=now())
                 throw OwnerSyncFailure("CLOUD_REVIEW_STALE")
-            val result=mediaTransport(s,target,kind,uploadId,bytes)
-            val read=request(s,"capabilities")
-            if(read.cloudText("subject")!=w.binding.subject || read.getValue("grantRevision").jsonPrimitive.long!=w.version.grantRevision){
-                cache.hide();notifyCache();throw OwnerSyncFailure("CLOUD_GRANT_UNVERIFIED")
+            val result=try { mediaTransport(s,target,kind,uploadId,bytes) } catch(err:OwnerSyncFailure) {
+                if(err.code=="MEDIA_HTTP_401")conceal()
+                if(err.code in setOf("MEDIA_HTTP_403","MEDIA_HTTP_404"))validateGrant(s,request(s,"capabilities"))
+                throw err
             }
+            val read=request(s,"capabilities")
+            validateGrant(s,read)
             if(read.getValue("epoch").jsonPrimitive.long!=w.version.epoch || read.getValue("revision").jsonPrimitive.long!=w.version.revision)
                 throw OwnerSyncFailure("SNAPSHOT_CHANGED")
             if(uploadId==null)cache.saveImage(w,target,result)

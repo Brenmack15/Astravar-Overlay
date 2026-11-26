@@ -1,6 +1,14 @@
 package com.yazsras.astravar.data
 
 import androidx.test.core.app.ApplicationProvider
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.ui.test.*
+import com.yazsras.astravar.ui.AstravarTheme
+import com.yazsras.astravar.ui.CloudWorkspace
+import com.yazsras.astravar.ui.createAstravarComposeRule
+import org.robolectric.Robolectric
+import org.junit.Rule
 import android.content.Context
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
@@ -16,6 +24,7 @@ import java.util.concurrent.TimeUnit
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class CloudWorkerInteropTest {
+    @get:Rule val compose=createAstravarComposeRule()
     @Test fun nativeCacheAndActualWorkerConvergeAcrossDisconnectRetryAndRevocation(): Unit = runBlocking {
         val driver = generateSequence(File(requireNotNull(System.getProperty("user.dir"))).absoluteFile) { it.parentFile }
             .map { File(it,"backend/owner-bridge/fixtures/native-cloud-wire.mjs") }.first(File::isFile)
@@ -62,7 +71,8 @@ class CloudWorkerInteropTest {
                 if (path.endsWith("/commands") && dropResponse) { dropResponse=false; throw OwnerSyncFailure("NETWORK_UNAVAILABLE") }
                 OwnerSyncResponse(wire.getValue("status").jsonPrimitive.int,wire.getValue("json").jsonObject)
             }
-            fun client() = CloudCampaignClient(cache,{ CloudSession(credential,null) },transport)
+            fun client() = CloudCampaignClient(cache,{ CloudSession(credential,null) },transport,
+                mediaTransport={_,_,_,_,_->throw OwnerSyncFailure("MEDIA_HTTP_404")})
             assertEquals("COMMITTED",dmCommit(0,"define_actor",defineActor("person")).cloudText("status"))
             fun gp(n:Int) = buildJsonObject { put("cp",0);put("sp",0);put("ep",0);put("gp",n);put("pp",0) }
             fun commitFromDm(rev:Int,op:String,properties:JsonObject): JsonObject {
@@ -139,6 +149,35 @@ class CloudWorkerInteropTest {
             assertEquals("COMMITTED",damage.cloudText("status"))
             assertTrue(android.records(kinds=setOf("attack_attempt")).isEmpty())
             assertEquals("Fixture damage: (4) + 2 = 6",android.record("observed")!!.getValue("data").jsonObject.cloudText("text"))
+            call(buildJsonObject{put("call","requireReview")})
+            val beforeReview=deviceRequests
+            val proposed=dmCommit(damage.getValue("revision").jsonPrimitive.int,"set_actor_ability",change(18))
+            assertEquals("PENDING_APPROVAL",proposed.cloudText("status"))
+            assertEquals(beforeReview,deviceRequests)
+            val proposalId=proposed.cloudText("commandId")
+            assertEquals(1,android.reviewCount())
+            assertEquals("PENDING_APPROVAL",android.verify(proposalId).cloudText("status"))
+            assertEquals(17,android.record("person")!!.getValue("data").jsonObject.getValue("abilities").jsonObject.getValue("INT").jsonPrimitive.int)
+            val approved=call(buildJsonObject{
+                put("call","ownerVerify")
+                putJsonObject("args"){put("commandId",proposalId);put("digest",proposed.cloudText("digest"))}
+            })
+            assertEquals("COMMITTED",approved.cloudText("status"))
+            assertEquals(approved,android.verify(proposalId))
+            assertEquals(0,android.reviewCount())
+            assertEquals(18,android.record("person")!!.getValue("data").jsonObject.getValue("abilities").jsonObject.getValue("INT").jsonPrimitive.int)
+            val activity=Robolectric.buildActivity(ComponentActivity::class.java).setup()
+            try {
+                val latest=requireNotNull(android.workspace())
+                activity.get().setContent { AstravarTheme { CloudWorkspace(android,latest) } }
+                compose.waitUntil(20_000){compose.onAllNodesWithText("Fixture actor").fetchSemanticsNodes().isNotEmpty()}
+                compose.onNodeWithTag("navigation-Inventory").performClick()
+                compose.waitUntil(20_000){compose.onAllNodesWithText("Fixture lens").fetchSemanticsNodes().isNotEmpty()}
+                compose.onNodeWithText("Party quantity · 1").assertExists()
+                compose.onNodeWithTag("navigation-Chronicle").performClick()
+                compose.waitUntil(20_000){compose.onAllNodesWithText("Fixture visit").fetchSemanticsNodes().isNotEmpty()}
+                compose.onNodeWithText("Fixture visit").assertExists()
+            } finally {activity.pause().stop().destroy()}
             call(buildJsonObject { put("call","revoke") })
             assertThrows(OwnerSyncFailure::class.java) { runBlocking { android.refresh() } }
             assertFalse(android.workspace()!!.visible)

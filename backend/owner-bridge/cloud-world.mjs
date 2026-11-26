@@ -26,7 +26,7 @@ const milestone = recordObject({ objectiveId: recordId, eventId: recordId, statu
 const checkpointFields = { checkpointId: recordId, title: recordTitle, scene: recordText, locationId: maybeId, worldTime: maybeText,
   lastEventId: maybeId, unresolved: maybeText, pendingRollId: maybeId, encounterId: maybeId, objectiveIds: recordArray(recordId,16),
   actorIds: recordArray(recordId,16), source: recordSource };
-const lastEventKind=recordChoice('timeline_event','item_event','coin_transaction','component_event','rest_report');
+const lastEventKind=recordChoice('timeline_event','item_event','coin_transaction','party_exchange','component_event','rest_report');
 const checkpoint = recordObject({ ...checkpointFields, pendingRollPrompt: maybeText, lastEventKind }, Object.keys(checkpointFields));
 const expectedRevision=recordInt(1,Number.MAX_SAFE_INTEGER);
 

@@ -125,8 +125,8 @@ function chronologicalCursor(after) {
 async function history(service,b,grant,view,opts) {
   requireScope(grant,view==='item_history'?'inventory':'chronicle');
   if(view==='item_history'||opts.id)await subject(service,b,grant,opts.id,view==='item_history'?'item_instance':null);
-  const kinds=view==='item_history'?['item_event']:['timeline_event','item_event','coin_transaction','component_event']
-    .filter(k=>grant.scopes.includes(service.kinds[k]+'.read'));
+  const kinds=(view==='item_history'?['item_event','component_event']:['timeline_event','item_event','coin_transaction','party_exchange','component_event','rest_report'])
+    .filter(k=>service.kinds[k] && grant.scopes.includes(service.kinds[k]+'.read'));
   const visible=actorRule(grant,'e'),related=actorRule(grant,'a');
   const [rev,cursorId]=chronologicalCursor(opts.after);
   const predicates=["e.owner_id=?","e.continuity_id=?","e.life='active'","e.kind IN(SELECT value FROM json_each(?))",visible.sql,
@@ -147,7 +147,7 @@ async function history(service,b,grant,view,opts) {
        AND ${grant.scopes.includes('lifecycle.read')?'1=1':"n.life='active'"}),`;
     lineageBinds=[opts.id,...b,...eventScope.values,...ancestor.values];
     predicates.push(`EXISTS(SELECT 1 FROM cloud_links j JOIN lineage ON lineage.ancestor_id=j.to_id
-       WHERE j.owner_id=e.owner_id AND j.continuity_id=e.continuity_id AND j.from_id=e.id AND j.relation='item_subject'
+       WHERE j.owner_id=e.owner_id AND j.continuity_id=e.continuity_id AND j.from_id=e.id AND j.relation IN('item_subject','source_component','resulting_item')
        AND (SELECT min(r.revision) FROM cloud_changes r WHERE r.owner_id=e.owner_id AND r.continuity_id=e.continuity_id AND r.entity_id=e.id)<=lineage.until_revision)`);
   }else if(opts.id){
     predicates.push(`(EXISTS(SELECT 1 FROM cloud_links j WHERE j.owner_id=e.owner_id AND j.continuity_id=e.continuity_id
@@ -161,6 +161,12 @@ async function history(service,b,grant,view,opts) {
       ON a.owner_id=p.owner_id AND a.continuity_id=p.continuity_id AND a.id=p.from_id
       WHERE p.owner_id=e.owner_id AND p.continuity_id=e.continuity_id AND p.to_id=e.id AND p.relation='payment'
       AND a.kind='item_event' AND a.life='active' AND ${related.sql}))`);values.push(...related.values);
+  }
+  if(view==='timeline' && kinds.includes('party_exchange')){
+    predicates.push(`(e.kind NOT IN('item_event','coin_transaction') OR NOT EXISTS(SELECT 1 FROM cloud_links l JOIN cloud_entities a
+      ON a.owner_id=l.owner_id AND a.continuity_id=l.continuity_id AND a.id=l.to_id
+      WHERE l.owner_id=e.owner_id AND l.continuity_id=e.continuity_id AND l.from_id=e.id AND l.relation='part_of_trade'
+        AND a.kind='party_exchange' AND a.life='active' AND ${related.sql}))`);values.push(...related.values);
   }
   const rows=(await service.s(`WITH RECURSIVE ${lineageSql}events AS (SELECT e.*, (SELECT min(h.revision) FROM cloud_changes h
      WHERE h.owner_id=e.owner_id AND h.continuity_id=e.continuity_id AND h.entity_id=e.id) AS event_revision

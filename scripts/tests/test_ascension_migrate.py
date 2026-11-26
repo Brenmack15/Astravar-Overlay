@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 import ascension_migrate as migration
-from ascension_migrate_legacy import encode, legacy_review, sha, weapon_review
+from ascension_migrate_legacy import compare_legacy, encode, legacy_review, sha, weapon_review
 
 
 class OfflineMigrationTest(unittest.TestCase):
@@ -103,6 +103,20 @@ class OfflineMigrationTest(unittest.TestCase):
         self.source.write_text('{"format":"a","format":"b"}')
         with self.assertRaisesRegex(ValueError, "Duplicate"):
             self.convert()
+
+    def test_reconciliation_keeps_distinct_same_balance_events_and_revision_conflicts(self):
+        self.native["events"] = [{"commandId":"earlier-purchase", "value":25}]
+        self.source.write_bytes(encode(self.native))
+        later = self.base / "later.json"
+        self.native["events"] = [{"commandId":"different-purchase", "value":25}]
+        self.native["records"]["wallets"][0]["copper"] = 1
+        later.write_bytes(encode(self.native))
+        result = compare_legacy(self.source,later,*self.tenant)
+        self.assertEqual({"identical":1,"onlyEarlier":1,"onlyLater":1,"conflictingSameRevision":1},result["counts"])
+        wallet = next(d for d in result["differences"] if d["family"] == "records.wallets")
+        self.assertEqual(7,wallet["earlier"]["revision"])
+        self.assertNotEqual(wallet["earlier"]["sha256"],wallet["later"]["sha256"])
+        self.assertEqual([],self.rows()["cloud_receipts"])
 
     def test_rollback_restores_before_generation_and_preserves_receipt_history(self):
         self.convert()
@@ -288,6 +302,15 @@ class OfflineMigrationTest(unittest.TestCase):
         grants = self.rows(rebuilt)["cloud_grant_audit"]
         self.assertEqual([2, 3], sorted(r["epoch"] for r in grants))
         self.assertEqual(2, len({r["event_id"] for r in grants}))
+        second = self.base / "next-generation.zip"
+        migration.export(rebuilt, second)
+        final = self.base / "fourth-epoch"
+        migration.init(final, *self.tenant)
+        migrate = migration.inspect(final, second)["approvalSha256"]
+        migration.apply(final, second, migrate)
+        proof = migration.control(final, "cutover")["approvalSha256"]
+        self.assertEqual(4,migration.control(final,"cutover",proof)["state"]["epoch"])
+        self.assertEqual(committed,run_worker(final,"read",4))
 
     def test_native_weapon_zip_hash_and_unindexed_asset(self):
         original = b'{"campaign":{}}'

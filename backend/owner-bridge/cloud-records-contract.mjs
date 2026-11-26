@@ -47,7 +47,7 @@ export function uniqueRecordIds(values) {
   if (new Set(values).size !== values.length) recordsFail('DUPLICATE_REFERENCE');
 }
 export const RECORD_DOMAIN_KINDS = Object.freeze({
-  wallet: 'economy', coin_transaction: 'economy', item_definition: 'inventory', item_instance: 'inventory',
+  wallet: 'economy', coin_transaction: 'economy', party_exchange:'economy', item_definition: 'inventory', item_instance: 'inventory',
   item_event: 'inventory', world_entity: 'world', relationship: 'world', known_fact: 'world',
   timeline_event: 'chronicle', objective: 'chronicle', checkpoint: 'chronicle', research_note: 'crafting',
   invention_project: 'crafting', blueprint_version: 'crafting', project_stage: 'crafting', component_event: 'crafting',

@@ -273,7 +273,7 @@ internal class ObservedUi(private val device: UiDevice) {
         primaryTabState(node)?.takeIf { it.enabled && it.selected }?.bounds
 
     fun ensurePrimaryTab(packageName: String, tab: String) {
-        require(tab in listOf("Character", "Inventory", "Companions", "Campaign")) { "Only primary tabs use tab-selection semantics" }
+        require(tab in listOf("Character", "Inventory", "Companions", "Campaign", "Connections", "Chronicle")) { "Only primary tabs use tab-selection semantics" }
         val deadline = SystemClock.uptimeMillis() + 30_000
         fun remaining() = (deadline - SystemClock.uptimeMillis()).coerceAtLeast(0)
         val selector = By.text(tab).pkg(packageName)

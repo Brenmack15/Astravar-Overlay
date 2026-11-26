@@ -176,10 +176,10 @@ private fun <T> List<T>.move(index: Int, target: Int): List<T> = toMutableList()
     val startingRevision = rememberSaveable(actorId,recordId) { attack.str("revision") }.toLongOrNull()
     val draftState = rememberReforgeDraft(Json.decodeFromString(CloudAttackDraft.serializer(), initial), CloudAttackDraft.serializer())
     var d by draftState
-    var discard by rememberSaveable(actorId,recordId) { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     val oldSelections = (attack?.get("data") as? JsonObject).rows("selections")
     val orphaned = oldSelections.filter { o -> d.components.none { it.id == o.str("componentId") && o.str("type") in it.variants } }
+    var discard by rememberSaveable(actorId, recordId, orphaned) { mutableStateOf(false) }
     val stale = attack != null && (startingRevision == null || startingRevision != attack.str("revision").toLongOrNull() || attack.str("actorId") != actorId)
     val references = remember(actorId) { mutableStateMapOf<String,List<JsonObject>>() }
     LaunchedEffect(client, actorId) {

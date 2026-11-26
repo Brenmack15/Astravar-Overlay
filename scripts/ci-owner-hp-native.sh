@@ -278,10 +278,13 @@ if [[ "$astravar_bootstrap_gate" == true ]]; then
   run_test 'com.yazsras.astravar.data.NotionNativeImportTest#publicContextApplyBackupReimportAndRollbackPreserveIdentity' notion-public-import.txt 360
   run_test 'com.yazsras.astravar.data.CampaignNativeHttpsTest#authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts' native-campaign-https.txt 360
   git rev-parse HEAD >"$astravar_output/SOURCE_COMMIT.txt"
+  bash scripts/ci-ascension-api37.sh
   python3 - "$astravar_output/SCOPE.json" <<'PY_SCOPE'
 import json,os,pathlib,sys
 pathlib.Path(sys.argv[1]).write_text(json.dumps({
- 'fictionalOnly':True,'emulatorApi':37,'nativeAndroidKeyStore':True,
+ 'fictionalOnly':True,'emulatorApi':int(pathlib.Path('validation/ascension-api37/sdk.txt').read_text()),
+ 'androidRelease':pathlib.Path('validation/ascension-api37/release.txt').read_text().strip(),
+ 'nativeAndroidKeyStore':True,
  'webCryptoEncryptedBootstrap':True,'sameDebugKeyUpdate':'53 to '+os.environ['ASTRAVAR_VERSION_CODE'],
  'legacyAliasAndVaultPreserved':True,'nativePublicNotionImport':True,
  'nativeCampaignHttpsAndIndependentReadback':True,

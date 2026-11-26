@@ -255,6 +255,10 @@ def review_bytes(raw, owner, continuity, shared_ids=(), known_records=()):
         counts[family] = {"declared": declared, "source": len(rows), "mapped": 0, "held": 0}
         for identity, row in rows:
             record = {"family": family, "identity": list(identity), "sha256": sha(encode(row))}
+            if type(row.get("revision")) is int:
+                record["sourceRevision"] = row["revision"]
+            if type(row.get("updatedAt")) is int:
+                record["sourceUpdatedAt"] = row["updatedAt"]
             if family in REVIEW_SCOPE:
                 # Membership and visibility approval applies to this exact row, source and destination.
                 token = sha(encode([owner, continuity, digest, family, list(identity), record["sha256"]]))
@@ -286,6 +290,37 @@ def review_bytes(raw, owner, continuity, shared_ids=(), known_records=()):
             "continuity": continuity, "sharedWallets": sorted(shared_ids), "knownRecords": sorted(known_records),
             "links": sorted(links, key=lambda r: (r["from_id"], r["relation"], r["to_id"])), "families": counts, "records": sources,
             "blockers": dict(sorted(blockers.items()))}, mapped, raw
+
+
+def compare_legacy(before, after, owner, continuity):
+    """Reconcile identifiers, revisions, and revision evidence without choosing a winner or replaying an event."""
+    left = legacy_review(before, owner, continuity)[0]
+    right = legacy_review(after, owner, continuity)[0]
+    verify("records" in left and "records" in right,
+           "This source format requires its dedicated archive comparison")
+    def index(report):
+        return {(r["family"], tuple(r["identity"])): r for r in report["records"]}
+    a, b = index(left), index(right)
+    counts = Counter()
+    differences = []
+    for key in sorted(a.keys() | b.keys()):
+        old, new = a.get(key), b.get(key)
+        if old and new and old["sha256"] == new["sha256"]:
+            counts["identical"] += 1
+            continue
+        status = "changed" if old and new else "onlyEarlier" if old else "onlyLater"
+        if old and new and old.get("sourceRevision") is not None and old.get("sourceRevision") == new.get("sourceRevision"):
+            status = "conflictingSameRevision"
+        counts[status] += 1
+        def evidence(row):
+            if row is None:
+                return None
+            return {"sha256":row["sha256"], "revision":row.get("sourceRevision"), "sourceUpdatedAt":row.get("sourceUpdatedAt")}
+        differences.append({"family":key[0], "identity":list(key[1]), "disposition":status,
+                            "earlier":evidence(old), "later":evidence(new)})
+    return {"owner":owner, "continuity":continuity, "earlierSource":left["sha256"], "laterSource":right["sha256"],
+            "counts":dict(sorted(counts.items())), "differences":differences,
+            "sourceCoverage":{"earlier":left.get("families",left.get("counts")), "later":right.get("families",right.get("counts"))}}
 
 
 def weapon_review(path):

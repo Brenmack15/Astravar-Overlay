@@ -49,7 +49,7 @@ object RollManagerRules {
         for (p in presets) {
             require(p.id.isNotBlank() && p.id.length <= 128 && p.name.isNotBlank() && p.name.length <= 120 && p.entries.size in 1..24)
             for (e in p.entries) {
-                require(e.key.isNotBlank() && e.key.length <= 128 && e.label.isNotBlank() && e.label.length <= 120)
+                require(e.key.isNotBlank() && e.key.length <= 160 && e.label.isNotBlank() && e.label.length <= 120)
                 require(e.kind in setOf(RollKind.SKILL, RollKind.ABILITY_CHECK, RollKind.SAVE, RollKind.INITIATIVE, RollKind.CUSTOM))
                 if (e.kind == RollKind.CUSTOM) SecureDice.parse(requireNotNull(e.customFormula))
                 else require(e.customFormula == null)

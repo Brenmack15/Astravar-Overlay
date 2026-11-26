@@ -31,10 +31,10 @@ async function setup(route, body) {
     assert.equal(response.status, 200);
     return response.json;
 }
-async function grant(subject, revision, revoked = false) {
+async function grant(subject, revision, revoked = false, automatic = true) {
     return setup(path + '/grants/' + subject, {
-        scopes: ['character','resources','inventory','economy','combat','chronicle','rolls'].flatMap(k=>[k+'.read',k+'.write']),
-        actors: ['*'], auto: ['character','resources','inventory','economy','combat','chronicle','rolls'].map(k=>k+'.write'),
+        scopes: ['character','resources','inventory','economy','combat','chronicle','rolls'].flatMap(k=>[k+'.read',k+'.write']).concat(subject.startsWith('device:')?['approval.read']:[]),
+        actors: ['*'], auto: automatic?['character','resources','inventory','economy','combat','chronicle','rolls'].map(k=>k+'.write'):[],
         expiresAt, expectedGrantRevision: revision, revoked
     });
 }
@@ -56,6 +56,10 @@ try {
                 const result = await setup('/mcp', {jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:{continuityId:continuity,...args}}});
                 assert.ok(result.result && !result.result.isError);
                 emit(result.result.structuredContent);
+            } else if (call === 'requireReview') emit(await grant('sites-mcp',1,false,false));
+            else if (call === 'ownerVerify') {
+                assert.match(args.commandId,/^[A-Za-z0-9-]+$/);
+                emit(await setup(path+'/approvals/'+args.commandId+'/verify',{digest:args.digest}));
             } else if (call === 'revoke') emit(await grant('device:'+device, 1, true));
             else throw new Error('Unknown control');
         } catch (error) { emit({fixtureError: error.name + ' in native test driver'}); }

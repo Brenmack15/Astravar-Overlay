@@ -8,6 +8,7 @@ import { CloudService } from './cloud-service.mjs';
 import { cloudRecordView } from './cloud-records-query.mjs';
 import { RECORD_KINDS, RECORD_OPERATIONS } from './cloud-records.mjs';
 import { MECHANIC_KINDS, MECHANIC_OPERATIONS, mechanicActorSheet } from './cloud-mechanics.mjs';
+import { cloudParity } from './fixtures/cloud-parity.mjs';
 import { CloudPlan } from './cloud-plan.mjs';
 import { cloudActions } from './cloud-actions-view.mjs';
 
@@ -45,7 +46,8 @@ async function fixture(t,withMechanics=false) {
   };
   await grant();
   const body=async(operation,args)=>({version:1,epoch:1,commandId:crypto.randomUUID(),expectedRevision:(await service.continuity(continuity)).revision,operation,args});
-  const submit=(cmd,p=dm)=>service.submit(p,continuity,cmd);
+  const paritySubmit=cloudParity(()=>db,owner.ownerId,continuity);
+  const submit=(cmd,p=dm)=>p===dm?paritySubmit(cmd):service.submit(p,continuity,cmd);
   const run=async(op,args,p=dm)=>(await submit(await body(op,args),p)).receipt.outcome;
   const record=async(id,p=owner)=>(await service.state(p,continuity,{id,activeOnly:false})).records[0];
   if(withMechanics){
@@ -203,6 +205,85 @@ test('a failed commit rolls back the real SQL item, accounting, history and requ
   assert.equal((await f.submit(command)).status,'COMMITTED');
   assert.equal((await f.record('purse')).data.coins.gp,4);
 });
+test('a reviewed mixed party exchange conserves possessions and both exact wallets in one retry-safe commit',async t=>{
+  const f=await fixture(t);
+  await f.run('define_item_definition',definition());await f.run('define_item_definition',definition('instrument',false));
+  await f.run('acquire_item',{itemId:'supplies',ownerId:'hero',definitionId:'supply',quantity:8,source});
+  await f.run('acquire_item',{itemId:'tool',ownerId:'ally',definitionId:'instrument',quantity:1,source});
+  await f.run('define_wallet',{walletId:'left-money',title:'Purse',holderId:'hero',shared:false,coins:amounts({gp:10,ep:null}),source});
+  await f.run('define_wallet',{walletId:'right-money',title:'Purse',holderId:'ally',shared:false,coins:amounts({cp:7}),source});
+  const give={actorId:'hero',walletId:'left-money',coins:amounts({gp:2}),items:[{itemId:'supplies',quantity:3,splitId:'received-supplies'}]};
+  const receive={actorId:'ally',walletId:'right-money',coins:amounts({cp:2}),items:[{itemId:'tool',quantity:1,splitId:null}]};
+  const args={left:give,right:receive,reason:'Confirmed exchange',source};
+  await assert.rejects(f.run('exchange_party_assets',{...args,right:{...receive,items:[{itemId:'tool',quantity:2,splitId:null}]}}),/INSUFFICIENT_KNOWN_QUANTITY/);
+  assert.equal((await f.record('left-money')).data.coins.gp,10);assert.equal(await f.record('received-supplies'),undefined);
+  assert.equal((await f.record('supplies')).data.quantity,8);
+  const command=await f.body('exchange_party_assets',args),original=await f.submit(command);
+  const trade=original.receipt.outcome;
+  assert.equal(trade.holdings.length,2);
+  assert.equal((await f.record('left-money')).data.coins.gp,8);
+  assert.equal((await f.record('left-money')).data.coins.ep,null);
+  assert.equal((await f.record('right-money')).data.coins.cp,5);
+  assert.equal((await f.record('tool')).data.ownerId,'hero');
+  assert.equal((await f.record('received-supplies')).data.ownerId,'ally');
+  assert.equal((await f.record('supplies')).data.quantity,5);
+  const total=(await cloudRecordView(f.service,dm,continuity,'wallets',{})).totals;
+  assert.equal(total.knownCopper,'1007');
+  for(const id of ['hero','supplies','received-supplies','tool','right-money']){
+    const entries=(await cloudRecordView(f.service,dm,continuity,'timeline',{id})).events.filter(row=>row.data.commandId===command.commandId);
+    assert.deepEqual(entries.map(row=>row.id),[trade.tradeId]);
+  }
+  const itemHistory=(await cloudRecordView(f.service,dm,continuity,'item_history',{id:'tool'})).events;
+  assert.equal(itemHistory[0].data.after.ownerId,'hero');
+  f.reopen();assert.equal((await f.submit(command)).receipt.transactionId,original.receipt.transactionId);
+});
+test('jointly owned stock stays separate from custody and confirmed unknown currency is initialized once',async t=>{
+  const f=await fixture(t);
+  await f.run('define_item_definition',definition());
+  await f.run('define_connection',{entityId:'store',name:'Shared store',category:'place',partyStorage:true,actorId:null,knownDescription:null,source});
+  await f.run('define_wallet',{walletId:'joint',title:'Common purse',holderId:null,shared:true,coins:amounts({gp:null,ep:null}),source});
+  const reconciliation={walletId:'joint',expectedRevision:1,denomination:'gp',previous:null,confirmedBalance:6,reason:'Recorded opening count',source};
+  await f.run('reconcile_wallet_denomination',reconciliation);
+  await assert.rejects(f.run('reconcile_wallet_denomination',reconciliation),/WALLET_RECONCILIATION_CONFLICT/);
+  await f.run('reconcile_wallet_denomination',{...reconciliation,expectedRevision:2,denomination:'ep',confirmedBalance:0,reason:'Confirmed no electrum held'});
+  assert.equal((await f.record('joint')).data.coins.ep,0);
+  await f.run('purchase_item',{itemId:'shared-stack',definitionId:'supply',ownerId:null,storageId:'store',quantity:4,
+    walletId:'joint',price:amounts({gp:2}),sellerId:null,source});
+  const original=await f.record('shared-stack');
+  assert.equal(original.data.ownerType,'party');assert.equal(original.data.ownerId,null);assert.equal(original.data.custodianId,null);
+  assert.equal(original.data.holding,'storage');assert.equal(original.data.locationId,'store');
+  await f.run('transfer_item',{itemId:'shared-stack',quantity:4,splitId:null,destination:{type:'loan',actorId:'ally',locationId:null,
+    recipientId:null,recipientName:null},reason:'Confirmed custody',source});
+  const held=await f.record('shared-stack');
+  assert.equal(held.data.ownerType,'party');assert.equal(held.data.ownerId,null);assert.equal(held.data.custodianId,'ally');
+  await f.run('transfer_item',{itemId:'shared-stack',quantity:4,splitId:null,destination:{type:'storage',actorId:null,partyOwned:true,
+    locationId:'store',recipientId:null,recipientName:null},reason:'Returned to party storage',source});
+  f.reopen();assert.equal((await f.record('joint')).data.coins.gp,4);
+  assert.equal((await cloudRecordView(f.service,dm,continuity,'inventory',{})).groups[0].knownQuantity,4);
+});
+test('editing a known connection and relationship, an instance, a favorite and an exact signed wallet entry preserves other identities',async t=>{
+  const f=await fixture(t);
+  const place={entityId:'house',name:'House',category:'place',actorId:null,knownDescription:'A known entrance',source};
+  await f.run('define_connection',place);
+  await f.run('edit_connection',{...place,name:'North House',knownDescription:'A confirmed north entrance'});
+  const relation={relationshipId:'host',from:{kind:'actor',id:'hero'},to:{kind:'world_entity',id:'house'},relationship:'Visiting',
+    terms:'Invitation recorded',status:'current',source};
+  await f.run('record_relationship',relation);
+  await f.run('update_relationship',{...relation,terms:'Visit finished',status:'ended'});
+  await f.run('define_item_definition',definition('device',false));
+  for(const itemId of ['custom-device','original-device'])await f.run('acquire_item',{definitionId:'device',itemId,ownerId:'hero',quantity:1,source});
+  await f.run('customize_item',{itemId:'custom-device',name:'Adjusted instrument',description:'Owner-approved markings',condition:'marked',source});
+  await f.run('set_item_favorite',{itemId:'custom-device',favorite:true});
+  await f.run('define_wallet',{walletId:'spending',title:'Held coins',holderId:'hero',shared:false,coins:amounts({cp:8,gp:null}),source});
+  await f.run('adjust_coins',{walletId:'spending',change:amounts({cp:-5,sp:2}),reason:'Confirmed service and income',source});
+  f.reopen();
+  assert.equal((await f.record('house')).title,'North House');
+  assert.equal((await f.record('host')).data.status,'ended');
+  assert.equal((await f.record('custom-device')).data.favorite,true);
+  assert.equal((await f.record('original-device')).title,'Supplies');
+  assert.equal((await f.record('device')).title,'Supplies');
+  assert.deepEqual((await f.record('spending')).data.coins,amounts({cp:3,sp:2,gp:null}));
+});
 
 test('party projections count actual compatible stock and unknown wallets, timeline deduplicates purchase under each subject',async t=>{
   const f=await fixture(t),view=(name,opts={},p=dm)=>cloudRecordView(f.service,p,continuity,name,opts);
@@ -280,6 +361,88 @@ test('actual material quantity, decided stage, blueprint history and linked outp
   assert.equal((await f.record('wood')).data.quantity,3);assert.equal((await f.record('build')).data.outputId,'fixture-frame');
   assert.equal((await cloudRecordView(f.service,dm,continuity,'genealogy',{id:'wood'})).events[0].data.definitionId,'supply');
   assert.equal((await cloudRecordView(f.service,dm,continuity,'genealogy',{id:'fixture-frame'})).events[0].data.beforeQuantity,5);
+});
+test('sourced corrections preserve holdings, earlier receipts, unresolved facts and completed milestones',async t=>{
+  const f=await fixture(t);
+  await f.run('define_item_definition',definition());
+  await f.run('acquire_item',{itemId:'bundle',definitionId:'supply',ownerId:'hero',quantity:3,source});
+  const owned=await f.record('bundle');
+  const historic={eventId:'attested',itemId:'bundle',eventType:'acquisition',previousOwner:{kind:'unknown',id:null,name:null},
+    newOwner:{kind:'actor',id:'hero',name:null},reason:'Recorded prior acquisition',worldTime:null,sourceEventId:'page-record-one',
+    sourcePublishedAt:null,source,evidence:'uncertain',correctsId:null};
+  await f.run('record_historical_item_event',historic);
+  await assert.rejects(f.run('record_historical_item_event',{...historic,eventId:'duplicate'}),/ITEM_SOURCE_EVENT_ALREADY_RECORDED/);
+  await f.run('record_historical_item_event',{...historic,eventId:'clarified',sourceEventId:'page-record-two',evidence:'confirmed',
+    previousOwner:{kind:'named',id:null,name:'Recorded prior holder'},correctsId:'attested',reason:'Clarified earlier source'});
+  assert.deepEqual(await f.record('bundle'),owned);
+  const history=await cloudRecordView(f.service,dm,continuity,'item_history',{id:'bundle'});
+  assert.deepEqual(history.events.slice(0,2).map(row=>[row.id,row.data.evidence]),[['clarified','confirmed'],['attested','uncertain']]);
+  const cp={checkpointId:'handoff',title:'Handoff',scene:'Source fixture',locationId:null,worldTime:null,lastEventKind:'item_event',lastEventId:'attested',
+    unresolved:null,pendingRollId:null,encounterId:null,objectiveIds:[],actorIds:['hero'],source};
+  await assert.rejects(f.run('save_checkpoint',cp),/CONFIRMED_EVENT_REQUIRED/);
+  await f.run('save_checkpoint',{...cp,lastEventId:'clarified'});
+  const original=await f.body('record_known_fact',{factId:'fact',subject:{kind:'item_instance',id:'bundle'},title:'Recorded marking',
+    detail:'A mark was reported.',evidence:'rumor',learnedAt:null,originalWorldTime:null,source});
+  const originalReceipt=(await f.submit(original)).receipt;
+  const revision={factId:'fact',expectedRevision:1,title:'Recorded marking',detail:'A mark was inspected.',evidence:'confirmed',
+    learnedAt:null,originalWorldTime:null,reason:'Inspected evidence',source};
+  await f.run('revise_known_fact',revision);
+  await assert.rejects(f.run('revise_known_fact',revision),/FACT_REVISION_CHANGED/);
+  await f.run('define_objective',{objectiveId:'goal',title:'Examine a marking',actorId:'hero',category:'personal',status:'active',
+    knownRequirements:[],linkedProjectId:null,source});
+  await f.run('revise_objective',{objectiveId:'goal',expectedRevision:1,title:'Examine both marks',knownRequirements:['Compare the sides'],reason:'Clarified scope',source});
+  assert.equal((await f.record('goal')).data.status,'active');
+  for(const eventId of ['observed','compared']){
+    await f.run('record_chronicle_event',{eventId,title:'Actual observation',narrative:'Observed in the fixture.',category:'discovery',
+      status:'confirmed',worldTime:null,subjects:[{kind:'item_instance',id:'bundle'}],correctsId:null,source});
+    await f.run('record_objective_milestone',{objectiveId:'goal',eventId,status:'active',source});
+  }
+  await assert.rejects(f.run('record_objective_milestone',{objectiveId:'goal',eventId:'observed',status:'completed',source}),/MILESTONE_ALREADY_RECORDED/);
+  f.reopen();
+  assert.equal((await f.record('fact')).data.evidence,'confirmed');
+  assert.deepEqual((await f.service.receipt(dm,continuity,original.commandId)).receipt,originalReceipt);
+  assert.equal((await f.service.state(dm,continuity,{kind:'coin_transaction'})).records.length,0);
+});
+test('project revisions and mandatory source materials, linked payments and completed predecessor are validated before completion',async t=>{
+  const f=await fixture(t);
+  await f.run('define_item_definition',definition());
+  await f.run('define_item_definition',definition('shell',false));
+  await f.run('acquire_item',{itemId:'thread',definitionId:'supply',ownerId:'hero',quantity:4,source});
+  for(const itemId of ['prior-item','result-item','unrelated-item'])await f.run('acquire_item',{itemId,definitionId:'shell',ownerId:'hero',quantity:1,source});
+  await f.run('define_wallet',{walletId:'purse',title:'Coins',holderId:'hero',shared:false,coins:amounts({gp:8,sp:2}),source});
+  await f.run('record_research',{researchId:'finding',title:'Observation',actorId:'hero',finding:'Suspected fit',evidence:'hypothesis',itemId:'thread',rollId:null,source});
+  await f.run('revise_research_finding',{researchId:'finding',expectedRevision:1,title:'Observation',finding:'Confirmed fit',evidence:'confirmed',reason:'Inspected components',source});
+  for(const projectId of ['prior','result'])await f.run('propose_invention',{projectId,title:projectId,actorId:'hero',intent:'Prepare the fixture',requirements:[],researchIds:[],source});
+  await f.run('revise_invention_plan',{projectId:'result',expectedRevision:1,title:'Reviewed assembly',intent:'Join the fixture',
+    requirements:['Attach the source material'],additionalResearchIds:['finding'],reason:'Confirmed fit',source});
+  await f.run('link_project_dependency',{projectId:'result',requiredProjectId:'prior',source});
+  await assert.rejects(f.run('link_project_dependency',{projectId:'prior',requiredProjectId:'result',source}),/PROJECT_DEPENDENCY_CONFLICT/);
+  for(const projectId of ['prior','result']){
+    const stageId=projectId+'-stage';
+    await f.run('define_construction_stage',{projectId,stageId,blueprintId:null,title:'Reviewed fitting',prerequisites:[],requiredWork:null,checkRequired:false,
+      ...(projectId==='result'?{materials:[{definitionId:'supply',quantity:3,method:'material_consumed'}],minimumPayment:amounts({gp:3,sp:2})}:{}),source});
+    await f.run('resolve_construction_stage',{stageId,outcome:'completed',rollId:null,worldTimeSpent:null,evidence:'Confirmed by fixture owner',source});
+  }
+  const finish={projectId:'result',outputItemId:'result-item',stageIds:['result-stage'],source};
+  await assert.rejects(f.run('link_completed_invention',finish),/INCOMPLETE_PROJECT_DEPENDENCY/);
+  await f.run('link_completed_invention',{projectId:'prior',outputItemId:'prior-item',stageIds:['prior-stage'],source});
+  await assert.rejects(f.run('link_completed_invention',finish),/STAGE_MATERIAL_EVIDENCE_REQUIRED/);
+  const install={eventId:'material-1',projectId:'result',stageId:'result-stage',donorItemId:'thread',outputItemId:'result-item',
+    method:'material_consumed',quantity:3,evidence:'Three lengths were used',source};
+  await assert.rejects(f.run('integrate_component',{...install,quantity:4}),/STAGE_MATERIAL_REQUIREMENT_MISMATCH/);
+  await f.run('integrate_component',install);
+  await assert.rejects(f.run('link_completed_invention',{...finish,outputItemId:'unrelated-item'}),/PROJECT_OUTPUT_LINEAGE_MISMATCH/);
+  await assert.rejects(f.run('link_completed_invention',finish),/STAGE_PAYMENT_EVIDENCE_REQUIRED/);
+  const payment={projectId:'result',stageId:'result-stage',walletId:'purse',coins:amounts({gp:3}),reason:'Recorded stage payment',source};
+  await f.run('pay_construction_cost',payment);
+  await assert.rejects(f.run('link_completed_invention',finish),/STAGE_PAYMENT_EVIDENCE_REQUIRED/);
+  await f.run('pay_construction_cost',{...payment,coins:amounts({sp:2})});
+  await f.run('link_completed_invention',finish);
+  f.reopen();
+  assert.equal((await f.record('result')).data.outputId,'result-item');
+  assert.equal((await f.record('thread')).data.quantity,1);
+  assert.deepEqual((await f.record('purse')).data.coins,amounts({gp:5}));
+  assert.equal((await f.record('finding')).data.evidence,'confirmed');
 });
 
 test('explicit exchange conserves copper and insufficient exact coins do not silently make change',async t=>{

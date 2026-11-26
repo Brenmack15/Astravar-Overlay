@@ -17,6 +17,7 @@ export const arrayOf = (items, maxItems = 64) => ({type:'array', items, maxItems
 export const fields = (properties, required = []) => ({type:'object', additionalProperties:false, properties, required});
 export const abilityMap = fields(Object.fromEntries(stats.map(stat => [stat, nullable(whole(0,100))])));
 export const movementMap = fields(Object.fromEntries(['walk','fly','swim','climb','burrow','hover'].map(key => [key,nullable(whole(0,10000))])));
+export const sensesMap = fields(Object.fromEntries(['darkvision','blindsight','tremorsense','truesight'].map(key=>[key,nullable(whole(0,10000))])));
 export const actionCost = option('action','bonus_action','reaction','attack','other');
 export const mode = option('normal','advantage','disadvantage');
 export const origin = option('player_digital','player_physical','dm','delegated','app');
@@ -29,7 +30,7 @@ export const actorSchema = fields({
   actorId:identifier, name:named(160), role:option('player','companion','npc','creature'),
   rulesProfile:option('legacy_2014','revised_2024','custom'), level:whole(1,20),
   proficiency:nullable(whole(0,30)), maxHp:nullable(whole()), currentHp:nullable(whole()), temporaryHp:nullable(whole()),
-  baseAc:nullable(whole(0,100)), abilities:abilityMap, speeds:movementMap, saveProficiencies:arrayOf(option(...stats),6),
+  baseAc:nullable(whole(0,100)), abilities:abilityMap, speeds:movementMap, senses:sensesMap, size:option('tiny','small','medium','large','huge','gargantuan'),creatureType:named(60), saveProficiencies:arrayOf(option(...stats),6),
   attacksPerAction:whole(1,12), attunementCapacity:nullable(whole(0,12)), gameSeconds:nullable(whole(0,100000000000)),
   source:named(300)
 }, ['actorId','name','role','rulesProfile','level']);
@@ -43,13 +44,13 @@ export const formSchema = fields({
   actorId:identifier, formId:identifier, name:named(160), source:named(300), description:named(2000),
   size:option('tiny','small','medium','large','huge','gargantuan'), creatureType:named(60),
   sourceItemId:identifier, requiresAttunement:boolean, requiresOperating:boolean, abilityOverrides:abilityMap, speeds:movementMap,
-  grounded:boolean, baseAc:nullable(whole(0,100)), activationSeconds:whole(0,86400), durationSeconds:nullable(whole(1,31536000)),
+  suppressedItemIds:arrayOf(identifier,24),requiresWilling:boolean,senses:sensesMap,grounded:boolean, baseAc:nullable(whole(0,100)), activationSeconds:whole(0,86400), durationSeconds:nullable(whole(1,31536000)),
   timing:actionCost, deploymentPoolId:identifier, integrityPoolId:identifier, resetPoolId:identifier
 }, ['actorId','formId','name','source','timing','activationSeconds']);
 export const effectSchema = fields({
   actorId:identifier, effectId:identifier, name:named(160), source:named(300),
-  target:option('ability_score','ability_check','skill','save','passive','initiative','ac','attack','spell_attack','spell_dc','damage_defense','condition_immunity','roll_edge'),
-  key:identifier, operation:option('add','set','resistance','immunity','vulnerability','advantage','disadvantage','keep_highest_three'),
+  target:option('ability_score','ability_check','skill','save','passive','initiative','ac','attack','spell_attack','spell_dc','speed','sense','damage_defense','condition_immunity','spell_damage_immunity','roll_edge'),
+  key:identifier, operation:option('add','set','minimum','maximum','resistance','immunity','vulnerability','advantage','disadvantage','keep_highest_three'),
   amount:whole(-1000,1000), priority:whole(-100,100), stackingKey:identifier,
   sourceItemId:identifier, transfersWithItem:boolean, requiresAttunement:boolean, requiresOperating:boolean, formId:identifier, contextTag:identifier,
   expiresAt:nullable(whole(0,100000000000)), enabled:boolean
@@ -81,6 +82,8 @@ export const attackSchema = fields({
 export const spellSchema = fields({
   actorId:identifier, spellId:identifier, name:named(160), source:named(300), baseLevel:whole(0,9), concentration:boolean,
   timing:actionCost, ritual:boolean, resolution:option('attack','save','automatic','manual'), saveAbility:option(...stats),saveSuccess:option('none','half','full'),
+  scaling:fields({targets:whole(1,10000),targetsPerLevel:whole(0,1000),durationSeconds:whole(0,31536000),durationPerLevel:whole(0,31536000),
+    areaFeet:whole(0,10000),areaPerLevel:whole(0,10000),source:named(300)},['source']),
   description:named(2400), range:named(120), duration:named(120), components:arrayOf(component,16)
 },['actorId','spellId','name','source','baseLevel','concentration','timing','ritual','resolution','components']);
 
@@ -118,13 +121,16 @@ export async function transferableSource(ctx,config){
     must(pool.data.type==='charge','TRANSFERABLE_RULE_REQUIRES_ITEM_CHARGES');
   }
 }
-export async function gearEligible(ctx,itemId,actorId,attunement=false,requiresOperating=false) {
+export async function gearEligible(ctx,itemId,actorId,attunement=false,requiresOperating=false,formOverride=undefined) {
   if (!itemId) return !attunement && !requiresOperating;
   const item=await ctx.get('item_instance',itemId);
   const data=item?.data;
-  return !!data && item.life==='active' && data.custodianId===actorId && data.partyAccess===true &&
+  const equipped=!!data && item.life==='active' && data.custodianId===actorId && data.partyAccess===true &&
     data.holding==='carried' && ['held','worn'].includes(data.equipment) && (!requiresOperating || data.operating===true) &&
     data.quantity===1 && (!attunement || data.attuned===true);
+  if(!equipped)return false;
+  const form=formOverride===undefined?await activeForm(ctx,await actor(ctx,actorId)):formOverride;
+  return !form?.data.suppressedItemIds?.includes(itemId);
 }
 export async function activeForm(ctx,a) {
   const d=a.data;
@@ -132,7 +138,7 @@ export async function activeForm(ctx,a) {
   const f=await ctx.get('form',d.activeFormId);
   if (!f || f.actorId!==a.id || f.life!=='active') return null;
   if (d.formExpiresAt!=null && (d.gameSeconds==null || d.gameSeconds>=d.formExpiresAt)) return null;
-  return await gearEligible(ctx,f.data.sourceItemId,a.id,f.data.requiresAttunement,f.data.requiresOperating) ? f:null;
+  return await gearEligible(ctx,f.data.sourceItemId,a.id,f.data.requiresAttunement,f.data.requiresOperating,null) ? f:null;
 }
 export async function activeEffects(ctx,a,form,contextTags=[]) {
   const winners=new Map(), suppressed=[];
@@ -143,7 +149,7 @@ export async function activeEffects(ctx,a,form,contextTags=[]) {
     const eligible=d.enabled && (!d.formId || d.formId===form?.id) &&
       (!d.contextTag || contextTags.includes(d.contextTag)) &&
       (d.expiresAt==null || (a.data.gameSeconds!=null && a.data.gameSeconds<d.expiresAt)) &&
-      await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating);
+      await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating,form);
     if (!eligible) {suppressed.push(id); continue;}
     // A shared anti-stacking key affects only the same mechanical target and subject.
     const key=JSON.stringify([d.stackingKey??id,d.target,d.key,d.target==='roll_edge'||d.target==='damage_defense'?d.operation:null]);
@@ -154,25 +160,48 @@ export async function activeEffects(ctx,a,form,contextTags=[]) {
       winners.set(key,row);
     } else suppressed.push(id);
   }
-  return {active:[...winners.values()],suppressed};
+  const active=[...winners.values()];
+  if(a.data.rulesProfile!=='custom'){
+    const tags=new Set(contextTags),conditions=(a.data.conditions??[]).map(k=>k.toLowerCase());
+    const immunity=new Set(active.filter(r=>r.data.target==='condition_immunity').map(r=>r.data.key));
+    const applies=c=>conditions.includes(c)&&!immunity.has(c);
+    function add(c,target,key,operation,amount=null){
+      active.push({id:'condition:'+c+':'+target+':'+key,data:{target,key,operation,amount,priority:10000,source:`${a.data.rulesProfile} ${c}`}});
+    }
+    const genericChecks=['ability:all','skill:all','initiative:initiative','attack:all','spell_attack:all'];
+    if(applies('poisoned') && !applies('petrified'))for(const key of genericChecks)add('poisoned','roll_edge',key,'disadvantage');
+    if(applies('frightened') && tags.has('fear-source-visible'))for(const key of genericChecks)add('frightened','roll_edge',key,'disadvantage');
+    for(const c of ['blinded','prone','restrained'])if(applies(c))for(const key of ['attack:all','spell_attack:all'])add(c,'roll_edge',key,'disadvantage');
+    if(applies('restrained'))add('restrained','roll_edge','save:DEX','disadvantage');
+    if(applies('invisible') && tags.has('target-cannot-see-you'))for(const key of ['attack:all','spell_attack:all'])add('invisible','roll_edge',key,'advantage');
+    if(a.data.rulesProfile==='revised_2024'){
+      if(applies('invisible'))add('invisible','roll_edge','initiative:initiative','advantage');
+      for(const c of ['incapacitated','paralyzed','petrified','unconscious','stunned'])if(applies(c))add(c,'roll_edge','initiative:initiative','disadvantage');
+    }
+    for(const c of ['grappled','restrained','paralyzed','petrified','unconscious'])if(applies(c))add(c,'speed','all','maximum',0);
+    if(applies('petrified'))for(const type of damageTypes)add('petrified','damage_defense',type,'resistance');
+  }
+  return {active,suppressed};
 }
 export function numeric(base,active,target,key) {
   const matching=active.filter(r=>r.data.target===target && (r.data.key===key||r.data.key==='all'));
   const sets=matching.filter(r=>r.data.operation==='set').sort((a,b)=>b.data.priority-a.data.priority||b.data.amount-a.data.amount||a.id.localeCompare(b.id));
   const applied=matching.filter(r=>r.data.operation==='add');
   const starting=sets.length ? sets[0].data.amount : base;
-  return {value:starting==null?null:starting+applied.reduce((s,r)=>s+r.data.amount,0),
-    base,sources:[...sets.slice(0,1),...applied].map(r=>({id:r.id,source:r.data.source,operation:r.data.operation,value:r.data.amount}))};
+  let value=starting==null?null:starting+applied.reduce((sum,r)=>sum+r.data.amount,0);
+  const bounds=matching.filter(r=>['minimum','maximum'].includes(r.data.operation)).sort((a,b)=>b.data.operation.localeCompare(a.data.operation));
+  for(const r of bounds)if(value!=null)value=r.data.operation==='minimum'?Math.max(value,r.data.amount):Math.min(value,r.data.amount);
+  return {value,base,sources:[...sets.slice(0,1),...applied,...bounds].map(r=>({id:r.id,source:r.data.source,operation:r.data.operation,value:r.data.amount}))};
 }
 export function rollPolicy(active,key,requested='normal') {
-  const modes=active.filter(r=>r.data.target==='roll_edge' && (r.data.key===key||r.data.key==='all')).map(r=>r.data.operation);
+  const modes=active.filter(r=>r.data.target==='roll_edge' && (r.data.key===key||r.data.key===key.split(':')[0]+':all'||r.data.key==='all')).map(r=>r.data.operation);
   const high=requested==='advantage'||modes.includes('advantage')||modes.includes('keep_highest_three');
   const low=requested==='disadvantage'||modes.includes('disadvantage');
   if(high===low)return {mode:'normal',count:1};
   return {mode:high?'advantage':'disadvantage',count:high && modes.includes('keep_highest_three')?3:2};
 }
-export async function sheet(ctx,id,contextTags=[]) {
-  const a=await actor(ctx,id), form=await activeForm(ctx,a);
+export async function sheet(ctx,id,contextTags=[],previewFormId=undefined) {
+  const a=await actor(ctx,id), form=previewFormId===undefined?await activeForm(ctx,a):previewFormId?await owned(ctx,'form',previewFormId,id):null;
   const {active,suppressed}=await activeEffects(ctx,a,form,contextTags);
   const abilities={},checks={},saves={},skills={},passives={};
   for(const stat of stats){
@@ -197,14 +226,28 @@ export async function sheet(ctx,id,contextTags=[]) {
     passives[key]={...numeric(skills[key].value==null?null:10+skills[key].value+adjustment,active,'passive',key),mode,adjustment};
   }
   const movement={...a.data.speeds,...form?.data.speeds};
+  const senses={...a.data.senses,...form?.data.senses};
+  for(const [target,output] of [['speed',movement],['sense',senses]]){
+    const modes=new Set([...Object.keys(output),...active.filter(r=>r.data.target===target&&r.data.key!=='all').map(r=>r.data.key)]);
+    for(const k of modes){const value=numeric(output[k]??null,active,target,k).value;output[k]=value==null?null:Math.max(0,value);}
+  }
   if(form?.data.grounded){movement.fly=0; movement.hover=0;}
   const ac=numeric(form?.data.baseAc??a.data.baseAc,active,'ac','all');
   const subjects=[...stats.flatMap(k=>['ability:'+k,'save:'+k]),...Array.from(keys,k=>'skill:'+k),'initiative:initiative'];
+  const rollRestrictions={};
+  if(a.data.rulesProfile!=='custom'){
+    const immune=new Set(active.filter(r=>r.data.target==='condition_immunity').map(r=>r.data.key));
+    const conditions=(a.data.conditions??[]).map(k=>k.toLowerCase()).filter(c=>!immune.has(c));
+    if(conditions.some(c=>['paralyzed','petrified','unconscious','stunned'].includes(c)))for(const key of ['save:STR','save:DEX'])rollRestrictions[key]='AUTOMATIC_SAVE_FAILURE';
+    if(conditions.includes('blinded')&&contextTags.includes('requires-sight')||conditions.includes('deafened')&&contextTags.includes('requires-hearing'))
+      for(const key of subjects.filter(k=>k.startsWith('ability:')||k.startsWith('skill:')))rollRestrictions[key]='REQUIRED_SENSE_UNAVAILABLE';
+  }
   const rollModes=Object.fromEntries(subjects.map(key=>[key,Object.fromEntries(['normal','advantage','disadvantage'].map(mode=>[mode,rollPolicy(active,key,mode)]))]));
-  return {actorId:id,formId:form?.id??null,abilities,checks,saves,skills,passives,ac,movement,
+  return {actorId:id,formId:form?.id??null,size:form?.data.size??a.data.size??null,creatureType:form?.data.creatureType??a.data.creatureType??null,
+    senses,abilities,checks,saves,skills,passives,ac,movement,
     initiative:numeric(abilities.DEX.modifier,active,'initiative','all'),proficiency:a.data.proficiency,
     currentHp:a.data.currentHp,maxHp:a.data.maxHp,temporaryHp:a.data.temporaryHp,
-    activeEffects:active.map(r=>r.id),suppressedEffects:suppressed,conditions:a.data.conditions,rollModes,contextTags:a.data.contextTags??[],
+    activeEffects:active.map(r=>r.id),suppressedEffects:suppressed,conditions:a.data.conditions,rollModes,rollRestrictions,contextTags:a.data.contextTags??[],
     defenses:active.filter(r=>r.data.target==='damage_defense').map(r=>({type:r.data.key,kind:r.data.operation,source:r.id})),
     effects:active};
 }
@@ -215,22 +258,23 @@ export async function spend(ctx,actorId,id,amount) {
   await save(ctx,p,{...p.data,current:after});
   return {poolId:id,before:p.data.current,after,amount};
 }
+export async function checkTiming(ctx,a,timing) {
+  if(!a.data.encounterId || timing==='other') return null;
+  const encounter=await ctx.get('encounter',a.data.encounterId);
+  must(encounter?.life==='active' && encounter.data.active && encounter.data.participants.includes(a.id),'ENCOUNTER_STATE_UNRESOLVED');
+  const turn=encounter.data.economy[a.id];
+  must(turn && (timing==='reaction'||encounter.data.participants[encounter.data.index]===a.id),'TURN_UNAVAILABLE');
+  if(timing==='attack')must(turn.action && turn.attacks>0,'ACTION_UNAVAILABLE');
+  else must(turn[timing]===true && (timing!=='action'||turn.attacks===a.data.attacksPerAction),'ACTION_UNAVAILABLE');
+  return {encounter,turn};
+}
 export async function useTiming(ctx,a,timing) {
-  if(!a.data.encounterId || timing==='other') return;
-  const e=await ctx.get('encounter',a.data.encounterId);
-  must(e && e.life==='active' && e.data.active && e.data.participants.includes(a.id),'ENCOUNTER_STATE_UNRESOLVED');
-  const t=e.data.economy[a.id];
-  must(t && (timing==='reaction'||e.data.participants[e.data.index]===a.id),'TURN_UNAVAILABLE');
-  const next={...t};
-  if(timing==='attack'){
-    must(t.action && t.attacks>0,'ACTION_UNAVAILABLE');
-    next.attacks--; next.action=next.attacks>0;
-  }else{
-    must(t[timing]===true && (timing!=='action'||t.attacks===a.data.attacksPerAction),'ACTION_UNAVAILABLE');
-    next[timing]=false;
-    if(timing==='action')next.attacks=0;
-  }
-  await save(ctx,e,{...e.data,economy:{...e.data.economy,[a.id]:next}});
+  const cost=await checkTiming(ctx,a,timing);
+  if(!cost)return;
+  const {encounter,turn}=cost,next={...turn};
+  if(timing==='attack'){next.attacks--;next.action=next.attacks>0;}
+  else {next[timing]=false;if(timing==='action')next.attacks=0;}
+  await save(ctx,encounter,{...encounter.data,economy:{...encounter.data.economy,[a.id]:next}});
 }
 export async function addClock(ctx,a,seconds) {
   const now=a.data.gameSeconds;
@@ -238,8 +282,10 @@ export async function addClock(ctx,a,seconds) {
   const next=now==null?null:now+seconds;
   must(next==null||Number.isSafeInteger(next)&&next<=100000000000,'GAME_CLOCK_OUT_OF_RANGE');
   const expired=a.data.formExpiresAt!=null && next!=null && next>=a.data.formExpiresAt;
+  const concentrationExpired=a.data.concentrationCastId && a.data.concentrationExpiresAt!=null && next!=null && next>=a.data.concentrationExpiresAt;
+  if(concentrationExpired)await ctx.unlink(a.id,'concentrates_on',a.data.concentrationCastId);
   const sources=(a.data.conditionSources??[]).filter(s=>s.expiresAt==null || next==null || s.expiresAt>next);
   const expiredKeys=new Set((a.data.conditionSources??[]).filter(s=>!sources.includes(s)).map(s=>s.key));
   const conditions=a.data.conditions.filter(key=>!expiredKeys.has(key) || sources.some(s=>s.key===key));
-  return {...a.data,gameSeconds:next,conditions,conditionSources:sources,...(expired?{activeFormId:null,formExpiresAt:null}:{})};
+  return {...a.data,gameSeconds:next,conditions,conditionSources:sources,...(concentrationExpired?{concentrationCastId:null,concentrationExpiresAt:null}:{}),...(expired?{activeFormId:null,formExpiresAt:null}:{})};
 }

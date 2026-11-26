@@ -2,6 +2,7 @@ import { BridgeError } from './core.mjs';
 import { CloudPlan } from './cloud-plan.mjs';
 import { cloudFail, validCloudId } from './cloud-validation.mjs';
 import { sheet, gearEligible, numeric } from './cloud-mechanics-core.mjs';
+import { scaledSpellEffects } from './cloud-mechanics-spells.mjs';
 import { snapshotComponents } from './cloud-mechanics-combat.mjs';
 
 export async function cloudSpellbook(service,principal,id,actorId,options={}) {
@@ -48,7 +49,7 @@ export async function cloudSpellbook(service,principal,id,actorId,options={}) {
       let components=[];
       try{components=snapshotComponents(def.components,stats,{},level-def.baseLevel);}
       catch(e){if(!(e instanceof BridgeError))throw e;reasons.push(e.code);}
-      rows.push({grantId,spellId:spell.id,name:spell.title,baseLevel:def.baseLevel,level,route:d.route,source:d.source,preparation:d.preparation,
+      rows.push({scaling:scaledSpellEffects(def,level),grantId,spellId:spell.id,name:spell.title,baseLevel:def.baseLevel,level,route:d.route,source:d.source,preparation:d.preparation,
         concentration:def.concentration,requiresConcentrationDecision:Boolean(def.concentration&&a.data.concentrationCastId),
         timing:def.timing,range:def.range??null,duration:def.duration??null,description:def.description??null,
         resolution:def.resolution,hit,dc,saveAbility:def.saveAbility??null,components,eligibleSlotIds:eligibleSlots.map(s=>s.id),

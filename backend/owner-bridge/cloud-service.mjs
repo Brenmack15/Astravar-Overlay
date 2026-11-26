@@ -74,11 +74,11 @@ export class CloudService {
     if(subject.startsWith('device:') && !await this.s('SELECT 1 FROM bridge_credentials WHERE owner_id=? AND campaign_id=? AND id=?',...b,subject.slice(7)).first())cloudFail(404,'DEVICE_CREDENTIAL_REQUIRED');
     let changed;
     if(grant.expectedGrantRevision===0){
-      changed=await this.s("INSERT INTO cloud_grants(owner_id,continuity_id,subject,scopes_json,actors_json,auto_json,expires_at,revoked,revision) VALUES(?,?,?,?,?,?,?,?,1) ON CONFLICT DO NOTHING",...b,subject,...v).run();
+      changed=await this.s("INSERT INTO cloud_grants(owner_id,continuity_id,subject,scopes_json,actors_json,auto_json,expires_at,revoked,revision) VALUES(?,?,?,?,?,?,?,?,1) ON CONFLICT DO NOTHING RETURNING revision",...b,subject,...v).first();
     }else{
-      changed=await this.s('UPDATE cloud_grants SET scopes_json=?,actors_json=?,auto_json=?,expires_at=?,revoked=?,revision=revision+1 WHERE owner_id=? AND continuity_id=? AND subject=? AND revision=?',...v,...b,subject,grant.expectedGrantRevision).run();
+      changed=await this.s('UPDATE cloud_grants SET scopes_json=?,actors_json=?,auto_json=?,expires_at=?,revoked=?,revision=revision+1 WHERE owner_id=? AND continuity_id=? AND subject=? AND revision=? RETURNING revision',...v,...b,subject,grant.expectedGrantRevision).first();
     }
-    if(changed.meta.changes!==1)cloudFail(409,'GRANT_REVISION_CONFLICT');
+    if(changed?.revision!==grant.expectedGrantRevision+1)cloudFail(409,'GRANT_REVISION_CONFLICT');
     return {continuityId:id,subject,revision:grant.expectedGrantRevision+1,revoked:grant.revoked};
   }
   async grantForSubject(id,subject) {

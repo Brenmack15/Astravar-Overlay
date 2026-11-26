@@ -2,11 +2,24 @@ import { checkDiceOwner, stats, identifier, boolean, named, whole, nullable, arr
 import { damageEvidence, componentRules, snapshotComponents, rollComponents } from './cloud-mechanics-combat.mjs';
 import { observed } from './cloud-mechanics-rolls.mjs';
 
-async function defineSpell(ctx,x){
+export function scaledSpellEffects(spell,level){
+  const d=spell.scaling??{},extra=level-spell.baseLevel;
+  const derived=(key,increment)=>d[key]==null?null:d[key]+(d[increment]??0)*extra;
+  return {targets:derived('targets','targetsPerLevel'),durationSeconds:derived('durationSeconds','durationPerLevel'),areaFeet:derived('areaFeet','areaPerLevel'),source:d.source??null};
+}
+async function defineSpell(ctx,x,edit=false){
   await actor(ctx,x.actorId);componentRules(x.components,true);
   must(x.resolution!=='save'||x.saveAbility,'SPELL_SAVE_ABILITY_REQUIRED');
+  for(const [base,perLevel] of [['targets','targetsPerLevel'],['durationSeconds','durationPerLevel'],['areaFeet','areaPerLevel']])
+    must(x.scaling?.[perLevel]===undefined||x.scaling[base]!==undefined,'SPELL_SCALING_BASE_REQUIRED');
   const {actorId,spellId,name,...data}=x;
-  await insert(ctx,'spell',spellId,actorId,name,data);return {spellId};
+  if(edit){
+    const old=await owned(ctx,'spell',spellId,actorId);
+    // Casting-source grants already encode legal levels and accuracy requirements.
+    must(old.data.baseLevel===x.baseLevel && old.data.resolution===x.resolution,'SPELL_GRANT_COMPATIBILITY_REQUIRED');
+    await ctx.put({...old,title:name,data});
+  }else await insert(ctx,'spell',spellId,actorId,name,data);
+  return {spellId};
 }
 const grantSchema=fields({
   actorId:identifier,spellId:identifier,grantId:identifier,source:named(300),route:option('at_will','slot','ritual','limited','item'),
@@ -66,10 +79,12 @@ async function cast(ctx,x){
   const dc=d.resolution==='save'?numeric(grant.fixedDc??(derived!=null?derived+8:null),p.effects,'spell_dc',g.id).value:null;
   must(d.resolution!=='attack'||hit!=null,'SPELL_ACCURACY_UNKNOWN');
   must(d.resolution!=='save'||dc!=null,'SPELL_DC_UNKNOWN');
+  const scaling=scaledSpellEffects(d,x.level),targets=x.targets??[];
+  must(new Set(targets).size===targets.length && (scaling.targets==null||targets.length<=scaling.targets),'SPELL_TARGET_COUNT_INVALID');
   const data={actorId:a.id,formId:p.formId,spellId:spell.id,grantId:g.id,baseLevel:d.baseLevel,level:x.level,
     route:grant.route,source:grant.source,sourceItemId:grant.sourceItemId??null,costs,timing:grant.route==='ritual'?'ritual':d.timing,
     resolution:d.resolution,hitModifier:hit,save:d.resolution==='save'?{ability:d.saveAbility,dc,success:d.saveSuccess??null}:null,components:snapshotComponents(d.components,p,{},x.level-d.baseLevel),
-    concentration:d.concentration,duration:d.duration??null,targets:x.targets??[],outcome:'pending',hit:null,damage:null,
+    concentration:d.concentration,duration:d.duration??null,scaling,targets,targetResults:[],outcome:'pending',hit:null,damage:null,
     effectivePolicy:{normal:rollPolicy(p.effects,'spell_attack:'+g.id),advantage:rollPolicy(p.effects,'spell_attack:'+g.id,'advantage'),disadvantage:rollPolicy(p.effects,'spell_attack:'+g.id,'disadvantage')},
     recordedAt:ctx.now,commandId:ctx.commandId};
   for(const id of data.targets)await actor(ctx,id);
@@ -79,7 +94,7 @@ async function cast(ctx,x){
   if(d.concentration){
     if(a.data.concentrationCastId)await ctx.unlink(a.id,'concentrates_on',a.data.concentrationCastId);
     await ctx.link(a.id,'concentrates_on',x.castId);
-    await save(ctx,a,{...a.data,concentrationCastId:x.castId});
+    await save(ctx,a,{...a.data,concentrationCastId:x.castId,concentrationExpiresAt:scaling.durationSeconds!=null && a.data.gameSeconds!=null?a.data.gameSeconds+scaling.durationSeconds:null});
   }
   return {castId:x.castId,...data};
 }
@@ -104,7 +119,8 @@ async function castRoll(ctx,x){
   await save(ctx,c,{...d,hit,damage,outcome});return {castId:c.id,hit,damage,outcome,costs:d.costs};
 }
 export const spellOperations=Object.freeze({
-  define_spell:op('spells',spellSchema,defineSpell),
+  define_spell:op('spells',spellSchema,(ctx,x)=>defineSpell(ctx,x,false)),
+  revise_spell:op('spells',spellSchema,(ctx,x)=>defineSpell(ctx,x,true)),
   grant_spell:op('spells',grantSchema,grantSpell),
   prepare_spell:op('spells',fields({actorId:identifier,grantId:identifier,prepared:boolean},['actorId','grantId','prepared']),async(ctx,x)=>{
     const g=await owned(ctx,'spell_grant',x.grantId,x.actorId);

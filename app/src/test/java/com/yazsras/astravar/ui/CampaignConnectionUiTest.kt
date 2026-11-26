@@ -177,8 +177,8 @@ class CampaignConnectionUiTest {
         val operation = CampaignOperationView("adjust_hp", "player", 4, 5, listOf("currentHp" to "20"), listOf("currentHp" to "17"), previewVerified = true)
         show(CampaignConnectionView(connected = true, pending = listOf(CampaignPendingView("cmd", "PENDING_APPROVAL", "Player confirmed action", "", listOf(operation)))),
             decision = { _, _ -> decisions++ }).use {
-            compose.onNodeWithText("Current currentHp: 20").performScrollTo().assertExists()
-            compose.onNodeWithText("Proposed currentHp: 17").performScrollTo().assertExists()
+            compose.onNodeWithText("Current HP · 20").performScrollTo().assertExists()
+            compose.onNodeWithText("Proposed HP · 17").performScrollTo().assertExists()
             compose.onNodeWithText("Verify").performScrollTo().assertIsNotEnabled()
             assertEquals(0, decisions)
             compose.onNodeWithText("Refuse").performScrollTo().performClick()
@@ -236,7 +236,7 @@ class CampaignConnectionUiTest {
             }) }
         }, now = 1000)
         show(view, decision = { id, approved -> decision = id to approved }).use {
-            compose.onNodeWithText("Proposed currentHp: 17").performScrollTo().assertExists()
+            compose.onNodeWithText("Proposed HP · 17").performScrollTo().assertExists()
             compose.onAllNodesWithText("Proposed delta: -3").assertCountEquals(0)
             compose.onNodeWithText("Verify").performScrollTo().assertIsEnabled().performClick()
             assertEquals("cmd-exact" to true, decision)

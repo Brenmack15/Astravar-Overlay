@@ -25,6 +25,7 @@ export const CLOUD_TOOLS=Object.freeze([
   read('get_cloud_changes','Page through authorized changes since the checkpoint or a known revision, newest first.',cloudObject({continuityId:CLOUD_ID,actorId:CLOUD_ID,sinceRevision:CLOUD_REVISION,...cursorPage},['continuityId'])),
   read('get_cloud_actions','Inspect eligible source-linked actions, attack families, variants and costs for a scoped actor.',cloudObject({continuityId:CLOUD_ID,id:CLOUD_ID,after:CLOUD_ID,limit:{type:'integer',minimum:1,maximum:50},atRevision:CLOUD_REVISION,atEpoch:CLOUD_REVISION,grantRevision:CLOUD_REVISION},['continuityId','id'])),
   read('get_cloud_spellbook','Inspect casting grants, available slots and per-level previews for a scoped actor.',cloudObject({continuityId:CLOUD_ID,id:CLOUD_ID,after:CLOUD_ID,limit:{type:'integer',minimum:1,maximum:50},atRevision:CLOUD_REVISION,atEpoch:CLOUD_REVISION,grantRevision:CLOUD_REVISION},['continuityId','id'])),
+  read('preview_cloud_form','Inspect the effective candidate form, equipment and pools without transforming or spending resources.',cloudObject({continuityId:CLOUD_ID,id:CLOUD_ID,formId:CLOUD_ID})),
   read('get_cloud_actor_sheet','Inspect calculated form, equipment, abilities, saves and passive modifiers for an authorized actor.',entity),
   read('get_cloud_receipt','Read a permanent command receipt or its current pending disposition. Independently read current state to verify.',cloudObject({continuityId:CLOUD_ID,commandId:CLOUD_ID})),
   {name:'submit_cloud_command',description:'Execute one operation listed by get_cloud_capabilities with its exact args schema. Bind the declared action, command ID, epoch, and expectedRevision. Pending owner review is not a committed result.',
@@ -51,6 +52,7 @@ export async function cloudMcpCall(tool,args,service,principal){
     case 'get_cloud_changes':return cloudChanges(service,principal,continuityId,opts);
     case 'get_cloud_actions':return cloudActions(service,principal,continuityId,opts.id,opts);
     case 'get_cloud_spellbook':return cloudSpellbook(service,principal,continuityId,opts.id,opts);
+    case 'preview_cloud_form':return cloudSheet(service,principal,continuityId,opts.id,opts.formId);
     case 'get_cloud_actor_sheet':return cloudSheet(service,principal,continuityId,opts.id);
     case 'get_cloud_receipt':return service.receipt(principal,continuityId,opts.commandId);
     case 'submit_cloud_command':return service.submit(principal,continuityId,opts.command);

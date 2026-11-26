@@ -115,6 +115,10 @@ async function standaloneDamage(ctx,x) {
   ctx.require('combat',x.actorId);
   const {a,attack,p,components}=await loadAttack(ctx,x);
   for(const part of x.damage)checkDiceOwner(ctx,a,'damage',part.evidence.origin);
+  if(attack.data.cost) {
+    const cost=attack.data.cost,pool=await owned(ctx,'resource_pool',cost.poolId,a.id);
+    must(pool.data.current!=null && pool.data.current>=cost.amount,'RESOURCE_EMPTY_OR_UNKNOWN');
+  }
   must(attack.data.resolution!=='manual','MANUAL_ADJUDICATION_REQUIRED');
   const results=rollComponents(components,x.damage,false);
   const result={kind:'attack_damage',status:'resolved',actorId:x.actorId,formId:p.formId,attackId:attack.id,
