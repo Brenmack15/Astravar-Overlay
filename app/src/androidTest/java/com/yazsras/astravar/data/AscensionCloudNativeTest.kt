@@ -26,15 +26,13 @@ import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManagerFactory
 
 /** Keystore-backed production client and cache on the reserved, disposable Android 17 TLS guest. */
-@RunWith(AndroidJUnit4::class)
-class AscensionCloudNativeTest {
-    private lateinit var context: Context
+abstract class AscensionCloudGuest {
+    protected lateinit var context: Context
     private lateinit var config: JsonObject
     private lateinit var originalTls: SSLSocketFactory
-    private val origin = "https://hp-bridge.example"
-    private val scope = "qa-api37-reconnect"
-    private val actor = "native-holder"
-    private val base = "/v3/continuities/$scope"
+    protected val origin = "https://hp-bridge.example"
+    protected val scope = "qa-api37-reconnect"
+    protected val base = "/v3/continuities/$scope"
 
     @Before fun verifyGuest() {
         context = ApplicationProvider.getApplicationContext()
@@ -57,7 +55,7 @@ class AscensionCloudNativeTest {
         if(::originalTls.isInitialized)HttpsURLConnection.setDefaultSSLSocketFactory(originalTls)
     }
 
-    private fun owner(path:String, payload:JsonObject):JsonObject {
+    protected fun owner(path:String, payload:JsonObject):JsonObject {
         val connection=URL("$origin/__ci/owner").openConnection() as HttpsURLConnection
         connection.instanceFollowRedirects=false
         connection.connectTimeout=12000
@@ -74,10 +72,16 @@ class AscensionCloudNativeTest {
         } finally { connection.disconnect() }
     }
 
-    private fun evidence(name:String,value:JsonObject) {
+    protected fun evidence(name:String,value:JsonObject) {
         val dir=File(requireNotNull(context.getExternalFilesDir(null)),"ascension-cloud").apply { mkdirs() }
         File(dir,"$name.json").writeText(value.toString())
     }
+
+}
+
+@RunWith(AndroidJUnit4::class)
+class AscensionCloudNativeTest : AscensionCloudGuest() {
+    private val actor = "native-holder"
 
     @Test fun pairAndCachePreStopState():Unit=runBlocking {
         val bootstrap=OwnerConnectionBootstrap(context)

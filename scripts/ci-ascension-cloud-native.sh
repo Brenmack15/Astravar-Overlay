@@ -52,3 +52,11 @@ assert b['priorReceiptsReverified']==4 and c['api']==37
 (p/'verified.json').write_text(json.dumps({'synthetic':True,'api':37,'packageForceStoppedDuringCloudCommit':True,
     'remoteCommandsVerified':4,'ownerApprovalRevision':c['ownerRevision'],'nativeEditRevision':b['revision']},indent=2)+'\n')
 PY
+
+# This suite starts after the original stop/reconnect witness was independently verified and saved.
+verify_owned_emulator
+node scripts/ci-ascension-companion-native.mjs seed "$astravar_private" > "$astravar_cloud_evidence/companion-seed.json"
+run_test 'com.yazsras.astravar.data.AscensionCompanionNativeTest#timedFormSharedDisplacementAndSingleOverflow' cloud-native-companion.txt 480
+verify_owned_emulator
+adb -s "$astravar_serial" pull "/sdcard/Android/data/$astravar_product/files/ascension-cloud/companion-device.json" "$astravar_cloud_evidence/companion-device.json" >/dev/null
+node scripts/ci-ascension-companion-native.mjs verify "$astravar_private" "$astravar_cloud_evidence/companion-device.json" > "$astravar_cloud_evidence/companion-verified.json"

@@ -9,6 +9,7 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import https from 'node:https';
 import {setTimeout as pause} from 'node:timers/promises';
+import {rehearseCompanionWire} from './fixtures/api37-companion-wire.mjs';
 import {runHost,harness,continuityId} from '../../scripts/ci-ascension-cloud-gateway.mjs';
 
 test('actual reserved TLS gateway verifies setup, remote commit/retry, pending decision and independent device receipt',async t=>{
@@ -58,4 +59,9 @@ test('actual reserved TLS gateway verifies setup, remote commit/retry, pending d
   assert.equal(edit.status,'COMMITTED');
   assert.equal((await runHost(directory,'device-readback',port)).deviceTransactionId,edit.receipt.transactionId);
   await assert.rejects(host.control('/v3/continuities/any-other/isolated',{}));
+  const companion=await rehearseCompanionWire(host,device,auth,token.credentialId);
+  assert.equal(companion.immutableReceipts.length,12);
+  assert.equal(companion.finalRevision,companion.baselineRevision+12);
+  assert.equal(companion.api,undefined);assert.equal(companion.reopenedNativeCache,undefined);
+
 });
