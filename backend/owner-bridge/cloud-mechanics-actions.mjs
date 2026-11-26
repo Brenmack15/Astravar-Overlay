@@ -1,3 +1,4 @@
+import {matchesForm} from './cloud-mechanics-core.mjs';
 import { interruptIfPending } from './cloud-form-deployment.mjs';
 import { arsenalDefinitions, loadChoice, useArsenal, validateArsenal } from './cloud-mechanics-arsenal.mjs';
 import { snapshotComponents } from './cloud-mechanics-combat.mjs';
@@ -63,6 +64,20 @@ export async function applyCondition(ctx,actorId,key,enabled,sourceId,expiresAt=
   await save(ctx,a,{...next,conditionSources:sources,conditions,concentrationCastId:ends?null:next.concentrationCastId});
   return {actorId,key,conditions};
 }
+async function setExhaustion(ctx,x){
+  const a=await actor(ctx,x.actorId),p=await sheet(ctx,a.id);
+  must(!x.enabled || !p.effects.some(e=>e.data.target==='condition_immunity' && e.data.key==='exhaustion'),'CONDITION_IMMUNE');
+  const level=x.level??(x.enabled?null:0);
+  must(level!==null && x.enabled===(level>0),'EXHAUSTION_LEVEL_REQUIRED');
+  must(!x.customExhaustionRule || a.data.rulesProfile==='custom'&&x.adjudicationSource,'PINNED_EXHAUSTION_RULE_REQUIRED');
+  must(!x.adjudicationSource || x.customExhaustionRule,'CUSTOM_EXHAUSTION_RULE_REQUIRED');
+  const source='manual:'+x.sourceId,conditions=a.data.conditions.filter(k=>k!=='exhaustion');
+  const conditionSources=(a.data.conditionSources??[]).filter(s=>s.key!=='exhaustion');
+  if(level>0){conditions.push('exhaustion');conditionSources.push({key:'exhaustion',sourceId:source,expiresAt:null});}
+  await save(ctx,a,{...a.data,conditions,conditionSources,exhaustionLevel:level,exhaustionSource:source,
+    ...(x.customExhaustionRule?{customExhaustionRule:x.customExhaustionRule,exhaustionAdjudicationSource:x.adjudicationSource}:{})});
+  return {actorId:a.id,key:'exhaustion',before:p.exhaustion,after:(await sheet(ctx,a.id)).exhaustion,conditions};
+}
 const destination=fields({label:named(200),distanceFeet:whole(0,1200),visible:boolean,unoccupied:boolean,grounded:boolean,
   availableSize:option(...sizeOrder),passengers:whole(0,100),permittedByBarriers:boolean},['label','distanceFeet','visible','unoccupied','grounded','availableSize','passengers','permittedByBarriers']);
 const targets=arrayOf(fields({actorId:identifier,distanceFeet:whole(0,1200),hears:boolean},['actorId','distanceFeet','hears']),24);
@@ -73,7 +88,7 @@ async function execute(ctx,x){
   must(!['disabled','dormant'].includes(a.data.activityState),'ACTOR_INACTIVE');
   must(!p.conditions.some(c=>['incapacitated','unconscious','stunned','paralyzed','petrified'].includes(c)),'ACTOR_CANNOT_ACT');
   must(d.type!=='fixed_attack_die','DECLARE_SUBSTITUTION_WITH_ATTACK');
-  must((!d.formId||p.formId===d.formId)&&!d.excludedForms?.includes(p.formId),'ACTION_FORM_INELIGIBLE');
+  must(matchesForm(d,p.ruleFormIds),'ACTION_FORM_INELIGIBLE');
   must(await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating),'ACTION_ITEM_INELIGIBLE');
   must((x.destination!=null)===(d.type==='teleport') && (x.targets!=null)===(d.type==='frighten') && (x.reaction!=null)===(d.type==='roll_bonus'),'ACTION_ARGUMENT_MISMATCH');
   const data={actionId:action.id,actorId:a.id,formId:p.formId,type:d.type,timing:d.timing,sourceItemId:d.sourceItemId??null,
@@ -172,8 +187,11 @@ export const actionOperations=Object.freeze({
     await save(ctx,attempt,{...d,targetResults:d.targetResults.map(r=>r.targetActorId===target.id?{...r,pushResult:result}:r)});
     await ctx.link(attempt.id,'resolved_rider',roll.id);return result;
   }),
-  set_condition:op('combat',fields({actorId:identifier,key:identifier,enabled:boolean,sourceId:identifier},['actorId','key','enabled','sourceId']),async(ctx,x)=>{
+  set_condition:op('combat',fields({actorId:identifier,key:identifier,enabled:boolean,sourceId:identifier,level:whole(0,6),
+    customExhaustionRule:option('legacy_2014','revised_2024','manual'),adjudicationSource:named(300)},['actorId','key','enabled','sourceId']),async(ctx,x)=>{
     ctx.require('combat',x.actorId);
+    if(x.key.toLowerCase()==='exhaustion')return setExhaustion(ctx,x);
+    must(x.level===undefined && !x.customExhaustionRule && !x.adjudicationSource,'EXHAUSTION_FIELDS_REQUIRE_EXHAUSTION');
     // Manually entered declarations carry an independent namespace from effect-generated conditions.
     return applyCondition(ctx,x.actorId,x.key.toLowerCase(),x.enabled,'manual:'+x.sourceId);
   })

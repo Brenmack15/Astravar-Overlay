@@ -83,6 +83,9 @@ async function recordCheck(ctx,x){
   if(x.forConcentrationId){
     const pending=await owned(ctx,'concentration_check',x.forConcentrationId,x.actorId),a=await actor(ctx,x.actorId);
     must(pending.data.status==='pending' && a.data.concentrationCastId===pending.data.castId && x.check.kind==='save' && x.check.key==='CON','NO_MATCHING_CONCENTRATION_SAVE');
+    const existing=await ctx.service.s(`SELECT 1 FROM cloud_links WHERE owner_id=? AND continuity_id=?
+      AND relation='for_concentration' AND to_id=? LIMIT 1`,...ctx.binding,pending.id).first();
+    must(!existing,'CONCENTRATION_SAVE_ALREADY_RECORDED');
     result.forConcentrationId=pending.id;
   }
   if(x.forUseId){

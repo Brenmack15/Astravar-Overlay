@@ -91,6 +91,40 @@ class HistoryBackupTest {
             } finally {pending.close()}
         }}
     }
+    @Test fun cloudRecoveryExtractsByteIdenticalOriginalForNativeWeaponRestore(): Unit = runBlocking {
+        val driver = generateSequence(File(requireNotNull(System.getProperty("user.dir"))).absoluteFile) { it.parentFile }
+            .map { File(it, "scripts/tests/ascension_weapon_roundtrip.py") }.first(File::isFile)
+        val temp = java.nio.file.Files.createTempDirectory("astravar-original-history-").toFile()
+        try {
+            fixture { source ->
+                seed(source, "Synthetic archived configuration")
+                val legacy = source.repo.export().toByteArray()
+                source.service.prepare(legacy.inputStream()).use { source.service.apply(it, UUID.randomUUID().toString()) }
+                source.db.dao().archive(ArchiveRow("synthetic-opaque-history", "opaque prior mechanics"))
+                val stateBeforeExport = source.db.dao().state()
+                val original = File(temp, "original.zip")
+                original.outputStream().use { source.service.export(it) }
+                assertEquals(stateBeforeExport, source.db.dao().state())
+                val recovered = File(temp, "recovered.zip")
+                val result = ProcessBuilder("python3", driver.absolutePath, original.absolutePath, recovered.absolutePath)
+                    .redirectErrorStream(true).redirectOutput(File(temp, "rehearsal.log")).start()
+                try {
+                    assertTrue(result.waitFor(90, java.util.concurrent.TimeUnit.SECONDS))
+                    assertEquals(File(temp, "rehearsal.log").readText().takeLast(2000), 0, result.exitValue())
+                } finally { result.destroyForcibly() }
+                assertArrayEquals(original.readBytes(), recovered.readBytes())
+                fixture { destination ->
+                    val restore = destination.service.prepare(recovered.inputStream())
+                    restore.use { destination.service.apply(it, UUID.randomUUID().toString()) }
+                    assertArchives(archives(source), archives(destination))
+                    val current = BackupCodec.decode(destination.repo.export()).campaign
+                    assertEquals("Synthetic archived configuration", current.notes)
+                    assertEquals(mapOf(2 to 3), current.slots)
+                }
+            }
+        } finally { temp.deleteRecursively() }
+    }
+
     @Test fun legacyJsonOriginalBytesSurviveProjectionReexportAndRestoreWithoutNesting()=runBlocking {
         fixture {source->fixture {target->
             seed(source)

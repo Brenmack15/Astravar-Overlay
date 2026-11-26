@@ -10,6 +10,10 @@ const featureSchema=fields({actorId:identifier,featureId:identifier,name:named(1
   description:named(3000),source:named(300),formId:identifier,sourceItemId:identifier,requiresOperating:boolean,requiresAttunement:boolean,
   speech:fields({languages:arrayOf(named(80),24),capacity:whole(0,24),fullSentences:boolean},['languages','capacity','fullSentences']),
   telepathy:fields({partnerActorId:identifier,twoWay:boolean,sharedSenses:boolean,limitFeet:whole(1,1000000)},['partnerActorId','twoWay','sharedSenses']),
+  lipReading:fields({visibleMouth:{const:true},understoodLanguage:{const:true}},['visibleMouth','understoodLanguage']),
+  feat:fields({familyId:identifier,edition:option('legacy_2014','revised_2024','homebrew'),
+    includedAbility:fields({ability:option(...stats),increase:whole(1,10)},['ability','increase']),
+    includedExpertise:arrayOf(identifier,32)},['familyId','edition']),
   mobility:option('flyby'),references:arrayOf(fields({id:identifier,kind:option(...featureKinds)},['id','kind']),24)},
   ['actorId','featureId','name','kind','description','source','references']);
 const capacity=fields({poolId:identifier,previous:whole(),maximum:whole(),granted:whole()},['poolId','previous','maximum','granted']);
@@ -49,7 +53,21 @@ async function feature(ctx,x,edit){
   if(x.sourceItemId)must((await ctx.get('item_instance',x.sourceItemId))?.life==='active','FEATURE_ITEM_REQUIRED');
   if(x.speech)must(x.speech.languages.length<=x.speech.capacity && new Set(x.speech.languages.map(l=>l.toLowerCase())).size===x.speech.languages.length,'INVALID_LANGUAGE_PACKAGES');
   if(x.telepathy){must(x.telepathy.partnerActorId!==a.id,'FEATURE_PARTNER_INVALID');await actor(ctx,x.telepathy.partnerActorId);}
-  const sensory=Boolean(x.speech||x.telepathy||x.mobility);
+  if(old?.data.feat)must(x.feat?.familyId===old.data.feat.familyId,'FEATURE_FAMILY_IDENTITY_REQUIRED');
+  if(x.feat){
+    must(x.kind==='feat','FEAT_CONFIGURATION_REQUIRES_FEAT');
+    const duplicate=await ctx.service.s(`SELECT id FROM cloud_entities WHERE owner_id=? AND continuity_id=?
+      AND actor_id=? AND kind='feature' AND id!=? AND json_extract(data_json,'$.feat.familyId')=? LIMIT 1`,
+      ...ctx.binding,a.id,x.featureId,x.feat.familyId).first();
+    must(!duplicate,'FEATURE_FAMILY_ALREADY_ASSIGNED');
+    const included=x.feat.includedAbility;
+    if(included)must(a.data.abilities[included.ability]!=null && a.data.abilities[included.ability]>=included.increase,
+      'INCLUDED_ABILITY_VALUE_UNKNOWN');
+    const expertise=x.feat.includedExpertise??[];
+    must(new Set(expertise).size===expertise.length && expertise.every(id=>Object.hasOwn(a.data.skills,id) && a.data.skills[id].rank===2),
+      'INCLUDED_EXPERTISE_NOT_ESTABLISHED');
+  }
+  const sensory=Boolean(x.speech||x.telepathy||x.mobility||x.lipReading);
   const indexed=(a.data.sensoryFeatureIds??[]).filter(id=>id!==x.featureId);
   if(sensory)indexed.push(x.featureId);
   must(indexed.length<=64,'SENSORY_FEATURE_LIMIT');
@@ -57,6 +75,7 @@ async function feature(ctx,x,edit){
   for(const r of x.references)await owned(ctx,r.kind,r.id,a.id);
   const data={category:x.kind,description:x.description,source:x.source,formId:x.formId??null,references:x.references,
     ...(x.sourceItemId?{sourceItemId:x.sourceItemId,requiresAttunement:x.requiresAttunement??false,requiresOperating:x.requiresOperating??false}:{}),
+    ...(x.feat?{feat:x.feat}:{}),...(x.lipReading?{lipReading:x.lipReading}:{}),
     ...(x.speech?{speech:x.speech}:{}),...(x.telepathy?{telepathy:x.telepathy}:{}),...(x.mobility?{mobility:x.mobility}:{})};
   if(old){
     for(const r of old.data.references)if(!x.references.some(n=>n.id===r.id))await ctx.unlink(old.id,'feature_mechanic',r.id);

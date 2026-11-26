@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {handleWorker} from './worker.mjs';
 import {SqliteAdapter} from './sqlite-adapter.mjs';
-import {sha256} from './core.mjs';
+import {canonical,sha256} from './core.mjs';
 
 const schema=readFileSync(new URL('schema.sql',import.meta.url),'utf8');
 const origin='https://isolated-worker.example', ownerId='fixture-site-owner', continuity='qa-offline-lab';
@@ -55,7 +55,7 @@ test('MCP commits actor, exact atomic purchase, expenditure and Chronicle while 
     const cmd=command(revision,operation,args);
     const ret=await l.rpc('submit_cloud_command',{command:cmd});assert.equal(ret.status,'COMMITTED',JSON.stringify(ret));revision++;
     assert.equal(ret.revision,revision);
-    const proof=await l.rpc('get_cloud_receipt',{commandId:cmd.commandId});assert.deepEqual(proof,ret);return {cmd,ret};
+    const proof=await l.rpc('get_cloud_receipt',{commandId:cmd.commandId});assert.deepEqual(proof,ret);assert.equal(proof.digest,await sha256(canonical(cmd)));return {cmd,ret};
   }
   await commit('define_actor',player);
   await commit('set_actor_ability',{actorId:'inventor',ability:'INT',score:15});

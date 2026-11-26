@@ -1,5 +1,8 @@
 """Prove fixture ownership, stopped-package controls and error propagation before native re-entry."""
 import os
+import json
+import sqlite3
+import runpy
 from pathlib import Path
 import subprocess
 import tempfile
@@ -28,15 +31,39 @@ adb() {
   case "$*" in
     *"shell dumpsys package"*) echo "User 0: installed=true stopped=$STOP" ;;
     *"command -v pidof"*) echo "$PROCESS" ;;
+    *"shell test -f"*) return 0 ;;
+    *" pull "*) return 0 ;;
     *"shell am force-stop"*) echo stopped-command >> "$ROOT/events" ;;
     *) return 71 ;;
   esac
 }
+python3() { [[ "$1" == scripts/ascension-stopped-cache-readback.py ]]; }
 source "$GATE"
 """
             p=subprocess.run(["bash","-c",s],env=env,capture_output=True,text=True)
             events=Path(folder,"events")
             return p.returncode,events.read_text().splitlines() if events.exists() else []
+
+    def test_stopped_cache_is_read_independently_with_unknown_or_advanced_store_rejected(self):
+        verify=runpy.run_path(str(SCRIPT.with_name("ascension-stopped-cache-readback.py")))["verify"]
+        with tempfile.TemporaryDirectory() as home:
+            path=Path(home,"cache.sqlite")
+            db=sqlite3.connect(path)
+            try:
+                db.executescript("CREATE TABLE workspace(slot,continuity,epoch,revision,token); CREATE TABLE records(token,id,body);")
+                db.execute("INSERT INTO workspace VALUES(1,'qa-api37-reconnect',1,4,'cached')")
+                rows={"native-holder":{"abilities":{"INT":12}},"native-wallet":{"coins":{"cp":0,"sp":0,"ep":0,"gp":12,"pp":0}},
+                      "native-pool":{"current":3}}
+                db.executemany("INSERT INTO records VALUES('cached',?,?)",[(i,json.dumps({"data":d})) for i,d in rows.items()])
+                db.commit()
+                self.assertEqual(4,verify(path)["cachedRevision"])
+                db.execute("UPDATE workspace SET revision=8");db.commit()
+                with self.assertRaises(ValueError): verify(path)
+                db.execute("UPDATE workspace SET revision=4")
+                db.execute("INSERT INTO records VALUES('cached','native-key',?)",(json.dumps({"data":{}}),));db.commit()
+                with self.assertRaises(ValueError): verify(path)
+            finally:
+                db.close()
 
     def test_host_never_commits_when_a_process_is_running_or_the_android_flag_is_clear(self):
         for stopped,proc in (("true","running"),("false","stopped")):

@@ -1,3 +1,4 @@
+import { interruptIfPending } from './cloud-form-deployment.mjs';
 import { identifier, whole, named, fields, option, evidence, must, op, actor, owned, insert, save, spend, addClock, checkDiceOwner, sheet, healedHp } from './cloud-mechanics-core.mjs';
 import { observed } from './cloud-mechanics-rolls.mjs';
 
@@ -65,7 +66,8 @@ export const careOperations=Object.freeze({
     uninterrupted:{const:true}},['actorId','operatorId','protocolId','state','elapsedSeconds','uninterrupted']),async(ctx,x)=>{
     const {a,operator,p}=await access(ctx,x);
     must(a.data.currentHp>0 && a.data.activityState===(x.state==='dormant'?'active':'dormant') && x.elapsedSeconds>=p.data.dormancySeconds,'DORMANCY_INELIGIBLE');
-    const next=await addClock(ctx,a,x.elapsedSeconds);if(a.data.activeFormId && !next.activeFormId)await ctx.unlink(a.id,'active_form',a.data.activeFormId);
+    const prior=x.state==='dormant'?await interruptIfPending(ctx,a,'actor_dormant'):a.data;
+    const next=await addClock(ctx,{...a,data:prior},x.elapsedSeconds);if(prior.activeFormId && !next.activeFormId)await ctx.unlink(a.id,'active_form',prior.activeFormId);
     await save(ctx,operator,await addClock(ctx,operator,x.elapsedSeconds));await save(ctx,a,{...next,activityState:x.state});
     return {actorId:a.id,state:x.state,elapsedSeconds:x.elapsedSeconds,hp:a.data.currentHp};
   })

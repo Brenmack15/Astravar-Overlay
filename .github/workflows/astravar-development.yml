@@ -99,9 +99,11 @@ jobs:
       - name: Validate cloud requirements and real D1 runtime
         run: |
           mkdir -p validation
+          set -o pipefail
           node scripts/verify-ascension-parity.mjs validation/ascension-protocol-parity.json
-          python3 tools/ascension_trace_check.py
-          bash scripts/ci-ascension-provider.sh
+          cmp docs/ascension/protocol-parity.json validation/ascension-protocol-parity.json
+          python3 tools/ascension_trace_check.py | tee validation/ascension-trace.txt
+          bash scripts/ci-ascension-provider.sh | tee validation/ascension-provider.log
       - name: Critical protocol and source safety before Android compilation
         run: |
           node --test backend/owner-bridge/*.test.mjs

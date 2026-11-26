@@ -1,3 +1,4 @@
+import { BridgeError } from './core.mjs';
 import { actor, owned, insert, save, must, op, identifier, fields, named, option, boolean, gearEligible, useTiming, addClock } from './cloud-mechanics-core.mjs';
 
 const roundSeconds=6;
@@ -63,9 +64,21 @@ export async function deploymentView(ctx,a,formId=null){
   const record=await currentDeployment(ctx,a);
   if(!record)return null;
   const enc=await actorEncounter(ctx,a),d=record.data,p=progress(d,enc,a);
+  const form=await ctx.get('form',d.formId);
+  let blockedReason=null;
+  if(!form||form.life!=='active'||(form.data.configurationRevision??form.revision)!==d.formRevision||a.data.activeFormId!==d.previousFormId)blockedReason='DEPLOYMENT_FORM_CHANGED';
+  else {
+    try {
+      await eligibleForm(ctx,a,form,true);
+      if(form.data.deploymentPoolId){
+        const pool=await owned(ctx,'resource_pool',form.data.deploymentPoolId,a.id);
+        if(pool.data.current==null||pool.data.current<1)blockedReason='RESOURCE_EMPTY_OR_UNKNOWN';
+      }
+    }catch(e){if(!(e instanceof BridgeError)||e.status===403)throw e;blockedReason=e.code;}
+  }
   return {deploymentId:record.id,formId:d.formId,formTitle:record.title,requiredSeconds:d.requiredSeconds,startedAt:d.startedAt,
     status:d.status,elapsedSeconds:p.elapsedSeconds,remainingSeconds:p.remainingSeconds,basis:p.basis,round:p.round,
-    ready:p.remainingSeconds===0,matchesForm:formId===d.formId,sourceRevision:d.formRevision};
+    ready:p.remainingSeconds===0 && !blockedReason,blockedReason,matchesForm:formId===d.formId,sourceRevision:d.formRevision};
 }
 async function begin(ctx,x){
   const a=await actor(ctx,x.actorId),form=await owned(ctx,'form',x.formId,a.id),d=form.data;
@@ -83,7 +96,7 @@ async function begin(ctx,x){
   // The action of starting work happens now. A successful deployment spends its
   // configured finite use and initializes eligible per-deployment resources later.
   await useTiming(ctx,a,d.timing);
-  const data={status:'deploying',formId:form.id,formRevision:form.revision,previousFormId:a.data.activeFormId,
+  const data={status:'deploying',formId:form.id,formRevision:form.data.configurationRevision??form.revision,previousFormId:a.data.activeFormId,
     requiredSeconds:d.activationSeconds,startedAt:ctx.now,startedByCommand:ctx.commandId,sourceItemId:d.sourceItemId??null,
     requiresOperating:d.requiresOperating??false,requiresAttunement:d.requiresAttunement??false,startedTiming:d.timing,
     elapsedBeforeSegment:0,segment:segment(a,enc),willing:x.willing??null};
@@ -111,7 +124,7 @@ export async function planCompletion(ctx,a,form,x){
   if(!x.deploymentId){must(!a.data.activeDeploymentId,'FINISH_OR_INTERRUPT_PENDING_DEPLOYMENT');return null;}
   const record=await owned(ctx,'form_deployment',x.deploymentId,a.id),d=record.data;
   must(record.id===a.data.activeDeploymentId && d.status==='deploying' && d.formId===form?.id,'DEPLOYMENT_NOT_PENDING');
-  must(a.data.activeFormId===d.previousFormId && form.revision===d.formRevision,'DEPLOYMENT_FORM_CHANGED');
+  must(a.data.activeFormId===d.previousFormId && (form.data.configurationRevision??form.revision)===d.formRevision,'DEPLOYMENT_FORM_CHANGED');
   must(x.elapsedSeconds===0 && x.uninterrupted===true,'RECORDED_DEPLOYMENT_TIME_REQUIRED');
   await eligibleForm(ctx,a,form,x.willing);
   const enc=await actorEncounter(ctx,a),p=progress(d,enc,a);

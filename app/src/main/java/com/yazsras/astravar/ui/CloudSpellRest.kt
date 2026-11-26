@@ -30,6 +30,22 @@ private fun JsonObject.rows(key: String) = (get(key) as? JsonArray).orEmpty().ma
 private fun JsonObject.strings(key: String) = (get(key) as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
 private fun JsonObject.details() = get("data") as? JsonObject ?: JsonObject(emptyMap())
 private fun levelName(level: Int) = if (level == 0) "Cantrips" else "Level $level"
+@Composable internal fun CloudChargeSelection(options:List<JsonObject>, selected:MutableList<String>) {
+    for(effect in options){
+        val id=effect.str("id") ?: continue
+        val charge=effect["charge"] as? JsonObject ?: continue
+        val amount=charge.num("amount") ?: continue
+        val available=effect.num("available")
+        val trigger=if(charge.str("trigger")=="confirmed_hit")"on a confirmed hit" else "on the attack attempt"
+        val value=effect.num("value")
+        val change=if(effect.str("operation")=="add" && value!=null && value>=0)"+$value" else value?.toString().orEmpty()
+        Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
+            Checkbox(id in selected,{on->if(on)selected.add(id)else selected.remove(id)},enabled=id in selected || available!=null && available>=amount,
+                modifier=Modifier.semantics{contentDescription=effect.str("title")?:id})
+            Column{Text("${effect.str("title")?:id} · $change");Text("$amount $trigger · ${available?:"Unknown"} available",style=MaterialTheme.typography.labelSmall)}
+        }
+    }
+}
 private fun formula(c: JsonObject): String {
     val dice = c.num("dice") ?: 0
     val bonus = c.num("flat") ?: 0
@@ -74,6 +90,7 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
         if (rest) {
             appendLine("Elapsed · " + shown(outcome, "elapsedSeconds") + " seconds")
             appendLine("HP · " + shown(outcome,"beforeHp") + " → " + shown(outcome,"afterHp") + " · healed " + shown(outcome,"actualHealing"))
+            (outcome["exhaustion"] as? JsonObject)?.let { appendLine("Exhaustion · "+shown(it,"before")+" → "+shown(it,"after")) }
             for (die in outcome.rows("hitDice")) {
                 val mod = die.num("modifier")
                 val signed = if (mod == null) "Unknown" else if (mod >= 0) "+$mod" else mod.toString()
@@ -123,7 +140,7 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
         if (!snapshot.visible) return@LaunchedEffect
         try {
             actor = client.record(actorId)
-            val kinds = if (tab == "Spells") setOf("spell","spell_grant","resource_pool","cast_instance") else setOf("resource_pool","rest_report")
+            val kinds = if (tab == "Spells") setOf("spell","spell_grant","resource_pool","cast_instance","concentration_check") else setOf("resource_pool","rest_report")
             val loaded = mutableListOf<JsonObject>()
             var tail = ""
             do {
@@ -156,24 +173,37 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = e.message ?: "Campaign data is unavailable." }
     }
-    fun submit(op: String, args: JsonObject) {
+    val spendOperation = if (tab == "Spells") "cast_spell" else "complete_rest"
+    val uncertain = rememberedUnconfirmedCommand(client, snapshot, spendOperation, actorId)
+    fun runCommand(action: suspend () -> JsonObject) {
         if (!online || busy) return
         busy = true; error = null
         scope.launch {
-            try { result = client.submit(op, args, snapshot) }
+            try { result = action() }
             catch (e: CancellationException) { throw e }
-            catch (e: Exception) { error = e.message ?: "Awaiting authoritative verification." }
+            catch (e: Exception) { error = cloudError(e) }
             finally { busy = false }
         }
     }
+    fun submit(op: String, args: JsonObject) {
+        if (uncertain == null) runCommand { client.submit(op, args, snapshot) }
+    }
+    if (uncertain != null && tab in listOf("Spells", "Rest")) {
+        CloudCommandRecovery(uncertain, online && !busy) { id -> runCommand { client.retry(id) } }
+    }
     val pools = records.filter { it.str("kind") == "resource_pool" && it.str("life") == "active" }
     when (tab) {
-        "Spells" -> CloudSpellRows(actorId, book, pools, records, online && !busy, openOperation, ::submit, possibleTargets)
+        "Spells" -> {
+            actor?.details()?.str("concentrationCastId")?.let { activeCast ->
+                CloudConcentrationSaves(actorId, activeCast, records, client, snapshot, online && !busy, openOperation)
+            }
+            CloudSpellRows(actorId, book, pools, records, online && !busy && uncertain == null, openOperation, ::submit, possibleTargets)
+        }
         "Resources" -> CloudResourceManagement(actorId, pools, online && !busy, openOperation) { poolId, after ->
             val page = after?.let { "?after=$it&atRevision=${snapshot.version.revision}&atEpoch=${snapshot.version.epoch}&grantRevision=${snapshot.version.grantRevision}" }.orEmpty()
             client.projection(snapshot, "pool-history/$poolId$page")
         }
-        "Rest" -> CloudRestPlan(actorId, actor?.details(), sheet, pools, online && !busy, ::submit)
+        "Rest" -> CloudRestPlan(actorId, actor?.details(), sheet, pools, online && !busy && uncertain == null, ::submit)
     }
     val history = records.filter { it.str("kind") == if (tab == "Spells") "cast_instance" else "rest_report" }
         .sortedByDescending { it.details().get("recordedAt")?.jsonPrimitive?.longOrNull ?: 0L }
@@ -251,6 +281,8 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
     val identified = pools.find { it.str("id") == selected } ?: return
     val id = identified.str("id") ?: return
     val data = identified.details()
+    val held=data.rows("effectHolds").sumOf{it.num("amount")?:0}
+    val available=data.num("current")?.minus(held)
     var events by remember(id) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var next by remember(id) { mutableStateOf<String?>(null) }
     var loading by remember(id) { mutableStateOf(false) }
@@ -282,12 +314,13 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
         Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(6.dp)) {
             PoolCounter(data.num("current"),data.num("maximum"))
             data.str("source")?.let { Text(it) }
+            if(held>0)Text("$held reserved for unresolved attacks · ${available ?: "Unknown"} available")
             Text("Recovery · " + data.str("recovery").orEmpty().replace('_',' '))
             data.num("recoveryAmount")?.let { Text("$it per eligible recovery") }
             data.num("dieSides")?.let { Text("Hit Die · d$it") }
             data.num("slotLevel")?.let { Text("Spell slot · level $it") }
             if (data.num("rechargeMinimum") != null) Text("Recharge · roll ${data.num("rechargeMinimum")} or higher on d${data.num("rechargeSides")}")
-            PlayerOutlinedButton({edit("spend_resource")},enabled=online && (data.num("current") ?: 0)>0) { Text("Spend uses") }
+            PlayerOutlinedButton({edit("spend_resource")},enabled=online && (available ?: 0)>0) { Text("Spend uses") }
             if (data.str("recovery")=="recharge_roll")
                 PlayerOutlinedButton({edit("resolve_pool_recharge")},enabled=online && data.num("current")==0) { Text("Record recharge roll") }
             PlayerTextButton({edit("revise_resource"){
@@ -337,19 +370,20 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
         val scaling = row["scaling"] as? JsonObject
         return row.str("resolution") in setOf("attack","save") || (scaling?.num("targets") ?: 0) > 0
     }
-    fun perform(row:JsonObject,slot:String?,replace:Boolean,ritual:Boolean,targets:List<String> = emptyList()) {
+    fun perform(row:JsonObject,slot:String?,replace:Boolean,ritual:Boolean,targets:List<String> = emptyList(),charges:List<String> = emptyList()) {
         submit("cast_spell",buildJsonObject {
             put("actorId",actorId);put("grantId",row.str("grantId"));put("castId",UUID.randomUUID().toString());put("level",row.num("level"))
             if(slot!=null)put("slotPoolId",slot)
             if(replace)put("replaceConcentration",true)
             if(ritual)put("confirmedRitualTime",true)
             if(targets.isNotEmpty())put("targets",JsonArray(targets.map(::JsonPrimitive)))
+            if(charges.isNotEmpty())put("chargedEffectIds",JsonArray(charges.map(::JsonPrimitive)))
         })
         choice=null;inspect=null
     }
     fun cast(row:JsonObject) {
         val slots=row.strings("eligibleSlotIds")
-        if((row.str("route")=="slot"&&slots.size>1)||needsTargets(row)&&possibleTargets.isNotEmpty()||row.str("route")=="ritual"||row["requiresConcentrationDecision"]?.jsonPrimitive?.booleanOrNull==true)choice=row
+        if((row.str("route")=="slot"&&slots.size>1)||needsTargets(row)&&possibleTargets.isNotEmpty()||row.rows("optionalCharges").isNotEmpty()||row.str("route")=="ritual"||row["requiresConcentrationDecision"]?.jsonPrimitive?.booleanOrNull==true)choice=row
         else perform(row,if(row.str("route")=="slot")slots.singleOrNull() else null,false,false)
     }
     if(!online && rows.isEmpty()) cached.filter { it.str("kind")=="spell"&&it.str("title").orEmpty().contains(query,true) }.forEach {
@@ -400,15 +434,20 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
         val ritual=row.str("route")=="ritual"
         val concentration=row["requiresConcentrationDecision"]?.jsonPrimitive?.booleanOrNull==true
         val chosen=remember(row){mutableStateListOf<String>()}
+        val charges=remember(row){mutableStateListOf<String>()}
+        val offered=row.rows("optionalCharges")
+        val needsChargedTarget=offered.any{it.str("id") in charges && (it["charge"] as? JsonObject)?.str("trigger")=="confirmed_hit"}
         val targetCap=((row["scaling"] as? JsonObject)?.num("targets") ?: 12).coerceIn(0,12)
         AlertDialog(onDismissRequest={choice=null},title={Text(row.str("name").orEmpty())},text={
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                CloudChargeSelection(offered,charges)
                 if(needsTargets(row)&&possibleTargets.isNotEmpty()){
                     Text("Targets",style=MaterialTheme.typography.titleSmall)
                     for(target in possibleTargets){
                         val id=target.str("id") ?: continue
                         Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
-                            Checkbox(id in chosen,{on->if(on)chosen.add(id)else chosen.remove(id)},enabled=id in chosen||chosen.size<targetCap)
+                            Checkbox(id in chosen,{on->if(on)chosen.add(id)else chosen.remove(id)},enabled=id in chosen||chosen.size<targetCap,
+                                modifier=Modifier.semantics { contentDescription="Target "+(target.str("title")?:id) })
                             Text(target.str("title") ?: id)
                         }
                     }
@@ -419,7 +458,7 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
                 if(concentration)Text("Casting ends the current concentration effect.")
                 if(ritual)Text("Confirm that the ritual casting time has elapsed.")
             }
-        },confirmButton={TextButton({perform(row,if(row.str("route")=="slot")slot else null,concentration,ritual,chosen.toList())},enabled=online&&(row.str("route")!="slot"||slot!=null)){Text("Confirm cast")}},dismissButton={TextButton({choice=null}){Text("Cancel")}})
+        },confirmButton={TextButton({perform(row,if(row.str("route")=="slot")slot else null,concentration,ritual,chosen.toList(),charges.toList())},enabled=online&&(row.str("route")!="slot"||slot!=null)&&(!needsChargedTarget||chosen.isNotEmpty())){Text("Confirm cast")}},dismissButton={TextButton({choice=null}){Text("Cancel")}})
     }
     if(manage)AlertDialog(onDismissRequest={manage=false},title={Text("Manage spells")},text={
         Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -453,6 +492,7 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
                 "set" -> "Set to $value"
                 "minimum" -> "At least $value"
                 "maximum" -> "At most $value"
+                "divide" -> "Divide by $value"
                 else -> null
             }
             Text("${source.str("source") ?: source.str("id") ?: "Unknown source"} · ${adjustment ?: "Unknown"}")
@@ -498,6 +538,15 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
     val vitals=sheet?:actor
     Text("Hit points ${vitals?.num("currentHp")?:"?"}/${vitals?.num("maxHp")?:"?"}",style=MaterialTheme.typography.titleMedium)
     CloudHpMaximumSources(sheet)
+    val exhaustion=sheet?.get("exhaustion") as? JsonObject
+    val exhaustionLevel=exhaustion?.num("level")?:0
+    var exhaustionEligible by rememberSaveable(actorId,kind,exhaustionLevel) { mutableStateOf(exhaustion?.str("rulesProfile")=="revised_2024") }
+    if(kind=="long_rest" && exhaustionLevel>0){
+        Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
+            Checkbox(exhaustionEligible,{exhaustionEligible=it},modifier=Modifier.semantics{contentDescription="Exhaustion recovery"})
+            Text(if(exhaustion?.str("rulesProfile")=="legacy_2014") "Food and drink confirmed · recover one exhaustion level" else "Eligible to recover one exhaustion level")
+        }
+    }
     Row(horizontalArrangement=Arrangement.spacedBy(4.dp)) {
         listOf("short_rest" to "Short rest","long_rest" to "Long rest").forEach{(key,label)->
             FilterChip(selected=kind==key,onClick={kind=key;minutes=if(key=="long_rest")"480" else "60"},label={Text(label)})
@@ -553,6 +602,7 @@ internal fun cloudGameplayReport(value: JsonObject, names: Map<String,String>): 
         confirmButton={TextButton({
             review=false
             submit("complete_rest",buildJsonObject{put("actorId",actorId);put("kind",kind);put("elapsedSeconds",(duration?:0)*60);put("confirmed",true)
+                if(kind=="long_rest" && exhaustionLevel>0)put("exhaustionRecoveryEligible",exhaustionEligible)
                 val rollInApp = origin=="app" && kind=="short_rest"
                 put("hitDice",if(!rollInApp) selectedData else buildJsonArray {
                     dice.forEach{p->

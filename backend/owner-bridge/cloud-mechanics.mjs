@@ -1,7 +1,9 @@
+import {formCollectionOperations} from './cloud-form-collection.mjs';
 import { checkDiceOwner, diceCategories, stats, damageTypes, standardSkills, identifier, boolean, whole, nullable, named, option, fields, actorSchema, resourceSchema, formSchema, effectSchema, restSchema, must, op, owned, actor, insert, save, transferableSource, gearEligible, activeForm, sheet, healedHp, spend, useTiming, addClock } from './cloud-mechanics-core.mjs';
 import { deploymentOperations, eligibleForm, planCompletion, deploymentView, interruptIfPending } from './cloud-form-deployment.mjs';
 import { careOperations } from './cloud-mechanics-care.mjs';
 import { settleEffectCosts } from './cloud-effect-costs.mjs';
+import { requirePlayableExhaustion } from './cloud-mechanics-core.mjs';
 import { profileOperations } from './cloud-mechanics-profile.mjs';
 import { rollOperations } from './cloud-mechanics-rolls.mjs';
 import { combatOperations } from './cloud-mechanics-combat.mjs';
@@ -35,6 +37,7 @@ export async function mechanicFormPreview(ctx,actorId,formId){
 }
 async function defineActor(ctx,x){
   const {actorId,name,source,role,rulesProfile,level}=x;
+  must(!(x.exhaustionLevel>0)||source,'EXHAUSTION_SOURCE_REQUIRED');
   must(x.currentHp==null||x.maxHp==null||x.currentHp<=x.maxHp,'HP_EXCEEDS_CAPACITY');
   must(new Set(x.saveProficiencies??[]).size===(x.saveProficiencies??[]).length,'DUPLICATE_SAVE_PROFICIENCY');
   if(x.initiativeAfterActorId){
@@ -48,6 +51,8 @@ async function defineActor(ctx,x){
     speeds:x.speeds??{},senses:x.senses??{},size:x.size??null,creatureType:x.creatureType??null,gameSeconds:x.gameSeconds??null,saveProficiencies:x.saveProficiencies??[],
     attacksPerAction:x.attacksPerAction??1,attunementCapacity:x.attunementCapacity??null,conditions:[],conditionSources:[],activeFormId:null,formExpiresAt:null,concentrationCastId:null,encounterId:null,
     poolIds:[],effectIds:[],skills:{}};
+  data.exhaustionLevel=x.exhaustionLevel===undefined?0:x.exhaustionLevel;
+  if(data.exhaustionLevel>0){data.conditions.push('exhaustion');data.exhaustionSource=source;data.conditionSources.push({key:'exhaustion',sourceId:'initial',expiresAt:null});}
   await insert(ctx,'actor',actorId,actorId,name,data);
   if(x.initiativeAfterActorId)await ctx.link(actorId,'initiative_after',x.initiativeAfterActorId);
   return {actorId};
@@ -133,6 +138,8 @@ async function defineForm(ctx,x,edit=false){
     for(const key of ['deploymentPoolId','integrityPoolId','resetPoolId'])if(previous.data[key] && !poolIds.includes(previous.data[key]))await ctx.unlink(formId,'uses_pool',previous.data[key]);
     if(previous.data.sourceItemId && previous.data.sourceItemId!==x.sourceItemId)await ctx.unlink(formId,'requires_item',previous.data.sourceItemId);
     for(const id of previous.data.suppressedItemIds??[])if(!suppress.includes(id))await ctx.unlink(formId,'suppresses_item',id);
+    if(previous.data.orderKey!==undefined)data.orderKey=previous.data.orderKey;
+    if(previous.data.inheritedRuleFormIds)data.inheritedRuleFormIds=previous.data.inheritedRuleFormIds;
     await ctx.put({...previous,title:name,data});
   }else await insert(ctx,'form',formId,actorId,name,data);
   for(const id of suppress)await ctx.link(formId,'suppresses_item',id);
@@ -256,7 +263,9 @@ async function hp(ctx,x){
     }
   }else if(x.kind==='heal'){
     must(before.activityState!=='disabled','DISABLED_ACTOR_REQUIRES_RECONSTRUCTION');
-    const cap=(await sheet(ctx,a.id)).maxHp;
+    const projection=await sheet(ctx,a.id);
+    must(projection.exhaustion.status!=='fatal','FATAL_EXHAUSTION_REQUIRES_RESOLUTION');
+    const cap=projection.maxHp;
     must(before.currentHp!=null&&cap!=null,'HP_UNKNOWN');
     after.currentHp=healedHp(before.currentHp,cap,amount);
   }else{
@@ -286,6 +295,7 @@ async function hp(ctx,x){
 async function applyAttemptTarget(ctx,x,isCast=false){
   const attempt=await owned(ctx,isCast?'cast_instance':'attack_attempt',isCast?x.castId:x.attemptId,x.actorId), d=attempt.data;
   const prior=d.targetResults??[];
+  must(!d.chargeRelease,'ATTEMPT_CLOSED');
   must(!isCast||!d.deliveryActorId||d.deliveryUseId,'SPELL_AWAITS_DELIVERY_REACTION');
   must(d.targets?.includes(x.targetActorId) && !prior.some(r=>r.targetActorId===x.targetActorId),'TARGET_UNDECLARED_OR_ALREADY_RESOLVED');
   const target=await actor(ctx,x.targetActorId), p=await sheet(ctx,target.id,target.data.contextTags??[]);
@@ -343,6 +353,7 @@ async function applyAttemptTarget(ctx,x,isCast=false){
   await save(ctx,attempt,{...d,...(d.effectCharges?.length?{effectCharges:settled.charges,costs:[...d.costs,...settled.costs]}:{}),
     targetResults,outcome:complete?'resolved':'pending',appliedDamage:targetResults.reduce((n,r)=>n+r.amount,0)});
   if(x.saveRollId)await ctx.link(attempt.id,'resolved_save',x.saveRollId);
+  if(applied?.concentrationCheckId)await ctx.link(applied.concentrationCheckId,isCast?'triggering_cast':'triggering_attack',attempt.id);
   return {...(isCast?{castId:attempt.id}:{attemptId:attempt.id}),...result,complete};
 }
 async function completeRest(ctx,x){
@@ -352,14 +363,25 @@ async function completeRest(ctx,x){
   must(!long || x.hitDice.length===0,'LONG_REST_CANNOT_SPEND_HIT_DICE');
   must(long || !x.restoreHitDice?.length,'SHORT_REST_CANNOT_RESTORE_HIT_DICE');
   must(!long || a.data.rulesProfile!=='custom','CUSTOM_LONG_REST_REQUIRES_ADJUDICATION');
+  const exhaustion=(await sheet(ctx,a.id)).exhaustion;
+  requirePlayableExhaustion(exhaustion);
+  must(x.exhaustionRecoveryEligible===undefined || long && exhaustion.level>0,'UNEXPECTED_EXHAUSTION_RECOVERY');
   const pools=new Map();
   for(const id of a.data.poolIds)pools.set(id,await owned(ctx,'resource_pool',id,a.id));
   const next=await addClock(ctx,a,x.elapsedSeconds);
+  const recovery=long && exhaustion.level>0 && (x.exhaustionRecoveryEligible===true ||
+    x.exhaustionRecoveryEligible===undefined && exhaustion.rulesProfile==='revised_2024');
+  if(recovery){
+    next.exhaustionLevel=exhaustion.level-1;next.exhaustionSource=ctx.commandId;
+    if(!next.exhaustionLevel){next.conditions=next.conditions.filter(k=>k!=='exhaustion');next.conditionSources=next.conditionSources.filter(s=>s.key!=='exhaustion');}
+  }
   if(a.data.activeFormId && !next.activeFormId)await ctx.unlink(a.id,'active_form',a.data.activeFormId);
   await save(ctx,a,next);
   const stats=await sheet(ctx,a.id),startHp=a.data.currentHp,max=stats.maxHp;
   const con=stats.abilities.CON.modifier;
   let hp=startHp;const dice=[],deltas=[],unresolved=[];
+  if(long && exhaustion.level>0 && exhaustion.rulesProfile==='legacy_2014' && x.exhaustionRecoveryEligible===undefined)
+    unresolved.push({reason:'legacy_exhaustion_food_and_drink_unconfirmed'});
   const selected=new Set();
   for(const entry of x.hitDice){
     const p=pools.get(entry.poolId);
@@ -425,6 +447,7 @@ async function completeRest(ctx,x){
   await save(ctx,a,{...next,currentHp:hp,temporaryHp:long&&next.temporaryHp!=null?0:next.temporaryHp,concentrationCastId:long?null:next.concentrationCastId});
   const reportId=ctx.commandId;
   const report={actorId:a.id,kind:x.kind,status:'completed',elapsedSeconds:x.elapsedSeconds,beforeHp:startHp,afterHp:hp,maxHp:max,
+    ...(exhaustion.level>0?{exhaustion:{before:exhaustion.level,after:next.exhaustionLevel,recovered:Boolean(recovery),eligible:x.exhaustionRecoveryEligible??null}}:{}),
     actualHealing:hp==null||startHp==null?null:hp-startHp,hitDice:dice,deltas,unresolved,
     remainingHitDice:await Promise.all([...pools.values()].filter(p=>p.data.type==='hit_die').map(async p=>({poolId:p.id,remaining:(await owned(ctx,'resource_pool',p.id,a.id)).data.current}))),
     commandId:ctx.commandId,recordedAt:ctx.now};
@@ -433,6 +456,15 @@ async function completeRest(ctx,x){
   return {reportId,...report};
 }
 export const MECHANIC_OPERATIONS=Object.freeze({
+  retire_unresolved_effect_charges:{...op('resources',fields({actorId:identifier,useId:identifier,kind:option('attack_attempt','cast_instance'),source:named(300)},
+    ['actorId','useId','kind','source']),async(ctx,x)=>{
+    const use=await owned(ctx,x.kind,x.useId,x.actorId);
+    must(!use.data.chargeRelease && use.data.effectCharges?.some(c=>c.status==='reserved'),'NO_PENDING_EFFECT_CHARGE');
+    const settled=await settleEffectCosts(ctx,x.actorId,use.id,use.data.effectCharges,'miss');
+    const chargeRelease={source:x.source,commandId:ctx.commandId};
+    await save(ctx,use,{...use.data,chargeRelease,outcome:'closed_unresolved',effectCharges:settled.charges});
+    return {useId:use.id,chargeRelease,effectCharges:settled.charges};
+  }),ownerReview:true},
   set_dice_delegation:{...op('character',fields({actorId:identifier,category:option(...diceCategories),enabled:boolean,source:named(300)},['actorId','category','enabled','source']),async(ctx,x)=>{
     const a=await actor(ctx,x.actorId), categories=new Set(a.data.diceDelegations??[]);
     if(x.enabled)categories.add(x.category);else categories.delete(x.category);
@@ -503,6 +535,7 @@ export const MECHANIC_OPERATIONS=Object.freeze({
     return {eventId:x.eventId,...report};
   }),
   complete_rest:op('resources',restSchema,completeRest),
+  ...formCollectionOperations(defineForm),
   define_form:op('character',formSchema,(ctx,x)=>defineForm(ctx,x,false)),
   revise_form:op('character',formSchema,(ctx,x)=>defineForm(ctx,x,true)),
   change_form:op('character',fields({actorId:identifier,formId:nullable(identifier),deploymentId:identifier,elapsedSeconds:whole(0,86400),uninterrupted:boolean,willing:boolean},['actorId','formId','elapsedSeconds']),changeForm),

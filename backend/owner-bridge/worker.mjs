@@ -90,7 +90,11 @@ async function handleWorkerRequest(request, env, context) {
   const cloudService=configured && env.ASTRAVAR_CLOUD_ENABLED==='1' ? new CloudService(
     typeof env.DB.withSession==='function'?env.DB.withSession('first-primary'):env.DB,
     {ownerId,kinds:{...CONTINUITY_KINDS,...MECHANIC_KINDS,...RECORD_KINDS,...CLOUD_MEDIA_KINDS},operations:{...CONTINUITY_OPERATIONS,...MECHANIC_OPERATIONS,...RECORD_OPERATIONS,...CLOUD_MEDIA_OPERATIONS,...CLOUD_LIFECYCLE_OPERATIONS},isolated:env.ASTRAVAR_CLOUD_ENV==='isolated'}) : null;
-  if(cloudService)cloudService.mediaBucket=env.ASTRAVAR_MEDIA;
+  if(cloudService){
+    cloudService.mediaBucket=env.ASTRAVAR_MEDIA;
+    cloudService.rateCapacity=env.ASTRAVAR_CLOUD_RATE_CAPACITY;
+    cloudService.rateRefillMs=env.ASTRAVAR_CLOUD_RATE_REFILL_MS;
+  }
   // Tool schemas contain no private data and are needed for plugin provisioning.
   // Actual tools/call still requires the configured owner and verified identity.
   if (url.pathname === '/mcp') return handleMcp(request, bridge, { ownerId, allowPublicDiscovery: true,liveHp,campaignBridge,campaignPush,cloudService });

@@ -1,7 +1,9 @@
+import {matchesForm} from './cloud-mechanics-core.mjs';
 import { changeDeploymentClock } from './cloud-form-deployment.mjs';
 import { armedComponents, shotChoice } from './cloud-mechanics-arsenal.mjs';
 import { attackModeFor } from './cloud-mechanics-linked.mjs';
 import { chargedEffectSelection, reserveEffectCosts, settleEffectCosts } from './cloud-effect-costs.mjs';
+import { availableUses, requirePlayableExhaustion } from './cloud-mechanics-core.mjs';
 import { checkDiceOwner, stats, identifier, boolean, named, whole, arrayOf, option, fields, mode, evidence, attackSchema, must, op, actor, owned, insert, save, sheet, transferableSource, gearEligible, numeric, preferredEffect, rollPolicy, spend, useTiming } from './cloud-mechanics-core.mjs';
 import { observed } from './cloud-mechanics-rolls.mjs';
 
@@ -119,9 +121,10 @@ async function writeAttack(ctx,x,editing=false){
 async function loadAttack(ctx,x){
   const a=await actor(ctx,x.actorId),attack=await owned(ctx,'attack',x.attackId,a.id),p=await sheet(ctx,a.id,[],undefined,x.chargedEffectIds);
   const d=attack.data;
+  requirePlayableExhaustion(p.exhaustion);
   must(!['disabled','dormant'].includes(a.data.activityState),'ACTOR_INACTIVE');
   must(!p.conditions.some(c=>['incapacitated','unconscious','stunned','petrified','paralyzed'].includes(c)),'ACTOR_CANNOT_ATTACK');
-  must((!d.formId||d.formId===p.formId)&&!d.excludedForms?.includes(p.formId),'ATTACK_FORM_INELIGIBLE');
+  must(matchesForm(d,p.ruleFormIds),'ATTACK_FORM_INELIGIBLE');
   must(await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating),'ATTACK_SOURCE_INELIGIBLE');
   const chosen=Object.fromEntries(d.selections.filter(s=>(s.actorId??attack.actorId)===a.id&&s.formId===p.formId).map(s=>[s.componentId,s.type]));
   const mode=await attackModeFor(ctx,a,attack);
@@ -162,7 +165,7 @@ async function standaloneDamage(ctx,x) {
   for(const part of x.damage)checkDiceOwner(ctx,a,'damage',part.evidence.origin);
   if(attack.data.cost) {
     const cost=attack.data.cost,pool=await owned(ctx,'resource_pool',cost.poolId,a.id);
-    must(pool.data.current!=null && pool.data.current>=cost.amount,'RESOURCE_EMPTY_OR_UNKNOWN');
+    must(availableUses(pool.data)!=null && availableUses(pool.data)>=cost.amount,'RESOURCE_EMPTY_OR_UNKNOWN');
   }
   must(attack.data.resolution!=='manual','MANUAL_ADJUDICATION_REQUIRED');
   const results=rollComponents(components,x.damage,false);
@@ -188,7 +191,7 @@ async function resolveAttack(ctx,x){
     if(x.substitutionId){
       must(!x.hit && x.mode==='normal','SUBSTITUTION_REPLACES_DICE');
       const rule=await owned(ctx,'action_definition',x.substitutionId,a.id),f=rule.data;
-      must(f.type==='fixed_attack_die' && f.cost && (!f.formId||f.formId===p.formId) &&
+      must(f.type==='fixed_attack_die' && f.cost && matchesForm(f,p.ruleFormIds) &&
         await gearEligible(ctx,f.sourceItemId,a.id,f.requiresAttunement,f.requiresOperating),'DIE_SUBSTITUTION_INELIGIBLE');
       const cost=await spend(ctx,a.id,f.cost.poolId,f.cost.amount);
       hit={name:attack.title,status:'resolved',origin:'source_substitution',faces:[],substitutedValue:f.fixedDieValue,modifier:total,
@@ -303,6 +306,7 @@ export const combatOperations=Object.freeze({
   roll_damage_only:op('combat',fields({actorId:identifier,attackId:identifier,rollId:identifier,payload:shotChoice,damage:damageEvidence},['actorId','attackId','rollId','damage']),standaloneDamage),
   roll_attack_damage:op('combat',fields({actorId:identifier,attemptId:identifier,damage:damageEvidence},['actorId','attemptId','damage']),async(ctx,x)=>{
     const r=await owned(ctx,'attack_attempt',x.attemptId,x.actorId);
+    must(!r.data.chargeRelease,'ATTEMPT_CLOSED');
     must(r.data.damage===null,'ATTEMPT_DAMAGE_ALREADY_RECORDED');
     const a=await actor(ctx,x.actorId);
     for(const part of x.damage)checkDiceOwner(ctx,a,'damage',part.evidence.origin);

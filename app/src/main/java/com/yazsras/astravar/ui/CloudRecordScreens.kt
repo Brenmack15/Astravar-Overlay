@@ -6,6 +6,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -671,8 +672,10 @@ private fun hasTradeCoins(side:JsonObject)=coins.any{(side.obj("coins").s(it)?.t
         left.s("actorId")!=right.s("actorId") && reason.isNotBlank()
     PlayerSheet("Party exchange",dismiss) {
         for((index,side) in sides.withIndex())key(index){
-            TradeOffer(client,snapshot,if(index==0)"First offer" else "Second offer",side,sides[1-index].s("actorId"),online){
-                if(index==0)leftJson=it.toString() else rightJson=it.toString()
+            Column(Modifier.testTag("trade-offer-$index")) {
+                TradeOffer(client,snapshot,if(index==0)"First offer" else "Second offer",side,sides[1-index].s("actorId"),online){
+                    if(index==0)leftJson=it.toString() else rightJson=it.toString()
+                }
             }
         }
         Field("Reason",reason,{reason=it.take(180)})

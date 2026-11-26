@@ -20,7 +20,7 @@ internal fun validCloudDevicePath(path: String): Boolean {
     if (path.substringBefore('?').split('/').any { it == "." || it == ".." }) return false
     val prefix = cloudPrefix.matchAt(path, 0) ?: return false
     val route = path.substring(prefix.range.last + 1)
-    return cloudReadRoute.matches(route) || formProjectionPath.matches(route) || actorProjectionPath.matches(route) || validRecordViewSuffix(route) || validArchiveSuffix(route) || validApprovalViewSuffix(route)
+    return cloudReadRoute.matches(route) || primaryAssociationPath.matches(route) || formProjectionPath.matches(route) || actorProjectionPath.matches(route) || validRecordViewSuffix(route) || validArchiveSuffix(route) || validApprovalViewSuffix(route)
 }
 
 internal class CloudSession(val credential: OwnerSyncCredential, val access: String?) {
@@ -33,9 +33,11 @@ internal class CloudCampaignClient(
     private val session: suspend () -> CloudSession?,
     private val transport: OwnerConnectionTransport,
     private val now: () -> Long = System::currentTimeMillis,
-    private val mediaTransport: suspend (CloudSession,String,String,String?,ByteArray?) -> ByteArray = { s,id,kind,upload,bytes -> transferCloudImage(s,id,kind,upload,bytes) }
+    private val mediaTransport: suspend (CloudSession,String,String,String?,ByteArray?) -> ByteArray = { s,id,kind,upload,bytes -> transferCloudImage(s,id,kind,upload,bytes) },
+    private val waitForRead: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) }
 ) {
     private val lock = Mutex()
+    private var rateLimit: Pair<CloudBinding, Long>? = null
     private val changed = MutableStateFlow(0L)
     val changes = changed.asStateFlow()
     private fun notifyCache() { changed.value++ }
@@ -54,11 +56,29 @@ internal class CloudCampaignClient(
         return current
     }
 
+    private fun checkRateLimit(s: CloudSession) {
+        rateLimit?.takeIf { it.first == s.binding }?.let { (_, until) ->
+            val remaining = until - now()
+            if (remaining > 0) throw OwnerSyncFailure("CLOUD_RATE_LIMITED", (remaining + 999) / 1000)
+            rateLimit = null
+        }
+    }
+
+    private fun rateFailure(s: CloudSession, supplied: Long?): OwnerSyncFailure {
+        val retry = supplied?.takeIf { it in 1..86400 }
+        if (retry != null) rateLimit = s.binding to (now() + retry * 1000)
+        return OwnerSyncFailure("CLOUD_RATE_LIMITED", retry)
+    }
+
     private suspend fun request(s: CloudSession, suffix: String, body: String? = null): JsonObject {
         val path = "/v3/continuities/${s.binding.continuity}/$suffix"
         require(validCloudDevicePath(path))
+        checkRateLimit(s)
         val result = transport.request(s.binding.origin, path, s.credential, s.access, body)
         if (result.status in 200..299) return result.json
+        if (result.status == 429) {
+            throw rateFailure(s, (result.json["error"] as? JsonObject)?.get("retryAfterSeconds")?.jsonPrimitive?.longOrNull)
+        }
         val baselineRequest=suffix=="capabilities" || suffix.startsWith("state?limit=20")
         if(result.status==401 || baselineRequest && result.status in setOf(403,404)) conceal()
         else if(result.status==403 && cache.workspace()?.visible==true) {
@@ -71,7 +91,7 @@ internal class CloudCampaignClient(
         }
         val code = (result.json["error"] as? JsonObject)?.get("code")?.jsonPrimitive?.contentOrNull
         if (suffix == "commands" && body != null && result.status in setOf(400, 403, 404, 409, 422) &&
-            code != null && code != "COMMAND_ID_REUSED") {
+            code != null && code !in setOf("COMMAND_ID_REUSED", "COMMAND_ID_CONFLICT")) {
             val id = Json.parseToJsonElement(body).jsonObject.cloudText("commandId")
             cache.acknowledge(s.binding, id); notifyCache()
         }
@@ -114,6 +134,18 @@ internal class CloudCampaignClient(
         }
     }
 
+    private suspend fun snapshotPage(s: CloudSession, path: String, explicit: Boolean): JsonObject {
+        repeat(3) {
+            try { return request(s, path) } catch (e: OwnerSyncFailure) {
+                val seconds = e.retryAfterSeconds
+                if (e.code != "CLOUD_RATE_LIMITED" || seconds == null || seconds !in 1..60) throw e
+                waitForRead(seconds * 1000)
+                if (current(explicit).binding != s.binding) throw OwnerSyncFailure("CLOUD_BINDING_CHANGED")
+            }
+        }
+        return request(s, path)
+    }
+
     private suspend fun refreshLocked(s: CloudSession, explicit: Boolean): CloudSnapshot {
         val token = UUID.randomUUID().toString()
         var expected: CloudVersion? = null
@@ -124,7 +156,7 @@ internal class CloudCampaignClient(
                 val v = expected
                 val path = if (v == null) "state?limit=20" else
                     "state?limit=20&after=$after&atRevision=${v.revision}&atEpoch=${v.epoch}&grantRevision=${v.grantRevision}"
-                val response = request(s, path)
+                val response = snapshotPage(s, path, explicit)
                 val page = cloudPage(response, s.binding, after, v, now())
                 val old = cache.workspace()
                 if(v==null && old?.visible==true && old.binding==s.binding && old.version==page.version) {
@@ -226,6 +258,7 @@ internal class CloudCampaignClient(
             val response = request(s, "commands", command.toString())
             require(response.cloudText("commandId") == command.cloudText("commandId"))
             if (response.cloudText("status") == "PENDING_APPROVAL") {
+                verifyOriginalEnvelope(command, response)
                 cache.acknowledge(s.binding, commandId); notifyCache(); response
             } else verifyLocked(s, commandId)
         }
@@ -246,11 +279,19 @@ internal class CloudCampaignClient(
         }
         val state = refreshLocked(s,false)
         if (state.version.epoch != command.getValue("epoch").jsonPrimitive.long ||
-            state.version.revision != command.getValue("expectedRevision").jsonPrimitive.long)
-            throw OwnerSyncFailure("CLOUD_REVIEW_STALE")
+            state.version.revision != command.getValue("expectedRevision").jsonPrimitive.long) {
+            // It could have committed between the first receipt lookup and reading the advanced state.
+            // Only a second authoritative absence now proves the frozen envelope cannot spend anything.
+            try { return verifyLocked(s, id) } catch (failure: OwnerSyncFailure) {
+                if (failure.code != "COMMAND_UNKNOWN") throw failure
+            }
+            cache.acknowledge(s.binding, id); notifyCache()
+            throw OwnerSyncFailure("CLOUD_UNSUBMITTED_STALE")
+        }
         val result = request(s,"commands",command.toString())
         require(result.cloudText("commandId")==id)
         return if (result.cloudText("status") == "PENDING_APPROVAL") {
+            verifyOriginalEnvelope(command, result)
             cache.acknowledge(s.binding, id); notifyCache(); result
         } else verifyLocked(s,id)
     }
@@ -263,6 +304,12 @@ internal class CloudCampaignClient(
         }
     }
 
+    private fun verifyOriginalEnvelope(command: JsonObject, observed: JsonObject) {
+        val actual = (observed["digest"] as? JsonPrimitive)?.contentOrNull
+        val expected = OwnerSyncProtocol.hash(OwnerSyncProtocol.canonical(command))
+        if (actual != expected) throw OwnerSyncFailure("CLOUD_RECEIPT_DIGEST_UNVERIFIED")
+    }
+
     suspend fun verify(id: String): JsonObject = withContext(Dispatchers.IO) {
         lock.withLock { verifyLocked(current(), id) }
     }
@@ -271,6 +318,7 @@ internal class CloudCampaignClient(
         require(cloudIdentifier.matches(id))
         val response = request(s, "receipts/$id")
         require(response.cloudText("commandId") == id)
+        cache.command(s.binding, id)?.let { verifyOriginalEnvelope(it, response) }
         if (response.cloudText("status") == "PENDING_APPROVAL") {
             cache.acknowledge(s.binding, id); notifyCache(); return response
         }
@@ -321,7 +369,7 @@ internal class CloudCampaignClient(
             val w = cache.workspace() ?: throw OwnerSyncFailure("CLOUD_NOT_SELECTED")
             if (!w.visible || w.version.grantExpiresAt <= now() || snapshot.binding != s.binding || w.version != snapshot.version)
                 throw OwnerSyncFailure("CLOUD_REVIEW_STALE")
-            require(suffix == "context" || suffix == "settings" || formProjectionPath.matches(suffix) || suffix.startsWith("sheet/") || actorProjectionPath.matches(suffix) || suffix.startsWith("links/") || validRecordViewSuffix(suffix) || validArchiveSuffix(suffix) || validApprovalViewSuffix(suffix))
+            require(primaryAssociationPath.matches(suffix) || suffix == "context" || suffix == "settings" || formProjectionPath.matches(suffix) || suffix.startsWith("sheet/") || actorProjectionPath.matches(suffix) || suffix.startsWith("links/") || validRecordViewSuffix(suffix) || validArchiveSuffix(suffix) || validApprovalViewSuffix(suffix))
             val result = request(s, suffix)
             if (result.getValue("epoch").jsonPrimitive.long != w.version.epoch ||
                 result.getValue("revision").jsonPrimitive.long != w.version.revision) throw OwnerSyncFailure("SNAPSHOT_CHANGED")
@@ -342,9 +390,14 @@ internal class CloudCampaignClient(
             val w=cache.workspace() ?: throw OwnerSyncFailure("CLOUD_NOT_SELECTED")
             if (!w.visible || w.binding!=snapshot.binding || w.version!=snapshot.version || w.version.grantExpiresAt<=now())
                 throw OwnerSyncFailure("CLOUD_REVIEW_STALE")
+            checkRateLimit(s)
             val result=try { mediaTransport(s,target,kind,uploadId,bytes) } catch(err:OwnerSyncFailure) {
+                if(err.code=="CLOUD_RATE_LIMITED")throw rateFailure(s,err.retryAfterSeconds)
                 if(err.code=="MEDIA_HTTP_401")conceal()
-                if(err.code in setOf("MEDIA_HTTP_403","MEDIA_HTTP_404"))validateGrant(s,request(s,"capabilities"))
+                if(err.code in setOf("MEDIA_HTTP_403","MEDIA_HTTP_404")) {
+                    if(uploadId==null)cache.evictImage(w,target)
+                    validateGrant(s,request(s,"capabilities"))
+                }
                 throw err
             }
             val read=request(s,"capabilities")

@@ -133,13 +133,15 @@ export class CloudService {
   async receipt(principal,id,commandId) {
     if(!validCloudId(commandId))cloudFail(400,'INVALID_COMMAND_ID');
     const {grant}=await this.access(principal,id);
-    const b=this.key(id),row=await this.s('SELECT * FROM cloud_receipts WHERE owner_id=? AND continuity_id=? AND command_id=?',...b,commandId).first();
+    const b=this.key(id),row=await this.s(`SELECT r.*, q.digest AS request_digest FROM cloud_receipts r
+      JOIN cloud_requests q ON (q.owner_id,q.continuity_id,q.command_id)=(r.owner_id,r.continuity_id,r.command_id)
+      WHERE r.owner_id=? AND r.continuity_id=? AND r.command_id=?`,...b,commandId).first();
     if(row){
       assertAccess(grant,JSON.parse(row.access_json));
       const evidence=await readResultEvidence(this,b,row);
       const cleanup=evidence.deletedIds?await completeMediaCleanup(this,b,commandId):null;
       if(cleanup)evidence.assetCleanup=cleanup;
-      return {status:row.status,commandId,epoch:row.epoch,revision:row.revision,receipt:receiptOf(row,evidence)};
+      return {status:row.status,commandId,epoch:row.epoch,revision:row.revision,digest:row.request_digest,receipt:receiptOf(row,evidence)};
     }
     const pending=await this.s('SELECT * FROM cloud_requests WHERE owner_id=? AND continuity_id=? AND command_id=?',...b,commandId).first();
     if(!pending)cloudFail(404,'COMMAND_UNKNOWN');
@@ -259,8 +261,6 @@ export class CloudService {
     if(command.replacesCommandId){
       statements.push(this.guard("NOT EXISTS(SELECT 1 FROM cloud_requests WHERE owner_id=? AND continuity_id=? AND json_extract(request_json,'$.command.replacesCommandId')=? AND status IN('PENDING_APPROVAL','COMMITTED','SUPERSEDED'))",...b,command.replacesCommandId));
     }
-    const windowStart=this.now()-60000;
-    statements.push(this.guard('((SELECT count(*) FROM cloud_requests WHERE owner_id=? AND continuity_id=? AND subject=? AND submitted_at>?)<120)',...b,grant.subject,windowStart));
     statements.push(this.s('INSERT INTO cloud_requests(owner_id,continuity_id,command_id,subject,digest,request_json,access_json,status,submitted_at) VALUES(?,?,?,?,?,?,?,?,?)',...b,command.commandId,grant.subject,digest,evidence.stored,access,status,now),...evidence.writes);
     if(direct){
       if(def.beforeCommit)await def.beforeCommit(this,id,command,plan);

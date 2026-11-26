@@ -12,3 +12,5 @@ else
 fi
 node "$repository/scripts/verify-ascension-runtime.cjs" "$provider_module"
 node "$repository/scripts/verify-ascension-provider-recovery.cjs" "$provider_module"
+node "$repository/scripts/verify-ascension-rate.cjs" "$provider_module"
+node "$repository/scripts/verify-ascension-preset-recovery.cjs" "$provider_module"

@@ -8,18 +8,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const output = resolve(process.argv[2] || resolve(root, 'build'));
-const modules = [
-  ['core.mjs', 'CORE'], ['native-source.mjs', 'NATIVE_SOURCE'], ['campaign.mjs', 'CAMPAIGN_SYNC'], ['campaign-push.mjs', 'CAMPAIGN_PUSH'], ['campaign-tools.mjs','CAMPAIGN_TOOLS_MODULE'], ['live-hp.mjs', 'LIVE_HP'], ['http.mjs', 'HTTP'],
-  ['cloud-validation.mjs','CLOUD_VALIDATION'], ['cloud-plan.mjs','CLOUD_PLAN'], ['cloud-continuity.mjs','CLOUD_CONTINUITY'], ['cloud-records-contract.mjs','CLOUD_RECORDS_CONTRACT'], ['cloud-chronology.mjs','CLOUD_CHRONOLOGY'], ['cloud-query.mjs','CLOUD_QUERY'], ['cloud-records-query.mjs','CLOUD_RECORDS_QUERY'],
-   ['cloud-holdings.mjs','CLOUD_HOLDINGS'],
-  ['cloud-crafting.mjs','CLOUD_CRAFTING'], ['cloud-world.mjs','CLOUD_WORLD'],  ['cloud-records.mjs','CLOUD_RECORDS'],
-  ['cloud-effect-costs.mjs','CLOUD_EFFECT_COSTS'], ['cloud-mechanics-profile.mjs','CLOUD_PROFILE'], ['cloud-mechanics-rolls.mjs','CLOUD_ROLLS'],
-  ['cloud-mechanics-care.mjs','CLOUD_CARE'], ['cloud-mechanics-linked.mjs','CLOUD_LINKED'], ['cloud-mechanics-arsenal.mjs','CLOUD_ARSENAL'], ['cloud-mechanics-combat.mjs','CLOUD_COMBAT'], ['cloud-mechanics-spells.mjs','CLOUD_SPELLS'],
-  ['cloud-mechanics-actions.mjs','CLOUD_ACTIONS'], ['cloud-mechanics.mjs','CLOUD_MECHANICS'],
-  ['cloud-media-codec.mjs','CLOUD_MEDIA_CODEC'], ['cloud-media.mjs','CLOUD_MEDIA'], ['cloud-evidence.mjs','CLOUD_EVIDENCE'], ['cloud-lifecycle.mjs','CLOUD_LIFECYCLE'], ['cloud-approval-view.mjs','CLOUD_APPROVAL_VIEW'], ['cloud-service.mjs','CLOUD_SERVICE'], ['cloud-actions-view.mjs','CLOUD_ACTIONS_VIEW'], ['cloud-spellbook.mjs','CLOUD_SPELLBOOK'], ['cloud-admin.mjs','CLOUD_ADMIN'], ['cloud-inbox.mjs','CLOUD_INBOX'], ['cloud-http.mjs','CLOUD_HTTP'], ['cloud-mcp.mjs','CLOUD_MCP'], ['mcp.mjs', 'MCP'],
-  ['bootstrap.mjs', 'BOOTSTRAP'], ['worker.mjs', 'ENTRY'],
-];
-const names = new Map(modules.map(([file, name]) => [`./${file}`, name]));
+// Traverse only static sibling modules reachable from the production entry point.
+const modules = [['worker.mjs', 'ENTRY']];
+const names = new Map([['./worker.mjs', 'ENTRY']]);
 const compiled = new Map();
 let bundle = '// Generated from tracked Astravar owner-bridge modules. Do not edit.\n';
 for (const [file, name] of modules) {
@@ -27,7 +18,13 @@ for (const [file, name] of modules) {
   let source = await readFile(resolve(root, file), 'utf8');
   const exported = [...source.matchAll(/\bexport\s+(?:async\s+)?(?:class|function|const|let)\s+([A-Za-z_$][\w$]*)/g)].map(match => match[1]);
   source = source.replace(/^import\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"];?\s*$/gm, (_, bindings, dependency) => {
-    if (!names.has(dependency)) throw Error(`Unsupported Worker import in ${file}`);
+    if (!/^\.\/[a-z][a-z0-9-]*\.mjs$/.test(dependency)) throw Error(`Unsupported Worker import in ${file}`);
+    if (!names.has(dependency)) {
+      const filename = dependency.slice(2);
+      const identifier = 'WORKER_' + filename.slice(0, -4).replaceAll('-', '_').toUpperCase();
+      names.set(dependency, identifier);
+      modules.push([filename, identifier]);
+    }
     dependencies.add(names.get(dependency));
     return `const {${bindings}} = ${names.get(dependency)};`;
   });

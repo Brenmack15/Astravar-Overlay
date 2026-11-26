@@ -1,3 +1,5 @@
+import { chargeCloudRequest, mcpRateCost, cloudRateResponse } from './cloud-rate.mjs';
+import { validCloudId } from './cloud-validation.mjs';
 import { CLOUD_TOOLS, cloudMcpArgs, cloudMcpCall } from './cloud-mcp.mjs';
 import {CAMPAIGN_TOOLS,CAMPAIGN_READ_KINDS} from './campaign-tools.mjs';
 import {canReadKind} from './campaign.mjs';
@@ -125,11 +127,13 @@ export async function handleMcp(request, bridge, { ownerId, allowPublicDiscovery
   const cloudTool = cloudService && CLOUD_TOOLS.find(value => value.name === params.name);
   const tool = cloudTool || TOOLS.find(value => value.name === params.name);
   const args = Object.hasOwn(params, 'arguments') ? params.arguments : {};
-  if (!tool || !(cloudTool ? cloudMcpArgs(tool,args) : matches(args, tool.inputSchema))) return rpcError(id, -32602, 'INVALID_TOOL_ARGUMENTS');
+  if (!tool || (cloudTool ? !validCloudId(args?.continuityId) : !matches(args, tool.inputSchema))) return rpcError(id, -32602, 'INVALID_TOOL_ARGUMENTS');
   const isHpTool = HP_TOOLS.has(tool.name);
   const principal = { ownerId, role: 'connector', credentialId: 'sites-mcp', scopes: [...(isHpTool ? hpConnectorScopes : connectorScopes)] };
   try {
     if(cloudTool){
+      await chargeCloudRequest(cloudService,principal,args.continuityId,mcpRateCost(tool.name));
+      if(!cloudMcpArgs(tool,args))return rpcError(id,-32602,'INVALID_TOOL_ARGUMENTS');
       const value=await cloudMcpCall(cloudTool,args,cloudService,principal);
       return result({content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value,isError:false});
     }
@@ -192,6 +196,12 @@ export async function handleMcp(request, bridge, { ownerId, allowPublicDiscovery
     }
     return result({ content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value, isError: false });
   } catch (error) {
+    const limited=cloudTool && cloudRateResponse(error);
+    if(limited){
+      const reply=json({jsonrpc:'2.0',id,error:{code:-32029,message:limited.code,data:limited}},429);
+      reply.headers.set('Retry-After',String(limited.retryAfterSeconds));
+      return reply;
+    }
     return result({ content: [{ type: 'text', text: JSON.stringify({ error: safeError(error), confirmation: 'UNVERIFIED', ...(cloudTool && error.conflict?{conflict:error.conflict}:{}) }) }], isError: true });
   }
 }

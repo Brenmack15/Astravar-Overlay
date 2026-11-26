@@ -123,6 +123,13 @@ class CloudWorkerInteropTest {
             dropResponse = true
             assertThrows(OwnerSyncFailure::class.java) { runBlocking { android.submit("set_actor_ability",change(17),second) } }
             val id = android.pending().single().cloudText("commandId")
+            val beforeAccidentalRepeat = deviceRequests
+            val uncertain = assertThrows(OwnerSyncFailure::class.java) {
+                runBlocking { android.submit("set_actor_ability", change(17), second) }
+            }
+            assertEquals("CLOUD_PRIOR_COMMAND_UNVERIFIED", uncertain.code)
+            assertEquals(beforeAccidentalRepeat, deviceRequests)
+            assertEquals(id, android.uncertain("set_actor_ability", "person")?.cloudText("commandId"))
             val receipt = android.retry(id)
             assertEquals("COMMITTED",receipt.cloudText("status"))
             assertEquals(9L,receipt.getValue("revision").jsonPrimitive.long)

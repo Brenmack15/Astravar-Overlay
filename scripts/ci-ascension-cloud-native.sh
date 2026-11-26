@@ -25,14 +25,26 @@ cloud_stopped() {
 cloud_stopped before-cloud-commands
 node scripts/ci-ascension-cloud-gateway.mjs offline "$astravar_private" > "$astravar_cloud_evidence/offline-host.json"
 cloud_stopped after-cloud-readback
+astravar_cache_dir="$astravar_private/ascension-stopped-cache"
+mkdir -m 700 "$astravar_cache_dir"
+astravar_cache_name=astravar-cloud-cache.db
+for suffix in '' '-wal' '-shm'; do
+  remote="/data/user/0/$astravar_product/databases/$astravar_cache_name$suffix"
+  if timeout 10s adb -s "$astravar_serial" shell test -f "$remote"; then
+    timeout 20s adb -s "$astravar_serial" pull "$remote" "$astravar_cache_dir/$astravar_cache_name$suffix" >/dev/null
+  fi
+done
+python3 scripts/ascension-stopped-cache-readback.py "$astravar_cache_dir/$astravar_cache_name" > "$astravar_cloud_evidence/stopped-cache.json"
+cloud_stopped after-independent-cache-copy
 run_test 'com.yazsras.astravar.data.AscensionCloudNativeTest#reconnectVerifyEachReceiptAndCommitDeviceEdit' cloud-native-after.txt 300
 node scripts/ci-ascension-cloud-gateway.mjs device-readback "$astravar_private" > "$astravar_cloud_evidence/device-edit-host.json"
 adb -s "$astravar_serial" pull "/sdcard/Android/data/$astravar_product/files/ascension-cloud/." "$astravar_cloud_evidence" >/dev/null
 python3 - "$astravar_cloud_evidence" <<'PY'
 import json,pathlib,sys
+if not __debug__: raise RuntimeError("Cross-client verification requires assertions enabled.")
 p=pathlib.Path(sys.argv[1]); read=lambda name: json.loads((p/(name+'.json')).read_text())
 a,b,c=map(read,['offline-host','device-edit-host','after-reconnect'])
-assert read('before-stop')['revision']==4 and c['priorCacheRevision']==4 and a['revision']==8
+assert read('before-stop')['revision']==read('stopped-cache')['cachedRevision']==4 and c['entryCacheRevision'] in (4,8) and a['revision']==8
 assert a['pending']=='PENDING_APPROVAL' and c['pendingBeforeOwner']==a['pending']
 assert [r['transactionId'] for r in a['receiptHashes']]==c['dmTransactionIds']
 assert b['deviceTransactionId']==c['deviceTransactionId'] and b['revision']==c['deviceRevision']==10

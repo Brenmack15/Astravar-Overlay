@@ -1,3 +1,4 @@
+import { chargeCloudRequest, httpRateCost, cloudRateResponse } from './cloud-rate.mjs';
 import { cloudReviewInbox } from './cloud-approval-view.mjs';
 import { cloudContinuitySettings } from './cloud-continuity.mjs';
 import { cloudAccessAdmin } from './cloud-admin.mjs';
@@ -50,6 +51,7 @@ export async function cloudHttp(request,bridge,service,ownerPrincipal) {
       if(method!=='GET' && origin!==url.origin)cloudFail(403,'SAME_ORIGIN_REQUIRED');
       principal=ownerPrincipal;
     }
+    await chargeCloudRequest(service,principal,id,httpRateCost(method,action),action==='isolated' && method==='POST' && !item);
     if(action==='settings' && !item && method==='GET')return cloudResponse(await cloudContinuitySettings(service,principal,id));
     if(action==='media')return await handleCloudMedia(request,service,principal,id,parts.slice(1).join('/'));
     if(action==='review-inbox'){
@@ -99,5 +101,12 @@ export async function cloudHttp(request,bridge,service,ownerPrincipal) {
       result=await service.review(principal,id,item,body.digest,decision);
     }else cloudFail(404,'UNKNOWN_ROUTE');
     return cloudResponse(result,result.status==='PENDING_APPROVAL'?202:200);
-  }catch(e){return cloudResponse({status:e instanceof BridgeError&&e.status===409?'CONFLICT':'UNVERIFIED',error:{code:e instanceof BridgeError?e.code:'SERVICE_UNAVAILABLE'},...(e instanceof BridgeError && e.conflict?{conflict:e.conflict}:{})},e instanceof BridgeError?e.status:503);}
+  }catch(e){
+    const limited=cloudRateResponse(e);
+    if(limited){
+      const response=cloudResponse({status:'UNVERIFIED',error:limited},429);
+      response.headers.set('Retry-After',String(limited.retryAfterSeconds));
+      return response;
+    }
+    return cloudResponse({status:e instanceof BridgeError&&e.status===409?'CONFLICT':'UNVERIFIED',error:{code:e instanceof BridgeError?e.code:'SERVICE_UNAVAILABLE'},...(e instanceof BridgeError && e.conflict?{conflict:e.conflict}:{})},e instanceof BridgeError?e.status:503);}
 }

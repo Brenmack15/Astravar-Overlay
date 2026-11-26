@@ -236,7 +236,7 @@ data class OwnerSyncResponse(val status: Int, val json: JsonObject)
 fun interface OwnerSyncTransport {
     suspend fun request(origin: String, path: String, credential: OwnerSyncCredential, body: String?): OwnerSyncResponse
 }
-class OwnerSyncFailure(val code: String) : IOException("Owner synchronization stopped ($code).")
+class OwnerSyncFailure(val code: String, val retryAfterSeconds: Long? = null) : IOException("Owner synchronization stopped ($code).")
 
 /** HTTPS only; bounded reads, no redirects/cookies, credentials sent only to their enrolled origin. */
 class OwnerSyncHttpsTransport : OwnerSyncTransport {

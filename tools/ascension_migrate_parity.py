@@ -2,19 +2,71 @@
 from ascension_migrate_legacy import COINS, encode, loads, read_limited, sha, source_families, verify
 
 
+def auxiliary_source_parity(raw, bundle):
+    """Read back archived source bytes and every normalized field attributed to a separate native format."""
+    from ascension_migrate_reviewed import indexed, path_value, project
+    digest = sha(raw)
+    evidence = bundle["sources"].get(digest)
+    checks, holds = [], []
+    def compare(kind, identity, field, expected, actual, present):
+        status = "absent" if not present else "different" if encode(expected)!=encode(actual) else "bothUnknown" if expected is None else "equal"
+        checks.append({"kind":kind,"id":identity,"field":field,"native":expected,"cloud":actual,"status":status})
+    compare("native_original", digest, "sha256", digest, sha(evidence[0]) if evidence else None, bool(evidence))
+    if evidence and "reviewedMapping" in evidence[1]:
+        plan = evidence[1]["reviewedMapping"]
+        grouped = {key:bundle["sources"][key][0] for key in plan["sources"]}
+        _, projected, _, _ = project(grouped, plan, bundle["tenant"])
+        def rows(records):
+            return {r["id"]:{"id":r["id"],"kind":r["kind"],"title":r["title"],"revision":r["revision"],
+                             "data":loads(r["data_json"])} for r in records}
+        expected = rows(projected)
+        actual = rows(bundle["rows"]["cloud_entities"])
+        _, original_rows = indexed(raw)
+        for d in plan["decisions"]:
+            if d["source"] != digest:
+                continue
+            family, identity = d["family"], tuple(d["identity"])
+            compare(family, list(identity), "originalRowSha256", sha(encode(original_rows[family,identity])), d["rowSha256"], True)
+            if d["disposition"] == "retain":
+                holds.append({"kind":family,"id":list(identity),"reason":d["reason"]})
+        for w in plan["parity"]:
+            if w["source"] != digest:
+                continue
+            ident, path = w["target"], w["targetPath"]
+            try:
+                value, present = path_value(actual[ident],path), True
+            except (KeyError, ValueError):
+                value, present = None, False
+            compare(expected[ident]["kind"], ident, path, path_value(expected[ident],path), value, present)
+    else:
+        holds.append({"kind":"source","id":digest,"reason":"A reviewed original is required to compare this source family."})
+    counts = {status:sum(c["status"]==status for c in checks) for status in ("equal","bothUnknown","different","absent")}
+    return {"sourceSha256":digest,"manifestSha256":bundle["digest"],"continuity":bundle["tenant"][1],
+            "counts":counts,"checks":checks,"holds":holds,"coverage":"verified original rows and source-bound canonical fields",
+            "comparisonSha256":sha(encode([checks,holds]))}
+
+
 def mechanical_parity(source_path, bundle):
     raw = read_limited(source_path)
+    if raw.startswith(b"PK\x03\x04"):
+        return auxiliary_source_parity(raw, bundle)
     native = loads(raw)
+    if native.get("format") not in ("astravar-connected-campaign", "astravar-campaign-items", "astravar-reforge"):
+        return auxiliary_source_parity(raw, bundle)
     families = {name: records for name, _, records in source_families(native)}
     continuity = bundle["tenant"][1]
     entities = {r["id"]: (r, loads(r["data_json"])) for r in bundle["rows"]["cloud_entities"]}
     source_digest=sha(raw)
     aliases={}
+    reviewed_actors=set()
     evidence=bundle["sources"].get(source_digest)
     if evidence and "reviewedMapping" in evidence[1]:
         plan=evidence[1]["reviewedMapping"]
         from ascension_migrate_reviewed import indexed as all_native_rows, path_value
         _, indexed = all_native_rows(raw)
+        for decision in plan["decisions"]:
+            if decision["source"] == source_digest and decision["family"] == "playable.characters" and decision["disposition"] == "map" and decision["playerKnown"]:
+                reviewed_actors.update(t for t in decision["targets"] if entities.get(t, ({},))[0].get("kind") == "actor")
         for w in plan["parity"]:
             if w["source"]==source_digest and w["targetPath"]==["id"] and w["transform"]=="scopedIdentity":
                 original=path_value(indexed[(w["family"],tuple(w["identity"]))],w["sourcePath"])
@@ -47,8 +99,8 @@ def mechanical_parity(source_path, bundle):
     for _, actor_row in families.get("playable.characters", []):
         identity = actor_row["profileId"]
         binding = actors.get(identity,{})
-        if binding.get("campaignId") != continuity or not binding.get("playable"):
-            holds.append({"kind":"actor","id":identity,"reason":"A playable Genesis binding to this continuity is required"})
+        if binding and (binding.get("campaignId") != continuity or not binding.get("playable")) or not binding and identity not in reviewed_actors:
+            holds.append({"kind":"actor","id":identity,"reason":"A playable Genesis binding or exact owner-reviewed actor mapping is required"})
             continue
         char = loads(actor_row["characterJson"])
         if char.get("id") != identity or char.get("revision") != actor_row.get("revision"):
@@ -73,6 +125,23 @@ def mechanical_parity(source_path, bundle):
             pool_id=pool["id"]
             values, found=target("resource_pool",pool_id,identity)
             compare_fields("resource_pool",pool_id,{k:pool.get(k) for k in ("current","maximum")},values,found)
+        for item in char.get("items", []):
+            item_id = item["id"]
+            holding, found = target("item_instance", item_id)
+            expected = {key:item[key] for key in ("attuned", "operating", "quantity", "definitionId") if key in item}
+            if item.get("state") in ("WORN", "HELD", "CARRIED", "STORED"):
+                expected["equipment"] = {"WORN":"worn", "HELD":"held", "CARRIED":"packed", "STORED":"packed"}[item["state"]]
+            compare_fields("item_instance",item_id,expected,holding,found)
+            for pool in item.get("pools", []):
+                candidates = {pool["id"], *aliases.get(("resource_pool",pool["id"]),set())}
+                chosen = holding.get("resourcePoolId")
+                if chosen not in candidates:
+                    holds.append({"kind":"item_resource","id":item_id,"pool":pool["id"],
+                                  "reason":"The physical item does not identify this independently configured pool."})
+                    continue
+                scoped, pool_data = entities.get(chosen, ({},{}))
+                compare_fields("item_resource",chosen, {key:pool.get(key) for key in ("current","maximum")},
+                               pool_data, scoped.get("kind")=="resource_pool" and scoped.get("actor_id")==identity)
         scoped_slots=[d for row,d in entities.values() if row["kind"]=="resource_pool" and row["actor_id"]==identity and d.get("type")=="spell_slot"]
         for level, balance in char.get("spellSlots",{}).items():
             eligible=[slot for slot in scoped_slots if str(slot.get("slotLevel"))==level]

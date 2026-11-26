@@ -31,7 +31,7 @@ export const actorSchema = fields({
   rulesProfile:option('legacy_2014','revised_2024','custom'), level:whole(1,20),initiativeAfterActorId:identifier,
   proficiency:nullable(whole(0,30)), maxHp:nullable(whole()), baselineConstitutionModifier:nullable(whole(-100,100)),currentHp:nullable(whole()), temporaryHp:nullable(whole()),
   baseAc:nullable(whole(0,100)), abilities:abilityMap, speeds:movementMap, senses:sensesMap, size:option('tiny','small','medium','large','huge','gargantuan'),creatureType:named(60), saveProficiencies:arrayOf(option(...stats),6),
-  attacksPerAction:whole(1,12), attunementCapacity:nullable(whole(0,12)), gameSeconds:nullable(whole(0,100000000000)),
+  attacksPerAction:whole(1,12), attunementCapacity:nullable(whole(0,12)), exhaustionLevel:nullable(whole(0,6)), gameSeconds:nullable(whole(0,100000000000)),
   source:named(300)
 }, ['actorId','name','role','rulesProfile','level']);
 export const resourceSchema = fields({
@@ -60,6 +60,7 @@ export const effectSchema = fields({
 export const costSchema = fields({poolId:identifier,amount:whole(1)},['poolId','amount']);
 export const restSchema = fields({
   actorId:identifier, kind:option('short_rest','long_rest'), elapsedSeconds:whole(0,31536000), confirmed:{const:true},
+  exhaustionRecoveryEligible:boolean,
   hitDice:arrayOf(fields({poolId:identifier,faces:arrayOf(whole(1,1000),100),origin},['poolId','faces','origin']),32),
   restoreHitDice:arrayOf(costSchema,32)
 }, ['actorId','kind','elapsedSeconds','confirmed','hitDice']);
@@ -153,20 +154,42 @@ export function preferredEffect(candidate,prior) {
   return !prior || priority>previous || (priority===previous &&
     ((candidate.data.amount??0)>(prior.data.amount??0) || ((candidate.data.amount??0)===(prior.data.amount??0) && candidate.id<prior.id)));
 }
+export function exhaustionOf(data,active=[]) {
+  const level=Object.hasOwn(data,'exhaustionLevel')?data.exhaustionLevel:(data.conditions??[]).includes('exhaustion')?null:0;
+  const rulesProfile=data.rulesProfile==='custom'?(data.customExhaustionRule??'manual'):data.rulesProfile;
+  const immune=active.some(e=>e.data.target==='condition_immunity' && e.data.key==='exhaustion');
+  const effectiveLevel=immune?0:level;
+  const status=effectiveLevel===0?(immune&&level!==0?'suppressed':'clear'):effectiveLevel===null||rulesProfile==='manual'?'adjudication_required':
+    effectiveLevel===6?'fatal':'active';
+  return {level,rulesProfile,effectiveLevel,status,source:data.exhaustionSource??null,adjudicationSource:data.exhaustionAdjudicationSource??null};
+}
+export function requirePlayableExhaustion(exhaustion) {
+  must(exhaustion.status!=='fatal','FATAL_EXHAUSTION_REQUIRES_RESOLUTION');
+  must(exhaustion.status!=='adjudication_required','EXHAUSTION_ADJUDICATION_REQUIRED');
+}
+function ruleFormIds(form) {
+  return form?[form.id,...(form.data.inheritedRuleFormIds??[])]:[];
+}
+export function matchesForm(rule,ids) {
+  return (!rule.formId||ids.includes(rule.formId)) && !rule.excludedForms?.some(id=>ids.includes(id));
+}
 export async function activeEffects(ctx,a,form,contextTags=[],chargedEffectIds=[]) {
   const winners=new Map(), suppressed=[],optional=[];
   for (const id of a.data.effectIds) {
     const row=await ctx.get('effect',id);
     if (!row || row.actorId!==a.id || row.life!=='active') continue;
     const d=row.data;
-    const eligible=d.enabled && (!d.formId || d.formId===form?.id) &&
+    const eligible=d.enabled && matchesForm(d,ruleFormIds(form)) &&
       (!d.contextTag || contextTags.includes(d.contextTag)) &&
       (d.expiresAt==null || (a.data.gameSeconds!=null && a.data.gameSeconds<d.expiresAt)) &&
       await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating,form);
     if (!eligible) {suppressed.push(id); continue;}
     if(d.charge){
+      const canInspect=ctx.grant.scopes.includes('resources.read') && (ctx.grant.actors.includes('*')||ctx.grant.actors.includes(a.id));
+      const pool=canInspect?await ctx.get('resource_pool',d.charge.poolId):null;
       optional.push({id,title:row.title,target:d.target,key:d.key,damageRoute:d.damageRoute??'attack',damageType:d.damageType??null,
-        damageComponentId:d.damageComponentId??null,charge:d.charge});
+        damageComponentId:d.damageComponentId??null,operation:d.operation,value:d.amount,charge:d.charge,
+        available:pool?.life==='active'&&pool.actorId===a.id?availableUses(pool.data):null});
       if(!chargedEffectIds.includes(id))continue;
     }
     // A shared anti-stacking key affects only the same mechanical target and subject.
@@ -200,7 +223,19 @@ export async function activeEffects(ctx,a,form,contextTags=[],chargedEffectIds=[
     for(const c of ['grappled','restrained','paralyzed','petrified','unconscious'])if(applies(c))add(c,'speed','all','maximum',0);
     if(applies('petrified'))for(const type of damageTypes)add('petrified','damage_defense',type,'resistance');
   }
-  return {active,suppressed,optional};
+  const exhaustion=exhaustionOf(a.data,active),level=exhaustion.effectiveLevel;
+  if(level>0 && exhaustion.rulesProfile!=='manual'){
+    const source=exhaustion.rulesProfile+' exhaustion level '+level;
+    const add=(target,key,operation,amount=null)=>active.push({id:'condition:exhaustion:'+target+':'+key,data:{target,key,operation,amount,priority:10000,source}});
+    if(exhaustion.rulesProfile==='revised_2024'){
+      for(const target of ['ability_check','save','initiative','attack','spell_attack'])add(target,'all','add',-2*level);
+      add('speed','all','add',-5*level);
+    }else{
+      for(const key of ['ability:all','skill:all','initiative:initiative',...(level>=3?['attack:all','spell_attack:all','save:all']:[])])add('roll_edge',key,'disadvantage');
+      if(level>=5)add('speed','all','maximum',0);
+    }
+  }
+  return {active,suppressed,optional,exhaustion};
 }
 export function numeric(base,active,target,key) {
   const applicable=new Map();
@@ -230,7 +265,7 @@ export function healedHp(current,maximum,amount){
 }
 export async function sheet(ctx,id,contextTags=[],previewFormId=undefined,chargedEffectIds=[]) {
   const a=await actor(ctx,id), form=previewFormId===undefined?await activeForm(ctx,a):previewFormId?await owned(ctx,'form',previewFormId,id):null;
-  const {active,suppressed,optional}=await activeEffects(ctx,a,form,contextTags,chargedEffectIds);
+  const {active,suppressed,optional,exhaustion}=await activeEffects(ctx,a,form,contextTags,chargedEffectIds);
   const abilities={},checks={},saves={},skills={},passives={},skillDefinitions={};
   for(const stat of stats){
     const base=a.data.abilities[stat]??null;
@@ -261,6 +296,8 @@ export async function sheet(ctx,id,contextTags=[],previewFormId=undefined,charge
     for(const k of modes){const value=numeric(output[k]??null,active,target,k).value;output[k]=value==null?null:Math.max(0,value);}
   }
   if(form?.data.grounded){movement.fly=0; movement.hover=0;}
+  const legacyExhaustion=exhaustion.rulesProfile==='legacy_2014'?(exhaustion.effectiveLevel??0):0;
+  if(legacyExhaustion>=2)for(const k of Object.keys(movement))if(movement[k]!=null)movement[k]=Math.floor(movement[k]/2);
   if(['disabled','dormant'].includes(a.data.activityState))for(const k of Object.keys(movement))movement[k]=0;
   const ac=numeric(form?.data.baseAc??a.data.baseAc,active,'ac','all');
   const baselineCon=a.data.baselineConstitutionModifier??null;
@@ -268,6 +305,10 @@ export async function sheet(ctx,id,contextTags=[],previewFormId=undefined,charge
   const hpBase=a.data.maxHp==null||conDelta===null?null:a.data.maxHp+conDelta;
   const hpMaximum=numeric(hpBase,active,'max_hp','all');
   if(hpMaximum.value!==null)hpMaximum.value=Math.max(0,hpMaximum.value);
+  if(legacyExhaustion>=4){
+    if(hpMaximum.value!==null)hpMaximum.value=Math.floor(hpMaximum.value/2);
+    hpMaximum.sources.push({id:'condition:exhaustion:max_hp',source:'Legacy exhaustion level '+legacyExhaustion,operation:'divide',value:2});
+  }
   const subjects=[...stats.flatMap(k=>['ability:'+k,'save:'+k]),...Array.from(keys,k=>'skill:'+k),'initiative:initiative'];
   const rollRestrictions={};
   if(a.data.rulesProfile!=='custom'){
@@ -277,17 +318,22 @@ export async function sheet(ctx,id,contextTags=[],previewFormId=undefined,charge
     if(conditions.includes('blinded')&&contextTags.includes('requires-sight')||conditions.includes('deafened')&&contextTags.includes('requires-hearing'))
       for(const key of subjects.filter(k=>k.startsWith('ability:')||k.startsWith('skill:')))rollRestrictions[key]='REQUIRED_SENSE_UNAVAILABLE';
   }
+  if(['fatal','adjudication_required'].includes(exhaustion.status)){
+    const reason=exhaustion.status==='fatal'?'FATAL_EXHAUSTION_REQUIRES_RESOLUTION':'EXHAUSTION_ADJUDICATION_REQUIRED';
+    for(const key of subjects)rollRestrictions[key]=reason;
+  }
   const rollModes=Object.fromEntries(subjects.map(key=>[key,Object.fromEntries(['normal','advantage','disadvantage'].map(mode=>[mode,rollPolicy(active,key,mode)]))]));
   const communications=[],mobilityRules=[];
   for(const featureId of a.data.sensoryFeatureIds??[]){
     const feature=await ctx.get('feature',featureId),d=feature?.data;
-    if(feature?.life!=='active'||feature.actorId!==id||d.formId&&d.formId!==form?.id||
+    if(feature?.life!=='active'||feature.actorId!==id||!matchesForm(d,ruleFormIds(form))||
       !await gearEligible(ctx,d.sourceItemId,id,d.requiresAttunement,d.requiresOperating,form))continue;
     if(d.speech)communications.push({featureId,kind:'speech',...d.speech,unassigned:d.speech.capacity-d.speech.languages.length});
     if(d.telepathy)communications.push({featureId,kind:'telepathy',...d.telepathy});
+    if(d.lipReading)communications.push({featureId,kind:'lip_reading',requiresVisibleMouth:true,requiresUnderstoodLanguage:true});
     if(d.mobility)mobilityRules.push({featureId,kind:d.mobility,eligible:movement.fly>0,requiresMovement:'fly'});
   }
-  return {actorId:id,communications,mobilityRules,activityState:a.data.activityState??null,formId:form?.id??null,size:form?.data.size??a.data.size??null,creatureType:form?.data.creatureType??a.data.creatureType??null,
+  return {actorId:id,activeDeploymentId:a.data.activeDeploymentId??null,communications,mobilityRules,exhaustion,activityState:a.data.activityState??null,formId:form?.id??null,ruleFormIds:ruleFormIds(form),size:form?.data.size??a.data.size??null,creatureType:form?.data.creatureType??a.data.creatureType??null,
     senses,abilities,checks,saves,skills,passives,skillDefinitions,ac,movement,
     initiative:numeric(abilities.DEX.modifier,active,'initiative','all'),proficiency:a.data.proficiency,
     currentHp:a.data.currentHp,maxHp:hpMaximum.value,temporaryHp:a.data.temporaryHp,
@@ -308,6 +354,8 @@ export async function spend(ctx,actorId,id,amount) {
   return {poolId:id,before:p.data.current,after,amount};
 }
 export async function checkTiming(ctx,a,timing) {
+  if(a.data.exhaustionLevel!==0 && (Object.hasOwn(a.data,'exhaustionLevel')||(a.data.conditions??[]).includes('exhaustion')))
+    requirePlayableExhaustion((await sheet(ctx,a.id)).exhaustion);
   if(!a.data.encounterId || timing==='other') return null;
   const encounter=await ctx.get('encounter',a.data.encounterId);
   must(encounter?.life==='active' && encounter.data.active && encounter.data.participants.includes(a.id),'ENCOUNTER_STATE_UNRESOLVED');

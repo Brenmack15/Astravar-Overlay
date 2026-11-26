@@ -73,11 +73,11 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
         val loaded=if (after.isEmpty()) result else actors + result
         actors=loaded.distinctBy { it.cloudText("id") }
         actorMore=more; actorAfter=cursor
-        if (after.isEmpty() && (actorId==null || client.record(actorId).let { it.obj("data").value("role") !in setOf("player","companion") }))
-            select(actors.firstOrNull()?.cloudText("id"))
-        else if (actorId!=null && actors.none { it.cloudText("id")==actorId }) {
-            client.record(actorId)?.let { actors=actors+it }
+        val retained = actorId?.let { id -> client.record(id) }?.takeIf {
+            cloudPartyMember(it) && it.obj("data").value("role") in setOf("player", "companion")
         }
+        if (after.isEmpty() && retained == null) select(actors.firstOrNull()?.cloudText("id"))
+        else if (retained != null && actors.none { it.cloudText("id") == actorId }) actors = actors + retained
     }
     LaunchedEffect(snapshot.version,snapshot.visible) {
         try { loadActors() } catch(e:CancellationException){throw e} catch(e:Exception){ actors=emptyList(); select(null); notice=cloudError(e) }
@@ -92,6 +92,7 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
     }
     fun roll(kind:String,key:String,mode:String="normal",physical:List<Int>?=null) {
         val id=actorId ?: return
+        sheet.obj("rollRestrictions").value("$kind:$key")?.let { reason->notice=cloudLabel(reason.lowercase());return }
         val count=sheet.obj("rollModes").obj("$kind:$key").obj(mode).value("count")?.toIntOrNull()
         if (!online || count==null || count !in 1..3) { notice="A verified roll configuration is required."; return }
         if (physical!=null && (physical.size!=count || physical.any { it !in 1..20 })) { notice="Enter $count actual d20 result(s)."; return }
@@ -123,6 +124,14 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
                 CloudEntityImage(client,snapshot,online,imageId,if(form==null)"actor" else "form",selected.cloudText("title"),Modifier.size(76.dp))
                 Text(selected.cloudText("title"),Modifier.clickable(role=Role.Button){overlay="Profile"}.padding(6.dp),
                     textAlign=TextAlign.Center,style=MaterialTheme.typography.titleMedium)
+                val currentFormTitle by produceState<String?>(null, actorId, form, snapshot.version) {
+                    value = if(form==null) null else try { client.record(form)?.cloudText("title") }
+                    catch(e:CancellationException){throw e}catch(_:Exception){null}
+                }
+                PlayerTextButton({scope.launch{pager.animateScrollToPage(sections.indexOf("Forms"))}},
+                    modifier=Modifier.semantics{contentDescription="Open forms and configurations"}) {
+                    Text(if(form==null) "Original form" else currentFormTitle ?: "Current form",textAlign=TextAlign.Center)
+                }
             }
             Column(Modifier.weight(1.1f),horizontalAlignment=Alignment.CenterHorizontally) {
                 val hp=(sheet?:data).value("currentHp")?.toIntOrNull()
@@ -158,6 +167,7 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
                                 }
                             }
                         }
+                        CloudPassiveChecks(actorId,sheet,online,{ id->client.record(id) },openOperation,inspect)
                         Text("Skills",Modifier.clickable(role=Role.Button){openOperation("set_skill_training",args("actorId" to actorId))}.padding(8.dp),style=MaterialTheme.typography.titleMedium)
                         sheet.obj("skills")?.entries?.sortedWith(compareByDescending<Map.Entry<String,JsonElement>> {
                             sheet.obj("skillDefinitions").obj(it.key).value("pinned")=="true"
@@ -202,6 +212,24 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
         }
         "AC" -> PlayerSheet("Armor class",{overlay=null}) { RecordFields(sheet.obj("ac") ?: JsonNull) }
         "Conditions" -> PlayerSheet("Conditions",{overlay=null}) { RecordFields((sheet?:data)?.get("conditions") ?: JsonNull)
+            val exhaustion=sheet.obj("exhaustion")
+            val current=exhaustion.value("level")?.toIntOrNull() ?: data.value("exhaustionLevel")?.toIntOrNull()
+            Text("Exhaustion level · ${current ?: "Unknown"}")
+            exhaustion.value("status")?.takeIf { it in setOf("adjudication_required","fatal","suppressed") }?.let { Text(cloudLabel(it)) }
+            var exhaustionMenu by remember { mutableStateOf(false) }
+            Box {
+                PlayerOutlinedButton({exhaustionMenu=true},enabled=online && actorId!=null){Text("Set exhaustion level")}
+                DropdownMenu(exhaustionMenu,{exhaustionMenu=false}) {
+                    (0..6).forEach { level ->
+                        DropdownMenuItem(text={Text("Level $level")},onClick={
+                            exhaustionMenu=false;overlay=null
+                            openOperation("set_condition",buildJsonObject{
+                                put("actorId",actorId);put("key","exhaustion");put("enabled",level>0);put("level",level)
+                            })
+                        })
+                    }
+                }
+            }
             if(actorId!=null)PlayerOutlinedButton({overlay=null;openOperation("set_condition",args("actorId" to actorId))},enabled=online){Text("Manage condition")} }
         "Profile" -> PlayerSheet("Character Profile",{overlay=null}) {
             PlayerTabs(listOf("Defenses","Features & Traits","Proficiencies & Training","Background"),profileTab,{profileTab=it})
@@ -226,7 +254,7 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
         }
         if(actorId!=null){
             PlayerTextButton({ selectedAbility=null;openOperation("set_actor_ability",args("actorId" to actorId,"ability" to stat)) },enabled=online){Text("Edit base score")}
-            PlayerTextButton({ selectedAbility=null;openOperation("set_skill_training",args("actorId" to actorId,"ability" to stat)) },enabled=online){Text("Manage training")}
+            CloudAbilityTraining(actorId,stat,data,sheet,online){name,input->selectedAbility=null;openOperation(name,input)}
         }
     } }
     rollOption?.let { ref->key(ref) {

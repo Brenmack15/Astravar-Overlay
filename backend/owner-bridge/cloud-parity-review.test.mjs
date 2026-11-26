@@ -41,6 +41,10 @@ test('owner-reviewed resource, delegation, context, artwork and lifecycle produc
   const uploadId='specific-image',assetId='primary-image';
   const inspect=await submit.stageImage(uploadId,actorId,bytes,sha256);
   await run('assign_primary_image',{uploadId,assetId,targetId:actorId,targetKind:'actor',sha256},{review:true,inspect});
+  const targetRevision=db.db.prepare('SELECT revision FROM cloud_entities WHERE id=?').get(actorId).revision;
+  await run('remove_primary_image',{targetId:actorId,targetKind:'actor',targetRevision,assetId,sha256},{review:true});
+  assert.ok(db.db.prepare('SELECT id FROM cloud_entities WHERE id=?').get(assetId));
+  assert.equal(db.db.prepare("SELECT count(*) AS n FROM cloud_links WHERE from_id=? AND relation='primary_image'").get(actorId).n,0);
   const records=entityRevision=>[{id:'disposable',kind:'actor',revision:entityRevision}];
   await run('archive_records',{records:records(1)},{review:true});
   await run('restore_records',{records:records(2)},{review:true});

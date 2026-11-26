@@ -67,6 +67,13 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     forkEvery = testForkEvery
     inputs.property("astravarTestForks", testForks)
     inputs.property("astravarTestForkEvery", testForkEvery)
+    // Cross-client tests launch the actual Worker and the optional local recovery runtime.
+    inputs.files(rootProject.fileTree("backend/owner-bridge") { include("*.mjs", "schema.sql", "fixtures/*.mjs") })
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files(rootProject.fileTree("scripts") { include("verify-ascension-forms-recovery.cjs") },
+        rootProject.fileTree("tools") { include("ascension_provider.cjs", "ascension_migrate*.py") })
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.property("ascensionProviderAvailable", providers.environmentVariable("ASTRAVAR_MINIFLARE_PATH").map { it.isNotBlank() }.orElse(false))
     providers.gradleProperty("astravarScreenshots").orNull?.let {
         systemProperty("astravar.screenshots", it)
     }

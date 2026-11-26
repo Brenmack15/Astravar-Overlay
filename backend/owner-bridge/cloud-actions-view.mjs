@@ -1,9 +1,11 @@
+import {matchesForm} from './cloud-mechanics-core.mjs';
 import { CloudPlan } from './cloud-plan.mjs';
 import { BridgeError } from './core.mjs';
 import { cloudFail, validCloudId } from './cloud-validation.mjs';
-import { sheet, gearEligible, rollPolicy, checkTiming } from './cloud-mechanics-core.mjs';
+import { sheet, gearEligible, rollPolicy, checkTiming, availableUses } from './cloud-mechanics-core.mjs';
 import { checkArsenal } from './cloud-mechanics-arsenal.mjs';
 import { attackModeFor } from './cloud-mechanics-linked.mjs';
+import { offeredCharges } from './cloud-effect-costs.mjs';
 import { attackModifier, attackSaveDc, snapshotComponents } from './cloud-mechanics-combat.mjs';
 
 export async function cloudActions(service,principal,id,actorId,options={}) {
@@ -23,14 +25,16 @@ export async function cloudActions(service,principal,id,actorId,options={}) {
     const entity=await ctx.get(candidate.kind,candidate.id);
     if(!entity)cloudFail(409,'SNAPSHOT_CHANGED');
     const d=entity.data;
-    if((d.formId && d.formId!==p.formId)||d.excludedForms?.includes(p.formId) || !await gearEligible(ctx,d.sourceItemId,actorId,d.requiresAttunement,d.requiresOperating))continue;
+    if(!matchesForm(d,p.ruleFormIds) || !await gearEligible(ctx,d.sourceItemId,actorId,d.requiresAttunement,d.requiresOperating))continue;
     const reasons=[];
+    if(p.exhaustion.status==='fatal')reasons.push('FATAL_EXHAUSTION_REQUIRES_RESOLUTION');
+    if(p.exhaustion.status==='adjudication_required')reasons.push('EXHAUSTION_ADJUDICATION_REQUIRED');
     if(p.conditions.some(s=>['incapacitated','unconscious','stunned','paralyzed','petrified'].includes(s)))reasons.push('ACTOR_CANNOT_ACT');
     if(d.resolution==='manual')reasons.push('MANUAL_ADJUDICATION_REQUIRED');
-    if(d.cost){const pool=await ctx.get('resource_pool',d.cost.poolId);if(pool?.data.current==null||pool.data.current<d.cost.amount)reasons.push('RESOURCE_EMPTY_OR_UNKNOWN');}
+    if(d.cost){const pool=await ctx.get('resource_pool',d.cost.poolId);if(!pool||availableUses(pool.data)==null||availableUses(pool.data)<d.cost.amount)reasons.push('RESOURCE_EMPTY_OR_UNKNOWN');}
     const damageReasons=[...reasons];
     try { await checkTiming(ctx,a,d.timing); }
-    catch(e){if(!(e instanceof BridgeError)||e.status===403)throw e;reasons.push(e.code);}
+    catch(e){if(!(e instanceof BridgeError)||e.status===403)throw e;if(!reasons.includes(e.code))reasons.push(e.code);}
     let components=[],hit=null,resolvedSaveDc=null,configuration=d;
     if(entity.kind==='attack'){
       const chosen=Object.fromEntries((d.selections??[]).filter(s=>(s.actorId??entity.actorId)===a.id && s.formId===p.formId).map(s=>[s.componentId,s.type]));
@@ -43,6 +47,7 @@ export async function cloudActions(service,principal,id,actorId,options={}) {
       catch(e){if(!(e instanceof BridgeError))throw e;reasons.push(e.code);damageReasons.push(e.code);}
     }
     rows.push({id:entity.id,title:entity.title,kind:entity.kind,configuration,components,hit,resolvedSaveDc,reasons,damageReasons,
+      optionalCharges:offeredCharges(p,'attack',entity.id,entity.id,components,d.resolution),
       modes:Object.fromEntries(['normal','advantage','disadvantage'].map(m=>[m,rollPolicy(p.effects,'attack:'+entity.id,m)]))});
   }
   const end=await service.access(principal,id);

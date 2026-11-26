@@ -77,6 +77,10 @@ internal fun cloudError(e: Exception): String = when ((e as? OwnerSyncFailure)?.
     "CLOUD_NOT_SELECTED","CLOUD_CONTINUITY_UNKNOWN","CLOUD_AUTHORITY_REQUIRED","CLOUD_HTTP_404" -> "A cloud-authoritative campaign has not been verified for this pairing."
     "AUTHENTICATION_REQUIRED","CLOUD_BINDING_CHANGED","CLOUD_GRANT_DENIED","CLOUD_GRANT_UNVERIFIED","CREDENTIAL_REVOKED_OR_EXPIRED" -> "Access is unavailable. Check this device’s campaign and cloud grant."
     "SNAPSHOT_CHANGED","CLOUD_REVIEW_STALE","EXPECTED_REVISION_CONFLICT" -> "The campaign changed. Refresh and review the current values."
+    "CLOUD_RATE_LIMITED" -> (e as? OwnerSyncFailure)?.retryAfterSeconds?.let { "Cloud requests are paused. Retry in $it seconds using the original request." }
+        ?: "Cloud requests are paused. Retry the original request after a short wait."
+    "CLOUD_UNSUBMITTED_STALE" -> "The server confirmed no receipt for the original request at its closed revision. Review a new request against the current records."
+    "CLOUD_PRIOR_COMMAND_UNVERIFIED" -> "A previous request is awaiting verification. Retry its original command to retrieve the outcome."
     "COMMAND_UNKNOWN" -> "The server has no receipt for this command."
     "NETWORK_UNAVAILABLE","NETWORK_TIMEOUT","TLS_FAILURE" -> "Cloud unavailable. Any previously downloaded records may be stale."
     else -> (e as? OwnerSyncFailure)?.code?.let { "Cloud request incomplete · ${cloudLabel(it.lowercase())}" }
@@ -114,6 +118,7 @@ private val categoryScopes = mapOf(
     var operation by remember { mutableStateOf<JsonObject?>(null) }
     var reviewed by remember { mutableStateOf<CloudSnapshot?>(null) }
     val operations = (caps?.get("operations") as? JsonArray).orEmpty().map { it.jsonObject }
+    val uncertain = rememberedUnconfirmedCommand(client, snapshot)
 
     suspend fun loadRecords(append: Boolean = false): Boolean {
         try {
@@ -205,6 +210,9 @@ private val categoryScopes = mapOf(
                 color=RebuildPalette.GoldBright, style=MaterialTheme.typography.labelMedium)
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             error?.let { Text(it,color=MaterialTheme.colorScheme.error) }
+            if (uncertain != null && snapshot.visible && uncertain.cloudText("operation") !in setOf("cast_spell", "complete_rest")) {
+                CloudCommandRecovery(uncertain, !busy) { id -> command { client.retry(id) } }
+            }
             if (snapshot.visible) {
                 if (search) {
                     PlayerSearch(query,{query=it},"Find a campaign record")
@@ -303,6 +311,7 @@ private val categoryScopes = mapOf(
         "Result" -> result?.let { r -> PlayerSheet("Transaction result",{ tool=null }) {
             Text(cloudLabel(r.cloudText("status").lowercase()))
             val receipt=r["receipt"] as? JsonObject
+            if(receipt!=null && r.cloudText("status")=="COMMITTED") CreatedEntityArtwork(client,snapshot,verified,receipt)
             val outcome=receipt?.get("outcome") as? JsonObject
             val lines = outcome?.let(::namedCloudResults).orEmpty()
             if (lines.isEmpty()) {

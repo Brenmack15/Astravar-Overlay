@@ -1,9 +1,10 @@
 import { BridgeError } from './core.mjs';
 import { CloudPlan } from './cloud-plan.mjs';
 import { cloudFail, validCloudId } from './cloud-validation.mjs';
-import { sheet, gearEligible, numeric } from './cloud-mechanics-core.mjs';
+import { sheet, gearEligible, numeric, availableUses } from './cloud-mechanics-core.mjs';
 import { scaledSpellEffects } from './cloud-mechanics-spells.mjs';
 import { snapshotComponents } from './cloud-mechanics-combat.mjs';
+import { offeredCharges } from './cloud-effect-costs.mjs';
 
 export async function cloudSpellbook(service,principal,id,actorId,options={}) {
   if(!validCloudId(actorId))cloudFail(400,'INVALID_ACTOR_ID');
@@ -37,12 +38,14 @@ export async function cloudSpellbook(service,principal,id,actorId,options={}) {
     const dc=def.resolution==='save'&&dcBase!=null?numeric(dcBase,stats.effects,'spell_dc',grantId).value:null;
     for(const level of d.levels){
       const reasons=[],eligibleSlots=slots.filter(s=>s.level===level&&s.current!==null&&s.current>0);
+      if(stats.exhaustion.status==='fatal')reasons.push('FATAL_EXHAUSTION_REQUIRES_RESOLUTION');
+      if(stats.exhaustion.status==='adjudication_required')reasons.push('EXHAUSTION_ADJUDICATION_REQUIRED');
       if(d.preparation==='known')reasons.push('PREPARATION_REQUIRED');
       if(!allowedGear)reasons.push('SOURCE_ITEM_UNAVAILABLE');
       if(d.prerequisites||def.resolution==='manual')reasons.push('MANUAL_ADJUDICATION_REQUIRED');
       if(d.route==='slot'&&!eligibleSlots.length)reasons.push('MATCHING_SLOT_UNAVAILABLE');
       const shared=d.resourceId?pools.get(d.resourceId)?.data:null;
-      if(d.resourceId&&(shared?.current==null||shared.current<d.cost))reasons.push('GRANT_RESOURCE_UNAVAILABLE');
+      if(d.resourceId&&(!shared||availableUses(shared)==null||availableUses(shared)<d.cost))reasons.push('GRANT_RESOURCE_UNAVAILABLE');
       if(stats.conditions.some(s=>['incapacitated','unconscious','stunned','paralyzed','petrified'].includes(s)))reasons.push('CASTER_INCAPACITATED');
       if(d.route==='ritual'&&a.data.encounterId)reasons.push('RITUAL_UNAVAILABLE');
       if(def.resolution==='attack'&&hit===null||def.resolution==='save'&&dc===null)reasons.push('CASTING_STAT_UNKNOWN');
@@ -53,6 +56,7 @@ export async function cloudSpellbook(service,principal,id,actorId,options={}) {
         concentration:def.concentration,requiresConcentrationDecision:Boolean(def.concentration&&a.data.concentrationCastId),
         timing:def.timing,range:def.range??null,duration:def.duration??null,description:def.description??null,
         resolution:def.resolution,hit,dc,saveAbility:def.saveAbility??null,components,eligibleSlotIds:eligibleSlots.map(s=>s.id),
+        optionalCharges:offeredCharges(stats,'spell',spell.id,grantId,components,def.resolution),
         resource:d.resourceId?{id:d.resourceId,current:shared?.current??null,cost:d.cost}:null,unavailable:reasons});
     }
   }

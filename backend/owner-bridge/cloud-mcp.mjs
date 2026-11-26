@@ -2,7 +2,7 @@ import { cloudContinuitySettings } from './cloud-continuity.mjs';
 import { cloudActions } from './cloud-actions-view.mjs';
 import { cloudArchiveView } from './cloud-lifecycle.mjs';
 import { cloudSpellbook } from './cloud-spellbook.mjs';
-import { CLOUD_MEDIA_MCP_TOOL, stageCloudMcpImage } from './cloud-media.mjs';
+import { CLOUD_MEDIA_MCP_TOOL, stageCloudMcpImage, cloudPrimaryAssociation } from './cloud-media.mjs';
 import { cloudRecordView } from './cloud-records-query.mjs';
 import { CLOUD_ID, CLOUD_ENVELOPE, CLOUD_REVISION, cloudObject, cloudMatches, cloudFail } from './cloud-validation.mjs';
 import { cloudContext, cloudChanges, cloudRelationships, cloudPoolHistory } from './cloud-query.mjs';
@@ -15,6 +15,7 @@ const cursorPage={after:{type:'string',minLength:1,maxLength:350},limit:{type:'i
 const read=(name,description,inputSchema)=>({name,description,inputSchema,annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false}});
 export const CLOUD_TOOLS=Object.freeze([
   CLOUD_MEDIA_MCP_TOOL,
+  read('get_cloud_primary_image','Inspect the exact authorized primary image association and current target revision.',entity),
   read('get_cloud_capabilities','Inspect authorized operations, exact argument schemas, scope and Auto-Sync settings for a cloud continuity.',scope),
   read('get_cloud_continuity_settings','Read the scoped campaign name, notes, source identity and recorded times.',cloudObject({continuityId:CLOUD_ID})),
   read('get_cloud_state','Read authoritative scoped records. Echo the epoch, revision and grantRevision on every subsequent page.',page),
@@ -42,6 +43,7 @@ export function cloudMcpArgs(tool,args) {
 export async function cloudMcpCall(tool,args,service,principal){
   const {continuityId,...opts}=args;
   switch(tool.name){
+    case 'get_cloud_primary_image':return cloudPrimaryAssociation(service,principal,continuityId,opts.id);
     case 'stage_cloud_image':return stageCloudMcpImage(service,principal,args);
     case 'get_cloud_capabilities':return service.capabilities(principal,continuityId);
     case 'get_cloud_continuity_settings':return cloudContinuitySettings(service,principal,continuityId);

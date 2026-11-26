@@ -13,6 +13,8 @@ function isInUse(row) {
   const d=row.data;
   if(row.kind==='actor')return Boolean(d.activeFormId||d.activeDeploymentId||d.concentrationCastId||d.encounterId);
   if(row.kind==='form_deployment')return d.status==='deploying';
+  if(row.kind==='resource_pool')return Boolean(d.effectHolds?.length);
+  if(['attack_attempt','cast_instance'].includes(row.kind))return d.effectCharges?.some(c=>c.status==='reserved')??false;
   if(row.kind==='item_instance')return Boolean(d.attuned||d.operating||d.equipment&&d.equipment!=='packed');
   if(row.kind==='encounter')return d.active===true || ['active','in_progress'].includes(d.status);
   if(row.kind==='effect')return d.enabled===true;

@@ -4,7 +4,7 @@ import json
 import re
 from collections import Counter
 from pathlib import Path
-from zipfile import ZipFile, is_zipfile
+from zipfile import is_zipfile
 
 from verify_campaign_archive import inspect_archive, loads
 
@@ -292,10 +292,23 @@ def review_bytes(raw, owner, continuity, shared_ids=(), known_records=()):
             "blockers": dict(sorted(blockers.items()))}, mapped, raw
 
 
+def comparison_inventory(path, owner, continuity):
+    raw = read_limited(path)
+    fmt = "astravar-complete-history" if raw.startswith(b"PK\x03\x04") else loads(raw).get("format")
+    if fmt in ("astravar-connected-campaign", "astravar-campaign-items", "astravar-reforge"):
+        return review_bytes(raw, owner, continuity)[0]
+    from ascension_migrate_reviewed import indexed
+    _, entries = indexed(raw)
+    records = [{"family":family, "identity":list(identity), "sha256":sha(encode(row)), "sourceRevision":row.get("revision"),
+                "sourceUpdatedAt":row.get("updatedAt")} for (family,identity),row in sorted(entries.items())]
+    return {"sha256":sha(raw), "records":records,
+            "families":dict(sorted(Counter(record["family"] for record in records).items()))}
+
+
 def compare_legacy(before, after, owner, continuity):
     """Reconcile identifiers, revisions, and revision evidence without choosing a winner or replaying an event."""
-    left = legacy_review(before, owner, continuity)[0]
-    right = legacy_review(after, owner, continuity)[0]
+    left = comparison_inventory(before, owner, continuity)
+    right = comparison_inventory(after, owner, continuity)
     verify("records" in left and "records" in right,
            "This source format requires its dedicated archive comparison")
     def index(report):
@@ -327,35 +340,8 @@ def weapon_review(path):
     """Verify checksums and the exact indexed entry set of the separate native history transport."""
     verify(Path(path).is_file() and not Path(path).is_symlink() and is_zipfile(path), "Expected a native history ZIP")
     verify(Path(path).stat().st_size <= 1 << 30, "Weapon archive exceeds its input limit")
-    with ZipFile(path) as z:
-        listing = z.infolist()
-        names = {i.filename for i in listing}
-        verify(len(listing) <= 100_003 and len(listing) == len(names), "Duplicate or excessive archive entries")
-        verify(sum(i.file_size for i in listing) <= 1 << 30, "Expanded weapon archive exceeds its limit")
-        for key, limit in (("manifest.json", 16_384), ("backup.json", 8 << 20), ("archives.ndjson", 64 << 20)):
-            verify(key in names and z.getinfo(key).file_size <= limit, "Missing or oversized weapon section")
-        header = loads(z.read("manifest.json"))
-        verify(header.get("format") == "astravar-complete-history" and header.get("version") == 1,
-               "Unsupported weapon archive")
-        index = z.read("archives.ndjson")
-        verify(sha(z.read("backup.json")) == header["workingSha256"] and sha(index) == header["indexSha256"],
-               "Weapon header checksum mismatch")
-        remaining = names - {"manifest.json", "backup.json", "archives.ndjson"}
-        total = 0
-        count = 0
-        for line in index.splitlines():
-            verify(len(line) <= 8192, "Weapon index entry exceeds its limit")
-            row = loads(line)
-            key = "archives/" + sha(row["id"].encode("utf-8")) + ".bin"
-            verify(key in remaining and row["entry"] == key and
-                   0 <= row["bytes"] == z.getinfo(key).file_size <= 64 << 20, "Invalid weapon history index")
-            with z.open(key) as obj:
-                verify(hashlib.file_digest(obj, "sha256").hexdigest() == row["sha256"], "Weapon history digest mismatch")
-            remaining.remove(key)
-            count += 1
-            total += row["bytes"]
-        verify(not remaining and (count, total) == (header["archiveCount"], header["archiveBytes"]),
-               "Unexpected weapon entries or counts")
-    return {"format": header["format"], "version": 1, "sha256": file_hash(path),
-            "archiveCount": count, "archiveBytes": total,
-            "blockers": ["Raw weapon history requires its separate native restore and reviewed mechanical mapping"]}
+    from ascension_migrate_weapon import checked_archive
+    header, _, _ = checked_archive(path)
+    return {"format":header["format"], "version":1, "sha256":file_hash(path),
+            **{key:header[key] for key in ("archiveCount","archiveBytes","originalFileCount","originalBytes")},
+            "blockers":["Use a source-bound reviewed mapping for weapon history and any current mechanics."]}

@@ -1,5 +1,5 @@
 import { canonical, sha256 } from './core.mjs';
-import { cloudFail, validCloudId, cloudObject, CLOUD_ID } from './cloud-validation.mjs';
+import { cloudFail, validCloudId, cloudObject, CLOUD_ID, CLOUD_REVISION } from './cloud-validation.mjs';
 import { cloudAllowed } from './cloud-plan.mjs';
 import { MEDIA_MAX_BYTES, boundedMediaBody, inspectMediaPng, mediaDigest, mediaHex } from './cloud-media-codec.mjs';
 
@@ -172,7 +172,23 @@ async function assignImage(ctx,args) {
   return {...change,candidate: candidatePaths(id,args.uploadId)};
 }
 
+async function removePrimaryImage(ctx, args) {
+  const target=await ctx.get(args.targetKind,args.targetId);
+  if(!target || target.life!=='active')unavailable();
+  ctx.require('media',target.actorId);
+  const asset=await ctx.get('media_asset',args.assetId);
+  const selected=await storedPrimary(ctx.service,ctx.binding,target.id);
+  if(target.revision!==args.targetRevision || !asset || asset.life!=='active' || asset.data.sha256!==args.sha256 || selected?.id!==asset.id)
+    cloudFail(409,'IMAGE_ASSOCIATION_CHANGED');
+  await ctx.unlink(target.id,'primary_image',asset.id);
+  // Publish an invalidation for readers even though playable data is identical.
+  await ctx.put(target);
+  return {targetId:target.id,targetKind:target.kind,previousAssetId:asset.id,previousSha256:args.sha256,assetId:null};
+}
 export const CLOUD_MEDIA_OPERATIONS=Object.freeze({
+  remove_primary_image:{scope:'media',ownerReview:true,
+    schema:cloudObject({targetKind:{type:'string',enum:[...targetKinds]},targetId:CLOUD_ID,targetRevision:CLOUD_REVISION,assetId:CLOUD_ID,
+      sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}}),plan:removePrimaryImage},
   assign_primary_image:{scope:'media',ownerReview:true,beforeCommit:checkUploadObjects,
     schema:cloudObject({uploadId:CLOUD_ID,assetId:CLOUD_ID,targetId:CLOUD_ID,
       targetKind:{type:'string',enum:[...targetKinds]},sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}}),
@@ -197,12 +213,29 @@ async function shownCandidate(service,principal,id,uploadId,variant) {
   }
   return response;
 }
+async function storedPrimary(service,b,targetId) {
+  return service.s(`SELECT e.id,e.actor_id,e.data_json FROM cloud_links l JOIN cloud_entities e
+    ON e.owner_id=l.owner_id AND e.continuity_id=l.continuity_id AND e.id=l.to_id
+    WHERE l.owner_id=? AND l.continuity_id=? AND l.from_id=? AND l.relation='primary_image' AND e.kind='media_asset' AND e.life='active'`,...b,targetId).first();
+}
+
+export async function cloudPrimaryAssociation(service,principal,id,targetId) {
+  if(!validCloudId(targetId))unavailable();
+  const b=service.key(id),{grant,continuity:c}=await service.access(principal,id),target=await targetById(service,b,targetId);
+  requireTarget(service,grant,target,false);
+  const asset=await storedPrimary(service,b,targetId);
+  if(asset && !cloudAllowed(grant,'media',asset.actor_id,false))unavailable();
+  const again=await service.access(principal,id);
+  if(again.grant.revision!==grant.revision || again.continuity.epoch!==c.epoch || again.continuity.revision!==c.revision)cloudFail(409,'SNAPSHOT_CHANGED');
+  const metadata=asset?JSON.parse(asset.data_json):null;
+  return {epoch:c.epoch,revision:c.revision,grantRevision:grant.revision,targetId,targetKind:target.kind,targetRevision:target.revision,
+    assetId:asset?.id??null,sha256:metadata?.sha256??null,thumbnailSha256:metadata?.thumbnailSha256??null};
+}
+
 async function primaryImage(service,principal,id,targetId,variant) {
   const b=service.key(id),{grant,continuity}=await service.access(principal,id),target=await targetById(service,b,targetId);
   requireTarget(service,grant,target,false);
-  const asset=await service.s(`SELECT e.actor_id,e.data_json FROM cloud_links l JOIN cloud_entities e
-    ON e.owner_id=l.owner_id AND e.continuity_id=l.continuity_id AND e.id=l.to_id
-    WHERE l.owner_id=? AND l.continuity_id=? AND l.from_id=? AND l.relation='primary_image' AND e.kind='media_asset' AND e.life='active'`,...b,targetId).first();
+  const asset=await storedPrimary(service,b,targetId);
   if(!asset || !cloudAllowed(grant,'media',asset.actor_id,false))unavailable();
   const meta=JSON.parse(asset.data_json);
   const result=await readObject(service,b,meta.uploadId,meta,variant);
@@ -237,6 +270,8 @@ export async function handleCloudMedia(request,service,principal,continuityId,ac
     if(request.method==='PUT')return putUpload(request,service,principal,continuityId,id);
     if(request.method==='DELETE')return cleanup(service,principal,continuityId,id);
   }
+  if(parts.length===4 && request.method==='GET' && route==='primary' && variant==='association')
+    return Response.json(await cloudPrimaryAssociation(service,principal,continuityId,id),{headers});
   if(parts.length===4&&request.method==='GET'&&['original','thumbnail'].includes(variant)){
     if(route==='uploads')return shownCandidate(service,principal,continuityId,id,variant);
     if(route==='primary')return primaryImage(service,principal,continuityId,id,variant);
@@ -248,15 +283,23 @@ export async function handleCloudMedia(request,service,principal,continuityId,ac
 // source image. Larger uploads stream through the authenticated binary route.
 export const CLOUD_MEDIA_MCP_TOOL=Object.freeze({
   name:'stage_cloud_image',
-  description:'Stage actual PNG bytes (maximum 36 KiB) for one existing entity. Returns an owner preview and digest. The separate assign_primary_image operation requires owner review. Larger PNGs use the authenticated binary upload endpoint. Only use bytes available in this conversation or an owner-authorized asset source.',
-  inputSchema:cloudObject({continuityId:CLOUD_ID,uploadId:CLOUD_ID,targetId:CLOUD_ID,
+  description:'Stage actual PNG bytes (maximum 36 KiB) for an entity. During creation, pass its committed creationCommandId and reuse that target on image retries. Returns an owner preview and digest. The separate assign_primary_image operation requires owner review. Larger PNGs use the authenticated binary upload endpoint. Only use bytes available in this conversation or an owner-authorized asset source.',
+  inputSchema:cloudObject({continuityId:CLOUD_ID,uploadId:CLOUD_ID,targetId:CLOUD_ID,creationCommandId:CLOUD_ID,
     targetKind:{type:'string',enum:[...targetKinds]},sha256:{type:'string',pattern:'^[a-f0-9]{64}$'},
-    bytesBase64:{type:'string',minLength:4,maxLength:49152,pattern:'^[A-Za-z0-9+/]*={0,2}$'}}),
+    bytesBase64:{type:'string',minLength:4,maxLength:49152,pattern:'^[A-Za-z0-9+/]*={0,2}$'}},['continuityId','uploadId','targetId','targetKind','sha256','bytesBase64']),
   annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
 });
 export async function stageCloudMcpImage(service,principal,args) {
   if(principal?.role!=='connector')cloudFail(403,'CLOUD_GRANT_DENIED');
   if(typeof args.bytesBase64!=='string'||args.bytesBase64.length>49152||args.bytesBase64.length%4)cloudFail(400,'INVALID_MEDIA_ENCODING');
+  let creation=null;
+  if(args.creationCommandId!==undefined){
+    if(!validCloudId(args.creationCommandId))cloudFail(400,'INVALID_CREATION_COMMAND');
+    const verified=await service.receipt(principal,args.continuityId,args.creationCommandId);
+    const created=verified.receipt?.changes?.some(change=>change.before===null && change.after?.id===args.targetId && change.after?.kind===args.targetKind);
+    if(verified.status!=='COMMITTED'||!created)cloudFail(409,'CREATED_IMAGE_TARGET_UNVERIFIED');
+    creation={commandId:verified.commandId,transactionId:verified.receipt.transactionId};
+  }
   let decoded;
   try { decoded=atob(args.bytesBase64); }
   catch { cloudFail(400,'INVALID_MEDIA_ENCODING'); }
@@ -269,7 +312,8 @@ export async function stageCloudMcpImage(service,principal,args) {
   // This local Request adapts the bytes to the shared validator. It performs no fetch.
   const request=new Request(url,{method:'PUT',headers:{'Content-Type':'image/png','X-Astravar-Content-SHA256':args.sha256},
     body:Uint8Array.from(decoded,char=>char.charCodeAt(0))});
-  return (await handleCloudMedia(request,service,principal,args.continuityId,path)).json();
+  const result=await (await handleCloudMedia(request,service,principal,args.continuityId,path)).json();
+  return creation?{...result,creation}:result;
 }
 
 /** The lifecycle worker calls this only for durable, owner-approved GC rows. */

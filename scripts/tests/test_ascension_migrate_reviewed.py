@@ -283,7 +283,9 @@ class ReviewedGraphTest(unittest.TestCase):
         ch=json.loads(raw["characterJson"])
         ch["effects"]=[{"id":"native-"+target.lower(),"name":"Synthetic typed effect","source":{"id":"native-reference",
             "name":"Source fixture","acceptance":"ACCEPTED_HOMEBREW","revision":1},
-            "payload":{"target":target,"operation":"ADD","amount":2,"key":""},"enabled":True} for target in ("MAX_HP","DAMAGE")]
+            "payload":{"target":target,"operation":"ADD","amount":2,"key":""},"enabled":True} for target in ("MAX_HP","DAMAGE","ATTACK")]
+        for effect in ch["effects"][1:]:
+            effect.update(chargeResourceId=POOL,chargeCost=2)
         raw["characterJson"]=json.dumps(ch)
         self.rebind_source(0,self.complete)
         fresh=template([self.files[0].read_bytes()],*TENANT)
@@ -297,7 +299,14 @@ class ReviewedGraphTest(unittest.TestCase):
             adr=self.by_family["playable.characters"]
             self.plan["parity"].append({**{k:adr[k] for k in ("source","family","identity")},
                "sourcePath":["characterJson","$json","effects",index,"id"],"target":ACTOR,"targetPath":["data","effectIds",index],"transform":"exact"})
-            data={"target":("max_hp","damage")[index],"operation":"add","amount":2,"key":"all","source":"Source fixture","enabled":True}
+            data={"target":("max_hp","damage","attack")[index],"operation":"add","amount":2,"key":"all","source":"Source fixture","enabled":True}
+            if "chargeResourceId" in effect:
+                data["charge"] = {"poolId":POOL,"amount":2,"trigger":"confirmed_hit" if data["target"]=="damage" else "attempt"}
+                bound={k:d[k] for k in ("source","family","identity")}
+                self.plan["links"].append({**bound,"from":ident,"relation":"uses_pool","to":POOL,"targetPath":["chargeResourceId"]})
+                for native_field,field,transform in ((["chargeResourceId"],"poolId","exact"),(["chargeCost"],"amount","exact"),
+                                                     (["payload","target"],"trigger","nativeChargeTrigger")):
+                    self.plan["parity"].append({**bound,"sourcePath":native_field,"target":ident,"targetPath":["data","charge",field],"transform":transform})
             self.plan["targets"].append(dict(id=ident,kind="effect",actorId=ACTOR,title=effect["name"],life="active",revision=1,data=data))
             for source,target,transform in ((["id"],["id"],"exact"),(["payload","target"],["data","target"],"numericEffectTarget"),
                  (["payload","operation"],["data","operation"],"lowercase"),(["payload","amount"],["data","amount"],"exact"),
@@ -307,7 +316,35 @@ class ReviewedGraphTest(unittest.TestCase):
                     "sourcePath":source,"target":ident,"targetPath":target,"transform":transform})
         self.package()
         result=mig.read_bundle(self.dst)
-        self.assertEqual({"max_hp","damage"},{json.loads(r["data_json"])["target"] for r in result["rows"]["cloud_entities"] if r["kind"]=="effect"})
+        effects={r["id"]:json.loads(r["data_json"]) for r in result["rows"]["cloud_entities"] if r["kind"]=="effect"}
+        self.assertEqual({"max_hp","damage","attack"},{data["target"] for data in effects.values()})
+        self.assertEqual(("attempt","confirmed_hit"),(effects["native-attack"]["charge"]["trigger"],effects["native-damage"]["charge"]["trigger"]))
+        pool=next(r for r in result["rows"]["cloud_entities"] if r["id"]==POOL)
+        self.assertEqual(1,json.loads(pool["data_json"])["current"])
+        self.dst.unlink()
+        next(t for t in self.plan["targets"] if t["id"]=="native-damage")["data"]["charge"]["trigger"]="attempt"
+        with self.assertRaisesRegex(ValueError,"trigger lacks matching evidence"):
+            self.package()
+
+    def test_pending_form_deployment_requires_real_form_owner_and_encounter_membership(self):
+        from ascension_migrate_reviewed import check_target
+        data={"status":"deploying","formId":"shape","formRevision":3,"previousFormId":None,"requiredSeconds":60,
+              "startedAt":123,"startedByCommand":"past-command","sourceItemId":None,"elapsedBeforeSegment":12,
+              "segment":{"gameSeconds":100,"encounterId":"meeting","round":2,"index":0}}
+        deployment=dict(id="old-deployment",kind="form_deployment",actorId=ACTOR,title="Synthetic transformation",data=data)
+        row=dict(id=ACTOR,kind="actor",actorId=ACTOR,data={"activeDeploymentId":deployment["id"],"encounterId":"meeting"})
+        encounter={"kind":"encounter","data":{"participants":[ACTOR]}}
+        entities={ACTOR:row,"shape":{"kind":"form","actorId":ACTOR},"meeting":encounter}
+        check_target(deployment,entities)
+        encounter["data"]["participants"]=["different-actor"]
+        with self.assertRaisesRegex(ValueError,"membership or turn"):
+            check_target(deployment,entities)
+        data["segment"]={"gameSeconds":112,"encounterId":None}
+        row["data"]["encounterId"]=None
+        check_target(deployment,entities)
+        entities["shape"]["actorId"]="different-actor"
+        with self.assertRaisesRegex(ValueError,"another actor"):
+            check_target(deployment,entities)
 
     def test_reference_archive_can_restore_source_backed_arc_and_session_with_unknown_dates(self):
         def doc(identity,kind,props):

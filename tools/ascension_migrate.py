@@ -141,7 +141,9 @@ def state(db, tenant):
 
 def rows_by_family(db, tenant):
     actual = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name GLOB 'cloud_*'")}
-    verify(actual == set(TABLES) | {"cloud_grants", "cloud_guards", "cloud_continuities"},
+    # Rate-limit reservations are installation-local and can be absent in a pre-0013 snapshot.
+    # Recreating traffic debt after recovery could strand clients without preserving any gameplay.
+    verify(actual - {"cloud_rate_buckets"} == set(TABLES) | {"cloud_grants", "cloud_guards", "cloud_continuities"},
            "Unclassified or missing canonical table; update the versioned recovery mapping")
     result = {}
     for table, pk in TABLES.items():
@@ -249,6 +251,33 @@ def write_bundle(path, payloads):
     return summary(bundle)
 
 
+def save_private_copy(destination, output):
+    """Publish a new 0600 file after independent byte verification."""
+    temporary = destination.with_name(uuid.uuid4().hex + ".partial")
+    try:
+        fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(output)
+            stream.flush()
+            os.fsync(stream.fileno())
+        verify(file_hash(temporary) == sha(output), "Recovery file failed independent byte readback")
+        os.link(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def extract_source(package, destination, digest):
+    """Recover the exact original native artifact without exposing it through gameplay APIs."""
+    verify(isinstance(digest, str) and HASH.fullmatch(digest), "Invalid native source digest")
+    bundle = read_bundle(package)
+    check_database(bundle)
+    verify(digest in bundle["sources"], "No original with this digest in the scoped recovery package")
+    original, report = bundle["sources"][digest]
+    verify(sha(original) == digest, "Native source digest differs")
+    save_private_copy(destination, original)
+    return {"status":"EXTRACTED_ORIGINAL", "sourceSha256":digest, "bytes":len(original), "format":report["format"]}
+
+
 def protect(source, destination, key_file, decrypt=False):
     """Publish an authenticated backup or a validated plaintext copy using a separate recovery key."""
     try:
@@ -277,17 +306,7 @@ def protect(source, destination, key_file, decrypt=False):
     check_database(bundle)
     if not decrypt:
         output = cipher.encrypt(output)
-    temporary = destination.with_name(uuid.uuid4().hex + ".partial")
-    try:
-        fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(output)
-            stream.flush()
-            os.fsync(stream.fileno())
-        verify(file_hash(temporary) == sha(output), "Protected backup failed independent file readback")
-        os.link(temporary, destination)
-    finally:
-        temporary.unlink(missing_ok=True)
+    save_private_copy(destination, output)
     return {"status": "UNSEALED" if decrypt else "SEALED", "fileSha256": sha(output), **summary(bundle)}
 
 
@@ -710,6 +729,10 @@ def main():
     compare.add_argument("later", type=Path)
     compare.add_argument("--owner", required=True)
     compare.add_argument("--continuity", required=True)
+    original = sub.add_parser("extract-source", help="Recover one digest-verified native original into a new private file")
+    original.add_argument("package", type=Path)
+    original.add_argument("output", type=Path)
+    original.add_argument("--sha256", required=True)
     for op in ("seal", "unseal"):
         p = sub.add_parser(op)
         p.add_argument("file", type=Path)
@@ -748,6 +771,8 @@ def main():
         return mechanical_parity(args.native, snapshot)
     if args.operation == "compare-legacy":
         return compare_legacy(args.earlier, args.later, args.owner, args.continuity)
+    if args.operation == "extract-source":
+        return extract_source(args.package, args.output, args.sha256)
     if args.operation in ("seal", "unseal"):
         return protect(args.file, args.output, args.key_file, args.operation == "unseal")
     if args.operation == "init": return init(args.directory, args.owner, args.continuity)

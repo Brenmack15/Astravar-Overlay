@@ -110,6 +110,12 @@ internal class CloudSnapshotCache(context: Context, name: String? = "astravar-cl
         arrayOf(id,binding.origin,binding.continuity,binding.subject,now.toString())
     ).use { if(it.moveToFirst())it.getBlob(0) else null }
 
+    fun evictImage(snapshot:CloudSnapshot,id:String) = transaction { db ->
+        val current=workspace()
+        if(current?.binding==snapshot.binding && current.version==snapshot.version)
+            db.delete("image_cache","id=?",arrayOf(id))
+    }
+
     fun saveImage(snapshot:CloudSnapshot,id:String,bytes:ByteArray) = transaction { db ->
         val current=workspace()
         require(current?.visible==true && current.version==snapshot.version && current.binding==snapshot.binding && bytes.size in 1..cloudMediaMax)
@@ -179,7 +185,7 @@ internal class CloudSnapshotCache(context: Context, name: String? = "astravar-cl
         if (previous == null || previous.version.grantRevision != version.grantRevision || previous.version.epoch != version.epoch)
             db.delete("commands", null, null)
         db.execSQL("INSERT OR IGNORE INTO fenced VALUES(?)", arrayOf(binding.continuity))
-        db.execSQL("INSERT OR REPLACE INTO workspace VALUES(1,?,?,?,?,?,?,?,?,?)", arrayOf(
+        db.execSQL("INSERT OR REPLACE INTO workspace VALUES(1,?,?,?,?,?,?,?,?,?)", arrayOf<Any>(
             binding.origin, binding.continuity, binding.subject, version.epoch, version.revision, version.grantRevision,
             version.grantExpiresAt, checkedAt, token))
         db.delete("records", "token<>?", arrayOf(token))

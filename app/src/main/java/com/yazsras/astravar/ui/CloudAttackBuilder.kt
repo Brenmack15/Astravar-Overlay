@@ -73,6 +73,55 @@ private fun JsonObjectBuilder.optionalId(key: String, id: String) {
     }
 }
 
+@Serializable internal data class AttackSourceRulesDraft(
+    val transfers: Boolean = false,
+    val weaponBus: Boolean = false,
+    val cooldown: String = "",
+    val preparationId: String = "",
+    val payloadAction: String = "",
+    val payloadComponent: String = "",
+    val push: Boolean = false,
+    val pushFeet: String = "",
+    val pushAbility: String = "",
+    val pushDc: String = "",
+    val pushProne: Boolean = false,
+) {
+    fun write(target: JsonObjectBuilder, attack: CloudAttackDraft) = with(target) {
+        require(!transfers || attack.item.isNotBlank()) { "A transferable attack requires a physical source item." }
+        if (transfers) put("transfersWithItem", true)
+        if (weaponBus || preparationId.isNotBlank() || payloadAction.isNotBlank()) {
+            require(attack.item.isNotBlank() && !transfers) { "These weapon rules require a fixed physical source." }
+        }
+        if (weaponBus) putJsonObject("weaponBus") { optionalNumber("cooldownSeconds", cooldown, "Weapon downtime", 1..86400) }
+        if (preparationId.isNotBlank()) {
+            require(attack.delivery == "melee" && attack.resolution == "attack") { "A prepared strike requires a melee attack roll." }
+            optionalId("chargeActionId", preparationId)
+        }
+        require(payloadAction.isBlank() == payloadComponent.isBlank()) { "Choose the storage action and the damage component it replaces." }
+        if (payloadAction.isNotBlank()) {
+            require(attack.resolution == "attack" && attack.components.any { it.id == payloadComponent }) { "Choose an attack-roll component for the spell payload." }
+            putJsonObject("payloadRule") { optionalId("storeActionId", payloadAction); optionalId("componentId", payloadComponent) }
+        }
+        if (push) {
+            require(preparationId.isNotBlank() && pushAbility in abilityCodes) { "Choose the preparation and target save for the push." }
+            putJsonObject("preparedPush") {
+                put("feet", number(pushFeet, "Push distance", 1..200)); put("ability", pushAbility)
+                put("dc", number(pushDc, "Push save DC", 1..100)); put("prone", pushProne)
+            }
+        }
+    }
+    companion object {
+        fun read(data: JsonObject): AttackSourceRulesDraft {
+            val bus = data["weaponBus"] as? JsonObject
+            val payload = data["payloadRule"] as? JsonObject
+            val push = data["preparedPush"] as? JsonObject
+            return AttackSourceRulesDraft(data.str("transfersWithItem") == "true", bus != null, bus.str("cooldownSeconds"),
+                data.str("chargeActionId"), payload.str("storeActionId"), payload.str("componentId"), push != null,
+                push.str("feet"), push.str("ability"), push.str("dc"), push.str("prone") == "true")
+        }
+    }
+}
+
 @Serializable internal data class CloudAttackDraft(val id: String, val name: String = "", val source: String = "",
     val description: String = "", val delivery: String = "melee", val resolution: String = "attack", val timing: String = "attack",
     val classification: String = "", val ability: String = "", val proficient: Boolean = false, val fixed: Boolean = false,
@@ -83,7 +132,8 @@ private fun JsonObjectBuilder.optionalId(key: String, id: String) {
     val components: List<AttackDamageDraft> = emptyList(), val riders: List<AttackRiderDraft> = emptyList(),
     val calculatedDc: Boolean = false, val dcAbility: String = "", val dcBase: String = "8",
     val dcProficient: Boolean = false, val dcBonus: String = "", val reviewedHolding: String = "",
-    val reviewedDefinition: String = "", val itemRevision: Long? = null, val definitionRevision: Long? = null) {
+    val reviewedDefinition: String = "", val itemRevision: Long? = null, val definitionRevision: Long? = null,
+    val sourceRules: AttackSourceRulesDraft = AttackSourceRulesDraft()) {
     fun payload(actorId: String, revision: Long? = null, discardSelections: Boolean = false): JsonObject = buildJsonObject {
         require(name.trim().length in 1..160 && source.trim().length in 1..300) { "Enter the attack name and source." }
         put("actorId", actorId); put("attackId", id); put("name", name.trim()); put("source", source.trim())
@@ -116,6 +166,7 @@ private fun JsonObjectBuilder.optionalId(key: String, id: String) {
         require(longRange.isBlank() || range.isNotBlank() && longRange.trim().toInt() >= range.trim().toInt()) { "Long range must be at least normal range." }
         optionalId("sourceItemId", item); optionalId("formId", form)
         require((!attuned && !operating) || item.isNotBlank()) { "Attunement and operating requirements need a source item." }
+        sourceRules.write(this, this@CloudAttackDraft)
         if (attuned) put("requiresAttunement", true)
         if (operating) put("requiresOperating", true)
         val excluded = exclude.split(',').map(String::trim).filter(String::isNotBlank)
@@ -150,7 +201,7 @@ private fun JsonObjectBuilder.optionalId(key: String, id: String) {
                 d.rows("riders").map { r -> AttackRiderDraft(r.str("id"), r.str("trigger"), r.str("effect"), r.str("duration"),
                     r.str("componentId"), r.str("saveAbility"), r.str("saveDc")) },
                 calculatedDc="dcAbility" in d, dcAbility=d.str("dcAbility"), dcBase=d.str("dcBase").ifBlank { "8" },
-                dcProficient=d.str("dcProficient")=="true", dcBonus=d.str("dcBonus"))
+                dcProficient=d.str("dcProficient")=="true", dcBonus=d.str("dcBonus"), sourceRules=AttackSourceRulesDraft.read(d))
         }
     }
 }
@@ -195,7 +246,7 @@ private fun <T> List<T>.move(index: Int, target: Int): List<T> = toMutableList()
     val references = remember(actorId) { mutableStateMapOf<String,List<JsonObject>>() }
     LaunchedEffect(client, actorId) {
         val repo = client ?: return@LaunchedEffect
-        for (kind in listOf("item_instance", "form", "resource_pool")) {
+        for (kind in listOf("item_instance", "form", "resource_pool", "action_definition")) {
             try {
                 val rows=mutableListOf<JsonObject>()
                 var after=""
@@ -295,6 +346,30 @@ private fun <T> List<T>.move(index: Int, target: Int): List<T> = toMutableList()
                 else BuilderReference("Source item",d.item,references["item_instance"].orEmpty()){d=d.copy(item=it)}
                 Toggle("Requires attunement",d.attuned){d=d.copy(attuned=it)}
                 Toggle("Requires operating equipment",d.operating){d=d.copy(operating=it)}
+                val sourceRules = d.sourceRules
+                fun setRules(value: AttackSourceRulesDraft) { d=d.copy(sourceRules=value) }
+                Toggle("Grant this attack to the item’s current wielder",sourceRules.transfers){setRules(sourceRules.copy(transfers=it))}
+                PlayerDisclosure("Weapon-specific rules",initiallyOpen=false) {
+                    Toggle("Uses the weapon’s shared firing mechanism", sourceRules.weaponBus) { setRules(sourceRules.copy(weaponBus=it)) }
+                    if (sourceRules.weaponBus) Field("Downtime after firing (seconds, optional)", sourceRules.cooldown,
+                        { setRules(sourceRules.copy(cooldown=it)) })
+                    val sourceActions=references["action_definition"].orEmpty().filter { (it["data"] as? JsonObject).str("sourceItemId")==d.item }
+                    BuilderReference("Strike preparation action",sourceRules.preparationId,sourceActions.filter {
+                        (it["data"] as? JsonObject).str("type")=="prepare_strike" }) { setRules(sourceRules.copy(preparationId=it)) }
+                    BuilderReference("Spell storage action",sourceRules.payloadAction,sourceActions.filter {
+                        (it["data"] as? JsonObject).str("type")=="store_payload" }) { setRules(sourceRules.copy(payloadAction=it)) }
+                    if (sourceRules.payloadAction.isNotBlank() || sourceRules.payloadComponent.isNotBlank()) {
+                        BuilderChoice("Replaced damage component",sourceRules.payloadComponent,listOf("")+d.components.map { it.id }) {
+                            setRules(sourceRules.copy(payloadComponent=it)) }
+                    }
+                    Toggle("Prepared strike can push its target",sourceRules.push){setRules(sourceRules.copy(push=it))}
+                    if (sourceRules.push) {
+                        Field("Push distance (feet)",sourceRules.pushFeet,{setRules(sourceRules.copy(pushFeet=it))})
+                        BuilderChoice("Target save",sourceRules.pushAbility,abilityCodes){setRules(sourceRules.copy(pushAbility=it))}
+                        Field("Push save DC",sourceRules.pushDc,{setRules(sourceRules.copy(pushDc=it))})
+                        Toggle("Knocks the target prone",sourceRules.pushProne){setRules(sourceRules.copy(pushProne=it))}
+                    }
+                }
                 BuilderReference("Required form",d.form,references["form"].orEmpty()){d=d.copy(form=it)}
                 Field("Excluded form IDs (comma separated)",d.exclude,{d=d.copy(exclude=it)})
                 BuilderReference("Resource pool",d.pool,references["resource_pool"].orEmpty()){d=d.copy(pool=it)}
@@ -333,6 +408,13 @@ private fun <T> List<T>.move(index: Int, target: Int): List<T> = toMutableList()
                 GenesisReviewSection("Advanced",{select(3)}) {
                     if(d.pool.isNotBlank()) Text("Spend ${d.cost} from ${d.pool}")
                     if(d.item.isNotBlank()) Text("Source item ${d.item} · Attunement ${d.attuned} · Operating ${d.operating}")
+                    with(d.sourceRules) {
+                        if(transfers) Text("Follows the source item to its eligible wielder")
+                        if(weaponBus) Text("Shares firing mechanism" + cooldown.takeIf(String::isNotBlank)?.let { " · ${it}s downtime" }.orEmpty())
+                        if(preparationId.isNotBlank()) Text("Preparation · $preparationId")
+                        if(payloadAction.isNotBlank()) Text("Stored payload · $payloadAction replaces $payloadComponent")
+                        if(push) Text("Prepared push · $pushFeet feet · $pushAbility DC $pushDc" + if(pushProne) " · prone" else "")
+                    }
                     if(d.form.isNotBlank() || d.exclude.isNotBlank()) Text("Required form ${d.form.ifBlank { "Any" }} · Excluded ${d.exclude.ifBlank { "None" }}")
                     d.riders.forEach { Text("${cloudLabel(it.trigger)} · ${it.effect} ${it.duration}") }
                 }

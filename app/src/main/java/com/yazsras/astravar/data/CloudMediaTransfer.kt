@@ -11,7 +11,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 
-internal val cloudMediaTargets=setOf("actor","form","world_entity","item_definition","item_instance","invention_project","attack","blueprint_version")
+internal val cloudMediaTargets=setOf("actor","form","world_entity","item_definition","item_instance","invention_project","attack","attack_definition","blueprint_version")
+internal val primaryAssociationPath = Regex("media/primary/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/association")
 internal const val cloudMediaMax=4*1024*1024
 internal fun cloudDigest(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
@@ -61,6 +62,7 @@ internal fun transferCloudImage(session:CloudSession,target:String,kind:String,u
             connection.setFixedLengthStreamingMode(image.size);connection.outputStream.use { it.write(image) }
         }
         val status=connection.responseCode
+        if (status == 429) throw OwnerSyncFailure("CLOUD_RATE_LIMITED", connection.getHeaderField("Retry-After")?.trim()?.toLongOrNull())
         if(status !in 200..299)throw OwnerSyncFailure("MEDIA_HTTP_$status")
         val mime=connection.contentType?.substringBefore(';')?.trim()?.lowercase()
         require(mime==(if(uploading)"application/json" else "image/png"))

@@ -1,5 +1,6 @@
 import base64
 import json
+import io
 import sqlite3
 import subprocess
 import sys
@@ -325,6 +326,69 @@ class OfflineMigrationTest(unittest.TestCase):
         with zipfile.ZipFile(self.bundle, "a") as z: z.writestr("extra", b"stray")
         with self.assertRaisesRegex(ValueError, "Unexpected"):
             weapon_review(self.bundle)
+
+    def test_rate_limit_reservations_are_excluded_and_cold_restored_with_no_debt(self):
+        source = self.current_db()
+        with closing(migration.db_connect(source)) as db:
+            marks = migration.marks(db, self.tenant)
+            db.execute("INSERT INTO cloud_rate_buckets VALUES(?,?,?,?)", (*self.tenant, "device:synthetic-client", 100))
+            self.assertEqual(marks, migration.marks(db, self.tenant))
+        migration.export(self.lab, self.bundle)
+        snapshot = migration.read_bundle(self.bundle)
+        self.assertNotIn("cloud_rate_buckets", snapshot["rows"])
+        other = self.base / "cold-traffic"
+        migration.init(other, *self.tenant)
+        migration.apply(other, self.bundle, migration.inspect(other, self.bundle)["approvalSha256"])
+        with closing(migration.db_connect(self.current_db(other))) as db:
+            self.assertEqual(0, db.execute("SELECT COUNT(*) FROM cloud_rate_buckets").fetchone()[0])
+            db.execute("CREATE TABLE cloud_unclassified(id TEXT)")
+            with self.assertRaisesRegex(ValueError, "Unclassified"):
+                migration.rows_by_family(db, self.tenant)
+
+    def test_reviewed_weapon_originals_validate_descriptors_and_preserve_all_private_bytes(self):
+        from ascension_weapon_roundtrip import rehearse
+        from ascension_migrate_weapon import ORIGINAL, checked_archive, entry
+        from ascension_migrate_reviewed import template
+        working = encode({"format":"astravar-backup","schema":1,"campaign":{"schema":1,"revision":7,"slots":{"2":1},
+                         "cores":[{"id":"fixture-core","name":"Synthetic core","payloads":[]}]},"history":[],"archives":[]})
+        original = b'{"older":"exact synthetic source"}'
+        large = sha(original)
+        def archive(stored_hash=large, original_count=1):
+            descriptor = {"format":"astravar-original-json-v1","sha256":stored_hash,"bytes":len(original),"chunks":[large]}
+            bodies = {ORIGINAL+"chunk:"+large:base64.b64encode(original),
+                      ORIGINAL+"file:"+stored_hash:encode(descriptor),"opaque-history":b"\xffsynthetic legacy bytes"}
+            index = b"".join(encode({"id":k,"entry":entry(k),"sha256":sha(v),"bytes":len(v)})+b"\n" for k,v in bodies.items())
+            header = {"format":"astravar-complete-history","version":1,"indexSha256":sha(index),"workingSha256":sha(working),
+                      "archiveBytes":sum(map(len,bodies.values())),"archiveCount":len(bodies),
+                      "originalBytes":len(original),"originalFileCount":original_count}
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer,"w") as z:
+                z.writestr("manifest.json",encode(header)); z.writestr("backup.json",working); z.writestr("archives.ndjson",index)
+                for k,v in bodies.items(): z.writestr(entry(k),v)
+            return buffer.getvalue()
+        with self.assertRaisesRegex(ValueError,"Original weapon history file checksum mismatch"):
+            checked_archive(io.BytesIO(archive(stored_hash="0"*64)))
+        with self.assertRaisesRegex(ValueError,"Original weapon file count"):
+            checked_archive(io.BytesIO(archive(original_count=0)))
+        raw = archive()
+        self.source.write_bytes(raw)
+        out = self.base / "recovered-history.zip"
+        self.assertEqual("EXTRACTED_ORIGINAL",rehearse(self.source,out)["status"])
+        self.assertEqual(raw,out.read_bytes())
+        self.assertEqual(0,out.stat().st_mode & 0o077)
+        with self.assertRaises(FileExistsError):
+            rehearse(self.source,out)
+        plain = self.base / "bounded-legacy.json";plain.write_bytes(working)
+        inventory = compare_legacy(self.source,plain,*self.tenant)
+        self.assertGreater(inventory["counts"]["identical"],2)
+        self.assertEqual(0,inventory["counts"].get("changed",0))
+        plan = template([raw],*self.tenant)
+        for d in plan["decisions"]: d.update(disposition="historical",reason="Unchecked blanket archive request")
+        review = self.base / "unchecked.json";review.write_bytes(encode(plan))
+        with self.assertRaisesRegex(ValueError,"Active data cannot be retired"):
+            migration.convert_reviewed([self.source],review,self.bundle,self.tenant)
+        self.assertFalse(self.bundle.exists())
+        self.assertEqual("astravar-complete-history",weapon_review(self.source)["format"])
 
     def test_character_transfer_inventory_keeps_currency_history_non_spendable(self):
         value = {"format":"astravar-notion-character-transfer-v2", "transferId":"fixture-transfer",

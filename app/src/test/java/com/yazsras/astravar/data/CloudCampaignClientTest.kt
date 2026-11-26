@@ -105,6 +105,83 @@ class CloudCampaignClientTest {
         } finally { db.close() }
     }
 
+    @Test fun rateLimitKeepsTheOriginalEnvelopeAndHonorsTheServerWait(): Unit = runBlocking {
+        val db = cache()
+        var clock = now
+        var reads = 0
+        var posts = 0
+        val transport = OwnerConnectionTransport { _, path, _, _, _ ->
+            if (path.endsWith("/commands")) {
+                posts++
+                OwnerSyncResponse(429, buildJsonObject { putJsonObject("error") {
+                    put("code", "CLOUD_RATE_LIMITED"); put("retryAfterSeconds", 2)
+                } })
+            } else { reads++; OwnerSyncResponse(200, page(listOf(row("actor")))) }
+        }
+        val client = CloudCampaignClient(db, { CloudSession(credential, null) }, transport, { clock })
+        try {
+            val selected = client.refresh(openExisting = true)
+            val initial = assertThrows(OwnerSyncFailure::class.java) { runBlocking {
+                client.submit("spend_resource", buildJsonObject { put("actorId", "actor"); put("amount", 1) }, selected, "limited")
+            } }
+            assertEquals(2L, initial.retryAfterSeconds)
+            val before = reads
+            clock += 1000
+            val waiting = assertThrows(OwnerSyncFailure::class.java) { runBlocking { client.retry("limited") } }
+            assertEquals(1L, waiting.retryAfterSeconds); assertEquals(before, reads); assertEquals(1, posts)
+            assertEquals("limited", client.uncertain()?.cloudText("commandId"))
+            clock += 1000
+            client.refresh(); assertEquals(before + 1, reads)
+        } finally { db.close() }
+    }
+
+    @Test fun cancellingTheRateWaitKeepsThePreviouslyVerifiedSnapshot(): Unit = runBlocking {
+        val db = cache()
+        var downloading = false
+        var waits = 0
+        val transport = OwnerConnectionTransport { _, path, _, _, body ->
+            assertNull(body)
+            when {
+                !downloading -> OwnerSyncResponse(200, page(listOf(row("old"))))
+                "after=" !in path -> OwnerSyncResponse(200, page(listOf(row("new", 2)), "new", rev = 2))
+                else -> OwnerSyncResponse(429, buildJsonObject { putJsonObject("error") { put("retryAfterSeconds", 1) } })
+            }
+        }
+        val client = CloudCampaignClient(db, { CloudSession(credential, null) }, transport, { now },
+            waitForRead = { waits++; throw kotlinx.coroutines.CancellationException("Owner left the view") })
+        try {
+            val previous = client.refresh(openExisting = true)
+            downloading = true
+            assertThrows(kotlinx.coroutines.CancellationException::class.java) { runBlocking { client.refresh() } }
+            assertEquals(1, waits)
+            assertEquals(previous, client.workspace())
+            assertEquals(listOf("old"), client.records().map { it.cloudText("id") })
+        } finally { db.close() }
+    }
+
+    @Test fun receiptForDifferentEnvelopeCannotConfirmTheLocalIntent(): Unit = runBlocking {
+        val db = cache()
+        val transport = OwnerConnectionTransport { _, path, _, _, body ->
+            val value = when {
+                path.endsWith("/commands") -> buildJsonObject { put("commandId", "reviewed"); put("status", "COMMITTED") }
+                path.endsWith("/receipts/reviewed") -> buildJsonObject {
+                    put("commandId", "reviewed"); put("status", "COMMITTED"); put("digest", "a".repeat(64))
+                }
+                else -> { assertNull(body); page(listOf(row("actor"))) }
+            }
+            OwnerSyncResponse(200, value)
+        }
+        val client = CloudCampaignClient(db, { CloudSession(credential, null) }, transport, { now })
+        try {
+            val selected = client.refresh(openExisting = true)
+            val failure = assertThrows(OwnerSyncFailure::class.java) { runBlocking {
+                client.submit("spend_resource", buildJsonObject { put("actorId", "actor"); put("amount", 1) }, selected, "reviewed")
+            } }
+            assertEquals("CLOUD_RECEIPT_DIGEST_UNVERIFIED", failure.code)
+            assertEquals("reviewed", client.uncertain("spend_resource", "actor")?.cloudText("commandId"))
+        } finally { db.close() }
+    }
+
     @Test fun nativeTransportAllowsOnlyConstructedCloudRoutes() {
         assertTrue(validCloudDevicePath("/v3/continuities/isolated/state?limit=20&after=item:A&atRevision=5&atEpoch=1&grantRevision=2"))
         assertFalse(validCloudDevicePath("/v3/continuities/isolated/../secret"))

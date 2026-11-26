@@ -5,6 +5,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -191,7 +192,7 @@ private fun ArchiveRows(
     if (rows.isEmpty() && !loading && error == null && (!archived || online)) Text("No matching records.")
     rows.forEach { row ->
         val selected = chosen.any { it.id == row.cloudText("id") }
-        PlayerOutlinedButton({ inspect(row) }, Modifier.fillMaxWidth(), enabled = online) {
+        PlayerOutlinedButton({ inspect(row) }, Modifier.fillMaxWidth().testTag("archive-record-"+row.cloudText("id")), enabled = online) {
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 Text(row.cloudText("title"), style = MaterialTheme.typography.titleSmall)
                 Text(cloudLabel(row.cloudText("kind")) + if (selected) " · Selected" else "", style = MaterialTheme.typography.labelSmall)

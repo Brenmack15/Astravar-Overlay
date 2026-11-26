@@ -45,6 +45,29 @@ class CloudAttackBuilderTest {
         assertThrows(IllegalArgumentException::class.java) { base.copy(attuned=true).payload("synthetic") }
     }
 
+    @Test fun editingNameRetainsPortableAndCompoundSourceRules() {
+        val base = draft().copy(item = "fixture-item")
+        fun rename(rules: AttackSourceRulesDraft): JsonObject {
+            val command = base.copy(sourceRules=rules).payload("fixture-actor")
+            val record = buildJsonObject {
+                put("id", base.id); put("title",base.name)
+                put("data",JsonObject(command.filterKeys { it !in setOf("actorId","attackId","name") }))
+            }
+            val update = CloudAttackDraft.read(record).copy(name="New display name").payload("fixture-actor",9)
+            for (field in listOf("weaponBus","chargeActionId","preparedPush","payloadRule","transfersWithItem")) {
+                assertEquals(field, command[field],update[field])
+            }
+            return update
+        }
+        assertTrue(rename(AttackSourceRulesDraft(transfers=true)).getValue("transfersWithItem").jsonPrimitive.boolean)
+        val rules = AttackSourceRulesDraft(weaponBus=true,cooldown="120",preparationId="prepare",payloadAction="store",
+            payloadComponent="enchantment",push=true,pushFeet="10",pushAbility="STR",pushDc="15",pushProne=true)
+        assertEquals(15,rename(rules).getValue("preparedPush").jsonObject.getValue("dc").jsonPrimitive.int)
+        assertEquals(buildJsonObject {},rename(AttackSourceRulesDraft(weaponBus=true)).getValue("weaponBus"))
+        assertThrows(IllegalArgumentException::class.java) { rename(rules.copy(transfers=true)) }
+        assertThrows(IllegalArgumentException::class.java) { rename(rules.copy(payloadComponent="unavailable")) }
+    }
+
     @Test fun sourcedItemTextPrefillsOnlyUnconditionalTypedDamageAndBindsTheExactSource() {
         fun record(kind:String,id:String,revision:Long,title:String,data:JsonObject)=buildJsonObject {
             put("kind",kind);put("id",id);put("revision",revision);put("title",title);put("data",data) }

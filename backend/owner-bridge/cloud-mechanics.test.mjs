@@ -1,5 +1,8 @@
+import { defineFrameFixture,defineMorphFixture,wornFixture } from './fixtures/representative-forms.mjs';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { test } from 'node:test';
 import { CloudService } from './cloud-service.mjs';
 import { cloudParity } from './fixtures/cloud-parity.mjs';
@@ -14,9 +17,10 @@ const owner={ownerId,role:'owner',credentialId:'sites-owner'};
 const dm={ownerId,role:'connector',credentialId:'sites-mcp'};
 const base={actorId:'actor-one',name:'Fictional engineer',role:'player',rulesProfile:'revised_2024',level:12,
   abilities:{STR:8,DEX:14,CON:14,INT:20,WIS:11,CHA:10},baseAc:16,maxHp:60,currentHp:42,temporaryHp:0,gameSeconds:100,attacksPerAction:2};
-async function setup(t){
-  const db=new SqliteAdapter();t.after(()=>db.close());db.exec(schema);
-  const service=new CloudService(db,{ownerId,kinds:{...MECHANIC_KINDS,...RECORD_KINDS},operations:{...MECHANIC_OPERATIONS,...RECORD_OPERATIONS},isolated:true});
+async function setup(t,path=':memory:'){
+  let activePath=path,db=new SqliteAdapter(path);t.after(()=>db.close());db.exec(schema);
+  const createService=()=>new CloudService(db,{ownerId,kinds:{...MECHANIC_KINDS,...RECORD_KINDS},operations:{...MECHANIC_OPERATIONS,...RECORD_OPERATIONS},isolated:true});
+  let service=createService();
   await service.createIsolated(owner,cid);
   const cats=['character','resources','rolls','spells','combat','inventory'];
   await service.setGrant(owner,cid,'sites-mcp',{scopes:cats.flatMap(k=>[k+'.read',k+'.write']),auto:cats.map(k=>k+'.write'),actors:['*'],expiresAt:Date.now()+3600000,revoked:false,expectedGrantRevision:0});
@@ -36,7 +40,8 @@ async function setup(t){
   const effect=async(effectId,target,key,operation,extra={})=>command('define_effect',{actorId:base.actorId,effectId,name:effectId,source:'reviewed fixture effect',target,key,operation,...extra});
   const sheet=async(id=base.actorId)=>mechanicActorSheet(new CloudPlan(service,service.key(cid),await service.grantForSubject(cid,'sites-mcp'),{commandId:'read-only'},Date.now()),id);
   const preview=async formId=>mechanicFormPreview(new CloudPlan(service,service.key(cid),await service.grantForSubject(cid,'sites-mcp'),{commandId:'preview-only'},Date.now()),base.actorId,formId);
-  return {db,service,command,retry:paritySubmit,read,defined,pool,effect,sheet,preview};
+  function reopen(nextPath=activePath){assert.notEqual(nextPath,':memory:');db.close();activePath=nextPath;db=new SqliteAdapter(activePath);service=createService();}
+  return {get db(){return db;},get service(){return service;},reopen,command,retry:paritySubmit,read,defined,pool,effect,sheet,preview};
 }
 const who=base.actorId;
 const dice=(...faces)=>({origin:'player_physical',faces});
@@ -566,15 +571,6 @@ test('reviewed item text binds the physical holding and definition revisions wit
   assert.equal(row.data.sourceItemId,'text-item');assert.equal(row.data.components[0].type,'cold');
 });
 
-async function wornFixture(f,id,{attuned=false,packed=false,manual=false,ownerId=who}={}) {
-  await f.command('define_item_definition',{definitionId:id+'-def',name:'Fixture '+id,category:'gear',
-    description:'Synthetic configured fixture',rarity:null,stackable:false,wearable:!packed,handheld:false,
-    attunement:attuned?'required':'none',...(attuned?{attunementSeconds:0}:{}),...(manual?{activation:'manual'}:{}),source:'fixture'});
-  await f.command('acquire_item',{itemId:id,definitionId:id+'-def',ownerId,quantity:1,source:'fixture'});
-  if(!packed)await f.command('equip_item',{itemId:id,equipment:'worn',source:'fixture'});
-  if(attuned)await f.command('set_item_attunement',{itemId:id,attuned:true,elapsedSeconds:0,confirmed:true,source:'fixture'});
-  if(manual)await f.command('set_item_operating',{itemId:id,operating:true,source:'fixture'});
-}
 async function fixtureEncounter(f,id,participants) {
   for(const [actorId,face] of participants)await f.command('record_check',{actorId,rollId:id+'-initiative-'+actorId,check:check('initiative','initiative'),evidence:dice(face)});
   return f.command('start_encounter',{encounterId:id,name:'Fictional encounter',participants:participants.map(([actorId])=>({actorId,initiativeRollId:id+'-initiative-'+actorId}))});
@@ -601,50 +597,7 @@ test('shared breath recharge checks the current turn, actual face, failed checks
 });
 
 test('one small actor retains eight physical holdings, ordinary attacks, graded senses and a shared grounded deployment',async t=>{
-  const f=await setup(t);await f.defined({role:'companion',proficiency:4,currentHp:60,baseAc:16,attunementCapacity:1,
-    abilities:{STR:8,DEX:18,CON:10,INT:10,WIS:12,CHA:12},speeds:{walk:5,fly:60},senses:{darkvision:180},
-    size:'tiny',creatureType:'construct',saveProficiencies:['DEX']});
-  await f.defined({actorId:'listener',name:'Fixture listener',role:'creature'});await f.defined({actorId:'ally',name:'Fixture ally'});
-  const ids=['stabilizer','vocoder','ward','dial','optic','step','keepsake','shell-rig'];
-  for(const id of ids)await wornFixture(f,id,{attuned:id==='ward',packed:id==='keepsake'});
-  for(const [id,details] of [['speech',{sourceItemId:'vocoder',speech:{capacity:6,languages:['Fixture A','Fixture B','Fixture C'],fullSentences:true}}],
-    ['private-link',{telepathy:{partnerActorId:'ally',twoWay:true,sharedSenses:false}}],['flyby',{mobility:'flyby'}]])
-    await f.command('define_feature',{actorId:who,featureId:id,name:id,kind:'companion',description:'Synthetic source capability',source:'fixture',references:[],...details});
-  await f.pool('blink','charge',3,3,'long_rest');await f.pool('dial-pool','charge',1,1,'dawn');
-  await f.pool('deploy','charge',1,1,'long_rest');await f.pool('roar','charge',1,1,'deployment');await f.pool('rig-integrity','integrity',75,75,'none');
-  await f.command('define_form',{actorId:who,formId:'rig-form',name:'Heavy frame',source:'fixture',size:'large',creatureType:'construct',
-    sourceItemId:'shell-rig',grounded:true,baseAc:18,abilityOverrides:{STR:20},speeds:{walk:40},timing:'other',activationSeconds:60,
-    durationSeconds:3600,deploymentPoolId:'deploy',integrityPoolId:'rig-integrity',resetPoolId:'roar',requiresWilling:true});
-  for(const [id,stat,rank] of [['stealth','DEX',2],['perception','WIS',1]])await f.command('set_skill_training',{actorId:who,skillId:id,ability:stat,rank,name:id});
-  await f.effect('precision','skill','stealth','add',{amount:1,sourceItemId:'stabilizer'});await f.effect('perception-base','skill','perception','add',{amount:2});
-  await f.effect('visual','skill','perception','add',{amount:2,contextTag:'heat',sourceItemId:'optic'});
-  await f.effect('heat-edge','roll_edge','skill:perception','advantage',{sourceItemId:'optic',contextTag:'heat'});
-  for(const key of ['skill:stealth','save:DEX'])await f.effect('edge-'+key.split(':')[1],'roll_edge',key,'keep_highest_three',{sourceItemId:'stabilizer'});
-  for(const key of ['acid','necrotic','poison','psychic'])await f.effect('plate-'+key,'damage_defense',key,'immunity');
-  for(const key of ['blinded','charmed','exhaustion','frightened','incapacitated','paralyzed','petrified','poisoned','prone','stunned','unconscious'])
-    await f.effect('condition-'+key,'condition_immunity',key,'immunity');
-  await f.effect('force-ward','damage_defense','force','resistance',{sourceItemId:'ward',requiresAttunement:true});
-  await f.effect('evasion','save_mitigation','DEX','evade');
-  await f.command('define_spell',{actorId:'ally',spellId:'guided-bolts',name:'Fictional guided spell',source:'fixture',baseLevel:1,concentration:false,
-    ritual:false,resolution:'automatic',timing:'action',components:[component('dart','force',1,4,1)]});
-  await f.effect('spell-ward','spell_damage_immunity','guided-bolts','immunity',{sourceItemId:'ward',requiresAttunement:true});
-  const basic={actorId:who,source:'fixture',timing:'attack',resolution:'attack',classification:'magical'};
-  for(const [id,type,num,sides,flat,hit,extra] of [
-    ['rake','slashing',3,4,4,8,{delivery:'melee',reach:5,excludedForms:['rig-form']}],
-    ['nip','piercing',3,4,4,8,{delivery:'melee',reach:5,excludedForms:['rig-form']}],
-    ['pulse','force',3,6,4,9,{delivery:'ranged',range:30,excludedForms:['rig-form']}],
-    ['large-bite','piercing',2,10,5,9,{delivery:'melee',reach:5,formId:'rig-form'}],
-    ['large-rake','slashing',3,8,5,9,{delivery:'melee',reach:5,formId:'rig-form'}]])
-    await f.command('define_attack',{...basic,attackId:id,name:id,fixedHit:hit,components:[component('impact',type,num,sides,flat)],...extra});
-  const action={actorId:who,source:'fixture'};
-  await f.command('define_action',{...action,actionId:'basic-pair',name:'Normal pair',type:'multiattack',timing:'action',excludedForms:['rig-form'],
-    attackSequence:['rake','nip'],substitutions:[{attackId:'pulse',replaces:['rake','nip'],maximum:1}]});
-  await f.command('define_action',{...action,actionId:'large-pair',name:'Large pair',type:'multiattack',timing:'action',formId:'rig-form',attackSequence:['large-bite','large-rake']});
-  await f.command('define_action',{...action,actionId:'scan',name:'Thermal inspection',type:'thermal_scan',timing:'other',sourceItemId:'optic',thermal:{normal:150,faint:60,skillId:'perception',tag:'heat'}});
-  await f.command('define_action',{...action,actionId:'fixed',name:'Fixed face',type:'fixed_attack_die',timing:'other',sourceItemId:'dial',fixedDieValue:10,cost:{poolId:'dial-pool',amount:1}});
-  await f.command('define_action',{...action,actionId:'shift',name:'Short displacement',type:'teleport',timing:'bonus_action',range:30,sourceItemId:'step',cost:{poolId:'blink',amount:1}});
-  await f.command('define_action',{...action,actionId:'cry',name:'Selective cry',type:'frighten',timing:'bonus_action',range:30,sourceItemId:'shell-rig',formId:'rig-form',
-    saveDc:15,saveAbility:'WIS',durationSeconds:60,cost:{poolId:'roar',amount:1}});
+  const f=await setup(t);const ids=await defineFrameFixture(f,who);
   const ordinary=await f.sheet();assert.equal(ordinary.mobilityRules[0].eligible,true);
   assert.equal(ordinary.communications.find(v=>v.kind==='speech').unassigned,3);assert.equal(ordinary.communications.find(v=>v.kind==='telepathy').sharedSenses,false);
   assert.deepEqual([ordinary.size,ordinary.ac.value,ordinary.skills.stealth.value,ordinary.saves.DEX.value,ordinary.skills.perception.value,ordinary.senses.darkvision],['tiny',16,13,8,7,180]);
@@ -690,31 +643,7 @@ test('one small actor retains eight physical holdings, ordinary attacks, graded 
 });
 
 test('three anatomies share four holdings, one rechargeable breath and one timed melee enhancement',async t=>{
-  const f=await setup(t);await f.defined({role:'companion',proficiency:4,currentHp:154,maxHp:154,baseAc:19,attunementCapacity:1,
-    abilities:{STR:20,DEX:18,CON:18},size:'large',creatureType:'dragon',speeds:{walk:40,fly:80,swim:40}});
-  await wornFixture(f,'primary-focus',{manual:true});await wornFixture(f,'reserve-focus',{packed:true});await wornFixture(f,'tattoo',{attuned:true});await wornFixture(f,'harness');
-  for(const [key,op] of [['acid','immunity'],['cold','resistance'],['poison','resistance']])await f.effect('biological-'+key,'damage_defense',key,op);
-  await f.pool('shared-breath','ordinary',1,1,'recharge_roll',{rechargeSides:6,rechargeMinimum:5});await f.pool('shared-mode','charge',1,1,'dawn');
-  for(const [id,size,walk,fly,swim] of [['original','large',40,80,40],['civilian','medium',30,0,null],['winged-hybrid','medium',30,40,null]]){
-    await f.command('define_form',{actorId:who,formId:id,name:id,source:'fixture',sourceItemId:'primary-focus',requiresOperating:true,revertOnSourceLoss:true,
-      timing:'action',activationSeconds:0,requiresWilling:true,size,speeds:{walk,fly,swim}});
-  }
-  const atk={actorId:who,source:'synthetic combat profile',timing:'attack',delivery:'melee',resolution:'attack',ability:'STR',proficient:true};
-  for(const [suffix,extra] of [['base',{excludedForms:['civilian','winged-hybrid']}],['hybrid',{formId:'winged-hybrid'}]]){
-    for(const [id,type,die] of [['bite','piercing',10],['claw','slashing',6]])await f.command('define_attack',{...atk,...extra,attackId:id+'-'+suffix,
-      name:id,reach:suffix==='base'?10:5,components:[component('natural',type,2,die,6),...(id==='bite'?[component('acid','acid',2,6,0)]:[])]});
-    await f.command('define_action',{actorId:who,...extra,actionId:'three-'+suffix,name:'Natural sequence',type:'multiattack',timing:'action',source:'fixture',
-      attackSequence:['bite-'+suffix,'claw-'+suffix,'claw-'+suffix]});
-  }
-  await f.command('define_action',{actorId:who,actionId:'extended',name:'Timed reach',source:'fixture',sourceItemId:'tattoo',requiresAttunement:true,
-    type:'timed_attack_mode',timing:'bonus_action',durationSeconds:60,modeReach:15,cost:{poolId:'shared-mode',amount:1},
-    modeAttacks:['bite-base','claw-base','bite-hybrid','claw-hybrid'],modeComponent:component('surge','force',1,6,0)});
-  const breath={actorId:who,source:'synthetic source-backed geometry',timing:'action',delivery:'area',resolution:'save',saveSuccess:'half',cost:{poolId:'shared-breath',amount:1}};
-  for(const [id,type,save,die,sides,extra] of [
-    ['stream','acid','DEX',8,8,{range:60,area:'60 by 5 line',excludedForms:['civilian']}],['focused','acid','DEX',8,8,{range:60,area:'one target',sourceItemId:'harness',excludedForms:['civilian']}],
-    ['fan','acid','DEX',8,8,{range:30,area:'cone',sourceItemId:'harness',excludedForms:['civilian']}],['frost','cold','CON',8,8,{area:'synthetic cold geometry',excludedForms:['civilian','winged-hybrid']}],
-    ['gas','poison','CON',8,6,{range:30,area:'30-foot area',excludedForms:['civilian','winged-hybrid']}]])
-    await f.command('define_attack',{...breath,...extra,attackId:id,name:id,saveAbility:save,saveDc:16,components:[component('breath',type,die,sides,0)]});
+  const f=await setup(t);await defineMorphFixture(f,who);
   const change=id=>f.command('change_form',{actorId:who,formId:id,elapsedSeconds:0,willing:true});
   await change('civilian');const human=await f.sheet();assert.deepEqual([human.currentHp,human.ac.value,human.proficiency,human.initiative.value,human.movement.walk,human.movement.fly],[154,19,4,4,30,0]);
   for(const id of ['claw-base','bite-hybrid','stream','frost'])await assert.rejects(f.command('resolve_attack',declaredAttack(id,'bad-'+id)),/ATTACK_FORM_INELIGIBLE/);
@@ -876,4 +805,164 @@ test('seven armor attack families share one physical source, bounded charge, pre
   await f.command('advance_actor_time',{actorId:who,elapsedSeconds:599,confirmed:true});await assert.rejects(execute('shot','not-yet'),/WEAPON_BUS_UNAVAILABLE/);
   await f.command('advance_actor_time',{actorId:who,elapsedSeconds:1,confirmed:true});assert.ok((await execute('shot','ready-again')).out.hit);
   assert.equal((await f.read('frame')).data.attuned,true);assert.equal((await f.read('blast-budget')).data.current,0);
+});
+
+test('long deployment follows actual encounter rounds, survives a service restart, and consumes one charge only on completion',async t=>{
+  const directory=await mkdtemp(join(tmpdir(),'astravar-deployment-'));
+  const f=await setup(t,join(directory,'state.sqlite'));t.after(()=>rm(directory,{recursive:true,force:true}));
+  await f.defined();await f.defined({actorId:'other',name:'Fixture participant'});
+  await f.pool('deploy-use','charge',1,1,'long_rest');await f.pool('integrity','integrity',47,75,'none');await f.pool('cry-use','charge',0,1,'deployment');
+  await wornFixture(f,'deploy-kit');
+  const config={actorId:who,formId:'timed',name:'Synthetic timed form',source:'fixture',sourceItemId:'deploy-kit',requiresWilling:true,
+    timing:'action',activationSeconds:60,durationSeconds:3600,deploymentPoolId:'deploy-use',integrityPoolId:'integrity',resetPoolId:'cry-use'};
+  await f.command('define_form',config);
+  const begin={actorId:who,formId:'timed',deploymentId:'tracked-work',declared:true,willing:true};
+  const finish={actorId:who,formId:'timed',deploymentId:'tracked-work',elapsedSeconds:0,uninterrupted:true,willing:true};
+  const next=currentActorId=>f.command('advance_encounter_turn',{encounterId:'timer-enc',currentActorId});
+  await fixtureEncounter(f,'timer-enc',[['other',18],[who,5]]);
+  await assert.rejects(f.command('begin_form_deployment',begin),/TURN_UNAVAILABLE/);
+  await next('other');const started=await f.command('begin_form_deployment',begin);await f.retry(started.command);
+  assert.equal((await f.read('timer-enc')).data.economy[who].action,false);assert.equal((await f.read('cry-use')).data.current,0);
+  await assert.rejects(f.command('begin_form_deployment',{...begin,deploymentId:'duplicate-work'}),/DEPLOYMENT_ALREADY_PENDING/);
+  await assert.rejects(f.command('change_form',{...finish,elapsedSeconds:60}),/RECORDED_DEPLOYMENT_TIME_REQUIRED/);
+  await assert.rejects(f.command('change_form',{actorId:who,formId:'timed',elapsedSeconds:60,uninterrupted:true,willing:true}),/FINISH_OR_INTERRUPT_PENDING_DEPLOYMENT/);
+  await assert.rejects(f.command('change_form',{...finish,actorId:'other'}),/MECHANIC_REFERENCE_UNAVAILABLE/);
+  // A separately approved clock update or actual non-disabling damage supplies no invented combat rounds.
+  await f.command('advance_actor_time',{actorId:who,elapsedSeconds:60,confirmed:true});await f.command('apply_hp_change',{actorId:who,kind:'damage',amount:3});
+  assert.equal((await f.preview('timed')).deployment.elapsedSeconds,0);assert.equal((await f.read('deploy-use')).data.current,1);
+  for(let i=0;i<4;i++){await next(who);await next('other');}
+  assert.equal((await f.preview('timed')).deployment.elapsedSeconds,24);
+  const independentSnapshot=join(directory,'restored.sqlite');
+  f.db.db.prepare('VACUUM INTO ?').run(independentSnapshot);
+  f.reopen(independentSnapshot);
+  assert.equal((await f.preview('timed')).deployment.remainingSeconds,36);assert.equal((await f.sheet()).activeDeploymentId,'tracked-work');
+  assert.equal((await f.read(who)).data.activeDeploymentId,'tracked-work');
+  for(let i=0;i<5;i++){await next(who);await next('other');}
+  await next(who);assert.equal((await f.preview('timed')).deployment.elapsedSeconds,54);
+  await assert.rejects(f.command('change_form',finish),/DEPLOYMENT_TIME_REMAINING/);
+  await next('other');
+  const ready=await f.preview('timed');assert.equal(ready.deployment.ready,true);
+  assert.equal((await f.read('timer-enc')).data.economy[who].action,true);
+  await assert.rejects(f.command('change_form',{...finish,uninterrupted:false}),/RECORDED_DEPLOYMENT_TIME_REQUIRED/);
+  await assert.rejects(f.command('change_form',{...finish,willing:false}),/FORM_TRANSFORMATION_INELIGIBLE/);
+  const completed=await f.command('change_form',finish);await f.retry(completed.command);f.reopen();
+  assert.equal(completed.out.elapsedSeconds,60);assert.equal((await f.read('tracked-work')).data.status,'completed');
+  const a=(await f.read(who)).data;
+  assert.deepEqual([a.activeDeploymentId,a.activeFormId,a.currentHp,a.gameSeconds,a.formExpiresAt],[null,'timed',39,160,3760]);
+  assert.deepEqual(await Promise.all(['deploy-use','integrity','cry-use'].map(async id=>(await f.read(id)).data.current)),[0,47,1]);
+  assert.equal((await f.read('timer-enc')).data.economy[who].action,true);
+  const replay=(await f.service.receipt(dm,cid,completed.command.commandId));assert.deepEqual(replay.receipt,completed.result.receipt);
+  await assert.rejects(f.command('interrupt_form_deployment',{actorId:who,deploymentId:'tracked-work',status:'cancelled',reason:'late'}),/DEPLOYMENT_NOT_PENDING/);
+});
+
+test('pending deployment preserves scene and encounter time, cancellations, source interruptions and reviewed definitions',async t=>{
+  const f=await setup(t);await f.defined();await f.defined({actorId:'other',name:'Fixture participant'});await wornFixture(f,'changer',{manual:true});
+  await f.pool('use','charge',1,1,'long_rest');
+  const config={actorId:who,formId:'slow',name:'Synthetic mechanism',source:'fixture',sourceItemId:'changer',requiresOperating:true,
+    timing:'other',activationSeconds:60,deploymentPoolId:'use'};
+  await f.command('define_form',config);
+  const begin=id=>f.command('begin_form_deployment',{actorId:who,formId:'slow',deploymentId:id,declared:true});
+  const stop=(id,status,reason)=>f.command('interrupt_form_deployment',{actorId:who,deploymentId:id,status,reason});
+  const finish=id=>f.command('change_form',{actorId:who,formId:'slow',deploymentId:id,elapsedSeconds:0,uninterrupted:true});
+  await begin('cancel-me');await stop('cancel-me','cancelled','Player changed the declared action');
+  assert.equal((await f.read('cancel-me')).data.status,'cancelled');assert.equal((await f.read('use')).data.current,1);
+  await begin('interrupt-me');await stop('interrupt-me','interrupted','Work was interrupted');
+  assert.equal((await f.read('interrupt-me')).data.reason,'Work was interrupted');
+  await begin('source-lost');await f.command('set_item_operating',{itemId:'changer',operating:false,source:'confirmed suppression'});
+  await f.command('set_item_operating',{itemId:'changer',operating:true,source:'confirmed reactivation'});
+  assert.equal((await f.read('source-lost')).data.reason,'source_item_unavailable');await assert.rejects(finish('source-lost'),/DEPLOYMENT_NOT_PENDING/);
+  await begin('incapacitated');await f.command('set_condition',{actorId:who,key:'stunned',enabled:true,sourceId:'approved-effect'});
+  await f.command('set_condition',{actorId:who,key:'stunned',enabled:false,sourceId:'approved-effect'});
+  assert.equal((await f.read('incapacitated')).data.reason,'actor_incapacitated');
+  await begin('stale-config');await f.command('revise_form',{...config,source:'reviewed change',activationSeconds:72});
+  assert.equal((await f.preview('slow')).deployment.blockedReason,'DEPLOYMENT_FORM_CHANGED');
+  await assert.rejects(finish('stale-config'),/DEPLOYMENT_FORM_CHANGED/);await stop('stale-config','cancelled','Reviewed changed timing');
+  await begin('split-clock');await f.command('advance_actor_time',{actorId:who,elapsedSeconds:12,confirmed:true});
+  await fixtureEncounter(f,'split-enc',[[who,18],['other',2]]);
+  const turn=currentActorId=>f.command('advance_encounter_turn',{encounterId:'split-enc',currentActorId});
+  for(let i=0;i<2;i++){await turn(who);await turn('other');}
+  assert.equal((await f.preview('slow')).deployment.elapsedSeconds,24);
+  await f.command('end_encounter',{encounterId:'split-enc',currentActorId:who,outcome:'Encounter ended during work'});
+  const progress=(await f.preview('slow')).deployment;
+  assert.deepEqual([progress.elapsedSeconds,progress.remainingSeconds,progress.basis],[24,48,'actor_game_clock']);
+  await assert.rejects(finish('split-clock'),/DEPLOYMENT_TIME_REMAINING/);
+  await f.command('advance_actor_time',{actorId:who,elapsedSeconds:48,confirmed:true});
+  await finish('split-clock');
+  assert.equal((await f.read('use')).data.current,0);assert.equal((await f.read(who)).data.currentHp,42);
+  await f.pool('other-use','charge',1,1,'none');
+  await f.command('define_form',{...config,formId:'alternate',deploymentPoolId:'other-use'});
+  await f.command('begin_form_deployment',{actorId:who,formId:'alternate',deploymentId:'late-cost',declared:true});
+  await f.command('spend_resource',{actorId:who,poolId:'other-use',amount:1});
+  await f.command('advance_actor_time',{actorId:who,elapsedSeconds:60,confirmed:true});
+  assert.equal((await f.preview('alternate')).deployment.blockedReason,'RESOURCE_EMPTY_OR_UNKNOWN');
+  await assert.rejects(f.command('change_form',{actorId:who,formId:'alternate',deploymentId:'late-cost',elapsedSeconds:0,uninterrupted:true}),/RESOURCE_EMPTY_OR_UNKNOWN/);
+  assert.equal((await f.read('late-cost')).data.status,'deploying');assert.equal((await f.read(who)).data.activeFormId,'slow');
+});
+
+test('an actor-scoped deployment reads only its participant clock and refuses a foreign actor',async t=>{
+  const f=await setup(t);await f.defined();await f.defined({actorId:'private-participant',name:'Other participant'});
+  await f.command('define_form',{actorId:who,formId:'scoped-form',name:'Fixture form',source:'fixture',timing:'other',activationSeconds:60});
+  await fixtureEncounter(f,'private-encounter',[[who,18],['private-participant',5]]);
+  const prior=await f.service.grantForSubject(cid,'sites-mcp');
+  await f.service.setGrant(owner,cid,'sites-mcp',{scopes:prior.scopes,auto:prior.auto,actors:[who],expiresAt:Date.now()+3600000,revoked:false,expectedGrantRevision:prior.revision});
+  const begin=await f.command('begin_form_deployment',{actorId:who,formId:'scoped-form',deploymentId:'personal-deployment',declared:true});
+  assert.doesNotMatch(JSON.stringify(begin.result.receipt),/private-participant/);
+  const preview=await f.preview('scoped-form');assert.equal(preview.deployment.elapsedSeconds,0);assert.doesNotMatch(JSON.stringify(preview),/private-participant/);
+  await assert.rejects(f.command('interrupt_form_deployment',{actorId:'private-participant',deploymentId:'personal-deployment',status:'interrupted',reason:'out of scope'}),/GRANT_DENIED|SCOPE/);
+  const stopped=await f.command('interrupt_form_deployment',{actorId:who,deploymentId:'personal-deployment',status:'cancelled',reason:'actor-scoped cancellation'});
+  assert.equal(stopped.out.status,'cancelled');
+});
+
+test('three pinned feat variants retain one identity each, verified prior gains and an independent physical luck source',async t=>{
+  const directory=await mkdtemp(join(tmpdir(),'ascension-feat-'));
+  t.after(()=>rm(directory,{recursive:true,force:true}));
+  const f=await setup(t,join(directory,'proof.sqlite'));
+  const family='fixture-perceptive-training',skills=['perception','investigation','insight'];
+  for(const [id,edition] of [['v1','legacy_2014'],['v2','revised_2024'],['combined','homebrew']]){
+    const profile=edition==='homebrew'?'legacy_2014':edition;
+    await f.defined({actorId:id,name:'Synthetic feat subject',rulesProfile:profile,level:12,proficiency:4,
+      abilities:{STR:10,DEX:14,CON:12,INT:20,WIS:11,CHA:10}});
+    for(const [skill,ability,rank] of [['perception','WIS',1],['investigation','INT',edition==='legacy_2014'?1:2],['insight','WIS',2]])
+      await f.command('set_skill_training',{actorId:id,skillId:skill,ability,rank,name:skill});
+    const refs=[];
+    if(edition!=='revised_2024')for(const key of ['perception','investigation']){
+      const effectId=id+'-watch-'+key;
+      await f.command('define_effect',{actorId:id,effectId,name:'Passive training',source:edition,target:'passive',key,operation:'add',amount:5,stackingKey:family+':'+key});
+      refs.push({id:effectId,kind:'effect'});
+    }
+    if(edition!=='legacy_2014'){
+      const actionId=id+'-search';
+      await f.command('define_action',{actorId:id,actionId,name:'Search',type:'use',source:edition,timing:'bonus_action'});
+      refs.push({id:actionId,kind:'action_definition'});
+    }
+    const feat={actorId:id,featureId:id+'-feat',kind:'feat',name:'Perceptive training',description:'Synthetic edition regression',
+      source:edition,references:refs,feat:{familyId:family,edition,includedAbility:{ability:'INT',increase:1},
+        ...(edition==='legacy_2014'?{}:{includedExpertise:['investigation']})},
+      ...(edition==='revised_2024'?{}:{lipReading:{visibleMouth:true,understoodLanguage:true}})};
+    const created=await f.command('define_feature',feat);await f.retry(created.command);
+    await assert.rejects(f.command('define_feature',{...feat,featureId:id+'-duplicate'}),/FEATURE_FAMILY_ALREADY_ASSIGNED/);
+    if(edition!=='legacy_2014')await assert.rejects(f.command('revise_feature',{...feat,feat:{...feat.feat,includedExpertise:['perception']}}),/INCLUDED_EXPERTISE_NOT_ESTABLISHED/);
+    const sheet=await f.sheet(id),record=await f.read(feat.featureId);
+    assert.equal((await f.read(id)).data.rulesProfile,profile);assert.equal(sheet.abilities.INT.base,20);
+    assert.deepEqual(record.data.feat,feat.feat);assert.deepEqual(record.data.references,refs);
+    assert.equal(sheet.communications.some(c=>c.kind==='lip_reading'&&c.requiresVisibleMouth&&c.requiresUnderstoodLanguage),edition!=='revised_2024');
+    assert.equal(sheet.skills.investigation.rank,edition==='legacy_2014'?1:2);
+    assert.equal(sheet.passives.investigation.value-sheet.skills.investigation.value,edition==='revised_2024'?10:15);
+    assert.equal((await f.read(id+'-search'))?.data.timing,edition==='legacy_2014'?undefined:'bonus_action');
+  }
+  await f.command('define_item_definition',{definitionId:'rule-holder',name:'Integrated equipment',category:'armor',description:'Synthetic source',rarity:null,stackable:false,wearable:true,handheld:false,attunement:'none',source:'fixture'});
+  await f.command('acquire_item',{itemId:'worn-source',definitionId:'rule-holder',ownerId:'combined',quantity:1,source:'fixture'});
+  for(const [suffix,target] of [['skills','skill'],['saves','save'],['initiative','initiative']])
+    await f.command('define_effect',{actorId:'combined',effectId:'stone-'+suffix,name:'Integrated luck',source:'fixture equipment',target,key:'all',operation:'add',
+      amount:1,stackingKey:'fixture-luck',sourceItemId:'worn-source'});
+  const equipment=state=>f.command('equip_item',{itemId:'worn-source',equipment:state,source:'fixture selection'});
+  const numbers=async()=>{const state=await f.sheet('combined');return [
+    ...skills.map(k=>state.skills[k].value),...skills.map(k=>state.passives[k].value),state.initiative.value,state.saves.DEX.value,state.abilities.INT.base];};
+  await equipment('worn');assert.deepEqual(await numbers(),[5,14,9,20,29,19,3,3,20]);
+  const restored=join(directory,'restored.sqlite');f.db.db.prepare('VACUUM INTO ?').run(restored);f.reopen(restored);
+  for(const [id,edition] of [['v1','legacy_2014'],['v2','revised_2024'],['combined','homebrew']])
+    assert.equal((await f.read(id+'-feat')).data.feat.edition,edition);
+  assert.deepEqual(await numbers(),[5,14,9,20,29,19,3,3,20]);
+  await equipment('packed');assert.deepEqual(await numbers(),[4,13,8,19,28,18,2,2,20]);
+  assert.equal((await f.read('combined-feat')).data.feat.includedAbility.increase,1);
 });

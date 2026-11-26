@@ -90,7 +90,9 @@ function resource(root,id,worker,fn,modulePath){
         manifest:{mainModule:'index.js',modules:{'index.js':{type:'esm',contents}}},
         env:{DB:{type:'d1',id:'00000000-0000-4000-8000-000000000042'},ASTRAVAR_MEDIA:{type:'r2',name:'private-ascension-recovery'},
           OWNER_SITE_USER_ID:text(worker?.owner??'unused'),ASTRAVAR_CLOUD_ENABLED:text('1'),
-          ASTRAVAR_CLOUD_ENV:text('isolated'),LOCAL_CAPABILITY:text(capability)}}}]};
+          ASTRAVAR_CLOUD_ENV:text('isolated'),LOCAL_CAPABILITY:text(capability),
+          ...(worker?.rate ? {ASTRAVAR_CLOUD_RATE_CAPACITY:text(String(worker.rate.capacity)),
+            ASTRAVAR_CLOUD_RATE_REFILL_MS:text(String(worker.rate.refillMs))} : {})}}}]};
     const mf=new Miniflare(opts);
     try{
       const db=await mf.getD1Database('DB','ascension-local-recovery'),bucket=await mf.getR2Bucket('ASTRAVAR_MEDIA','ascension-local-recovery');
@@ -131,7 +133,7 @@ async function snapshot(db,m,layout){
   batch.push(...layout.map(t=>db.prepare('PRAGMA table_info('+t.name+')')));
   const [names,state,grants,...pages]=await db.batch(batch);
   const expected=[...layout.map(t=>t.name),'cloud_continuities','cloud_guards','cloud_grants'].sort();
-  check(stable(names.results.map(r=>r.name))===stable(expected),'Unclassified D1 schema');
+  check(stable(names.results.map(r=>r.name).filter(name=>name!=='cloud_rate_buckets'))===stable(expected),'Unclassified D1 schema');
   check(state.results.length<=1 && grants.results.length<=rowLimit,'Invalid or oversized scoped state');
   const tables={};let total=0;
   for(const [i,t] of layout.entries()){
@@ -356,10 +358,10 @@ async function rollbackStage(root,approval){
     return {status:'ROLLED_BACK',retained:p.gen};
   });
 }
-async function withGameplay(root,fn,mod){
+async function withGameplay(root,fn,mod,rate){
   return withLock(root,m=>{
     check(!m.intent,'Resume the interrupted cutover before opening gameplay');
-    return resource(root,m.active,m,r=>fn(r,m),mod);
+    return resource(root,m.active,{...m,rate},r=>fn(r,m),mod);
   });
 }
 async function inspect(root,mod){
