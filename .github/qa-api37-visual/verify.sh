@@ -17,6 +17,7 @@ cleanup() {
   trap - EXIT
   if [[ "$status" != 0 ]] && [[ "$(adb -s "$serial" emu avd name 2>/dev/null | tr -d '\r' | head -1)" == AstravarHpCI ]]; then
     if test -f "$RUNNER_TEMP/visual-continuous.log"; then
+      grep -E -m 45 'Abort message:|JNI DETECTED ERROR|Check failed:|Fatal signal|F DEBUG.*#[0-9]+.*\.so|F DEBUG.*TaskSnapshotPer' "$RUNNER_TEMP/visual-continuous.log" >"$art/guest-native-crash.txt" || true
       grep -Ei 'system_server|system server|systemui.*ANR|FATAL EXCEPTION|Zygote|Watchdog|Kernel panic|sys.powerctl|init.*killing|boot completed|starting service.*zygote|lowmemorykiller|Fatal signal' "$RUNNER_TEMP/visual-continuous.log" | tail -240 >"$art/failed-system-service.txt" || true
       cp "$RUNNER_TEMP/owned-visual-avd.log" "$art/failed-emulator.txt" || true
     fi
@@ -65,6 +66,20 @@ python3 .github/qa-api37-visual/probe.py 2>&1 | tee "$art/comparison.txt" || com
 test "$(icon read)" = "$original"
 export ASTRAVAR_VERSION_CODE=59
 bash scripts/ci-ascension-api37.sh 2>&1 | tee "$art/permanent-upgrade.txt"
+component=$(adb -s "$serial" shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.yazsras.astravar | tr -d '\r' | tail -1)
+[[ "$component" == com.yazsras.astravar/* ]]
+adb -s "$serial" shell am start -W -n "$component" | tee "$art/normal-launch.txt"
+grep -q 'Status: ok' "$art/normal-launch.txt"
+python3 scripts/ci-android17-silent-icons.py "$serial" AstravarHpCI ready 2>&1 | tee "$art/normal-focus.txt"
+grep -Fxq 'Verified focused and accessible Android package com.yazsras.astravar' "$art/normal-focus.txt"
+python3 - <<'PY'
+import pathlib,subprocess,xml.etree.ElementTree as ET
+serial="emulator-5584"
+path="/data/local/tmp/ascension-notification-settings.xml"
+root=ET.fromstring(subprocess.check_output(["adb","-s",serial,"exec-out","cat",path]))
+assert any(n.get("package")=="com.yazsras.astravar" and "Ascension upgrade fixture" in (n.get("text","")+" "+n.get("content-desc","")) for n in root.iter("node"))
+pathlib.Path("validation/visual-original/normal-actor.txt").write_text("Original seeded actor accessible in the focused optimized code 59 app\n")
+PY
 test "$comparison" = 0
 if grep -q '"freshGuestOriginalHelper": "original switch unreachable"' "$art/original-status.json"; then
   grep -Fq 'selected Android Wait and verified dismissal' "$art/policy.txt"
