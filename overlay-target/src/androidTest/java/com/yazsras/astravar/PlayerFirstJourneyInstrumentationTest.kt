@@ -278,7 +278,15 @@ class PlayerFirstJourneyInstrumentationTest {
         tap("Unassigned owner") // This journey tests a separately created manual relationship below.
         tap("Review & save")
         tap("Create companion")
-        find("CI Native Ally")
+        // Saving opens the companion at its sheet header. Scrolling while that save
+        // completes can move the freshly selected name out of the viewport.
+        assertEquals("Creation opens the named companion’s status controls", "CI Native Ally",
+            ui.snapshot(By.text("CI Native Ally").pkg(product), "Created companion sheet", refreshCache = true) { node ->
+                node.text?.takeIf { it == "CI Native Ally" && !node.visibleBounds.isEmpty &&
+                    device.findObject(By.text("Companion sheet").pkg(product))?.visibleBounds?.isEmpty == false &&
+                    device.findObject(By.text("Edit status").pkg(product))?.visibleBounds?.isEmpty == false &&
+                    !device.hasObject(By.text("Create companion").pkg(product)) }
+            })
         tap("Edit status")
         enter("Current HP (blank = unknown)", "4")
         enter("Maximum HP (blank = unknown)", "12")
