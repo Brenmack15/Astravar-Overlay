@@ -151,21 +151,24 @@ class CloudRecordScreensTest {
         val snapshot=runBlocking {client.refresh(true)}
         val activity=Robolectric.buildActivity(ComponentActivity::class.java).setup()
         val tab=mutableStateOf("Equipment")
+        val online=mutableStateOf(true)
         try {
             activity.get().setContent{AstravarTheme{ Column(Modifier.verticalScroll(rememberScrollState())){
-                CloudRecordScreen(tab.value,"bearer",client,snapshot,true,{op,a->drafts+=op to a},{error("Unexpected navigation")})
+                CloudRecordScreen(tab.value,"bearer",client,snapshot,online.value,{op,a->drafts+=op to a},{error("Unexpected navigation")})
             }}}
             awaitText("Current catalog name")
             compose.onNodeWithText("Current catalog name").performClick()
-            awaitText("Loading item definition…")
+            awaitText("Customize this instance")
             compose.waitForIdle()
             compose.waitUntil(5000) { readStarted.isCompleted }
             val customize = compose.onNode(hasText("Customize this instance") and hasClickAction())
             customize.performScrollTo().assertIsNotEnabled().performTouchInput { click() }
+            compose.onNodeWithText("Loading item definition…").assertExists()
             assertTrue(drafts.isEmpty())
             compose.onNodeWithText("Earlier catalog name").assertDoesNotExist()
             releaseRead.complete(Unit)
             awaitText("Item definition unavailable.")
+            compose.onNodeWithText("Recorded holding · Earlier catalog name").assertExists()
             customize.assertIsNotEnabled()
             compose.onNodeWithText("Known physical source").assertDoesNotExist()
             compose.onNodeWithText("Retry item definition").performScrollTo().performClick()
@@ -181,8 +184,15 @@ class CloudRecordScreensTest {
             compose.waitUntil(5000){drafts.size==2}
             assertEquals("equip_item",drafts.last().first)
             assertEquals("held-one",drafts.last().second.cloudText("itemId"))
+            compose.runOnIdle { online.value = false }
+            awaitText("Recorded holding · Earlier catalog name")
+            customize.assertIsNotEnabled().performTouchInput { click() }
+            compose.onNodeWithText("Known physical source").assertDoesNotExist()
+            compose.onNodeWithText("Retry item definition").assertDoesNotExist()
+            assertEquals(2, detailReads.get())
+            assertEquals(2, drafts.size)
             compose.onNodeWithText("Close").performClick()
-            compose.runOnIdle{tab.value="Chronicle"}
+            compose.runOnIdle{tab.value="Chronicle"; online.value=true}
             compose.onNodeWithText("Lore").performScrollTo().performClick()
             awaitText("Recorded inscription")
             compose.onNodeWithText("Recorded inscription").performClick()

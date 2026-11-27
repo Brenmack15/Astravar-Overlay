@@ -367,7 +367,9 @@ private sealed interface HoldingDefinition {
             val definition = ready?.record
             val name = if (d.s("customized") == "true") item.cloudText("title") else definition?.s("title")
             CloudEntityImage(client,snapshot,online,itemId,"item_instance",name ?: "Item")
-            name?.let { Text(it,style=MaterialTheme.typography.titleLarge) }
+            if (name != null) Text(name,style=MaterialTheme.typography.titleLarge)
+            else if (source == HoldingDefinition.Unavailable)
+                Text("Recorded holding · "+item.cloudText("title"),style=MaterialTheme.typography.titleMedium)
             Text("${amount(d.s("quantity"))} · ${cloudLabel(d.s("holding")?:"Unknown")} · ${cloudLabel(d.s("equipment")?:"Unknown")}",color=RebuildPalette.Gold)
             PlayerTabs(listOf("Details","Transfer","History","Components"),pane,{pane=it})
             when(pane) {
