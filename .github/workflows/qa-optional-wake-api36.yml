@@ -1,0 +1,176 @@
+name: Verify current optional Android 16 wake and pause controls
+on:
+  push:
+    branches: [verification/ascension-current-wake-api36]
+    paths: ['.github/workflows/qa-optional-wake-api36.yml']
+permissions:
+  actions: read
+  contents: read
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PRODUCT_SOURCE: 9ded49ee06b22f389c4d5f5553f975cb02fa762f
+      ARCHIVED_SOURCE: 90ea56725f4bd11c2741823f8039c0bc37e28203
+      ASTRAVAR_TEST_PACKAGE: com.yazsras.astravar.v2uidebug
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Prepare the stock Android 16 image
+        run: |
+          bash scripts/ci-android-sdk.sh native
+          sudo apt-get -qq update
+          sudo apt-get -qy install libpulse0 python3-pil
+      - name: Bind the exact current application, instrumentation, rules and Worker trees to tested APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code "$ARCHIVED_SOURCE" "$PRODUCT_SOURCE" -- app rules backend/owner-bridge build.gradle.kts settings.gradle.kts gradle.properties gradle gradlew gradlew.bat
+          git diff --exit-code "$PRODUCT_SOURCE" HEAD -- app rules backend/owner-bridge build.gradle.kts settings.gradle.kts gradle.properties gradle gradlew gradlew.bat scripts
+          test "$(git rev-parse "$PRODUCT_SOURCE:app/src/androidTest/java/com/yazsras/astravar/data/CampaignWakeNativeTest.kt")" = bd98b080596be70af161a915184455253754cb7e
+          mkdir -p validation/optional-wake
+          endpoint="repos/$GITHUB_REPOSITORY/actions/artifacts/15180213783"
+          gh api "$endpoint" > "$RUNNER_TEMP/artifact.json"
+          gh api "$endpoint/zip" > "$RUNNER_TEMP/artifact.zip"
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,re,shutil,subprocess,zipfile
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          meta=json.loads((root/'artifact.json').read_text())
+          archived=os.environ["ARCHIVED_SOURCE"]
+          digest="2c1f7965b7e8d32a130a6f10139e2413d05dfe3208c0b7f3352604cd0cf14012"
+          assert meta['id']==15180213783 and meta['workflow_run']['id']==45953670350 and meta['workflow_run']['head_sha']==archived
+          assert meta['name']=='android-verification' and not meta['expired'] and meta['digest']=='sha256:'+digest
+          with (root/'artifact.zip').open('rb') as f: assert hashlib.file_digest(f,'sha256').hexdigest()==digest
+          tools=pathlib.Path(os.environ['ANDROID_HOME'])/'build-tools/35.0.0'
+          package=os.environ['ASTRAVAR_TEST_PACKAGE']
+          apks={}
+          with zipfile.ZipFile(root/'artifact.zip') as z:
+              assert z.read('validation/SOURCE_COMMIT.txt').decode().strip()==archived
+              for name,pkg in [('app/build/outputs/apk/debug/app-debug.apk',package),('app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk',package+'.test')]:
+                  assert z.namelist().count(name)==1
+                  path=root/pathlib.Path(name).name
+                  with z.open(name) as src,path.open('xb') as dest: shutil.copyfileobj(src,dest)
+                  with path.open('rb') as f: sha=hashlib.file_digest(f,'sha256').hexdigest()
+                  signature=subprocess.check_output([tools/'apksigner','verify','--print-certs',path],text=True)
+                  cert,=re.findall(r'Signer #\d+ certificate SHA-256 digest: ([0-9a-f]{64})',signature)
+                  badging=subprocess.check_output([tools/'aapt2','dump','badging',path],text=True).splitlines()[0]
+                  assert f"name='{pkg}'" in badging
+                  if pkg==package: assert "versionCode='59'" in badging
+                  apks[pkg]={'sha256':sha,'certificateSha256':cert}
+          assert len({p['certificateSha256'] for p in apks.values()})==1
+          digests={p:subprocess.check_output(['git','rev-parse',os.environ['PRODUCT_SOURCE']+':'+p],text=True).strip() for p in ('app','rules','backend/owner-bridge')}
+          data={'targetSource':os.environ['PRODUCT_SOURCE'],'archivedSource':archived,'sourceTrees':digests,'verifiedArtifact':15180213783,'zipSha256':digest,'debugPackages':apks}
+          pathlib.Path('validation/optional-wake/provenance.json').write_text(json.dumps(data,indent=2)+'\n')
+          print(json.dumps(data))
+          PY
+      - name: Dispatch the four current instrumentation methods with their original assertions
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          root=Path(os.environ["RUNNER_TEMP"])
+          owned=Path("scripts/ci-emulator.sh").read_text()
+          cut='git rev-parse HEAD >validation/SOURCE_COMMIT.txt'
+          assert owned.count(cut)==1
+          (root/"wake-device.sh").write_text(owned.split(cut)[0])
+          native=Path("scripts/ci-owner-hp-native.sh").read_text()
+          for marker in ('run_test() {','run_independent_test() {'):
+              assert native.count(marker)==1
+          run=native.split('run_test() {',1)[1].split('\n}',1)[0]
+          independent=native.split('run_independent_test() {',1)[1].split('\n}',1)[0]
+          methods=[line for line in native.splitlines() if line.startswith("run_independent_test 'com.yazsras.astravar.data.CampaignWakeNativeTest#")]
+          assert len(methods)==4
+          (root/"wake-methods.sh").write_text("run_test() {"+run+"\n}\nrun_independent_test() {"+independent+"\n}\n"+"\n".join(methods)+"\n")
+          PY
+          cat >> "$RUNNER_TEMP/wake-device.sh" <<'SH'
+          astravar_output=validation/optional-wake
+          astravar_independent_failures=0
+          : > "$astravar_output/independent-tests.tsv"
+          test "$(adb -s "$astravar_serial" shell getprop ro.build.version.sdk | tr -d '\r')" = 36
+          adb -s "$astravar_serial" shell getprop ro.build.version.release | tr -d '\r' > "$astravar_output/android-version.txt"
+          adb -s "$astravar_serial" shell getprop ro.build.fingerprint | tr -d '\r' > "$astravar_output/build-fingerprint.txt"
+          timeout 15s adb -s "$astravar_serial" root > "$astravar_output/adbd.txt" || true
+          timeout 30s adb -s "$astravar_serial" wait-for-device
+          test "$(adb -s "$astravar_serial" shell id -u | tr -d '\r')" = 0
+          test "$(adb -s "$astravar_serial" shell getprop ro.kernel.qemu | tr -d '\r')" = 1
+          test "$(adb -s "$astravar_serial" emu avd name | tr -d '\r' | head -1)" = AstravarCI
+          adb -s "$astravar_serial" install "$RUNNER_TEMP/app-debug.apk"
+          adb -s "$astravar_serial" install "$RUNNER_TEMP/app-debug-androidTest.apk"
+          adb -s "$astravar_serial" shell pm list instrumentation | tr -d '\r' | grep -F "$astravar_product.test/androidx.test.runner.AndroidJUnitRunner (target=$astravar_product)" >"$astravar_output/instrumentation.txt"
+          uid=$(adb -s "$astravar_serial" shell pm list packages -U "$astravar_product" | tr -d '\r' | awk -v p="package:$astravar_product" '$1==p {sub(/^uid:/,"",$2);print $2}')
+          [[ "$uid" =~ ^[1-9][0-9]{4,5}$ ]]
+          # Block the installed application from external traffic while the owned OS retains
+          # its normal network assessment for the WorkManager CONNECTED constraint.
+          for family in iptables ip6tables; do
+            adb -s "$astravar_serial" shell "$family" -w 5 -I OUTPUT 1 -m owner --uid-owner "$uid" '!' -o lo -j REJECT
+            adb -s "$astravar_serial" shell "$family" -w 5 -C OUTPUT -m owner --uid-owner "$uid" '!' -o lo -j REJECT
+          done
+          printf '%s\n' 'Target UID egress restricted to guest loopback for IPv4 and IPv6 before instrumentation. No configured remote service.' > "$astravar_output/isolation.txt"
+          source "$RUNNER_TEMP/wake-methods.sh"
+          for artifact in campaign-power-state-scheduling.json campaign-sync-notification-observations.json campaign-sync-notification-paused-hierarchy.xml campaign-sync-notification-paused.png campaign-sync-notification-paused-not-visible.png; do
+            if adb -s "$astravar_serial" shell test -s "/sdcard/Android/data/$astravar_product/files/$artifact"; then
+              adb -s "$astravar_serial" pull "/sdcard/Android/data/$astravar_product/files/$artifact" "$astravar_output/$artifact" >/dev/null
+            fi
+          done
+          adb -s "$astravar_serial" shell dumpsys deviceidle get deep > "$astravar_output/final-deep-state.txt"
+          cat "$astravar_output/independent-tests.tsv"
+          test "$astravar_independent_failures" = 0
+          SH
+          bash "$RUNNER_TEMP/wake-device.sh"
+      - name: Independently verify the observed power states and paused SystemUI pixels
+        if: always()
+        run: |
+          /usr/bin/python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          from PIL import Image
+          import hashlib,json,re
+          out=Path("validation/optional-wake")
+          rows=[l.split('\t') for l in (out/"independent-tests.tsv").read_text().splitlines()]
+          names=["nativeWakeAuthenticationAndReplayRemainStrictWithScreenOff","nativePauseBlocksAutomaticWorkAndRetainsManualChoice","nativeInjectedWakeSchedulingRespectsBatterySaverDozeAndPause","nativeQuietNotificationHasImmutableActionsAndPausedScreenshot"]
+          assert [r[1].split("#")[-1] for r in rows]==names and all(r[0]=="PASS" for r in rows)
+          assert all("OK (1 test)" in (out/r[2]).read_text() for r in rows)
+          power=json.loads((out/"campaign-power-state-scheduling.json").read_text())
+          assert power["syntheticOnly"] and power["injectedWake"] and not power["actualPushyDelivery"] and not power["actualRoomCommit"] and not power["actualDozeWakeLatency"]
+          states={r["state"]:r for r in power["powerStates"]}
+          assert set(states)=={"battery_saver","doze_screen_off"}
+          assert all(all(r[k] for k in ("supported","wakeSchedulingTested","authenticatedWakeAccepted","uniqueConstrainedWork","duplicateRejected","pauseSuppressed")) for r in states.values())
+          assert "isPowerSaveMode=true" in states["battery_saver"]["observed"]
+          assert "isDeviceIdleMode=true" in states["doze_screen_off"]["observed"] and "deep=IDLE" in states["doze_screen_off"]["observed"]
+          assert power["powerModeRestored"] and power["restoredPowerSaveMode"]==power["powerSaveModeBefore"]
+          assert power["deepStateAfterRestore"]!="IDLE" and (out/"final-deep-state.txt").read_text().strip()!="IDLE"
+          notifications=json.loads((out/"campaign-sync-notification-observations.json").read_text())
+          phases={r["phase"]:r for r in notifications}
+          for phase in ("initial Paused","after Resume action","after Pause action","after manual Sync Now"):
+              assert phases[phase]["result"]=="posted" and phases[phase]["channelImportance"]==2
+          assert "titleVisible=true" in phases["paused shade screenshot"]["result"]
+          nodes=[n for n in ET.parse(out/"campaign-sync-notification-paused-hierarchy.xml").getroot().iter("node") if n.get("package")=="com.android.systemui" and "Astravar Background Sync" in n.get("text","") and "Paused" in n.get("text","")]
+          assert nodes, "paused notification missing from captured SystemUI"
+          title=nodes[0]
+          bounds=tuple(map(int,re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", title.get("bounds")).groups()))
+          photo=out/"campaign-sync-notification-paused.png"
+          with Image.open(photo) as image:
+              assert 0<=bounds[0]<bounds[2]<=image.width and 0<=bounds[1]<bounds[3]<=image.height
+              samples=image.convert("L").crop(bounds)
+              low,high=samples.getextrema()
+              assert high-low>35, "SystemUI title region has no readable foreground contrast"
+          summary={"source":json.loads((out/"provenance.json").read_text())["targetSource"],"api":36,"android":(out/"android-version.txt").read_text().strip(),"methods":names,"power":power,"pausedTitle":title.get("text"),"pausedTitleBounds":bounds,"screenshotSha256":hashlib.sha256(photo.read_bytes()).hexdigest(),"releaseScope":"Android emulator; signed input injected; scheduling and notification actions only","physicalDevice":False,"externalService":False}
+          (out/"verified.json").write_text(json.dumps(summary,indent=2)+"\n")
+          print(json.dumps(summary))
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: current-api36-optional-wake
+          path: validation/optional-wake/
+          if-no-files-found: error
+          retention-days: 5
