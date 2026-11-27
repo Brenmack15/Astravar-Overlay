@@ -4,6 +4,7 @@ from collections import defaultdict
 
 from ascension_migrate_legacy import COINS, encode, sha, verify
 from ascension_migrate_funds import confirmed_funds
+from ascension_migrate_provenance import restored_component
 
 BINDING = {"source", "family", "identity", "rowSha256"}
 GRANT = BINDING | {"op", "decision", "bindingPath"}
@@ -25,7 +26,8 @@ def allowed_field(kind, family, source, target):
 def reviewed_grants(authority, tenant, entries, path_value, source_key):
     if authority is None:
         return {}, {}
-    verify(isinstance(authority, dict) and set(authority) == {"version", "owner", "continuity", "decisions", "grants"}
+    verify(isinstance(authority, dict) and set(authority) in ({"version", "owner", "continuity", "decisions", "grants"},
+                   {"version", "owner", "continuity", "decisions", "grants", "attestedSources"})
            and type(authority["version"]) is int and authority["version"] == 1
            and (authority["owner"], authority["continuity"]) == tenant, "Wrong owner, continuity or review authority version")
     verify(sha(encode(authority)) == os.environ.get(PIN), "Independent review authority digest is missing or does not match")
@@ -34,7 +36,7 @@ def reviewed_grants(authority, tenant, entries, path_value, source_key):
            "Invalid reviewed authority grants")
     corrections, exclusions = {}, {}
     for g in grants:
-        verify(isinstance(g, dict) and g.get("op") in ("correct", "exclude", "confirmSlotCapacity", "confirmedFunds", "consumeRemainder"), "Unsupported reviewed operation")
+        verify(isinstance(g, dict) and g.get("op") in ("correct", "exclude", "confirmSlotCapacity", "confirmedFunds", "consumeRemainder", "restoreAttackComponent"), "Unsupported reviewed operation")
         fields = GRANT if g["op"] == "exclude" else GRANT | {
             "sourcePath", "target", "targetKind", "targetPath", "before", "after", "acceptedPath"}
         if g["op"] == "consumeRemainder":
@@ -54,7 +56,9 @@ def reviewed_grants(authority, tenant, entries, path_value, source_key):
             exclusions[key] = g
             continue
         capacity = g["op"] == "confirmSlotCapacity"
-        if g["op"] == "confirmedFunds":
+        if g["op"] == "restoreAttackComponent":
+            restored_component(g, doc, entries, key, path_value, source_key)
+        elif g["op"] == "confirmedFunds":
             confirmed_funds(g, doc, entries[key], path_value, tenant)
         else:
             if capacity:

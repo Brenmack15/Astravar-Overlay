@@ -21,3 +21,14 @@ def native_attack_distance(key, source_path, target_path, row, target):
               or (second is not None and data.get("range") == first and data.get("longRange") == second)))),
            "Native distance does not match the reviewed attack delivery and complete range band")
     return second if field == "longRange" else first
+
+
+def native_conditional_distance(key, source_path, target_path, row, target):
+    """Recover ordinary bands without discarding an exceptional range restriction."""
+    original = row.get("range")
+    first, separator, qualifier = original.partition("; ") if isinstance(original, str) else ("", "", "")
+    data = target["data"]
+    verify(separator and qualifier.strip() and data.get("nativeRange") == original and data.get("resolution") == "manual"
+           and target_path in (["data","range"],["data","longRange"]) and data.get("delivery") == "ranged",
+           "A conditional attack range needs the exact manual targeting rule")
+    return native_attack_distance(key, source_path, target_path, {"range":first}, target)

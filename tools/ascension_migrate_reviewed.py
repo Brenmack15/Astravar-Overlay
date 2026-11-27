@@ -3,9 +3,11 @@ import base64
 from collections import Counter
 from pathlib import Path
 import subprocess
-from ascension_migrate_range import native_attack_distance
+from ascension_migrate_range import native_attack_distance, native_conditional_distance
+from ascension_migrate_provenance import historical_transfer
 from ascension_migrate_legacy import (COINS, IDENTITY, encode, inspect_notion_transfer, loads,
                                       sha, source_families, verify)
+from ascension_migrate_attestations import FORMAT as ATTESTED_FORMAT, index_attestations, verify_attestations, verify_attested_targets
 from ascension_migrate_funds import validate_fund_target
 from ascension_migrate_features import FEATURE_NORMALIZERS, native_feature_value
 from ascension_migrate_documents import FAMILY as DOCUMENT_FAMILY, FORMAT as DOCUMENT_FORMAT, index_documents
@@ -54,7 +56,7 @@ REF = {
     "actor": {"activeDeploymentId":"form_deployment","activeFormId": "form", "concentrationCastId": "cast_instance", "encounterId": "encounter",
               "poolIds": "resource_pool", "effectIds": "effect", "recoveryPoolIds": "resource_pool"},
     "resource_pool": {"recoveryActorId": "actor"}, "wallet": {"holderId": "actor"},
-    "item_instance": {"definitionId": "item_definition", "ownerId": "actor", "custodianId": "actor",
+    "item_instance": {"definitionId": "item_definition", "ownerId": "actor", "custodianId": "actor", "installedOnActorId":"actor",
                       "locationId": "world_entity", "resourcePoolId": "resource_pool", "additionalResourcePoolIds": "resource_pool", "externalRecipientId": "world_entity"},
     "story_arc":{"parentArcId":"story_arc","eventIds":"timeline_event"},
     "campaign_session":{"arcId":"story_arc","previousSessionId":"campaign_session","openingCheckpointId":"checkpoint",
@@ -72,7 +74,7 @@ EDGE_TARGET = {
     "deployment_form":"form","deploying":"form_deployment","inherits_form_rules":"form",
     "includes_event":"timeline_event","part_of_arc":"story_arc","follows_session":"campaign_session","session_in_arc":"story_arc",
     "opens_at_checkpoint":"checkpoint","closes_at_checkpoint":"checkpoint",
-    "actor": "actor", "represents_actor": "actor", "owned_by": "actor", "held_by": "actor", "located_at": "world_entity",
+    "actor": "actor", "represents_actor": "actor", "owned_by": "actor", "held_by": "actor", "installed_on":"actor", "located_at": "world_entity",
     "definition": "item_definition", "charge_pool": "resource_pool", "uses_pool": "resource_pool", "excludes_form": "form", "feature_mechanic": "*",
     "applies_to_spell":"spell", "for_cast":"cast_instance","for_attempt":"attack_attempt","for_use":"action_use",
     "for_concentration":"concentration_check","used_cast":"cast_instance","used_substitution":"action_definition",
@@ -101,7 +103,7 @@ EDGE_FROM = {
     "deployment_form":{"form_deployment"},"deploying":{"actor"},"inherits_form_rules":{"form"},
     "part_of_arc":{"story_arc"},"follows_session":{"campaign_session"},"session_in_arc":{"campaign_session"},
     "opens_at_checkpoint":{"campaign_session"},"closes_at_checkpoint":{"campaign_session"},"includes_event":{"story_arc","campaign_session"},
-    "definition": {"item_instance"}, "owned_by": {"item_instance"}, "held_by": {"item_instance", "wallet"},
+    "definition": {"item_instance"}, "owned_by": {"item_instance"}, "held_by": {"item_instance", "wallet"}, "installed_on":{"item_instance"},
     "located_at": {"item_instance"}, "known_about": {"known_fact"}, "represents_actor": {"world_entity"},
     "from_subject": {"relationship"}, "to_subject": {"relationship"}, "design_for": {"blueprint_version"},
     "stage_of": {"project_stage"}, "active_form": {"actor"}, "concentrates_on": {"actor"},
@@ -138,6 +140,8 @@ def indexed(raw):
     fmt = v["format"]
     if fmt == "astravar-backup":
         return fmt, working_rows(v)
+    if fmt == ATTESTED_FORMAT:
+        return index_attestations(v)
     if fmt == DOCUMENT_FORMAT:
         return index_documents(v)
     if fmt == "astravar-reviewed-source-facts":
@@ -338,6 +342,14 @@ def check_target(row, entities):
         verify(isinstance(data["coins"],dict) and set(data["coins"])==set(COINS) and all(integer(v) for v in data["coins"].values()) and
                type(data["shared"]) is bool and aid==data["holderId"] and data["shared"]==(aid is None), "Invalid wallet shape")
     if kind=="item_instance":
+        if data.get("holding")=="installed" or data.get("installedOnActorId") is not None:
+            verify(data.get("installedOnActorId") and data["installedOnActorId"]==data["custodianId"]==data["ownerId"]==aid and
+                   data["holding"]=="installed" and data["quantity"]==1 and data["partyAccess"] is True and
+                   data["equipment"]=="packed" and data["attuned"] is False and data["operating"] is True and
+                   data["locationId"] is None, "Installed holding requires one original integral asset on its operator")
+        if "covenantLocked" in data:
+            verify(type(data["covenantLocked"]) is bool and (not data["covenantLocked"] or data["quantity"]==1),
+                   "Invalid restricted physical holding")
         verify(type(data["quantity"]) is int and 0<=data["quantity"]<=1_000_000_000 and (data["quantity"]>0 or row["life"]=="archived") and
                all(type(data[k]) is bool for k in ("partyAccess","attuned","operating")), "Invalid physical holding quantities or state")
         verify(aid==(data["custodianId"] if data["partyAccess"] and data["custodianId"] else data["ownerId"] if data["partyAccess"] else None),
@@ -467,11 +479,12 @@ def project(raw_by_hash, plan, tenant):
     for digest, raw in raw_by_hash.items():
         verify(digest==sha(raw), "Original export digest mismatch")
         fmt, indexed_rows=indexed(raw)
-        if fmt in ("astravar-reviewed-source-facts", DOCUMENT_FORMAT):
+        if fmt in ("astravar-reviewed-source-facts", DOCUMENT_FORMAT, ATTESTED_FORMAT):
             doc=loads(raw)
             verify((doc["owner"],doc["continuity"])==tenant, "Reviewed source belongs to another owner or continuity")
         entries.update({(digest,family,identity):r for (family,identity),r in indexed_rows.items()})
     archived_weapon_sources = {}
+    prior_transfers = {}
     for key,row in entries.items():
         if key[1]=="review.facts":
             binding=row["sourceBinding"]
@@ -481,6 +494,14 @@ def project(raw_by_hash, plan, tenant):
             if row["values"] == {"sourceRole":"original_armor_archive"}:
                 verify(original[1:] == ("weapon.working", ("campaign",)), "Historical archive designation requires the exact weapon working source")
                 archived_weapon_sources[key] = original[0]
+            if row["values"] == {"sourceRole":"original_notion_transfer"}:
+                verify(original[1]=="notion.character" and plan["sources"][original[0]].startswith("astravar-notion-character-transfer-"),
+                       "Historical transfer role requires the original character transfer")
+                transfer=loads(raw_by_hash[original[0]])
+                verify(any(historical_transfer(transfer,loads(raw_by_hash[digest]),tenant) for digest,fmt in plan["sources"].items()
+                           if fmt=="astravar-connected-campaign"), "Original transfer lacks a later matching native import and actor")
+                prior_transfers[key]=original[0]
+    verify_attestations(raw_by_hash, plan["sources"], plan.get("reviewAuthority"), entries, tenant, source_key, path_value)
     corrections, exclusions = reviewed_grants(plan.get("reviewAuthority"), tenant, entries, path_value, source_key)
     scoped_fixtures = fixture_memberships(entries)
     decisions={}
@@ -521,7 +542,8 @@ def project(raw_by_hash, plan, tenant):
                    "Supersession needs the same physical source identity and independently newer revision")
         if disposition=="historical":
             historical_weapon = key[1].startswith("weapon.working") and key[0] in archived_weapon_sources.values()
-            verify((key[1] in HISTORICAL or key in archived_weapon_sources or historical_weapon) and not d["targets"],
+            historical_transfer_row = key[1].startswith("notion.") and key[0] in prior_transfers.values()
+            verify((key[1] in HISTORICAL or key in archived_weapon_sources or historical_weapon or key in prior_transfers or historical_transfer_row) and not d["targets"],
                    "Active data cannot be retired as an historical event")
         if disposition=="map":
             verify(d["playerKnown"] and d["targets"] and membership in (None,tenant[1]) and native.get("visibility") not in ("private","dm","hidden"),
@@ -540,6 +562,9 @@ def project(raw_by_hash, plan, tenant):
                all(d["disposition"] == "historical" for key,d in decisions.items()
                    if key[0] == source_hash and key[1].startswith("weapon.")),
                "An owner-designated historical weapon store cannot also activate current mechanics")
+    for role, source in prior_transfers.items():
+        verify(decisions[role]["disposition"]=="historical" and all(d["disposition"]=="historical" for k,d in decisions.items() if k[0]==source),
+               "A prior transfer cannot also activate duplicate current records")
     active_by_native={}
     immutable_by_native={}
     for key,d in decisions.items():
@@ -566,6 +591,7 @@ def project(raw_by_hash, plan, tenant):
                isinstance(target["title"],str) and 0<len(target["title"].strip())<=180, "Invalid or duplicate typed canonical target")
         verify(target["kind"]!="continuity_profile" or target["id"]==tenant[1], "Wrong continuity metadata target")
         entities[target["id"]]=target
+    verify_attested_targets(decisions, entries, entities, tenant, scoped_identity)
     declared={i for d in decisions.values() for i in d["targets"]}
     verify(entities.keys()==declared, "Unbound target or missing declared canonical target")
     for key, d in decisions.items():
@@ -613,6 +639,7 @@ def project(raw_by_hash, plan, tenant):
             for pool_id in [target["data"]["resourcePoolId"],*extra]:
                 native = physical_pool_sources.get(pool_id)
                 verify(native is not None and native[-2] == original_id and
+                       (target["data"]["holding"]!="carried" or native[0] in (target["actorId"],aliases.get(target["actorId"]))) and
                        native[-1] == aliases.get(pool_id,pool_id),
                        "Additional pools need distinct nested identities from this physical holding")
     for key, decision in decisions.items():
@@ -656,7 +683,7 @@ def project(raw_by_hash, plan, tenant):
     witnesses={}
     for w in plan["parity"]:
         verify(isinstance(w,dict) and set(w)=={"source","family","identity","sourcePath","target","targetPath","transform"} and
-               isinstance(w["target"],str) and w["target"] in entities and w["transform"] in ("exact","omittedUnknown","scopedIdentity","canonicalRef","ownerCorrection","ownerConfirmedCapacity","confirmedFunds","consumedLifecycle","nativeSlotLevel","nativeSlotBalance","nativeAttackDistance",*FEATURE_NORMALIZERS,*SCALAR_RULES,*WIRE_ENUMS),
+               isinstance(w["target"],str) and w["target"] in entities and w["transform"] in ("exact","omittedUnknown","scopedIdentity","canonicalRef","ownerCorrection","ownerConfirmedCapacity","confirmedFunds","consumedLifecycle","nativeSlotLevel","nativeSlotBalance","nativeAttackDistance","nativeConditionalRange","nativeAbilityColumn","ownerAttackComponent",*FEATURE_NORMALIZERS,*SCALAR_RULES,*WIRE_ENUMS),
                "Invalid mechanical evidence witness")
         key=source_key(w)
         verify(key in decisions and w["target"] in decisions[key]["targets"], "Mechanical evidence belongs to another row or target")
@@ -667,10 +694,23 @@ def project(raw_by_hash, plan, tenant):
         sp=w["sourcePath"]
         expected=path_value(entries[key],sp,w["transform"]=="omittedUnknown")
         actual=path_value(entities[w["target"]],tp)
+        if w["transform"] == "nativeAbilityColumn":
+            target=entities[w["target"]]
+            profile,stat=key[2] if len(key[2])==2 else (None,None)
+            sheet=entries.get((key[0],"playable.characters",(profile,)),{})
+            verify(key[1]=="records.characterAbilities" and stat in STATS and sp==["score"] and tp==["data","abilities",stat] and
+                   target["kind"]=="actor" and profile in (target["id"],aliases.get(target["id"])) and "characterJson" in sheet and
+                   exact(loads(sheet["characterJson"]).get("baseAbilities",{}).get(stat),expected),"Ability column differs from the original base score")
         if w["transform"] == "consumedLifecycle":
             expected = consumed_state(corrections,entities[w["target"]],key,sp,tp)
         if w["transform"] in FEATURE_NORMALIZERS:
             expected=native_feature_value(w["transform"],key,entries[key],sp,expected,entities[w["target"]],tp)
+            if w["transform"]=="nativeSingleActionForm":
+                holding=entities.get(entities[w["target"]]["data"]["sourceItemId"],{})
+                verify(holding.get("kind")=="item_instance" and holding.get("actorId")==key[2][0] and
+                       holding["data"].get("definitionId") in (key[2][1], aliases.get(key[2][1])),
+                       "Form timing must come from its own physical source")
+
         if w["transform"] in ("nativeSlotLevel","nativeSlotBalance"):
             is_level = w["transform"] == "nativeSlotLevel"
             verify(key[1]=="playable.characters.spellSlots" and len(key[2])==2 and
@@ -682,7 +722,14 @@ def project(raw_by_hash, plan, tenant):
             if is_level:
                 verify(expected == key[2][1], "Invalid indexed spell-slot level")
                 expected = int(expected)
-        if w["transform"] == "confirmedFunds":
+        if w["transform"] == "ownerAttackComponent":
+            grant=corrections.get(pair)
+            target=entities[w["target"]]
+            verify(grant and grant["op"]=="restoreAttackComponent" and source_key(grant)==key and grant["sourcePath"]==sp and
+                   target["kind"]=="attack" and target["actorId"]==key[2][0] and key[2][1] in (target["id"],aliases.get(target["id"])) and
+                   target["data"]["components"][tp[2]]["id"]==entries[key]["damage"][sp[1]]["id"],"Component belongs to another attack or actor")
+            expected=grant["after"].lower() if tp[-1]=="type" else grant["after"]
+        elif w["transform"] == "confirmedFunds":
             grant = corrections.get(pair)
             verify(grant is not None and grant["op"] == "confirmedFunds" and source_key(grant) == key and
                    grant["sourcePath"] == sp and entities[w["target"]]["kind"] == "wallet", "Unbound confirmed holding component")
@@ -701,6 +748,8 @@ def project(raw_by_hash, plan, tenant):
         if w["transform"]=="scopedIdentity":
             verify(tp==["id"] and exact(aliases.get(actual),expected),"Incorrect source-derived identity")
             expected=actual
+        if w["transform"]=="nativeConditionalRange":
+            expected=native_conditional_distance(key,sp,tp,entries[key],entities[w["target"]])
         if w["transform"]=="nativeAttackDistance":
             expected=native_attack_distance(key,sp,tp,entries[key],entities[w["target"]])
         if w["transform"]=="canonicalRef":
@@ -756,7 +805,7 @@ def project(raw_by_hash, plan, tenant):
         if w["transform"]=="omittedUnknown":
             verify(expected is None, "An observed value cannot become unknown")
         verify(exact(expected,actual),"Recorded mechanical parity mismatch for "+str(tp[-1]))
-        if len(tp)>1 and tp[-1] in MECHANICAL_NAMES and w["transform"] not in ("nativeSlotBalance","ownerConfirmedCapacity","confirmedFunds","consumedLifecycle"):
+        if len(tp)>1 and tp[-1] in MECHANICAL_NAMES and w["transform"] not in ("nativeSlotBalance","ownerConfirmedCapacity","confirmedFunds","consumedLifecycle","nativeAbilityColumn"):
             component_holder = (tp == ["data","holderId"] and sp == ["actorId"] and key[1] == "authority.actors" and
                                 entities[w["target"]]["kind"] == "wallet" and
                                 any(g["op"] == "confirmedFunds" and g["target"] == w["target"] and source_key(g) == key
@@ -781,6 +830,7 @@ def project(raw_by_hash, plan, tenant):
             need.update(("data",)+path for path,value in scalar_paths(target["data"]) if value is not None)
         if target["kind"]=="item_instance":
             need.add(("data","source"))
+            need.update(("data",k) for k in ("installedOnActorId","covenantLocked") if k in target["data"])
         if target["kind"]=="wallet":
             need.add(("data","source"))
         for path,_ in scalar_paths(target["data"]):
@@ -827,6 +877,7 @@ def project(raw_by_hash, plan, tenant):
     must_link={"wallet":{"holderId":"held_by"},"item_instance":{"definitionId":"definition","ownerId":"owned_by","custodianId":"held_by","locationId":"located_at","resourcePoolId":"charge_pool","additionalResourcePoolIds":"charge_pool"},
                "spell_grant":{"spellId":"grants_spell","sourceItemId":"requires_item","resourceId":"uses_pool"},
                "actor":{"activeFormId":"active_form","concentrationCastId":"concentrates_on"}}
+    must_link["item_instance"]["installedOnActorId"]="installed_on"
     must_link["actor"]["activeDeploymentId"]="deploying"
     must_link["form_deployment"]={"formId":"deployment_form"}
     must_link["form"]={"inheritedRuleFormIds":"inherits_form_rules"}

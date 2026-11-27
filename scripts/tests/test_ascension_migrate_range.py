@@ -39,3 +39,16 @@ class NativeDistanceTest(unittest.TestCase):
         ]:
             with self.assertRaises(ValueError):
                 native_attack_distance(key,source_path,target_path,{"range":"7 ft."},target)
+
+    def test_conditional_display_bands_require_full_manual_rule(self):
+        from ascension_migrate_range import native_conditional_distance
+        full = "30/70 ft.; farther targets require a visible marker"
+        data = {"nativeRange":full, "resolution":"manual", "delivery":"ranged", "range":30, "longRange":70}
+        key = ("source", "playable.characters.attacks", ("reader","arc"))
+        target = {"kind":"attack", "actorId":"reader", "data":data}
+        read = lambda: native_conditional_distance(key, ["range"], ["data","longRange"], {"range":full}, target)
+        self.assertEqual(read(),70)
+        data["resolution"] = "attack"
+        with self.assertRaises(ValueError): read()
+        data.update(resolution="manual", nativeRange="30/70 ft.")
+        with self.assertRaises(ValueError): read()

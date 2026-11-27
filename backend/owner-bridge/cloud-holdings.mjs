@@ -73,6 +73,7 @@ function changedCoins(before, change) {
 }
 function debit(payment) { return Object.fromEntries(denominations.map(key => [key, -payment[key]])); }
 function usable(item) {
+  if (item.data.installedOnActorId) recordsFail('INSTALLED_COMPONENT_IMMOVABLE',409);
   if (item.life !== 'active' || !item.data.partyAccess || !['carried','storage','unassigned'].includes(item.data.holding)) recordsFail('ITEM_UNAVAILABLE', 409);
 }
 function compareStack(first, second) {

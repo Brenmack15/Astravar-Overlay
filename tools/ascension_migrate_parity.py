@@ -77,6 +77,14 @@ def mechanical_parity(source_path, bundle):
                 original=path_value(indexed[(w["family"],tuple(w["identity"]))],w["sourcePath"])
                 row,_=entities[w["target"]]
                 aliases.setdefault((row["kind"],original),set()).add(w["target"])
+            if w["source"]==source_digest and w["transform"]=="consumedLifecycle":
+                grant=approved.get((w["target"],"quantity"))
+                if grant and grant["op"]=="consumeRemainder":
+                    original=indexed[w["family"],tuple(w["identity"])]
+                    field=w["targetPath"][-1]
+                    approved[w["target"],field]={**grant,"sourcePath":w["sourcePath"],"rowSha256":sha(encode(original)),
+                        "acceptedPath":grant["lifecyclePath"],"before":path_value(original,w["sourcePath"]),
+                        "after":False if field=="operating" else None}
     actors = {a["actorId"]: a for _, a in families.get("authority.actors", [])}
     checks, holds = [], []
     def check(kind, identity, field, expected, actual, available=True):

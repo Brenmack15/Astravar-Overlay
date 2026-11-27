@@ -9,6 +9,17 @@ export function cloudAllowed(grant, scope, actorId, write = false) {
     (grant.actors.includes('*') || (actorId !== null && grant.actors.includes(actorId)));
 }
 
+const holdingIdentityFields = ['ownerId','ownerType','custodianId','locationId','holding','quantity','definitionId','partyAccess',
+  'installedOnActorId','covenantLocked','externalRecipientId','externalRecipientName','mergedInto'];
+function checkRestrictedHolding(before, actorId, life, data) {
+  const old = before.data;
+  if (before.kind !== 'item_instance' || (!old.installedOnActorId && !old.covenantLocked)) return;
+  const changed = holdingIdentityFields.some(field => old[field] !== data[field]);
+  const equipped = old.installedOnActorId && (old.equipment !== data.equipment || old.attuned !== data.attuned);
+  if (changed || equipped || before.actorId !== actorId || before.life !== life)
+    cloudFail(409, old.installedOnActorId ? 'INSTALLED_COMPONENT_IMMOVABLE' : 'COVENANT_REVIEW_REQUIRED');
+}
+
 /** A pure transaction plan. Reads come from the tenant; changes remain in memory until the SQL revision guard succeeds. */
 export class CloudPlan {
   constructor(service, binding, grant, command, now) {
@@ -70,6 +81,7 @@ export class CloudPlan {
     if(before) {
       if(before.kind!==kind) cloudFail(409,'ENTITY_ID_IN_USE');
       this.require(scope,before.actorId); this.require(scope,before.actorId,false);
+      checkRestrictedHolding(before,actorId,life,data);
     }
     if(kind==='actor' && actorId!==id) cloudFail(400,'INVALID_ACTOR_IDENTITY');
     if(actorId!==null && actorId!==id && !await this.get('actor',actorId)) cloudFail(409,'ACTOR_REQUIRED');

@@ -15,7 +15,7 @@ function isInUse(row) {
   if(row.kind==='form_deployment')return d.status==='deploying';
   if(row.kind==='resource_pool')return Boolean(d.effectHolds?.length);
   if(['attack_attempt','cast_instance'].includes(row.kind))return d.effectCharges?.some(c=>c.status==='reserved')??false;
-  if(row.kind==='item_instance')return Boolean(d.attuned||d.operating||d.equipment&&d.equipment!=='packed');
+  if(row.kind==='item_instance')return Boolean(d.installedOnActorId||d.covenantLocked||d.attuned||d.operating||d.equipment&&d.equipment!=='packed');
   if(row.kind==='encounter')return d.active===true || ['active','in_progress'].includes(d.status);
   if(row.kind==='effect')return d.enabled===true;
   return false;

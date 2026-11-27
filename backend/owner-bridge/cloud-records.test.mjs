@@ -692,3 +692,29 @@ test('known reference kinds carry source-backed text and preserve unclassified o
   assert.deepEqual((await f.service.receipt(dm,continuity,original.commandId)).receipt,original.receipt);
   assert.equal((await f.db.prepare("SELECT count(*) AS n FROM cloud_links WHERE from_id='letter' AND relation='known_about' AND to_id=?").bind('hero').first()).n,1);
 });
+
+test('restored installed and covenant holdings preserve their physical identity across transactions',async t=>{
+  const f=await fixture(t);
+  await f.run('define_item_definition',definition('original',false));
+  await f.run('define_wallet',{walletId:'purse',title:'Purse',holderId:'hero',shared:false,coins:amounts({gp:3}),source});
+  for(const [id,flags,error] of [
+    ['drive',{installedOnActorId:'hero',holding:'installed'},'INSTALLED_COMPONENT_IMMOVABLE'],
+    ['entrusted',{covenantLocked:true},'COVENANT_REVIEW_REQUIRED'],
+  ]){
+    await f.run('acquire_item',{itemId:id,definitionId:'original',ownerId:'hero',quantity:1,source});
+    const item=await f.record(id);
+    await f.db.prepare('UPDATE cloud_entities SET data_json=?, revision=revision+1 WHERE owner_id=? AND continuity_id=? AND id=?')
+      .bind(JSON.stringify({...item.data,...flags}),owner.ownerId,continuity,id).run();
+    const move={itemId:id,quantity:1,splitId:null,source,reason:'Transfer',destination:{
+      type:'party_actor',actorId:'ally',recipientName:null,recipientId:null,locationId:null}};
+    await assert.rejects(f.run('transfer_item',move),new RegExp(error));
+    if(flags.covenantLocked) await f.run('set_item_favorite',{itemId:id,favorite:true});
+    assert.equal((await f.record(id)).data.quantity,1);
+  }
+  await assert.rejects(f.run('sell_item',{itemId:'entrusted',quantity:1,splitId:null,walletId:'purse',
+    proceeds:amounts({gp:4}),buyerId:null,buyerName:'Buyer',source}),/COVENANT_REVIEW_REQUIRED/);
+  f.reopen();
+  assert.equal((await f.record('entrusted')).data.covenantLocked,true);
+  assert.equal((await f.record('drive')).data.installedOnActorId,'hero');
+  assert.deepEqual((await f.record('purse')).data.coins,amounts({gp:3}));
+});
