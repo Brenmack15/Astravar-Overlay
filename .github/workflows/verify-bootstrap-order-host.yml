@@ -1,0 +1,22 @@
+name: Check Android bootstrap gate ordering
+on:
+  push:
+    branches: [verification/ascension-native-bootstrap-order-9271036]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 927103682ba3df0757f24c502f30d04ad717f55e
+          persist-credentials: false
+      - name: Verify candidate identity and shell syntax
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 927103682ba3df0757f24c502f30d04ad717f55e
+          bash -n scripts/ci-owner-hp-native.sh
+      - name: Exercise Android bootstrap success and refusal paths on the host
+        run: python3 -m unittest discover -s scripts/tests -p 'test_native_bootstrap_gate.py' -v
