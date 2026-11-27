@@ -10,7 +10,7 @@ permissions:
   statuses: write
 jobs:
   native:
-    if: "!startsWith(github.event.head_commit.message, 'Preset-only')"
+    if: "!startsWith(github.event.head_commit.message, 'Preset-only') && !startsWith(github.event.head_commit.message, 'Evidence:')"
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -66,6 +66,7 @@ jobs:
           if [ "$RESULT" = success ]; then state=success; fi
           gh api -X POST "/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$state" -f context=qa-preservation -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --silent
   presets:
+    if: "!startsWith(github.event.head_commit.message, 'Evidence:')"
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -107,3 +108,48 @@ jobs:
           path: app/build/test-results/testDebugUnitTest/*.xml
           retention-days: 14
           if-no-files-found: warn
+
+  evidence:
+    if: "startsWith(github.event.head_commit.message, 'Evidence:')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {contents: read, actions: read, statuses: write}
+    steps:
+      - name: Verify previously generated synthetic archives and publish the observed counts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          base="/repos/$GITHUB_REPOSITORY/actions/artifacts"
+          gh api -X POST "/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=pending -f context=qa-preservation-members -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --silent
+          gh api "$base/15172027891/zip" > "$RUNNER_TEMP/installed.zip"
+          gh api "$base/15171734272/zip" > "$RUNNER_TEMP/presets.zip"
+          cd "$RUNNER_TEMP"
+          echo 'b40565006e96db1093cc2ba9ad76f7085e52c9915ca057b85f8dd6d07507ada0  installed.zip' | sha256sum -c -
+          echo '35bc9e4a67f1f107c6da001c096697f7e9cb2286861912a7da1800ab276b079e  presets.zip' | sha256sum -c -
+          python3 - <<'PY'
+          import hashlib, json, struct, xml.etree.ElementTree as ET, zipfile
+          from pathlib import PurePosixPath
+          with zipfile.ZipFile('presets.zip') as archive:
+              stats = {'tests':0,'errors':0,'failures':0,'skipped':0}
+              for member in archive.namelist():
+                  if member.endswith('.xml'):
+                      root = ET.fromstring(archive.read(member))
+                      for key in stats: stats[key] += int(root.get(key, '0'))
+              assert stats == {'tests':8,'errors':0,'failures':0,'skipped':0}, stats
+              print('Observed XML',json.dumps(stats))
+          with zipfile.ZipFile('installed.zip') as archive:
+              index = {PurePosixPath(n).name:n for n in archive.namelist()}
+              for m in ['code58-seed','upgraded-archive','restored-forms']:
+                  assert 'OK (1 test)' in archive.read(index[m+'.txt']).decode()
+              print('Android UID verification:',archive.read(index['uid.txt']).decode().strip())
+              for name in ['archive-summary.json','restore-summary.json']:
+                  print(name,json.dumps(json.loads(archive.read(index[name])),sort_keys=True))
+              capture = ['upgraded-find','upgraded-active-inventory','upgraded-owner-backup','restored-form-header','restored-resource','restored-ordinary-portrait']
+              for tag in capture:
+                  data=archive.read(index[tag+'.png']);assert data[:8] == bytes.fromhex('89504e470d0a1a0a')
+                  dimensions=struct.unpack('>II',data[16:24])
+                  assert min(dimensions)>800
+                  print('Synthetic screenshot',tag,*dimensions,hashlib.sha256(data).hexdigest())
+          PY
+          gh api -X POST "/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=success -f context=qa-preservation-members -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --silent
