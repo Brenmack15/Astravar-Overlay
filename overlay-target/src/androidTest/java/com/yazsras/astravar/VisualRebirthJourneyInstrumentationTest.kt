@@ -271,7 +271,17 @@ class VisualRebirthJourneyInstrumentationTest {
                 }
                 // Read-only primary-destination captures retain their upper
                 // headings and actions for the same enlarged-text review.
-                ui.campaignItems(product)
+                if (ascension) {
+                    ui.ensurePrimaryTab(product, "Inventory")
+                    find("CI Native Hero Revised's equipment and campaign records")
+                    capture("party-inventory-font-$scale", "Inventory", "Add item", interactiveMarker = true)
+                    // The companion's equipment links to the same campaign ledger.
+                    // This visits both the party-wide destination and its underlying source records.
+                    companionRoster()
+                    tap("CI Native Ally")
+                    ui.selectSection(product, "Equipment")
+                    tap("Open full inventory")
+                } else ui.campaignItems(product)
                 capture("inventory-font-$scale", "Inventory", "Equipment, treasures & discoveries")
                 campaignHome()
                 capture("campaign-font-$scale", chronicle, "Your living world")
