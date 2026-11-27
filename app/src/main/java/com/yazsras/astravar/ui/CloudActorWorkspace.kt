@@ -41,6 +41,20 @@ private fun JsonObject?.obj(key: String) = this?.get(key) as? JsonObject
 private fun JsonObject?.value(key: String) = (this?.get(key) as? JsonPrimitive)?.contentOrNull
 private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+$it" else it.toString() } ?: "—"
 
+@Composable
+private fun CloudCharacterPanels(header: @Composable () -> Unit, sections: @Composable () -> Unit) {
+    val screen = androidx.compose.ui.platform.LocalConfiguration.current
+    if (screen.screenWidthDp > screen.screenHeightDp && screen.screenHeightDp < 560) {
+        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.weight(.42f).fillMaxHeight().verticalScroll(rememberScrollState())) { header() }
+            Column(Modifier.weight(.58f).fillMaxHeight()) { sections() }
+        }
+    } else {
+        header()
+        sections()
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable internal fun CloudActorWorkspace(client:CloudCampaignClient,snapshot:CloudSnapshot,online:Boolean,actorId:String?,
     select:(String?)->Unit,openOperation:(String,JsonObject)->Unit,inspect:(String)->Unit,commit:(String,JsonObject)->Unit) {
@@ -59,8 +73,8 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
         featureCursor=page.lastOrNull()?.cloudText("id")?.takeIf{page.size==50}
     }
     var overlay by rememberSaveable { mutableStateOf<String?>(null) }
-    var rollOption by rememberSaveable { mutableStateOf<String?>(null) }
-    var selectedAbility by rememberSaveable { mutableStateOf<String?>(null) }
+    var rollOption by rememberSaveable(actorId) { mutableStateOf<String?>(null) }
+    var selectedAbility by rememberSaveable(actorId) { mutableStateOf<String?>(null) }
     var featureDetail by rememberSaveable(actorId) { mutableStateOf<String?>(null) }
     var profileTab by rememberSaveable { mutableStateOf("Defenses") }
     val pager=rememberPagerState { sections.size }
@@ -117,6 +131,7 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
         Column { PlayerButton({ overlay="Actors" }) { Text("Choose character") }
             PlayerOutlinedButton({ openOperation("define_actor",buildJsonObject {}) },enabled=online) { Text("Create character") } }
     } else {
+        CloudCharacterPanels(header = {
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f),horizontalAlignment=Alignment.CenterHorizontally) {
                 PlayerTextButton({overlay="AC"}) { Text("AC ${sheet.obj("ac").value("value") ?: "—"}") }
@@ -161,9 +176,10 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
                 PlayerTextButton({overlay="Conditions"}){Text("Conditions")}
             }
         }
+        }, sections = {
         notice?.let { Text(it,color=MaterialTheme.colorScheme.error) }
         PlayerTabs(sections,sections[pager.currentPage],{ idx->scope.launch { pager.animateScrollToPage(sections.indexOf(idx)) } })
-        HorizontalPager(pager,key={sections[it]},modifier=Modifier.fillMaxSize(),verticalAlignment=Alignment.Top) { i ->
+        HorizontalPager(pager,key={sections[it]},modifier=Modifier.fillMaxSize().testTag("cloud-character-pager"),verticalAlignment=Alignment.Top) { i ->
             val section=sections[i]
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 when(section){
@@ -177,7 +193,8 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
                                     QuickControl("$name saving throw",signed(sheet.obj("saves").obj(stat).value("value")),
                                         online && sheet!=null,{roll("save",stat)},{rollOption="save:$stat"},saveProficient=proficient)
                                     QuickControl("$name ability check",signed(sheet.obj("abilities").obj(stat).value("modifier")),online && sheet!=null,
-                                        {roll("ability",stat)},{rollOption="ability:$stat"},large=true)
+                                        {roll("ability",stat)},{rollOption="ability:$stat"},large=true,
+                                        rollText=signed(sheet.obj("checks").obj(stat).value("value")))
                                     Text(sheet.obj("abilities").obj(stat).value("effective") ?: "—", Modifier.background(RebuildPalette.Void,CircleShape).border(1.dp,RebuildPalette.Outline,CircleShape).padding(horizontal=9.dp,vertical=2.dp))
                                 }
                             }
@@ -206,6 +223,7 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
                 Spacer(Modifier.height(78.dp))
             }
         }
+        })
     }
     when(overlay) {
         "Actors" -> PlayerSheet("Character administration",{overlay=null}) {
@@ -317,7 +335,7 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
             if(kind=="skill"&&actorId!=null){
                 val definition=sheet.obj("skillDefinitions").obj(key)
                 val pinned=definition.value("pinned")=="true"
-                PlayerTextButton({rollOption=null;openOperation("set_skill_training",args("actorId" to actorId,"skillId" to key))},enabled=online){Text("Edit skill training")}
+                PlayerTextButton({rollOption=null;openOperation("set_skill_training",cloudSkillTrainingDraft(actorId,key,definition))},enabled=online){Text("Edit skill training")}
                 PlayerTextButton({rollOption=null;commit("set_skill_pin",buildJsonObject{
                     put("actorId",actorId);put("skillId",key);put("pinned",!pinned)})},enabled=online){Text(if(pinned)"Unpin skill" else "Pin skill")}
                 if(definition.value("standard")=="false")PlayerTextButton({
@@ -347,14 +365,18 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
 }
 
 @OptIn(ExperimentalFoundationApi::class)
-@Composable internal fun QuickControl(label:String,text:String,enabled:Boolean,tap:()->Unit,options:()->Unit,large:Boolean=false,saveProficient:Boolean?=null) {
-    Box(Modifier.heightIn(min=48.dp).widthIn(min=48.dp).combinedClickable(enabled=enabled,role=Role.Button,
-        onClickLabel="Roll $label",onLongClickLabel="Roll options",onClick=tap,onLongClick=options)
-        .semantics { contentDescription=when(saveProficient) {
-            true -> "$label $text, proficient"
-            false -> "$label $text, not proficient"
-            null -> "$label $text"
-        } },contentAlignment=Alignment.Center) {
+@Composable internal fun QuickControl(label:String,text:String,enabled:Boolean,tap:()->Unit,options:()->Unit,large:Boolean=false,
+    saveProficient:Boolean?=null,rollText:String=text) {
+    val spokenValue = if (rollText == "—") "unknown" else rollText
+    val spokenDetail = when {
+        saveProficient == true -> ", proficient"
+        saveProficient == false -> ", not proficient"
+        large && text != rollText && text != "—" -> ", ability modifier $text"
+        else -> ""
+    }
+    Box(Modifier.heightIn(min=48.dp).widthIn(min=48.dp).combinedClickable(enabled=enabled && rollText!="—",role=Role.Button,
+        onClickLabel=if(label.startsWith("Roll ")) label else "Roll $label",onLongClickLabel="Roll options",onClick=tap,onLongClick=options)
+        .semantics { contentDescription="$label $spokenValue$spokenDetail" },contentAlignment=Alignment.Center) {
         if(large || saveProficient!=null) {
             val shape=RoundedCornerShape(if(large) 7.dp else 4.dp)
             Box(Modifier.testTag("$label tile").widthIn(max=if(large) 106.dp else 84.dp).fillMaxWidth(if(large) .94f else .75f)

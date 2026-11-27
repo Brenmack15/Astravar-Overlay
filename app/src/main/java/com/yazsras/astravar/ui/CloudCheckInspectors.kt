@@ -33,6 +33,14 @@ internal fun cloudTrainingDraft(actorId: String, category: String, key: String?,
     known.field("source")?.let { put("source", it) }
 }
 
+internal fun cloudSkillTrainingDraft(actorId: String, skillId: String, definition: JsonObject?): JsonObject = buildJsonObject {
+    put("actorId", actorId)
+    put("skillId", skillId)
+    definition.field("name")?.let { put("name", it) }
+    definition.field("ability")?.let { put("ability", it) }
+    definition.field("rank")?.toIntOrNull()?.takeIf { it in 0..2 }?.let { put("rank", it) }
+}
+
 @Composable internal fun CloudAbilityTraining(actorId: String, stat: String, actor: JsonObject?, sheet: JsonObject?,
     online: Boolean, open: (String, JsonObject) -> Unit) {
     val save = cloudTrainingDraft(actorId, "save", stat, actor)
@@ -46,12 +54,10 @@ internal fun cloudTrainingDraft(actorId: String, category: String, key: String?,
     PlayerDisclosure("Skills and expertise", initiallyOpen = false) {
         skills.forEach { (id, row) ->
             val name = row.field("name") ?: id
-            PlayerTextButton({
-                open("set_skill_training", buildJsonObject {
-                    put("actorId",actorId); put("skillId",id); put("ability",stat); put("name",name)
-                    row.field("rank")?.toIntOrNull()?.let { put("rank",it) }
-                })
-            }, enabled=online) { Text(cloudLabel(name) + " · " + when(row.field("rank")) { "2" -> "expertise"; "1" -> "proficient"; else -> "untrained" }) }
+            PlayerTextButton({ open("set_skill_training", cloudSkillTrainingDraft(actorId, id, row)) }, enabled=online) {
+                val training = when (row.field("rank")) { "2" -> "expertise"; "1" -> "proficient"; "0" -> "untrained"; else -> "training unknown" }
+                Text(cloudLabel(name) + " · " + training)
+            }
         }
         PlayerTextButton({ open("set_skill_training", buildJsonObject { put("actorId",actorId);put("ability",stat) }) },enabled=online) { Text("Add skill") }
     }
