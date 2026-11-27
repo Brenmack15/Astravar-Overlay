@@ -128,7 +128,7 @@ export async function verify(bridge,device) {
     assert.equal(attempt.appliedDamage,null);assert.equal(attempt.damage,null);assert.deepEqual(attempt.targets,[]);
     assert.deepEqual(attempt.costs,[]);assert.equal(attempt.timing,'attack');
     assert.ok(attempt.hit.natural>=1&&attempt.hit.natural<=20);
-    assert.deepEqual(attempt.hit.faces,[attempt.hit.natural]);
+    assert.deepEqual(attempt.hit.faces,[{value:attempt.hit.natural,sides:20,kept:true}]);
     const extra=attempt.hit.aidDice??[];
     if(!heavy){assert.equal(extra.length,1);assert.equal(extra[0].castId,'support-live');assert.equal(extra[0].sides,4);
       assert.equal(extra[0].origin,'app');assert.ok(extra[0].face>=1&&extra[0].face<=4);}
@@ -168,7 +168,7 @@ export async function verify(bridge,device) {
   }
   checkData('heat-check','modeAndResult',[outputs['heat-check'].mode,outputs['heat-check'].modifier,outputs['heat-check'].total],['advantage',9,24]);
   for(const id of ['ordinary-stealth','heavy-stealth','ordinary-dex','heavy-dex']){
-    const v=outputs[id];checkData(id,'highestOfThree',[v.faces.length,v.natural,v.modifier],[3,Math.max(...v.faces),id.endsWith('stealth')?13:8]);
+    const v=outputs[id];checkData(id,'highestOfThree',[v.faces.length,v.natural,v.modifier],[3,Math.max(...v.faces.map(f=>f.value)),id.endsWith('stealth')?13:8]);
   }
   checkData('amulet-fixed','fixedWithoutDie',[outputs['amulet-fixed'].hit.substitutedValue,outputs['amulet-fixed'].hit.natural,outputs['amulet-fixed'].hit.faces,
     outputs['amulet-fixed'].hit.total,outputs['amulet-fixed'].critical,outputs['amulet-fixed'].costs[0].after],[10,null,[],18,false,0]);
