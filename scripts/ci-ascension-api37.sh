@@ -19,6 +19,7 @@ adb -s "$astravar_serial" install overlay-target/build/outputs/apk/androidTest/d
 astravar_test() {
   local method=$1 version=$2 theme=$3
   local log="$astravar_dir/$method-$theme.txt"
+  python3 scripts/ci-android17-silent-icons.py "$astravar_serial" AstravarHpCI ready
   timeout -k 5s 360s adb -s "$astravar_serial" shell am instrument -w -r -e class "com.yazsras.astravar.GenesisUpgradeInstrumentationTest#$method" \
     -e astravarPackage "$astravar_package" -e astravarExpectedVersion "$version" -e ascensionTheme "$theme" \
     com.yazsras.astravar.target.test/androidx.test.runner.AndroidJUnitRunner | tee "$log"

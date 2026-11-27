@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 parser = argparse.ArgumentParser()
 parser.add_argument("serial")
 parser.add_argument("avd_name")
-parser.add_argument("mode", choices=["read", "show", "hide"])
+parser.add_argument("mode", choices=["read", "show", "hide", "ready"])
 args = parser.parse_args()
 
 def adb(*arguments):
@@ -32,8 +32,86 @@ def tap(bounds):
 
 def hierarchy():
     path = "/data/local/tmp/ascension-notification-settings.xml"
+    adb("shell", "rm", "-f", path)
     adb("shell", "uiautomator", "dump", path)
     return ET.fromstring(adb("exec-out", "cat", path))
+
+def visible_anrs(windows):
+    found = set()
+    for block in re.split(r"(?m)^\s*Window #\d+ Window\{", windows)[1:]:
+        title = re.search(r"Application Not Responding: ([^}]+)\}", block.splitlines()[0])
+        if title and re.search(r"(?m)^\s*isVisible=true\s*$", block):
+            found.add(title[1])
+    return found
+
+def system_ui_wait(root):
+    nodes = [n for n in root.iter("node") if n.get("package") == "android"]
+    titles = [n.get("text", "").replace("’", "'").strip().casefold() for n in nodes
+              if n.get("resource-id") == "android:id/alertTitle"]
+    if titles != ["system ui isn't responding"]:
+        raise RuntimeError(f"Unexpected guest error dialog; no action taken: {titles}")
+    buttons = [location(n) for n in nodes if n.get("resource-id") == "android:id/aerr_wait"
+               and n.get("text", "").strip().casefold() == "wait"
+               and n.get("clickable") == "true" and n.get("enabled") == "true"]
+    if len(buttons) != 1 or not buttons[0]:
+        raise RuntimeError("The System UI error window has no unambiguous, enabled Wait control")
+    return buttons[0]
+
+def require_clear_error_windows():
+    def errors():
+        return visible_anrs(adb("shell", "dumpsys", "window", "windows"))
+    current = errors()
+    if not current:
+        return
+    if current != {"com.android.systemui"}:
+        raise RuntimeError(f"Visible ANR requires investigation; leaving it open: {sorted(current)}")
+    # The archived cold-boot failure outlived SystemUI startup. Only choose Wait once
+    # the actual service in that process answers a client dump and its own dialog agrees.
+    service = adb("shell", "dumpsys", "-t", "8", "activity", "service",
+                  "com.android.systemui/.SystemUIService", "-l")
+    if not (re.search(r"SERVICE com\.android\.systemui/[^\s]+ .*?pid=\d+", service)
+            and re.search(r"(?ms)^\s*Client:\s*\n\s*\S", service)
+            and "CentralSurfaces" in service.partition("Client:")[2]
+            and not re.search(r"(?:Failure while dumping|Timed? out|TimeoutException)", service, re.I)):
+        raise RuntimeError("System UI did not answer its service dump; leaving its ANR open")
+    bounds = system_ui_wait(hierarchy())
+    if errors() != current:
+        raise RuntimeError("The error window changed before Wait; no action taken")
+    tap(bounds)
+    end = time.monotonic() + 12
+    while time.monotonic() < end:
+        if not errors():
+            print("Observed System UI ANR; its service responded, selected Android Wait and verified dismissal",
+                  file=sys.stderr)
+            return
+        time.sleep(.25)
+    raise RuntimeError("The acknowledged System UI ANR is still visible")
+
+def prepare_visual_guest():
+    if adb("shell", "getprop", "sys.boot_completed") != "1":
+        raise RuntimeError("The Android guest has not completed boot")
+    # WAKEUP is idempotent; POWER would put a guest that was already awake back to sleep.
+    adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
+    adb("shell", "wm", "dismiss-keyguard")
+    if not re.search(r"(?m)^\s*mWakefulness=Awake\s*$", adb("shell", "dumpsys", "power")):
+        raise RuntimeError("Guest did not report an awake display")
+    require_clear_error_windows()
+    home = adb("shell", "cmd", "package", "resolve-activity", "--brief", "-a",
+               "android.intent.action.MAIN", "-c", "android.intent.category.HOME").splitlines()[-1]
+    pkg = home.partition("/")[0]
+    if "/" not in home or pkg in ("android", "com.android.settings") or not re.fullmatch(r"[\w.]+", pkg):
+        raise RuntimeError(f"Expected the installed launcher, got {home}")
+    adb("shell", "input", "keyevent", "KEYCODE_HOME")
+    end = time.monotonic() + 20
+    observed = set()
+    while time.monotonic() < end:
+        observed = {n.get("package") for n in hierarchy().iter("node")}
+        if pkg in observed:
+            print(f"Verified Android foreground {home}", file=sys.stderr)
+            return
+        require_clear_error_windows()
+        time.sleep(.25)
+    raise RuntimeError(f"Launcher did not become accessible; observed packages: {sorted(observed)}")
 
 def target_row(root, pkg):
     parents = {child: parent for parent in root.iter() for child in parent}
@@ -61,10 +139,13 @@ assert re.fullmatch(r"emulator-[0-9]+", args.serial)
 assert adb("shell", "getprop", "ro.kernel.qemu") == "1"
 assert adb("shell", "getprop", "ro.build.version.sdk") == "37"
 assert adb("emu", "avd", "name").splitlines()[0] == args.avd_name
-current = hidden()
 if args.mode == "read":
-    print("true" if current else "false")
+    print("true" if hidden() else "false")
     sys.exit(0)
+prepare_visual_guest()
+if args.mode == "ready":
+    sys.exit(0)
+current = hidden()
 wanted = args.mode == "hide"
 if current == wanted:
     print(f"Android hideSilentStatusBar already {wanted}", file=sys.stderr)
@@ -81,6 +162,7 @@ while time.monotonic() < end:
     root = hierarchy()
     nodes = [n for n in root.iter("node") if n.get("package") == pkg]
     if not nodes:
+        require_clear_error_windows()
         time.sleep(.3)
         continue
     row = target_row(root, pkg)
@@ -103,6 +185,7 @@ else:
 for _ in range(24):
     if hidden() == wanted:
         print(f"Verified Android hideSilentStatusBar={str(wanted).lower()} via the Settings switch", file=sys.stderr)
+        prepare_visual_guest()
         sys.exit(0)
     time.sleep(.2)
 raise RuntimeError("The framework did not confirm the requested silent-icon preference")
