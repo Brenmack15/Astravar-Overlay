@@ -1,0 +1,66 @@
+name: Verify final native release input
+on:
+  push:
+    branches: [verification/ascension-release-inputs-20261127]
+    paths: [qa/ascension-final-input.json]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          path: harness
+      - name: Read exact final source, run and archive pins
+        id: pins
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          pins = json.loads(Path("harness/qa/ascension-final-input.json").read_text())
+          assert set(pins) == {"source","run","artifact","checksum"}
+          assert re.fullmatch(r"[0-9a-f]{40}",pins["source"])
+          assert re.fullmatch(r"[0-9a-f]{64}",pins["checksum"])
+          assert all(type(pins[k]) is int and pins[k] > 0 for k in ("run","artifact"))
+          with open(os.environ["GITHUB_OUTPUT"],"a") as out:
+              for key,value in pins.items():
+                  print(f"{key}={value}",file=out)
+          PY
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ steps.pins.outputs.source }}
+          persist-credentials: false
+          path: source
+      - name: Verify the unaltered GitHub artifact and optimized APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE: ${{ steps.pins.outputs.source }}
+          RUN_ID: ${{ steps.pins.outputs.run }}
+          ARTIFACT_ID: ${{ steps.pins.outputs.artifact }}
+          ARCHIVE_SHA256: ${{ steps.pins.outputs.checksum }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          test -x "$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          python3 harness/scripts/qa-release-inputs.py --repo source --source "$SOURCE" --run "$RUN_ID" --artifact "$ARTIFACT_ID" --archive-sha256 "$ARCHIVE_SHA256" --output "$RUNNER_TEMP/verified-native-input"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          directory=Path(os.environ["RUNNER_TEMP"])/"verified-native-input"
+          data=json.loads((directory/"tested-input.json").read_text())
+          print(json.dumps({k:data[k] for k in ("sourceCommit","archiveSha256","testedApkSha256","package","versionName","versionCode","sixteenKiBAligned","ownerSigningPerformed")},sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ascension-native-input-receipts
+          path: |
+            ${{ runner.temp }}/verified-native-input/ci-evidence.json
+            ${{ runner.temp }}/verified-native-input/tested-input.json
+          if-no-files-found: error
+          retention-days: 14
