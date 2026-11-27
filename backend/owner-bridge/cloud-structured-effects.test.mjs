@@ -279,3 +279,17 @@ test('an attuned worn ward upgrades only while resistance from an independent so
   await attune(false);assert.equal(await ward(),undefined);
   assert.equal((await f.sheet()).defenses.some(r=>r.kind==='immunity'),false);
 });
+
+test('installed source eligibility follows its operating owner and cannot supply a worn-only rule',async ()=>{
+  const {gearEligible}=await import('./cloud-mechanics-core.mjs');
+  const data={custodianId:'pilot',ownerId:'pilot',installedOnActorId:'pilot',partyAccess:true,holding:'installed',
+    equipment:'packed',quantity:1,operating:true,attuned:false};
+  const row={id:'module',kind:'item_instance',life:'active',data};
+  const context={current:()=>row,require:(scope,id,write)=>assert.deepEqual([scope,id,write],['inventory','pilot',false])};
+  const eligible=(attuned=false,worn=false)=>gearEligible(context,'module','pilot',attuned,true,null,worn);
+  assert.equal(await eligible(),true);assert.equal(await eligible(true),false);assert.equal(await eligible(false,true),false);
+  data.operating=false;assert.equal(await eligible(),false);data.operating=true;
+  data.installedOnActorId='other';assert.equal(await eligible(),false);data.installedOnActorId='pilot';
+  data.ownerId='other';assert.equal(await eligible(),false);data.ownerId='pilot';
+  data.partyAccess=false;assert.equal(await eligible(),false);
+});

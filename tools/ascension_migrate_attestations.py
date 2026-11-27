@@ -69,18 +69,21 @@ def verify_attestations(raws, formats, authority, entries, tenant, source_key, p
                    "Historical assertion lacks an eligible player-known original")
         if row["category"] == "holding":
             accepted, data = row["accepted"],row["fields"]
-            verify(isinstance(accepted.get("title"),str) and data.get("title") == accepted["title"] and
+            native_id = accepted.get("physical_identity") if accepted.get("native_present") else accepted.get("item_id")
+            original_title = entries[original].get("title") if original[1] == "campaign.items" else None
+            title = accepted.get("title", original_title)
+            verify(isinstance(title,str) and data.get("title") == title and
                    type(data.get("quantity")) is int and data["quantity"] == accepted.get("quantity") and data["quantity"]>0,
                    "Historical holding title or quantity differs from the decision")
             if original[1] == "campaign.items":
-                verify(accepted.get("native_present") is True and accepted.get("physical_identity") == original[2][0]
+                verify(native_id == original[2][0]
                        and row["id"] == original[2][0], "Historical holding cannot replace a different native item")
             if original[1] == "reference.records":
                 verify(row["id"] == original[2][0] and row["id"] in
                        (accepted.get("notion_source_id"),accepted.get("source_page_id")),
                        "Attested holding does not match original page identity")
-            if not accepted.get("native_present"):
-                verify(not any(family == "campaign.items" and r.get("title","").casefold() == accepted["title"].casefold()
+            if not native_id:
+                verify(not any(family == "campaign.items" and r.get("title","").casefold() == title.casefold()
                                for (_,family,_),r in entries.items()), "Historical holding may duplicate an existing native item")
             for field, reviewed in (("locationId","reviewed_location_id"),("equipment","reviewed_equipment"),
                                     ("attuned","reviewed_attuned"),("operating","reviewed_operating"),("holding","reviewed_holding")):
@@ -105,9 +108,9 @@ def verify_attested_targets(decisions, entries, targets, tenant, scoped_identity
         instances = [targets[i] for i in ids if targets[i]["kind"] == "item_instance"]
         verify(len(instances) == 1, "A historical holding requires exactly one physical instance")
         instance = instances[0]
-        native = row["accepted"].get("physical_identity") if row["accepted"].get("native_present") else None
+        native = row["accepted"].get("physical_identity") if row["accepted"].get("native_present") else row["accepted"].get("item_id")
         expected_id = native or scoped_identity(tenant,key[1],key[2],"item_instance",row["id"])
-        verify(instance["id"] == expected_id and instance["id"] not in assigned and instance["title"]==row["accepted"]["title"]
+        verify(instance["id"] == expected_id and instance["id"] not in assigned and instance["title"]==row["fields"]["title"]
                and instance["data"]["quantity"] == row["accepted"]["quantity"],
                "A historical holding duplicates or changes its physical identity")
         assigned.add(instance["id"])

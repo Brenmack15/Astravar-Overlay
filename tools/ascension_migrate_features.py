@@ -2,13 +2,35 @@
 import re
 from ascension_migrate_legacy import verify
 
-FEATURE_NORMALIZERS = ("nativeAttackActionCount", "nativePassiveBonus", "nativeSkillRank", "nativeSingleActionForm")
+FEATURE_NORMALIZERS = ("nativeAttackActionCount", "nativePassiveBonus", "nativeSkillRank", "nativeSingleActionForm", "nativeTimedFormValue")
 
 
 def native_feature_value(rule, key, row, source_path, value, target, target_path):
     actor_id = key[2][0]
     data = target["data"]
     verify(target["actorId"] == actor_id, "Feature normalization belongs to another actor")
+    if rule == "nativeTimedFormValue":
+        verify(key[1] == "playable.characters.features" and target["kind"] == "form" and
+               row.get("source", {}).get("acceptance") == "ACCEPTED_HOMEBREW" and
+               data.get("source") == row["source"]["name"] and target.get("title") == row.get("name") and
+               data.get("sourceItemId") and data.get("timing") == "other" and data.get("grounded") is True and
+               isinstance(value, str), "Timed form requires its accepted physical configuration")
+        if target_path == ["data", "activationSeconds"]:
+            minutes = re.fullmatch(r"([1-9][0-9]*) minutes?", value, re.I)
+            verify(source_path == ["actionType"] and minutes, "Expected an explicit deployment time")
+            return int(minutes.group(1)) * 60
+        fields = {
+            ("data", "durationSeconds"): (r"\bfor up to ([1-9][0-9]*)\s*(?:hr|hours?)\b", 3600),
+            ("data", "baseAc"): (r"\bAC\s*(\d+)\b", 1),
+            ("data", "abilityOverrides", "STR"): (r"\bSTR\s*(\d+)\b", 1),
+            ("data", "speeds", "walk"): (r"\bwalk\s*(\d+)\b", 1),
+        }
+        spec = fields.get(tuple(target_path))
+        verify(source_path == ["description"] and spec and re.search(r"\bno flight, grounded\b", value, re.I),
+               "Unsupported grounded form configuration")
+        matches = re.findall(spec[0], value, re.I)
+        verify(len(matches) == 1, "Grounded form configuration must state one matching value")
+        return int(matches[0]) * spec[1]
     if rule == "nativeSingleActionForm":
         verify(key[1] == "playable.characters.itemDefinitions" and source_path == ["description"] and
                target["kind"] == "form" and target_path == ["data", "activationSeconds"] and data.get("timing") == "action" and

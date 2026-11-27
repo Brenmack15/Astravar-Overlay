@@ -59,17 +59,29 @@ def mechanical_parity(source_path, bundle):
     source_digest=sha(raw)
     aliases={}
     reviewed_actors=set()
+    dispositions={}
     approved={}
+    reviewed_holdings={}
     evidence=bundle["sources"].get(source_digest)
     if evidence and "reviewedMapping" in evidence[1]:
         plan=evidence[1]["reviewedMapping"]
         from ascension_migrate_reviewed import indexed as all_native_rows, path_value
+        from ascension_migrate_attestations import FORMAT as ATTESTED_FORMAT
         _, indexed = all_native_rows(raw)
+        attestations = {digest:all_native_rows(bundle["sources"][digest][0])[1]
+                        for digest,fmt in plan["sources"].items() if fmt==ATTESTED_FORMAT}
         # check_database has already verified the independent pin and every grant.
         for grant in plan.get("reviewAuthority", {}).get("grants", []):
             if grant["op"] in ("correct","consumeRemainder") and grant["source"]==source_digest:
                 approved[(grant["target"],grant["targetPath"][-1])] = grant
         for decision in plan["decisions"]:
+            if decision["source"] == source_digest:
+                dispositions[decision["family"],tuple(decision["identity"])]=decision
+            if decision["disposition"]=="map" and decision["family"]=="review.attested_holdings":
+                assertion=attestations[decision["source"]][decision["family"],tuple(decision["identity"])]
+                original_id=assertion["accepted"].get("physical_identity") if assertion["accepted"].get("native_present") else assertion["accepted"].get("item_id")
+                if original_id and original_id in decision["targets"]:
+                    reviewed_holdings[original_id] = (decision, assertion)
             if decision["source"] == source_digest and decision["family"] == "playable.characters" and decision["disposition"] == "map" and decision["playerKnown"]:
                 reviewed_actors.update(t for t in decision["targets"] if entities.get(t, ({},))[0].get("kind") == "actor")
         for w in plan["parity"]:
@@ -86,10 +98,15 @@ def mechanical_parity(source_path, bundle):
                         "acceptedPath":grant["lifecyclePath"],"before":path_value(original,w["sourcePath"]),
                         "after":False if field=="operating" else None}
     actors = {a["actorId"]: a for _, a in families.get("authority.actors", [])}
-    checks, holds = [], []
-    def check(kind, identity, field, expected, actual, available=True):
+    checks, holds, reviewed_scope = [], [], []
+    def excluded(family, identity):
+        d=dispositions.get((family,tuple(identity)),{})
+        return d if d.get("disposition") in ("excluded","foreign","fixture") else None
+    def check(kind, identity, field, expected, actual, available=True, omitted=None):
         state = "absent" if not available else "different" if expected != actual else "bothUnknown" if expected is None else "equal"
         row = {"kind":kind, "id":identity, "field":field, "native":expected, "cloud":actual, "status":state}
+        if omitted and not available:
+            row.update(status="reviewedExclusion",disposition=omitted["disposition"],rowSha256=omitted["rowSha256"])
         candidates = {identity, *aliases.get(("resource_pool" if kind=="item_resource" else kind,identity),set())}
         for target_id in candidates:
             grant = approved.get((target_id,field))
@@ -98,6 +115,15 @@ def mechanical_parity(source_path, bundle):
                 row.update(status="approvedCorrection", decision=grant["decision"], rowSha256=grant["rowSha256"],
                            sourcePath=grant["sourcePath"], acceptedPath=grant["acceptedPath"])
                 break
+        if row["status"]=="different" and kind=="item_instance" and field=="definitionId":
+            if actual in aliases.get(("item_definition",expected),set()) and entities.get(actual,({},{}))[0].get("kind")=="item_definition":
+                row.update(status="scopedAlias",originalDefinitionId=expected,canonicalDefinitionId=actual)
+        if row["status"]=="different" and kind=="item_instance" and identity in reviewed_holdings and field in (
+                "ownerId","custodianId","locationId","holding","equipment","attuned","operating"):
+            d, assertion = reviewed_holdings[identity]
+            if field in assertion["fields"] and encode(assertion["fields"][field])==encode(actual):
+                row.update(status="reviewedHolding",decision=assertion["decision"],attestationSha256=d["source"],
+                           rowSha256=d["rowSha256"],sourcePath=["fields",field],acceptedPath=assertion["acceptedPath"])
         checks.append(row)
     def target(kind, identity, actor_id=None):
         proposed=aliases.get((kind,identity),set())
@@ -105,12 +131,15 @@ def mechanical_parity(source_path, bundle):
         row, data = entities.get(canonical, ({}, {}))
         present = row.get("kind") == kind and (actor_id is None or row.get("actor_id") == actor_id)
         return data if present else {}, present
-    def compare_fields(kind, identity, expected, data, present):
+    def compare_fields(kind, identity, expected, data, present, omitted=None):
         for key, expected_value in expected.items():
-            check(kind, identity, key, expected_value, data.get(key), present and key in data)
+            check(kind, identity, key, expected_value, data.get(key), present and key in data,omitted if not present else None)
     for _, wallet in families.get("records.wallets", []):
         identity = wallet["id"]
         if wallet.get("campaignId") != continuity:
+            if excluded("records.wallets",[identity]):
+                reviewed_scope.append({"family":"records.wallets","id":identity,"disposition":excluded("records.wallets",[identity])["disposition"]})
+                continue
             holds.append({"kind":"wallet","id":identity,"reason":"Unproven continuity membership"})
             continue
         data, present = target("wallet", identity)
@@ -122,6 +151,9 @@ def mechanical_parity(source_path, bundle):
         identity = actor_row["profileId"]
         binding = actors.get(identity,{})
         if binding and (binding.get("campaignId") != continuity or not binding.get("playable")) or not binding and identity not in reviewed_actors:
+            if excluded("playable.characters",[identity]):
+                reviewed_scope.append({"family":"playable.characters","id":identity,"disposition":excluded("playable.characters",[identity])["disposition"]})
+                continue
             holds.append({"kind":"actor","id":identity,"reason":"A playable Genesis binding or exact owner-reviewed actor mapping is required"})
             continue
         char = loads(actor_row["characterJson"])
@@ -153,7 +185,7 @@ def mechanical_parity(source_path, bundle):
             expected = {key:item[key] for key in ("attuned", "operating", "quantity", "definitionId") if key in item}
             if item.get("state") in ("WORN", "HELD", "CARRIED", "STORED"):
                 expected["equipment"] = {"WORN":"worn", "HELD":"held", "CARRIED":"packed", "STORED":"packed"}[item["state"]]
-            compare_fields("item_instance",item_id,expected,holding,found)
+            compare_fields("item_instance",item_id,expected,holding,found,excluded("playable.characters.items",[identity,item_id]))
             for pool in item.get("pools", []):
                 candidates = {pool["id"], *aliases.get(("resource_pool",pool["id"]),set())}
                 bound = {holding.get("resourcePoolId"), *holding.get("additionalResourcePoolIds", [])}
@@ -180,6 +212,9 @@ def mechanical_parity(source_path, bundle):
         identity = ownership["itemId"]
         owner = ownership.get("ownerActorId")
         if actors.get(owner,{}).get("campaignId") != continuity:
+            if excluded("authority.items",[identity]):
+                reviewed_scope.append({"family":"authority.items","id":identity,"disposition":excluded("authority.items",[identity])["disposition"]})
+                continue
             holds.append({"kind":"item_instance","id":identity,"reason":"Unproven owner or continuity"})
             continue
         instance = loads(ownership["instanceJson"])
@@ -189,8 +224,8 @@ def mechanical_parity(source_path, bundle):
         data,present=target("item_instance",identity)
         expected={"ownerId":owner}
         expected.update({k:instance[k] for k in ("quantity","definitionId","attuned") if k in instance})
-        compare_fields("item_instance",identity,expected,data,present)
-    counts={status:sum(c["status"]==status for c in checks) for status in ("equal","bothUnknown","different","absent","approvedCorrection")}
+        compare_fields("item_instance",identity,expected,data,present,excluded("authority.items",[identity]))
+    counts={status:sum(c["status"]==status for c in checks) for status in ("equal","bothUnknown","different","absent","approvedCorrection","reviewedHolding","scopedAlias","reviewedExclusion")}
     return {"sourceSha256":sha(raw), "manifestSha256":bundle["digest"],"continuity":continuity,
-            "counts":counts,"checks":checks,"holds":holds,"coverage":"recorded values in selected native families",
-            "comparisonSha256":sha(encode([checks,holds]))}
+            "counts":counts,"checks":checks,"holds":holds,"reviewedScope":reviewed_scope,"coverage":"recorded values in selected native families",
+            "comparisonSha256":sha(encode([checks,holds,reviewed_scope]))}

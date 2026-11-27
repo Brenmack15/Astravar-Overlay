@@ -87,8 +87,14 @@ def reviewed_grants(authority, tenant, entries, path_value, source_key):
 
 
 def fixture_memberships(entries):
-    actors, records = defaultdict(set), defaultdict(set)
+    actors, records, item_actors = defaultdict(set), defaultdict(set), defaultdict(set)
     for (digest, family, ids), row in entries.items():
+        if family == "playable.characters.items":
+            item_actors[digest,ids[-1]].add(ids[0])
+        if family == "records.placements" and row.get("holderProfileId"):
+            item_actors[digest,ids[0]].add(row["holderProfileId"])
+        if family == "authority.items" and row.get("ownerActorId"):
+            item_actors[digest,ids[0]].add(row["ownerActorId"])
         campaign = row.get("campaignId")
         if not campaign:
             continue
@@ -96,13 +102,13 @@ def fixture_memberships(entries):
             actors[digest, ids[0]].add(campaign)
         if family == "records.externalReferences":
             records[digest, row.get("recordId")].add(campaign)
-    return actors, records
+    return actors, records, item_actors
 
 
 def fixture_only(key, row, tenant, memberships):
     """A reserved source tag excludes a fixture; it never supplies a foreign tenant ID."""
     digest, family, ids = key
-    actors, refs = memberships
+    actors, refs, item_actors = memberships
     row_campaign = row.get("campaignId")
     if tenant[1] in refs.get((digest, ids[0]), ()) or row_campaign == tenant[1]:
         return False
@@ -110,6 +116,14 @@ def fixture_only(key, row, tenant, memberships):
         campaigns = actors.get((digest, ids[0]), set())
         return len(campaigns) == 1 and tenant[1] not in campaigns
     if family not in ("campaign.items",) and not family.startswith("records."):
+        return False
+    # Local inventory or actor ownership takes precedence over a fixture label.
+    ids_to_check = {row.get(k) for k in ("profileId","holderProfileId","companionId","ownerActorId")}
+    if family == "records.characterProfiles":
+        ids_to_check.add(ids[0])
+    item = ids[0] if family == "campaign.items" else row.get("itemId")
+    ids_to_check.update(item_actors.get((digest,item), ()))
+    if any(tenant[1] in actors.get((digest,actor), ()) for actor in ids_to_check):
         return False
     source = row.get("source")
     return isinstance(source, str) and source.partition(":")[0].strip().casefold() == "synthetic_qa_only"

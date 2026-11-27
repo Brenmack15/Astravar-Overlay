@@ -144,8 +144,11 @@ export async function gearEligible(ctx,itemId,actorId,attunement=false,requiresO
   if(item?.kind!=='item_instance' || item.data.custodianId!==actorId)return false;
   ctx.require('inventory',actorId,false);
   const data=item.data;
+  const installed=!wornOnly && data.holding==='installed' && data.installedOnActorId===actorId &&
+    data.ownerId===actorId && data.operating===true;
+  const carried=data.holding==='carried' && (data.equipment==='worn'||!wornOnly && data.equipment==='held');
   const equipped=!!data && item.life==='active' && data.custodianId===actorId && data.partyAccess===true &&
-    data.holding==='carried' && (data.equipment==='worn'||!wornOnly && data.equipment==='held') && (!requiresOperating || data.operating===true) &&
+    (installed||carried) && (!requiresOperating || data.operating===true) &&
     data.quantity===1 && (!attunement || data.attuned===true);
   if(!equipped)return false;
   const form=formOverride===undefined?await activeForm(ctx,await actor(ctx,actorId)):formOverride;
