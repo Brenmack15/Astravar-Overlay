@@ -2,14 +2,43 @@ name: Verify final native release input
 on:
   push:
     branches: [verification/ascension-release-inputs-20261127]
-    paths: [qa/ascension-final-input.json]
+    paths:
+      - qa/ascension-final-input.json
+      - .github/workflows/verify-final-release-input.yml
 permissions:
   actions: read
   contents: read
 jobs:
-  verify:
+  policy:
+    name: Inspect existing artifact retention and final input pins
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 3
+    outputs:
+      ready: ${{ steps.policy.outputs.ready }}
+      retention: ${{ steps.policy.outputs.retention }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - id: policy
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_RETENTION_DAYS" =~ ^[1-9][0-9]*$ ]]
+          (( GITHUB_RETENTION_DAYS <= 90 ))
+          echo "Repository artifact retention: $GITHUB_RETENTION_DAYS days"
+          echo "retention=$GITHUB_RETENTION_DAYS" >> "$GITHUB_OUTPUT"
+          if git ls-files --error-unmatch qa/ascension-final-input.json >/dev/null 2>&1; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo 'Final input pins are pending.'
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+  verify:
+    name: Verify and retain the exact QA-only signing input
+    needs: policy
+    if: needs.policy.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -23,19 +52,19 @@ jobs:
           from pathlib import Path
           pins = json.loads(Path("harness/qa/ascension-final-input.json").read_text())
           assert set(pins) == {"source","run","artifact","checksum"}
-          assert re.fullmatch(r"[0-9a-f]{40}",pins["source"])
-          assert re.fullmatch(r"[0-9a-f]{64}",pins["checksum"])
+          assert re.fullmatch(r"[0-9a-f]{40}", pins["source"])
+          assert re.fullmatch(r"[0-9a-f]{64}", pins["checksum"])
           assert all(type(pins[k]) is int and pins[k] > 0 for k in ("run","artifact"))
-          with open(os.environ["GITHUB_OUTPUT"],"a") as out:
-              for key,value in pins.items():
-                  print(f"{key}={value}",file=out)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              for key, value in pins.items():
+                  print(f"{key}={value}", file=out)
           PY
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ steps.pins.outputs.source }}
           persist-credentials: false
           path: source
-      - name: Verify the unaltered GitHub artifact and optimized APK
+      - name: Verify the unaltered repository artifact and optimized APK
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE: ${{ steps.pins.outputs.source }}
@@ -45,22 +74,113 @@ jobs:
           PYTHONDONTWRITEBYTECODE: '1'
         run: |
           set -euo pipefail
+          umask 077
           export JAVA_HOME="$JAVA_HOME_17_X64"
           export PATH="$JAVA_HOME/bin:$PATH"
           test -x "$ANDROID_HOME/build-tools/35.0.0/apksigner"
-          python3 harness/scripts/qa-release-inputs.py --repo source --source "$SOURCE" --run "$RUN_ID" --artifact "$ARTIFACT_ID" --archive-sha256 "$ARCHIVE_SHA256" --output "$RUNNER_TEMP/verified-native-input"
+          api="repos/$GITHUB_REPOSITORY/actions"
+          test "$(gh api "$api/runs/$RUN_ID" --jq '[.head_sha,.status,.conclusion,.path]|join(" ")')" = "$SOURCE completed success .github/workflows/astravar-development.yml"
+          test "$(gh api "$api/artifacts/$ARTIFACT_ID" --jq '[.workflow_run.id,.workflow_run.head_sha,.name,.digest,.expired]|map(tostring)|join(" ")')" = "$RUN_ID $SOURCE android-verification sha256:$ARCHIVE_SHA256 false"
+          preserved="$RUNNER_TEMP/ordinary-qa-signing-input"
+          mkdir -m 700 "$preserved"
+          original="$preserved/android-verification-original.zip"
+          gh api "$api/artifacts/$ARTIFACT_ID/zip" > "$original"
+          echo "$ARCHIVE_SHA256  $original" | sha256sum -c -
+          python3 harness/scripts/qa-release-inputs.py --repo source --source "$SOURCE" --run "$RUN_ID" --artifact "$ARTIFACT_ID" --archive-sha256 "$ARCHIVE_SHA256" --archive-file "$original" --output "$RUNNER_TEMP/verified-native-input"
+          cp "$RUNNER_TEMP/verified-native-input/"{ci-evidence,tested-input}.json "$preserved/"
+          cat > "$preserved/QA-SIGNING-INPUT.txt" <<'EOF'
+          Astravar 4.1.0 code 59 — QA-only signing input
+          android-verification-original.zip contains the original GitHub native QA archive verbatim.
+          For the established private signer, supply that inner file as --artifact and ci-evidence.json as --ci-evidence.
+          The optimized APK inside that archive uses the disposable test certificate.
+          tested-input.json records its tested digest, source revision, payload manifest and Android checks.
+          EOF
+          (cd "$preserved" && sha256sum android-verification-original.zip ci-evidence.json tested-input.json QA-SIGNING-INPUT.txt > QA-SHA256SUMS)
+      - name: Preserve the verified original within the repository's QA artifact channel
+        id: preserved
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ascension-QA-only-signing-input-code59-${{ steps.pins.outputs.run }}
+          path: ${{ runner.temp }}/ordinary-qa-signing-input/
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: ${{ needs.policy.outputs.retention }}
+      - name: Independently retrieve the preserved wrapper and check the original bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WRAPPER_ID: ${{ steps.preserved.outputs.artifact-id }}
+          WRAPPER_DIGEST: ${{ steps.preserved.outputs.artifact-digest }}
+          NATIVE_ARCHIVE_DIGEST: ${{ steps.pins.outputs.checksum }}
+          NATIVE_ARTIFACT_ID: ${{ steps.pins.outputs.artifact }}
+          NATIVE_RUN: ${{ steps.pins.outputs.run }}
+          SOURCE: ${{ steps.pins.outputs.source }}
+          REQUESTED_DAYS: ${{ needs.policy.outputs.retention }}
+        run: |
+          set -euo pipefail
+          umask 077
+          api="repos/$GITHUB_REPOSITORY/actions/artifacts/$WRAPPER_ID"
+          ready=false
+          for attempt in 1 2 3 4 5; do
+            if gh api "$api" > "$RUNNER_TEMP/qa-wrapper-metadata.json" &&
+               jq -e --arg sha "sha256:$WRAPPER_DIGEST" '.digest == $sha' "$RUNNER_TEMP/qa-wrapper-metadata.json" >/dev/null &&
+               gh api "$api/zip" > "$RUNNER_TEMP/qa-wrapper-readback.zip" &&
+               printf '%s  %s\n' "$WRAPPER_DIGEST" "$RUNNER_TEMP/qa-wrapper-readback.zip" | sha256sum -c -; then
+              ready=true
+              break
+            fi
+            sleep 4
+          done
+          test "$ready" = true
           python3 - <<'PY'
-          import json,os
+          import datetime, hashlib, json, os, zipfile
           from pathlib import Path
-          directory=Path(os.environ["RUNNER_TEMP"])/"verified-native-input"
-          data=json.loads((directory/"tested-input.json").read_text())
-          print(json.dumps({k:data[k] for k in ("sourceCommit","archiveSha256","testedApkSha256","package","versionName","versionCode","sixteenKiBAligned","ownerSigningPerformed")},sort_keys=True))
+          env = os.environ
+          directory = Path(env["RUNNER_TEMP"])
+          metadata = json.loads((directory / "qa-wrapper-metadata.json").read_text())
+          wrapper = int(env["WRAPPER_ID"])
+          assert metadata["id"] == wrapper and metadata["expired"] is False
+          assert metadata["workflow_run"]["id"] == int(env["GITHUB_RUN_ID"])
+          assert metadata["name"] == "ascension-QA-only-signing-input-code59-" + env["NATIVE_RUN"]
+          assert metadata["digest"] == "sha256:" + env["WRAPPER_DIGEST"]
+          timestamp = lambda s: datetime.datetime.fromisoformat(s.replace("Z","+00:00"))
+          lifetime = timestamp(metadata["expires_at"]) - timestamp(metadata["created_at"])
+          assert abs(lifetime.total_seconds() - int(env["REQUESTED_DAYS"])*86400) <= 86400, lifetime
+          expected = {"android-verification-original.zip","ci-evidence.json","tested-input.json","QA-SIGNING-INPUT.txt","QA-SHA256SUMS"}
+          checks = {}
+          with zipfile.ZipFile(directory / "qa-wrapper-readback.zip") as archive:
+              assert set(archive.namelist()) == expected and len(archive.namelist()) == len(expected)
+              for name in sorted(expected):
+                  h = hashlib.sha256()
+                  with archive.open(name) as stream:
+                      for block in iter(lambda: stream.read(1024 * 1024), b""):
+                          h.update(block)
+                  checks[name] = h.hexdigest()
+              manifest = archive.read("QA-SHA256SUMS").decode("ascii").splitlines()
+              assert len(manifest) == 4 and set(manifest) == {checks[n]+"  "+n for n in expected-{"QA-SHA256SUMS"}}
+              report = json.loads(archive.read("tested-input.json"))
+              ci = json.loads(archive.read("ci-evidence.json"))
+              assert report["archiveSha256"] == checks["android-verification-original.zip"] == env["NATIVE_ARCHIVE_DIGEST"]
+              assert report["sourceCommit"] == ci["source_commit"] == env["SOURCE"]
+              assert ci["artifact"]["artifact_id"] == int(env["NATIVE_ARTIFACT_ID"])
+              assert ci["run"]["run_id"] == int(env["NATIVE_RUN"])
+              assert report["ownerSigningPerformed"] is False and report["ownerSigningMaterialAccessed"] is False
+          receipt = {"qaOnly": True, "officialRun": int(env["NATIVE_RUN"]), "sourceCommit": env["SOURCE"],
+                     "officialArtifactId": int(env["NATIVE_ARTIFACT_ID"]),
+                     "officialArchiveSha256": checks["android-verification-original.zip"],
+                     "testedApkSha256": report["testedApkSha256"], "wrapperId": wrapper,
+                     "wrapperSha256": env["WRAPPER_DIGEST"], "members": checks,
+                     "requestedRetentionDays": int(env["REQUESTED_DAYS"]), "createdAt": metadata["created_at"],
+                     "expiresAt": metadata["expires_at"], "retrievedAndVerified": True}
+          (directory / "verified-native-input" / "preservation.json").write_text(json.dumps(receipt, indent=2)+"\n")
+          print(json.dumps({k: receipt[k] for k in ("wrapperId","wrapperSha256","officialArchiveSha256","testedApkSha256","expiresAt","retrievedAndVerified")}, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - name: Retain compact receipts for the private release procedure
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ascension-native-input-receipts
           path: |
             ${{ runner.temp }}/verified-native-input/ci-evidence.json
             ${{ runner.temp }}/verified-native-input/tested-input.json
+            ${{ runner.temp }}/verified-native-input/preservation.json
           if-no-files-found: error
-          retention-days: 14
+          retention-days: ${{ needs.policy.outputs.retention }}
