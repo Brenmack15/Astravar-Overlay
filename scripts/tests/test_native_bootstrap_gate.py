@@ -20,6 +20,8 @@ METHODS = [
     'ci-ascension-cloud-native.sh',
     'actualSmallEmblemInStatusBarAndShadeAcrossLightAndDarkThemes',
     'ci-ascension-api37.sh',
+    'androidAccessibilityOptionsOpenWithoutRolling',
+    'aSecondPackagePastesTheOriginalNamedRollFromTheSystemClipboard',
 ]
 
 
@@ -84,6 +86,8 @@ git() { printf '%s\\n' 0123456789012345678901234567890123456789; }
         self.assertEqual(37, scope['emulatorApi'])
         self.assertTrue(scope['android17'])
         self.assertTrue(scope['api37ForceStoppedCloudReconnect'])
+        self.assertTrue(scope['frameworkRollOptionsWithoutRoll'])
+        self.assertTrue(scope['crossPackageNamedRollPaste'])
         self.assertTrue(scope['nativePublicNotionImport'])
         self.assertTrue(scope['nativeCampaignHttpsAndIndependentReadback'])
         self.assertFalse(scope['actualOwnerSigningIdentityTestedInCi'])

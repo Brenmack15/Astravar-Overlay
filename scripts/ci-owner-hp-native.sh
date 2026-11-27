@@ -304,13 +304,13 @@ if [[ "$astravar_bootstrap_gate" == true ]]; then
   git rev-parse HEAD >"$astravar_output/SOURCE_COMMIT.txt"
   # An independent package/Room upgrade can still produce its own evidence after a visual failure.
   bash scripts/ci-ascension-api37.sh
+  # The API 37 upgrade has installed the independent clipboard target on this emulator.
+  run_test 'com.yazsras.astravar.ui.AscensionAccessibleRollClipboardTest#androidAccessibilityOptionsOpenWithoutRolling' native-roll-accessibility.txt
+  run_test 'com.yazsras.astravar.ui.AscensionAccessibleRollClipboardTest#aSecondPackagePastesTheOriginalNamedRollFromTheSystemClipboard' native-roll-clipboard-paste.txt
   if (( astravar_notification_result != 0 )); then
     echo "Android 17 notification acceptance failed; see notification-emblem.txt." >&2
     exit "$astravar_notification_result"
   fi
-  # The API 37 upgrade has installed the independent clipboard target on this emulator.
-  run_test 'com.yazsras.astravar.ui.AscensionAccessibleRollClipboardTest#androidAccessibilityOptionsOpenWithoutRolling' native-roll-accessibility.txt
-  run_test 'com.yazsras.astravar.ui.AscensionAccessibleRollClipboardTest#aSecondPackagePastesTheOriginalNamedRollFromTheSystemClipboard' native-roll-clipboard-paste.txt
   python3 - "$astravar_output/SCOPE.json" <<'PY_SCOPE'
 import json,os,pathlib,sys
 pathlib.Path(sys.argv[1]).write_text(json.dumps({
