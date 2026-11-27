@@ -1,0 +1,92 @@
+name: Identify the officially distributed Android 17 screen reader
+on:
+  push:
+    branches: ['verification/ascension-stock-talkback-20261127']
+    paths: ['.github/workflows/qa-stock-talkback.yml']
+permissions:
+  contents: read
+jobs:
+  services:
+    name: 'Android 17 ${{ matrix.flavor }}'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [google_apis_playstore, google_apis]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 6e3ea597ecab1e42fad481898be83f0e7677408d
+          persist-credentials: false
+      - name: Inventory the clean official SDK image with no account
+        shell: bash
+        env:
+          QA_FLAVOR: ${{ matrix.flavor }}
+        run: |
+          set -euo pipefail
+          test -c /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          mkdir -p validation/talkback
+          report="$GITHUB_WORKSPACE/validation/talkback"
+          sdkbin=$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)
+          test -x "$sdkbin"
+          export PATH="$(dirname "$sdkbin"):$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+          timeout 120 sdkmanager --list > "$RUNNER_TEMP/stock-sdk-index.txt"
+          awk -F'|' -v flavor="$QA_FLAVOR" '{name=$1; gsub(/^[ \t]+|[ \t]+$/, "",name); if(name ~ ("^system-images;android-37(\\.0)?;" flavor ";x86_64$")) print name}' "$RUNNER_TEMP/stock-sdk-index.txt" | sort -u > "$report/available-images.txt"
+          image=$(sort -V "$report/available-images.txt" | tail -1)
+          if [[ -z "$image" ]]; then echo 'No matching stable official API 37 image' | tee "$report/outcome.txt"; exit 0; fi
+          printf 'Selected official SDK image %s\n' "$image"
+          timeout -k 5s 80s sdkmanager --licenses < <(printf 'y\n%.0s' {1..100}) >/dev/null
+          timeout -k 10s 570s sdkmanager emulator "$image" > "$RUNNER_TEMP/stock-sdk-install.txt"
+          pieces=${image//;/\/}
+          sed -nE '/^(Pkg.Desc|Pkg.Revision|AndroidVersion.ApiLevel|SystemImage.TagId|SystemImage.Abi)=/p' "$ANDROID_HOME/$pieces/source.properties" | tee "$report/image-source.txt"
+          emulator="$ANDROID_HOME/emulator/emulator"
+          qemu="$ANDROID_HOME/emulator/qemu/linux-x86_64/qemu-system-x86_64"
+          if ldd "$qemu" | grep -F 'libpulse.so.0 => not found' >/dev/null; then sudo apt-get -qq update; sudo apt-get -qy install --no-install-recommends libpulse0; fi
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/accessibility-avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          avd=AstravarTalkBackQA
+          serial=emulator-5582
+          device() { adb -s "$serial" "$@"; }
+          if adb devices | awk -v s="$serial" '$1==s{found=1}END{exit !found}'; then echo 'Reserved guest occupied'; exit 1; fi
+          printf 'no\n' | avdmanager create avd -f -n "$avd" -k "$image" --device pixel_8
+          "$emulator" -avd "$avd" -port 5582 -accel on -no-window -no-audio -no-snapshot -no-boot-anim -memory 4096 -gpu swiftshader > "$RUNNER_TEMP/talkback-emulator.log" 2>&1 &
+          qemu_pid=$!
+          trap 'kill "$qemu_pid" 2>/dev/null || true' EXIT
+          timeout 140 adb -s "$serial" wait-for-device
+          for _ in $(seq 1 115); do kill -0 "$qemu_pid"; if test "$(device shell getprop sys.boot_completed | tr -d '\r')" = 1; then break; fi; sleep 2; done
+          test "$(device shell getprop sys.boot_completed | tr -d '\r')" = 1
+          test "$(device shell getprop ro.kernel.qemu | tr -d '\r')" = 1
+          test "$(device shell getprop ro.build.version.sdk | tr -d '\r')" = 37
+          test "$(device emu avd name | tr -d '\r' | head -1)" = "$avd"
+          device shell getprop ro.build.fingerprint | tr -d '\r' | tee "$report/fingerprint.txt"
+          device shell pm list packages -s -u | tr -d '\r' | sort > "$report/system-packages.txt"
+          device shell cmd package query-services --brief --components --user 0 -a android.accessibilityservice.AccessibilityService | tr -d '\r' | tee "$report/accessible-services.txt"
+          device shell cmd package query-services --brief --components --user 0 --query-flags 512 -a android.accessibilityservice.AccessibilityService | tr -d '\r' | tee "$report/including-disabled.txt"
+          device shell cmd package query-services --brief --components --user 0 -a android.intent.action.TTS_SERVICE | tr -d '\r' | tee "$report/tts-services.txt"
+          service=$(awk '/^com\.google\.android\.marvin\.talkback\// && /TalkBackService$/ {print;exit}' "$report/including-disabled.txt")
+          if [[ -z "$service" ]]; then
+            if grep -Eiq 'talkback|marvin|accessibilitysuite' "$report/system-packages.txt"; then echo 'Matching stock package present but no exported TalkBack service'; else echo 'No stock Android Accessibility Suite or TalkBack package'; fi | tee "$report/outcome.txt"
+            exit 0
+          fi
+          package=${service%%/*}
+          device shell pm path "$package" | tr -d '\r' | tee "$report/stock-paths.txt"
+          apk=$(sed -n 's/^package:\(.*\/base\.apk\)$/\1/p' "$report/stock-paths.txt" | head -1)
+          if [[ -z "$apk" ]]; then apk=$(sed -n '1s/^package://p' "$report/stock-paths.txt"); fi
+          test -n "$apk"
+          device pull "$apk" "$RUNNER_TEMP/stock-reader.apk" >/dev/null
+          signer=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          "$signer" verify --print-certs "$RUNNER_TEMP/stock-reader.apk" | grep -E '^Signer #[0-9]+ certificate (DN:|SHA-256 digest:)' | tee "$report/reader-signer.txt"
+          device shell dumpsys package "$package" | tr -d '\r' | grep -E 'versionCode=|versionName=' | head -4 | tee "$report/reader-version.txt"
+          device shell settings put secure enabled_accessibility_services "$service"
+          device shell settings put secure accessibility_enabled 1
+          for _ in $(seq 1 20); do device shell dumpsys accessibility | tr -d '\r' > "$RUNNER_TEMP/stock-accessibility-status.txt"; if grep -Eq 'Bound services:.*TalkBack|Service\[.*TalkBackService|id=com\.google\.android\.marvin\.talkback.*isConnected=true' "$RUNNER_TEMP/stock-accessibility-status.txt"; then break; fi; sleep 1; done
+          grep -Ei 'TalkBackService|Bound services|TouchExplorationEnabled' "$RUNNER_TEMP/stock-accessibility-status.txt" | head -30 | tee "$report/reader-service-state.txt"
+          echo "Stock Google TalkBack service $service" | tee "$report/outcome.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: android17-stock-reader-${{ matrix.flavor }}
+          path: validation/talkback/
+          retention-days: 7
