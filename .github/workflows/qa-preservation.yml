@@ -2,6 +2,9 @@ name: Isolated installed preservation acceptance
 on:
   push:
     branches: [verification/ascension-preservation-gates-20261127]
+concurrency:
+  group: isolated-ascension-preservation-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
   statuses: write

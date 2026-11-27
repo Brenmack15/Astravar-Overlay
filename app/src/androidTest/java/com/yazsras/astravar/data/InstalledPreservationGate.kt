@@ -80,7 +80,12 @@ class PreservationLegacySeed {
 class InstalledPreservationGate {
     @get:Rule val compose = createEmptyComposeRule()
     private fun await(m: SemanticsMatcher): SemanticsNodeInteraction {
-        compose.waitUntil(25_000) { compose.onAllNodes(m).fetchSemanticsNodes().isNotEmpty() }
+        try { compose.waitUntil(25_000) { compose.onAllNodes(m).fetchSemanticsNodes().isNotEmpty() } }
+        catch (failure: Throwable) {
+            val roots=compose.onAllNodes(isRoot())
+            val visible=runCatching { roots.fetchSemanticsNodes().indices.joinToString("\n") { roots[it].printToString(12) } }.getOrDefault("No Compose root")
+            throw AssertionError("Missing " + m.description + "\n" + visible.take(24000), failure)
+        }
         return compose.onAllNodes(m).onLast()
     }
     private fun click(m: SemanticsMatcher) {
@@ -119,7 +124,7 @@ class InstalledPreservationGate {
             await(hasText(activeName) and hasClickAction()).assertExists()
             compose.onAllNodesWithText(archivedName).assertCountEquals(0)
             proof("upgraded-active-inventory")
-            tap("Close");tap("Tools");tap("Records, backups & connection");tap("Owner connection");tap("Backups and recovery");tap("Campaign backup")
+            tap("‹ Inventory");tap("Tools");tap("Records, backups & connection");tap("Owner connection");tap("Backups and recovery");tap("Campaign backup")
             tap("Export campaign backup")
             val filename=guest.wait(Until.findObject(By.clazz("android.widget.EditText")),10_000)
             assertNotNull("The system CreateDocument activity must accept a filename",filename)
