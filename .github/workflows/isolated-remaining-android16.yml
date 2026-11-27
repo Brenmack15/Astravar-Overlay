@@ -106,7 +106,38 @@ jobs:
               assert cert == expected_cert, "Matched disposable certificate required"
               print("Verified test-only package", code)
           PY
-          bash gradlew --console=plain --build-cache :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
+          # The instrumentation module declares only AGP and Kotlin Android. Its
+          # immutable source and matching module build file also work as a stand-
+          # alone Gradle project when an unrelated project-level KSP lookup fails.
+          if ! bash gradlew --console=plain --build-cache :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest; then
+            project="$RUNNER_TEMP/retained-overlay-only"
+            mkdir -p "$project/overlay-target"
+            cp -r overlay-target/src overlay-target/build.gradle.kts "$project/overlay-target/"
+            cp gradle.properties "$project/"
+            python3 - "$project" <<'PY'
+          from pathlib import Path
+          import sys
+          sandbox = Path(sys.argv[1])
+          source = Path("build.gradle.kts").read_text().splitlines()
+          keep = [line for line in source if 'id("com.android.application")' in line or 'kotlin("android")' in line]
+          assert len(keep) == 2 and all("version" in line for line in keep)
+          (sandbox/"build.gradle.kts").write_text("plugins {\n"+"\n".join(keep)+"\n}\n")
+          settings = Path("settings.gradle.kts").read_text()
+          all_modules = 'include(":rules", ":app", ":overlay-target")'
+          assert settings.count(all_modules) == 1
+          (sandbox/"settings.gradle.kts").write_text(settings.replace(all_modules,'include(":overlay-target")'))
+          PY
+            bash gradlew --console=plain --build-cache --project-dir "$project" :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
+            mkdir -p overlay-target/build/outputs
+            cp -r "$project/overlay-target/build/outputs/apk" overlay-target/build/outputs/
+          fi
+      - name: Retain the tested overlay pair for subsequent same-input diagnostics
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: compiled-overlay-android16
+          path: overlay-target/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+          retention-days: 7
       - name: Regenerate the matching demo rolls and retained actor, then execute the original remaining native journeys
         timeout-minutes: 112
         env:
