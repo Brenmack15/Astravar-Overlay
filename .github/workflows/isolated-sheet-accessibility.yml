@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 40006d9bb26ddcfa87d56a93bf0edd49ee575ff7
+          ref: 4aa4cb04e283dd62291a6c685bb7f66f0b724f40
           persist-credentials: false
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
@@ -31,7 +31,7 @@ jobs:
           set -euo pipefail
           mkdir -p validation/sheet-tests
           outcome=0
-          bash gradlew --console=plain --build-cache :app:testDebugUnitTest --rerun --tests '*CloudSheetAccessibilityInteropTest' --tests '*CloudCharacterLayoutInteropTest' --tests '*CloudCharacterContinuityInteropTest' --tests '*CloudCheckInspectorsTest' || outcome=$?
+          bash gradlew --console=plain --build-cache :app:testDebugUnitTest --rerun --tests '*CloudSheetAccessibilityInteropTest' --tests '*CloudCharacterLayoutInteropTest' --tests '*CloudCharacterContinuityInteropTest' --tests '*CloudCheckInspectorsTest' --tests '*CloudCastingDiceInteropTest' || outcome=$?
           cp app/build/test-results/testDebugUnitTest/TEST-*.xml validation/sheet-tests/ || true
           python3 - <<'PY'
           from pathlib import Path
