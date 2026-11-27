@@ -9,7 +9,8 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /** Both clients address the registered Worker. Only the synthetic transport uses stdio. */
-internal class AscensionWorkerFixture private constructor(private val context: Context, private val process: Process) : Closeable {
+internal class AscensionWorkerFixture private constructor(private val context: Context, private val process: Process,
+    private val beforeRequest: suspend (String) -> Unit) : Closeable {
     private val input = process.inputStream.bufferedReader()
     private val output = process.outputStream.bufferedWriter()
     private val pairing = read()
@@ -21,6 +22,7 @@ internal class AscensionWorkerFixture private constructor(private val context: C
     private val transport = OwnerConnectionTransport { origin, path, token, _, payload ->
         if (deviceOffline) throw OwnerSyncFailure("NETWORK_UNAVAILABLE")
         require(origin == credential.origin && validCloudDevicePath(path) && token != null)
+        beforeRequest(path)
         val reply = call(buildJsonObject {
             put("call", "request"); put("route", path); put("credentialId", token.credentialId); put("token", token.bearer)
             if (payload != null) put("body", Json.parseToJsonElement(payload))
@@ -91,14 +93,14 @@ internal class AscensionWorkerFixture private constructor(private val context: C
         input.close(); cache.close(); context.deleteDatabase(database)
     }
     companion object {
-        fun open(context: Context, lifecycleMedia: Boolean = false): AscensionWorkerFixture {
+        fun open(context: Context, lifecycleMedia: Boolean = false, beforeRequest: suspend (String) -> Unit = {}): AscensionWorkerFixture {
             val entry = generateSequence(File(requireNotNull(System.getProperty("user.dir"))).absoluteFile) { it.parentFile }
                 .map { File(it, "backend/owner-bridge/fixtures/native-cloud-wire.mjs") }.first(File::isFile)
             val arguments = mutableListOf("node", entry.absolutePath, "--exercise-gameplay")
             if (lifecycleMedia) arguments += "--lifecycle-media"
             val process = ProcessBuilder(arguments)
                 .redirectError(ProcessBuilder.Redirect.INHERIT).start()
-            try { return AscensionWorkerFixture(context, process) }
+            try { return AscensionWorkerFixture(context, process, beforeRequest) }
             catch (failure: Throwable) { process.destroyForcibly(); throw failure }
         }
     }

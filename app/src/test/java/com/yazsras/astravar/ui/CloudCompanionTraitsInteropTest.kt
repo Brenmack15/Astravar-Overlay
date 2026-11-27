@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.ui.test.*
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.data.*
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
@@ -41,7 +42,7 @@ class CloudCompanionTraitsInteropTest {
         assertEquals("COMMITTED",f.command(op,obj(raw)).cloudText("status"))
     }
     private val actor="actor-one"
-    private fun mount(f:AscensionWorkerFixture,saved:MutableList<JsonObject>) =
+    private fun mount(f:AscensionWorkerFixture,saved:MutableList<JsonObject>,online:State<Boolean>? = null) =
         Robolectric.buildActivity(ComponentActivity::class.java).setup().also {activity->
             val initial=runBlocking {f.refresh()}
             val operations=runBlocking {f.client.capabilities()}.getValue("operations").jsonArray.map {it.jsonObject}
@@ -53,7 +54,7 @@ class CloudCompanionTraitsInteropTest {
                     snapshot=runBlocking{requireNotNull(f.client.workspace())}
                 }
                 AstravarTheme {
-                    Column{CloudActorWorkspace(f.client,snapshot,true,actor,{},{op,args->editor=op to args},{},::apply)}
+                    Column{CloudActorWorkspace(f.client,snapshot,online?.value ?: true,actor,{},{op,args->editor=op to args},{},::apply)}
                     editor?.let{(op,args)->CloudCommandForm(operations.single{it.cloudText("name")==op},false,{editor=null},{reviewed,_->
                         apply(op,reviewed);editor=null
                     },null,args)}
@@ -143,22 +144,59 @@ class CloudCompanionTraitsInteropTest {
         }
     }
     @Test fun quickSaveRecordsAnAppOwnedOrPhysicalAidDieOnlyAfterAConfirmedCasting(){
-        AscensionWorkerFixture.open(ApplicationProvider.getApplicationContext<Context>()).use{f->
+        val sheetRequested = CompletableDeferred<Unit>()
+        val releaseSheet = CompletableDeferred<Unit>()
+        AscensionWorkerFixture.open(ApplicationProvider.getApplicationContext<Context>()) { path ->
+            if (path.endsWith("/sheet/$actor")) {
+                sheetRequested.complete(Unit)
+                releaseSheet.await()
+            }
+        }.use { f ->
             f.signal("seedCompanionAcceptance");castAid(f)
-            val saved=mutableListOf<JsonObject>();val activity=mount(f,saved)
-            try{
-                val save=hasContentDescription("Wisdom saving throw",substring=true) and hasClickAction()
-                node(save).performClick();val rolled=result(f,saved,1)
+            val online = mutableStateOf(false)
+            val saved = mutableListOf<JsonObject>()
+            val activity = mount(f, saved, online)
+            val save = hasContentDescription("Wisdom saving throw", substring = true) and hasClickAction()
+            val ready = hasContentDescription("Wisdom saving throw +1, not proficient") and isEnabled()
+            try {
+                node(save and isNotEnabled()).assertExists()
+                val baseline = f.dm("get_cloud_state",obj("""{"limit":1}""")).getValue("revision")
+                compose.runOnIdle { online.value = true }
+                compose.waitForIdle()
+                compose.waitUntil(8000) {
+                    compose.onAllNodes(save and isNotEnabled()).fetchSemanticsNodes().isNotEmpty() && sheetRequested.isCompleted
+                }
+                // Loading from a visible actor cache already publishes the disabled click action.
+                // Only the verified sheet can enable this roll and supply its cast-linked die.
+                node(save and isNotEnabled()).performClick()
+                assertTrue(saved.isEmpty())
+                assertEquals(baseline,f.dm("get_cloud_state",obj("""{"limit":1}""")).getValue("revision"))
+                releaseSheet.complete(Unit)
+                node(ready).performClick();val rolled=result(f,saved,1)
                 assertEquals("WIS",rolled.cloudText("key"));assertEquals("save",rolled.cloudText("kind"))
                 val credit=rolled.getValue("aidDice").jsonArray.single().jsonObject
                 assertEquals("support-live",credit.cloudText("castId"));assertEquals("app",credit.cloudText("origin"));assertTrue(credit.number("face") in 1..4)
-                node(save).performTouchInput{longClick()};input("Physical d20 faces, in order","13")
-                node(hasText("Record physical dice")).assertIsNotEnabled();input("Actual Support d4","2");press("Record physical dice")
-                val physical=result(f,saved,2);assertEquals(14,physical.number("beforeAid"));assertEquals(16,physical.number("total"));assertEquals(13,physical.number("natural"))
-                val die=physical.getValue("aidDice").jsonArray.single().jsonObject
-                assertEquals("player_physical",die.cloudText("origin"));assertEquals(2,die.number("face"))
-                assertEquals(f.record(physical.cloudText("rollId"))!!.data().number("total"),physical.number("total"))
-            }finally{activity.pause().stop().destroy()}
+                assertTrue(rolled.number("natural") in 1..20)
+                assertEquals(rolled.number("natural")+1+credit.number("face"),rolled.number("total"))
+                for ((index, dice) in listOf(13 to 2, 1 to 1, 20 to 4).withIndex()) {
+                    val (d20, d4) = dice
+                    node(ready).performTouchInput { longClick() }
+                    input("Physical d20 faces, in order",d20.toString())
+                    node(hasText("Record physical dice")).assertIsNotEnabled()
+                    input("Actual Support d4",d4.toString())
+                    node(hasText("Record physical dice") and isEnabled()).performClick()
+                    val physical=result(f,saved,index+2)
+                    assertEquals(d20+1,physical.number("beforeAid"));assertEquals(d20+1+d4,physical.number("total"));assertEquals(d20,physical.number("natural"))
+                    val die=physical.getValue("aidDice").jsonArray.single().jsonObject
+                    assertEquals("support-live",die.cloudText("castId"));assertEquals("player_physical",die.cloudText("origin"));assertEquals(d4,die.number("face"))
+                    assertEquals(physical.number("total"),f.record(physical.cloudText("rollId"))!!.data().number("total"))
+                }
+                assertEquals(4,saved.map { it.cloudText("commandId") }.toSet().size)
+                assertEquals(1,f.record("operator-slot")!!.data().number("current"))
+            } finally {
+                releaseSheet.complete(Unit)
+                activity.pause().stop().destroy()
+            }
         }
     }
     @Test fun normalFormsTrackTheFullMinuteOnReopenAndExpireWithoutRefillingAnItem(){

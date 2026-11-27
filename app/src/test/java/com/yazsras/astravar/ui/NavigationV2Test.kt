@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.room.MultiInstanceInvalidationService
 import androidx.compose.runtime.*
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.AstravarApp
@@ -149,8 +150,18 @@ class NavigationV2Test {
             compose.onNodeWithText("Records, backups & connection").performScrollTo().performClick()
             compose.onNodeWithText("Owner connection").performScrollTo().performClick()
             compose.onNodeWithText("Backups and recovery").performScrollTo().performClick()
-            compose.onNodeWithText("Campaign backup").performScrollTo().performClick()
-            compose.onNodeWithText("Export campaign backup").assertExists()
+            // Owner Connection loads its local status asynchronously. Invoke the visible
+            // entry's accessibility action so a status update cannot move a coordinate tap.
+            compose.onNode(hasText("Campaign backup") and hasClickAction())
+                .performScrollTo().assertIsDisplayed().assertIsEnabled().performSemanticsAction(SemanticsActions.OnClick)
+            val exportBackup = hasText("Export campaign backup") and hasClickAction()
+            compose.waitUntil(10_000) {
+                shadowOf(Looper.getMainLooper()).idle()
+                compose.onAllNodes(exportBackup).fetchSemanticsNodes().size == 1
+            }
+            compose.onNode(exportBackup).performScrollTo().assertIsDisplayed().assertIsEnabled()
+            compose.onNode(hasText("Choose file for preview") and hasClickAction())
+                .performScrollTo().assertIsDisplayed().assertIsEnabled()
             compose.onAllNodesWithText("Close").onLast().performClick()
             compose.onNodeWithTag("navigation-Character").performClick()
             compose.onNodeWithText("Tools").performClick()
