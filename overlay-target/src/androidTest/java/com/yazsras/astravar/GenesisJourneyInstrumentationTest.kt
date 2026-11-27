@@ -57,6 +57,28 @@ class GenesisJourneyInstrumentationTest {
                 if (left) bounds.left + inset else bounds.right - inset, bounds.centerY(), 25))
         device.waitForIdle(1_000)
     }
+    private fun revealFeatureEditor(minimumTarget: Int): Rect {
+        val label = "Edit identity & features"
+        val viewport = pageViewport()
+        assertTrue("The enlarged Features page has at least one touch target of scrollable space",
+            viewport.height() >= minimumTarget)
+        repeat(6) {
+            val marker = find(label)
+            val button = ui.controlBounds(By.text(label).pkg(product), "Feature editor button", refreshCache = true)
+            if (button.height() >= minimumTarget && button.width() >= minimumTarget &&
+                marker.top > viewport.top && marker.bottom < viewport.bottom) return button
+            // Compose can expose the first pixel of the label at a scroll edge.
+            // Move only the content, then measure this same button again before tapping.
+            val middle = viewport.centerY()
+            val offset = viewport.height() / 3
+            val start = if (marker.centerY() >= middle) middle + offset else middle - offset
+            assertTrue("Scroll the Features page to expose its editor",
+                device.swipe(viewport.centerX(), start, viewport.centerX(), middle, 30))
+            device.waitForIdle(1_000)
+        }
+        error("The enlarged Features page did not expose a 48dp editor button in $viewport")
+    }
+
     private fun capture(name: String, primary: String, vararg labels: String) {
         labels.forEach(::find)
         ui.captureStablePage(File(files, "genesis-$name.png"), product, primary, labels.map { By.text(it).pkg(product) })
@@ -315,8 +337,13 @@ class GenesisJourneyInstrumentationTest {
             assertTrue("Compact HP remains a 48dp touch target", hp.width() >= minimumTarget && hp.height() >= minimumTarget)
             val controls = ui.controlBounds(By.desc("Character controls").pkg(product), "Compact character controls")
             assertTrue("Compact controls remain a 48dp touch target", controls.width() >= minimumTarget && controls.height() >= minimumTarget)
+            val editor = revealFeatureEditor(minimumTarget)
             capture("landscape-font200", "Character", "Edit identity & features")
-            ui.touch(controls, "Open all character controls at 200 percent")
+            ui.touch(editor, "Open the visible Features editor at 200 percent")
+            find("Identity & features")
+            tap("Close")
+            assertSection("Features")
+            ui.tap(By.desc("Character controls").pkg(product), "Open all character controls at 200 percent", refreshCache = true)
             ui.descriptionBounds("Switch character", product)
             tap("Health")
             find("Damage or healing amount")
