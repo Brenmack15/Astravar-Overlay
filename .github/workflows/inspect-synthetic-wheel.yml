@@ -1,0 +1,44 @@
+name: Inspect synthetic retained wheel accessibility
+on:
+  push:
+    branches: [verification/ascension-update-wheel-inspector-20261127]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Inspect exact retained synthetic wheel hierarchy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          path="/repos/$GITHUB_REPOSITORY/actions/artifacts/15170139567"
+          test "$(gh api "$path" --jq .workflow_run.id)" = 45932147515
+          test "$(gh api "$path" --jq .workflow_run.head_sha)" = 1d57b52cab13cc7d25419cb93c35e25c927fd00a
+          test "$(gh api "$path" --jq .name)" = remaining-android16-journeys
+          gh api "$path/zip" > "$RUNNER_TEMP/synthetic.zip"
+          echo "e6355ad840dafbe709a2f64920228dd1fda62a2382d55f879b3bd2523167cc3f  $RUNNER_TEMP/synthetic.zip" | sha256sum -c -
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          from zipfile import ZipFile
+          from xml.etree import ElementTree as ET
+          with ZipFile(Path(os.environ['RUNNER_TEMP'])/'synthetic.zip') as z:
+              target="emulator-evidence/failure-UpdatePreservationInstrumentationTest-retainedRollAndPartyNavigationAfterSameKeyUpdate.xml"
+              names=[name for name in z.namelist() if name in {target,'validation/'+target}]
+              assert len(names)==1,names
+              data=z.read(names[0])
+              print("Synthetic native hierarchy SHA-256",hashlib.sha256(data).hexdigest())
+              xml=ET.fromstring(data)
+              parents={c:p for p in xml.iter() for c in p}
+              def show(n):
+                  return {k:n.get(k) for k in ('text','class','content-desc','selectable','selected','enabled','checked','checkable','clickable','bounds') if n.get(k)}
+              for n in xml.iter('node'):
+                  if n.get('package')!='com.yazsras.astravar':
+                      continue
+                  if n.get('content-desc','').endswith(('element','Force')) or n.get('text','') in {'Cold','Force','Fire','Lightning','Radiant','Acid','Poison','Choose an element','Neutral Force'}:
+                      print("WHEEL",json.dumps({'node':show(n),'parent':show(parents[n]),'children':[show(c) for c in n]},sort_keys=True))
+          PY
