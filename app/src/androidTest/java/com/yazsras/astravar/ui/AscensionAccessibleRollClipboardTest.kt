@@ -1,5 +1,6 @@
 package com.yazsras.astravar.ui
 
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
 import android.os.Build
 import android.view.KeyEvent
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.lifecycle.Lifecycle
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -32,17 +34,17 @@ import java.util.ArrayDeque
 class AscensionAccessibleRollClipboardTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
-    private fun walk(root: AccessibilityNodeInfo?, description: String): AccessibilityNodeInfo? {
-        if (root == null) return null
+    private fun nodes(root: AccessibilityNodeInfo?): List<AccessibilityNodeInfo> {
+        val found = mutableListOf<AccessibilityNodeInfo>()
+        if (root == null) return found
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
-        while (queue.isNotEmpty()) {
+        while (queue.isNotEmpty() && found.size < 2048) {
             val n = queue.removeFirst()
-            if (n.isVisibleToUser && n.contentDescription?.toString() == description &&
-                n.actionList.any { it.id == AccessibilityNodeInfo.ACTION_LONG_CLICK }) return n
+            found += n
             for (i in 0 until n.childCount) n.getChild(i)?.let(queue::addLast)
         }
-        return null
+        return found
     }
 
     @Test fun screenReaderOptionsEnterOnePlayerFaceAndPasteItsExactNamedResultInASecondPackage() {
@@ -54,6 +56,15 @@ class AscensionAccessibleRollClipboardTest {
         assertEquals(37, Build.VERSION.SDK_INT)
         device.wakeUp()
         device.executeShellCommand("wm dismiss-keyguard")
+        compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
+        compose.waitUntil(15000) { compose.runOnUiThread { compose.activity.hasWindowFocus() } }
+        val automation=instrumentation.uiAutomation
+        val service=automation.serviceInfo
+        val originalFlags=service.flags
+        val originalFeedback=service.feedbackType
+        service.flags=service.flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+        service.feedbackType=originalFeedback or AccessibilityServiceInfo.FEEDBACK_SPOKEN
+        automation.serviceInfo=service
         val local = Room.inMemoryDatabaseBuilder(context, ReforgeDb::class.java).build()
         val ledger = Room.inMemoryDatabaseBuilder(context, CampaignLedgerDb::class.java).build()
         val repo = ReforgeRepository(local)
@@ -66,11 +77,23 @@ class AscensionAccessibleRollClipboardTest {
                 ReforgeCharacterSheet(CampaignLedgerRepository(ledger),repo)
             } } }
             compose.waitUntil(20000) { compose.onAllNodesWithTag("reforge-check-STR").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("reforge-check-STR").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("reforge-check-STR").performScrollTo().assertIsDisplayed().assertContentDescriptionEquals("Strength check +3")
             var exported: AccessibilityNodeInfo? = null
-            compose.waitUntil(15000) {
-                exported = walk(instrumentation.uiAutomation.rootInActiveWindow, "Strength check +3")
-                exported != null
+            var details = ""
+            try {
+                compose.waitUntil(18000) {
+                    val roots=automation.windows.mapNotNull { it.root } + listOfNotNull(automation.rootInActiveWindow)
+                    val visible=roots.flatMap(::nodes)
+                    val described=visible.filter { n->n.packageName==context.packageName && !n.contentDescription.isNullOrBlank() }
+                    details=described.joinToString("\n"){ n->"${n.className} ${n.contentDescription} visible=${n.isVisibleToUser} actions=${n.actionList.joinToString { it.id.toString()+"/"+it.label }}" }.take(8000)
+                    exported=described.firstOrNull { n->n.contentDescription.toString().contains("Strength check +3") &&
+                        n.actionList.any { it.id==AccessibilityNodeInfo.ACTION_LONG_CLICK } }
+                    exported != null
+                }
+            } catch (failure: AssertionError) {
+                throw AssertionError("Framework options absent. Focused package ${device.currentPackageName}.\n$details", failure)
+            } catch (failure: androidx.compose.ui.test.ComposeTimeoutException) {
+                throw AssertionError("Framework options absent. Focused package ${device.currentPackageName}.\n$details", failure)
             }
             assertTrue(requireNotNull(exported).performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK))
             val manual = hasText("Enter physical dice faces") and hasClickAction()
@@ -99,6 +122,9 @@ class AscensionAccessibleRollClipboardTest {
             assertEquals(listOf(only),runBlocking { repo.rollHistory(actor.id).first() })
             assertEquals(before,runBlocking { requireNotNull(repo.get(actor.id)) })
         } finally {
+            service.flags=originalFlags
+            service.feedbackType=originalFeedback
+            automation.serviceInfo=service
             device.pressBack()
             ledger.close()
             local.close()
