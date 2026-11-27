@@ -1,0 +1,43 @@
+name: Verify the responsive sheet requirements and signed named results
+on:
+  push:
+    branches: ['verification/ascension-sheet-trace-check-20261127']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: d22237bbadd8465120ef59b832cc014db7841bf6
+          persist-credentials: false
+      - name: Check release requirement, evidence and registered protocol references
+        run: python3 tools/ascension_trace_check.py
+      - name: Verify zero, negative, natural, discarded and typed non-check outcomes
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {observed} from './backend/owner-bridge/cloud-mechanics-rolls.mjs';
+          const cases=[
+            ['Strength Check',20,3,'sum',[17],true,'Strength Check: (17) + 3 = 20'],
+            ['Constitution Check',20,-1,'sum',[1],true,'Constitution Check: (Nat 1) − 1 = 0'],
+            ['Dexterity Saving Throw',20,-2,'sum',[1],true,'Dexterity Saving Throw: (Nat 1) − 2 = -1'],
+            ['Investigation',20,4,'highest',[2,20],true,'Investigation: ([2], Nat 20) + 4 = 24'],
+            ['Initiative',20,0,'lowest',[20,4],true,'Initiative: ([20], 4) + 0 = 4'],
+            ['Impact',20,0,'sum',[20],false,'Impact: (20) + 0 = 20'],
+            ['Independent custom damage',6,-3,'sum',[1,1],false,'Independent custom damage: (1, 1) − 3 = -1']
+          ];
+          for(const [name,sides,flat,keep,faces,eligible,expected] of cases){
+            const evidence={origin:'player_physical',faces:[...faces]};
+            const original=structuredClone(evidence);
+            const result=observed(name,faces.length,sides,flat,keep,evidence,eligible);
+            assert.equal(result.text,expected);
+            assert.equal(result.origin,'player_physical');
+            assert.deepEqual(result.faces.map(v=>v.value),faces);
+            assert.deepEqual(evidence,original);
+            assert.equal(result.total,Number(expected.slice(expected.lastIndexOf('= ')+2)));
+          }
+          console.log(cases.length+' exact named outcomes, preserved faces, ownership and inputs');
+          JS
