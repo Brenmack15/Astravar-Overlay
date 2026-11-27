@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 4aa4cb04e283dd62291a6c685bb7f66f0b724f40
+          ref: 1fc2a511bda5bf00478b27d36ab387be90b0d449
           persist-credentials: false
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
@@ -63,6 +63,7 @@ jobs:
           device shell input keyevent KEYCODE_WAKEUP
           device shell wm dismiss-keyguard
           mkdir -p validation/sheet
+          device shell cmd package query-services --brief -a android.accessibilityservice.AccessibilityService | tee validation/sheet/stock-reader-services.txt
           timeout -k 5s 240s adb -s "$serial" shell am instrument -w -r -e class com.yazsras.astravar.ui.AscensionAccessibleRollClipboardTest "$product.test/androidx.test.runner.AndroidJUnitRunner" | tee validation/sheet/paste-native.txt
           grep -q '^OK (2 tests)' validation/sheet/paste-native.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
