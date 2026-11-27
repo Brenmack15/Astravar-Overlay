@@ -1,0 +1,269 @@
+name: Isolated Android 16 archive import and rollback
+on:
+  push:
+    branches: [verification/ascension-isolated-native-imports-20261127]
+permissions:
+  contents: read
+  actions: read
+  statuses: write
+jobs:
+  journeys:
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    env:
+      ARCHIVE_RUN: '45923727140'
+      ARCHIVE_ID: '15166880758'
+      PRODUCT_SOURCE: '5e65a4c7052fe1697cbcbd03f415b85249d09b7a'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Link synthetic verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST "/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=pending -f context=isolated-campaign-imports -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" -f description='Running separate synthetic archive imports and rollback' --silent
+      - name: Recover the exact disposable test packages and archived resource observation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base="/repos/$GITHUB_REPOSITORY/actions/artifacts/$ARCHIVE_ID"
+          test "$(gh api "$base" --jq '.workflow_run.id')" = "$ARCHIVE_RUN"
+          test "$(gh api "$base" --jq '.workflow_run.head_sha')" = "$PRODUCT_SOURCE"
+          test "$(gh api "$base" --jq '.name')" = android-verification
+          git diff --exit-code "$PRODUCT_SOURCE" HEAD -- app rules build.gradle.kts settings.gradle.kts gradle.properties gradle gradlew gradlew.bat scripts/ci-emulator.sh scripts/genesis-upgrade-readback.py
+          gh api "$base/zip" >"$RUNNER_TEMP/scoped-artifact.zip"
+          echo "f69a63624470085a805790ce7831e99134f10e160d974ca60af90759f19cd4d1  $RUNNER_TEMP/scoped-artifact.zip" | sha256sum -c -
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          from zipfile import ZipFile
+          output = Path("validation")
+          output.mkdir(exist_ok=True)
+          with ZipFile(Path(os.environ["RUNNER_TEMP"]) / "scoped-artifact.zip") as archive:
+              names = set(archive.namelist())
+              assert archive.read("validation/SOURCE_COMMIT.txt").decode().strip() == os.environ["PRODUCT_SOURCE"]
+              paths = ["app/build/outputs/apk/release/app-release.apk","app/build/outputs/apk/debug/app-debug.apk","app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"]
+              paths += [f"validation/upgrade-baseline/code{code}-ci.apk" for code in (49,50,54,56,57,58)]
+              for name in paths:
+                  contents = archive.read(name)
+                  assert 65536 < len(contents) < 100000000
+                  dest = Path(name)
+                  dest.parent.mkdir(parents=True, exist_ok=True)
+                  dest.write_bytes(contents)
+                  print("Frozen disposable package", name, hashlib.sha256(contents).hexdigest())
+              failure_path = "validation/emulator-evidence/failure-GenesisUpgradeInstrumentationTest-verifyAfterUpgrade.xml"
+              matching = [name for name in names if name.endswith("/failure-GenesisUpgradeInstrumentationTest-verifyAfterUpgrade.xml")]
+              assert matching == [failure_path], matching
+              xml = ET.fromstring(archive.read(failure_path))
+              package = "com.yazsras.astravar"
+              expected = {"Resources","Genesis Legacy Retention Charges","Genesis Legacy Retention Actor","2 / 5","2/5","2/5 remaining","Limited uses","Use one","Edit"}
+              observations = []
+              for node in xml.iter("node"):
+                  if node.get("package") == package:
+                      for att in ("text","content-desc"):
+                          value = node.get(att, "")
+                          if value in expected:
+                              observations.append((att,value,node.get("bounds")))
+              print("Archived original code 59 resource screen", json.dumps(observations))
+              assert ("text","Genesis Legacy Retention Charges") in [row[:2] for row in observations]
+              assert all(("text", value) not in [row[:2] for row in observations] for value in ["2 / 5"])
+              assert any(value == "2/5 remaining" for _,value,_ in observations)
+              (output/"archived-counter.json").write_text(json.dumps(observations, indent=2))
+          PY
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Prepare the stock Android 16 emulator
+        run: |
+          bash scripts/ci-android-sdk.sh native
+          sudo apt-get -qq update
+          sudo apt-get -qy install libpulse0
+      - name: Verify each frozen ordinary APK certificate
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, re, subprocess
+          from pathlib import Path
+          tools = Path(os.environ["ANDROID_HOME"]) / "build-tools" / "35.0.0"
+          expected_cert = None
+          for code in (49,50,54,56,57,58,59):
+              path = Path("app/build/outputs/apk/release/app-release.apk") if code == 59 else Path(f"validation/upgrade-baseline/code{code}-ci.apk")
+              info = subprocess.check_output([str(tools/"aapt"),"dump","badging",str(path)], text=True).splitlines()[0]
+              assert f"package: name='com.yazsras.astravar' versionCode='{code}'" in info
+              sig = subprocess.check_output([str(tools/"apksigner"),"verify","--print-certs",str(path)], text=True)
+              cert = re.search(r"(?m)^Signer #1 certificate SHA-256 digest: ([a-f0-9]{64})$", sig).group(1)
+              assert cert != "4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847"
+              expected_cert = expected_cert or cert
+              assert cert == expected_cert, "Matched disposable certificate required"
+              print("Verified test-only package", code)
+          PY
+      - name: Use the matching previously built disposable overlay pair
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          api="/repos/$GITHUB_REPOSITORY/actions/artifacts/15169862564"
+          test "$(gh api "$api" --jq .workflow_run.id)" = 45933900764
+          test "$(gh api "$api" --jq .workflow_run.head_sha)" = 2016cf1f08b90950a8a0f67f8902cd4cb8bd130d
+          test "$(gh api "$api" --jq .name)" = compiled-overlay-android16
+          git diff --exit-code 2016cf1f08b90950a8a0f67f8902cd4cb8bd130d HEAD -- overlay-target
+          gh api "$api/zip" > "$RUNNER_TEMP/checked-overlay.zip"
+          echo "f07f47d2f33ebc79ad41a3502f35b1266de4b9800995ba65a8594db952174d7d  $RUNNER_TEMP/checked-overlay.zip" | sha256sum -c -
+          python3 - <<'PY'
+          import hashlib,os
+          from pathlib import Path
+          from zipfile import ZipFile
+          with ZipFile(Path(os.environ["RUNNER_TEMP"])/"checked-overlay.zip") as z:
+              for target in ("debug/overlay-target-debug.apk","androidTest/debug/overlay-target-debug-androidTest.apk"):
+                  matching=[name for name in z.namelist() if name.split('/')[-1]==target.split('/')[-1]]
+                  assert len(matching)==1, (target,matching)
+                  out=Path("overlay-target/build/outputs/apk")/target
+                  content=z.read(matching[0])
+                  assert 2048<len(content)<8000000,(target,len(content))
+                  out.parent.mkdir(parents=True,exist_ok=True)
+                  out.write_bytes(content)
+                  print("Current verified native overlay",target,hashlib.sha256(content).hexdigest())
+          PY
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging overlay-target/build/outputs/apk/debug/overlay-target-debug.apk | sed -n '1p' | grep -F "name='com.yazsras.astravar.target'"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging overlay-target/build/outputs/apk/androidTest/debug/overlay-target-debug-androidTest.apk | sed -n '1p' | grep -F "name='com.yazsras.astravar.target.test'"
+      - name: Regenerate populated synthetic baseline, verify byte-preserving update, then execute every original import and rollback
+        timeout-minutes: 64
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASTRAVAR_BASELINE_APK: validation/upgrade-baseline/code49-ci.apk
+          ASTRAVAR_GENESIS_BASELINE_APK: validation/upgrade-baseline/code50-ci.apk
+          ASTRAVAR_CONVERGENCE_BASELINE_APK: validation/upgrade-baseline/code54-ci.apk
+          ASTRAVAR_TEST_PACKAGE: com.yazsras.astravar
+          ASTRAVAR_TEST_APK: app/build/outputs/apk/release/app-release.apk
+          EXPECTED_VERSION_CODE: '59'
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          original = Path("scripts/ci-emulator.sh").read_text()
+          begin = 'if [ -n "${ASTRAVAR_BASELINE_APK:-}" ]; then'
+          end = "# Collect independent roll, SQLite and player journeys once before dependent"
+          assert original.count(begin) == 1 and original.count(end) == 1
+          preamble, _, rest = original.partition(begin)
+          historical, _, tail = rest.partition(end)
+          assert 'run_stage OverlayInstrumentationTest 3 420 native-baseline-overlay.txt 49' in historical
+          assert 'run_stage GenesisUpgradeInstrumentationTest#seedCode49 1 720 native-genesis-upgrade-seed.txt' in historical
+          assert "GenesisUpgradeInstrumentationTest#canonicalWriteSurvivesRestart" in historical
+          assert "dMappedCampaignRecordsRollbackAfterReadback" in tail and "genesis-crafting-readback.py" in tail
+          setup = r'''
+          run_stage OverlayInstrumentationTest 3 420 native-baseline-overlay.txt 49
+          run_stage GenesisUpgradeInstrumentationTest#seedCode49 1 720 native-genesis-upgrade-seed.txt
+          stop_product
+          timeout 15s adb -s "$astravar_serial" root
+          timeout 15s adb -s "$astravar_serial" wait-for-device
+          copy_upgrade_stores validation/remaining-seeded
+          python3 scripts/genesis-upgrade-readback.py validation/remaining-seeded --synthetic-emulator --expected-room-schema 9 --output validation/remaining-seeded.json
+          for retained_code in 50 54 56 57 58; do
+              frozen_apk="validation/upgrade-baseline/code${retained_code}-ci.apk"
+              timeout 45s adb -s "$astravar_serial" install -r "$frozen_apk"
+              timeout 25s adb -s "$astravar_serial" shell am start -W -n "$astravar_product/com.yazsras.astravar.MainActivity"
+              stop_product
+          done
+          timeout 45s adb -s "$astravar_serial" install -r "$astravar_apk"
+          run_stage GenesisUpgradeInstrumentationTest#verifyAfterUpgrade 1 360 remaining-precondition-code59.txt
+          stop_product
+          copy_upgrade_stores validation/remaining-precondition
+          python3 scripts/genesis-upgrade-readback.py validation/remaining-precondition --synthetic-emulator --expected-room-schema 9 --compare validation/remaining-seeded.json --output validation/remaining-precondition.json
+          run_stage GenesisUpgradeInstrumentationTest#canonicalWriteSurvivesRestart 1 240 remaining-precondition-heal.txt
+          stop_product
+          copy_upgrade_stores validation/remaining-start
+          python3 scripts/genesis-upgrade-readback.py validation/remaining-start --synthetic-emulator --expected-room-schema 9 --verify-write validation/remaining-precondition.json --output validation/remaining-start.json
+          '''
+          begin_import = "stop_product\ncopy_campaign_database validation/campaign-before"
+          end_import = "printf '%s\\n' 'PASS: every ordered stage recorded"
+          assert tail.count(begin_import)==1 and tail.count(end_import)==1
+          import_steps=begin_import+tail.split(begin_import)[1].split(end_import)[0]
+          assert "aDocumentPickerPreviewConfirmationAndLibrary" in import_steps
+          assert "bGuardedRollbackRestoresVerifiedSnapshot" in import_steps
+          assert "cMappedCampaignRecordsReachPlayerViews" in import_steps
+          assert "dMappedCampaignRecordsRollbackAfterReadback" in import_steps and import_steps.count("verify_mapped ")==2
+          # Capture exactly the independently measured, populated synth database and reinstall.
+          # The original import proof checks every preexisting row against its own fresh baseline.
+          update = r'''
+          run_stage UpdateFixtureInstrumentationTest 1 120 native-update-fixture.txt
+          stop_product
+          timeout 15s adb -s "$astravar_serial" root
+          timeout 15s adb -s "$astravar_serial" wait-for-device
+          snapshot_stores validation/import-update-before.sha256
+          timeout -k 5s 45s adb -s "$astravar_serial" install -r "$astravar_apk" | tee validation/update-install.txt
+          grep -q Success validation/update-install.txt
+          snapshot_stores validation/import-update-after.sha256
+          diff -u validation/import-update-before.sha256 validation/import-update-after.sha256 >validation/import-update-difference.txt
+          '''
+          location=Path(os.environ["RUNNER_TEMP"])/"remaining-journeys.sh"
+          location.write_text(preamble + setup + update + "\n" + import_steps)
+          PY
+          python3 - <<'PY'
+          import json, os, re, subprocess, time
+          from pathlib import Path
+          env = os.environ.copy()
+          env.pop("GH_TOKEN",None)
+          env.pop("GITHUB_TOKEN",None)
+          result = subprocess.Popen(["bash",os.environ["RUNNER_TEMP"]+"/remaining-journeys.sh"],env=env)
+          states = Path("validation/native-stages.tsv")
+          seen = 0
+          def post(line):
+              status,stage,name = line.split("\t")
+              if status not in ("PASS","FAIL") or not re.fullmatch(r"[A-Za-z0-9#]+",stage) or not re.fullmatch(r"[a-zA-Z0-9_.-]+\.txt",name): return
+              description=status+" "+stage
+              if status == "FAIL" and Path("validation",name).exists():
+                  stderr = Path("validation",name).read_text(errors="replace")
+                  stack = re.search(r"INSTRUMENTATION_STATUS: stack=([^\n]+)",stderr)
+                  if stack: description += " "+stack.group(1).split(": ",1)[-1]
+              subprocess.run(["gh","api","-X","POST","/repos/"+os.environ["GITHUB_REPOSITORY"]+"/statuses/"+os.environ["GITHUB_SHA"],"-f","state="+("success" if status=="PASS" else "failure"),"-f","context=journey/"+name.removesuffix(".txt"),"-f","target_url="+os.environ["GITHUB_SERVER_URL"]+"/"+os.environ["GITHUB_REPOSITORY"]+"/actions/runs/"+os.environ["GITHUB_RUN_ID"],"-f","description="+description[:137],"--silent"],check=False)
+          while True:
+              if states.exists():
+                  lines=states.read_text().splitlines()
+                  for line in lines[seen:]:
+                      if line.count("\t")==2:post(line)
+                  seen=len(lines)
+              code=result.poll()
+              if code is not None:break
+              time.sleep(8)
+          raise SystemExit(code)
+          PY
+          test -s validation/campaign-applied-result.json
+          test -s validation/campaign-rollback-result.json
+          test -s validation/native-mapped-readback.json
+          test -s validation/native-mapped-rollback-readback.json
+          cat validation/native-stages.tsv
+          cat validation/campaign-applied-result.json validation/campaign-rollback-result.json validation/native-mapped-readback.json validation/native-mapped-rollback-readback.json
+      - name: Retain scoped synthetic import evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: isolated-android16-import-readback
+          path: |
+            validation/remaining-start.json
+            validation/native-stages.tsv
+            validation/*-result.json
+            validation/*-readback.json
+            validation/native-*.txt
+            validation/emulator-evidence/failure-*.xml
+            validation/emulator-evidence/failure-*.png
+            validation/emulator-evidence/native-campaign-verified-import.png
+            validation/emulator-evidence/native-campaign-rollback-receipt.png
+            validation/emulator-evidence/native-mapped-rollback.png
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Record private synthetic acceptance status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATE: ${{ job.status }}
+        run: |
+          state=failure
+          if [ "$JOB_STATE" = success ]; then state=success; fi
+          gh api -X POST "/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$state" -f context=isolated-campaign-imports -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" -f description='Synthetic archive import and guarded rollback run completed' --silent
