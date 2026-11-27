@@ -6,7 +6,7 @@ mkdir -p "$dir"
 qa_sdk="$ANDROID_HOME"
 export ANDROID_AVD_HOME="$RUNNER_TEMP/notification-avd"
 mkdir -p "$ANDROID_AVD_HOME"
-avd=AscensionNotificationCI
+avd=AstravarHpCI
 serial=emulator-5576
 device() { adb -s "$serial" "$@"; }
 printf 'no\n' | avdmanager create avd -f -n "$avd" -k 'system-images;android-37.0;default;x86_64' --device pixel_6
@@ -34,23 +34,9 @@ for key in "global device_provisioned" "secure user_setup_complete" "global zen_
   read -r table name <<< "$key"
   echo "Before $table $name: $(device shell settings get "$table" "$name")"
 done
-# Keep the quiet production channel. AOSP 37 hides silent status icons by default.
-preference() { python3 scripts/qa-android17-silent-icons.py "$serial" "$avd" "$@"; }
+preference() { python3 scripts/ci-android17-silent-icons.py "$serial" "$avd" "$@"; }
 was_hidden=$(preference read)
-printf 'Framework hideSilentStatusBar before test: %s\n' "$was_hidden" | tee "$dir/silent-visibility.txt"
-restore_and_stop() {
-  local code=$?
-  trap - EXIT
-  if test "$was_hidden" = true; then preference hide || code=1; else preference show || code=1; fi
-  echo "Framework hideSilentStatusBar after restoration: $(preference read)" | tee -a "$dir/silent-visibility.txt"
-  kill "$qemu_pid" 2>/dev/null || true
-  exit "$code"
-}
-trap restore_and_stop EXIT
-preference show
-test "$(preference read)" = false
-echo "Framework hideSilentStatusBar during test: false" | tee -a "$dir/silent-visibility.txt"
-device shell am start -W -a android.intent.action.MAIN -c android.intent.category.HOME | head -8
+printf 'Framework hideSilentStatusBar before registered gate: %s\n' "$was_hidden" | tee "$dir/silent-visibility.txt"
 # Restrict saved diagnostics to notification visibility and this one disposable app.
 (
   while ! test -e "$dir/collector-finished"; do
@@ -65,10 +51,24 @@ device shell am start -W -a android.intent.action.MAIN -c android.intent.categor
   done
 ) > "$dir/framework-ranking.txt" 2>&1 &
 collector_pid=$!
-set +e
-timeout 180 adb -s "$serial" shell am instrument -w -r -e class 'com.yazsras.astravar.data.AscensionNotificationNativeTest#actualSmallEmblemInStatusBarAndShadeAcrossLightAndDarkThemes' "$product.test/androidx.test.runner.AndroidJUnitRunner" | tee "$dir/test-result.txt"
-result=${PIPESTATUS[0]}
-set -e
+# Run the exact registered bootstrap function and its visibility wrapper against this fresh AVD.
+astravar_output=$dir
+astravar_product=$product
+astravar_serial=$serial
+python3 - > "$RUNNER_TEMP/notification-registered.sh" <<'PY'
+from pathlib import Path
+source = Path('scripts/ci-owner-hp-native.sh').read_text()
+function_start = source.index('run_test() {')
+print(source[function_start:source.index('\n}', function_start)+2])
+policy_start = source.index('  astravar_notification_result=0')
+print(source[policy_start:source.index('\n  git rev-parse HEAD', policy_start)])
+PY
+source "$RUNNER_TEMP/notification-registered.sh"
+result=$astravar_notification_result
+cp "$dir/notification-emblem.txt" "$dir/test-result.txt"
+restored=$(preference read)
+printf 'Framework hideSilentStatusBar after registered gate: %s\n' "$restored" | tee -a "$dir/silent-visibility.txt"
+test "$restored" = "$was_hidden"
 touch "$dir/collector-finished"
 wait "$collector_pid" || true
 device pull "/sdcard/Android/data/$product/files/ascension-notification/." "$dir/frames" >/dev/null || true

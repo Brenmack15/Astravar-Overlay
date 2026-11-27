@@ -19,6 +19,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      - name: Verify the registered bootstrap failure and restoration contracts
+        run: python3 -m unittest discover -s scripts/tests -p test_native_bootstrap_gate.py -v
       - name: Prepare the Android 17 emulator
         run: |
           sdkbin=$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)
