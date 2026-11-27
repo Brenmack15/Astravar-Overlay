@@ -1,0 +1,56 @@
+name: Astravar final source-register verification
+on:
+  push:
+    branches: ["verification/ascension-audit-final-python-20261127"]
+    paths: [".github/workflows/ascension-final-audit-python.yml"]
+permissions:
+  contents: read
+jobs:
+  verify-source-register:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: a8e55c643ebec9c2b461504227d998520df04a8f
+          persist-credentials: false
+      - name: Verify frozen source-line index, matrices, staged release input and independent map
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "a8e55c643ebec9c2b461504227d998520df04a8f"
+          python - <<'PY'
+          import csv, hashlib, io, json, os, runpy
+          from pathlib import Path
+          original_lines = [29,30,31,32,40,41,42,43,44,52,53,54,55,56,60,61,62,66,67,68,72,73,74,78,79,80,90,91,92,93,94,95,96,97,103,104,105,106,107,111,112,113,114,132,133,134,135,136,137,138,139,140,141,164,165,166,167,179,180,181,182,183,189,190,191,192,210,211,212,213,214,215,216,217,231,232,233,234,235,236,240,241,242,243,244,245,246,250,251,252,253,254,268,269,270,271,272,273,274,278,279,280,281,282,296,297,298,299,300,304,305,306,307,317,318,319,320,321,337,338,339,340,341,342,343,347,348,349,350,354,355,356,357,358,359,360,368,369,370,371,372,373,379,380,381,395,396,397,398,399,403,404,405,406,410,411,412,416,417,418,419,429,430,431,432,433,445,446,447,448,449,461,462,463,464,465,466,467,481,482,483,484,485,486,487,488,492,493,494,495,496,506,507,508,509,510,511,530,531,532,533,545,546,547,548,560,561,562,563,564,565,577,578,579,580,581,599,600,601,605,606,607,611,612,616,617,618,638,639,640,641,642,643,647,648,649,650,651,655,656,668,669,670,671,672,673,677,678,679,680,681,682,692,693,694,708,709,710,711,715,716,720,721,725,726,727,741,742,743,747,748,749,750,754,755,756,757,761,762,763,767,768,769,770,774,775,783,784,785,786,787,788,789,801,802,806,807,808,809,810,811,815,816,817,818,830,831,832,833,837,838,839,853,854,858,859,863,864,868,869,873,874,888,889,890,894,895,896,897,898,908,909,910,911,912,913,921,922,923,924,925,926,927,931]
+          assert len(original_lines) == len(set(original_lines)) == 344
+          assert hashlib.sha256(",".join(map(str, original_lines)).encode()).hexdigest() == "750616a772da073ba1ecbaf31185c4f5ced32ca1f5d63c863128b89f21b7e545"
+          line_set = set(original_lines)
+          target = Path(os.environ["RUNNER_TEMP"]) / "source-line-index.md"
+          # Each marker retains its authorized source-line identity; only non-sensitive line numbers are required here.
+          target.write_text("\n".join("- [ ]" if line in line_set else "" for line in range(1, 950))+"\n")
+          folder = Path("docs/ascension")
+          cross = folder / "verification/release-cross-check.csv"
+          assert hashlib.sha256(cross.read_bytes()).hexdigest() == "ba00098a348fdc1d9da98681241d57dac4a8ca2f52846802396b369a206915f1"
+          rows = list(csv.DictReader(io.StringIO(cross.read_text())))
+          assert len(rows) == len({r["id"] for r in rows}) == 793
+          assert {int(r["id"].split("-")[-1]) for r in rows if r["original_backlog_checkbox"]=="yes"} == line_set
+          for table in ("requirements","requirements-backlog","requirements-fixtures","capabilities"):
+              loc = str(folder / (table+".csv"))
+              source = {r["id"]:r for r in csv.DictReader(open(loc))}
+              selected = [r for r in rows if r["register"]==loc]
+              assert len(source)==len(selected)
+              for copied in selected:
+                  live = source[copied["id"]]
+                  assert copied["status"] == live["status"] and copied["candidate_evidence_ids"] == live["candidate_evidence_ids"]
+                  assert copied["acceptance_id"] == live["planned_acceptance_id"]
+          ci = folder / "verification/code59-signing-input.json"
+          assert hashlib.sha256(ci.read_bytes()).hexdigest() == "052abace8cc9d7a0c04dd19ba3aaed8927860cc38dfcb8564d64127ace0daada"
+          selected = json.loads(ci.read_bytes())
+          checked = runpy.run_path("scripts/owner_release_sign.py")["check_ci_evidence"](selected, "9ded49ee06b22f389c4d5f5553f975cb02fa762f", "f34d8562f6c13fe775bd4ae79ed79f8d837227cfa07091c39332ab622accf309")
+          assert checked["artifact"]["artifact_id"] == 15185466555
+          print("793 unique linked rows and 344 exact independent source-line IDs; literal schema-2 release input validated without accessing signing material")
+          PY
+          python tools/ascension_trace_check.py --backlog "$RUNNER_TEMP/source-line-index.md"
+          python tools/ascension_trace_check.py --sync-wire --backlog "$RUNNER_TEMP/source-line-index.md"
+          git diff --exit-code -- docs/ascension
