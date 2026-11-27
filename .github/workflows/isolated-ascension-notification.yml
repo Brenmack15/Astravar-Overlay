@@ -1,0 +1,55 @@
+name: Isolated Android 17 notification verification
+on:
+  push:
+    branches: [verification/ascension-notification-20261127]
+permissions:
+  contents: read
+  actions: read
+  statuses: write
+jobs:
+  notification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 32
+    steps:
+      - name: Link this isolated run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=pending -f context=api37-notification -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" -f description='Checking the actual quiet notification on a fresh Android 17 device' --silent
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Prepare the Android 17 emulator
+        run: |
+          sudo chmod a+rw /dev/kvm
+          bash scripts/ci-android17-sdk.sh
+      - name: Retrieve the exact synthetic debug pair
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          src=/repos/$GITHUB_REPOSITORY/actions/artifacts/15166880758
+          test "$(gh api "$src" --jq '.workflow_run.head_sha')" = 5e65a4c7052fe1697cbcbd03f415b85249d09b7a
+          test "$(gh api "$src" --jq '.workflow_run.id')" = 45923727140
+          gh api "$src/zip" > "$RUNNER_TEMP/test-pair.zip"
+          unzip -p "$RUNNER_TEMP/test-pair.zip" app/build/outputs/apk/debug/app-debug.apk > "$RUNNER_TEMP/notification-target.apk"
+          unzip -p "$RUNNER_TEMP/test-pair.zip" app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk > "$RUNNER_TEMP/notification-tests.apk"
+          sha256sum "$RUNNER_TEMP/notification-target.apk" "$RUNNER_TEMP/notification-tests.apk"
+      - name: Verify notification rendering and actual ranking
+        run: bash scripts/qa-api37-notification.sh
+      - name: Retain synthetic UI measurements
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: api37-notification
+          path: validation/api37-notification/
+          retention-days: 5
+      - name: Record the isolated result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ job.status }}
+        run: |
+          result=failure
+          if test "$RESULT" = success; then result=success; fi
+          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$result" -f context=api37-notification -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" -f description='Android 17 isolated notification verification' --silent
