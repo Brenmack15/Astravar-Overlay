@@ -224,13 +224,21 @@ class UpdatePreservationInstrumentationTest {
             }
             assertNotNull(ui.bounds(By.desc("Neutral Force").pkg(product), "Neutral Force at width $width"))
             if (ascension) {
-                ui.snapshot(By.desc("Cold element").pkg(product), "Previously selected Cold variant", refreshCache = true) { node ->
-                    true.takeIf { (node.isSelected || node.isChecked) && node.isEnabled }
-                }
-                for (locked in listOf("Radiant", "Psychic", "Necrotic")) {
-                    ui.snapshot(By.desc("$locked locked element").pkg(product), "$locked remains locked", refreshCache = true) { node ->
-                        true.takeIf { !node.isEnabled }
+                val locked = setOf("Radiant", "Psychic", "Necrotic")
+                for (name in outer + "Force") {
+                    val description = when {
+                        name == "Force" -> "Neutral Force"
+                        name in locked -> "$name locked element"
+                        else -> "$name element"
                     }
+                    val state = ui.snapshot(By.desc(description).pkg(product),
+                        "Radio state of $description at width $width", refreshCache = true) { label ->
+                        // Android may expose the description on a child of its checkable radio.
+                        generateSequence(label) { it.parent }.firstOrNull { it.isCheckable }
+                            ?.let { radio -> radio.isChecked to radio.isEnabled }
+                    }
+                    assertEquals("Only the stored Cold element is selected: $name", name == "Cold", state.first)
+                    assertEquals("The source determines whether $name is available", name !in locked, state.second)
                 }
             }
             assertTrue(device.takeScreenshot(File(files, "element-wheel-width-$width.png")))
