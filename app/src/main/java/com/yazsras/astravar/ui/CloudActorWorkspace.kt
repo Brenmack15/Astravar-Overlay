@@ -59,8 +59,8 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
         featureCursor=page.lastOrNull()?.cloudText("id")?.takeIf{page.size==50}
     }
     var overlay by rememberSaveable { mutableStateOf<String?>(null) }
-    var rollOption by rememberSaveable { mutableStateOf<String?>(null) }
-    var selectedAbility by rememberSaveable { mutableStateOf<String?>(null) }
+    var rollOption by rememberSaveable(actorId) { mutableStateOf<String?>(null) }
+    var selectedAbility by rememberSaveable(actorId) { mutableStateOf<String?>(null) }
     var featureDetail by rememberSaveable(actorId) { mutableStateOf<String?>(null) }
     var profileTab by rememberSaveable { mutableStateOf("Defenses") }
     val pager=rememberPagerState { sections.size }
@@ -317,7 +317,7 @@ private fun signed(value: String?) = value?.toIntOrNull()?.let { if (it >= 0) "+
             if(kind=="skill"&&actorId!=null){
                 val definition=sheet.obj("skillDefinitions").obj(key)
                 val pinned=definition.value("pinned")=="true"
-                PlayerTextButton({rollOption=null;openOperation("set_skill_training",args("actorId" to actorId,"skillId" to key))},enabled=online){Text("Edit skill training")}
+                PlayerTextButton({rollOption=null;openOperation("set_skill_training",cloudSkillTrainingDraft(actorId,key,definition))},enabled=online){Text("Edit skill training")}
                 PlayerTextButton({rollOption=null;commit("set_skill_pin",buildJsonObject{
                     put("actorId",actorId);put("skillId",key);put("pinned",!pinned)})},enabled=online){Text(if(pinned)"Unpin skill" else "Pin skill")}
                 if(definition.value("standard")=="false")PlayerTextButton({
