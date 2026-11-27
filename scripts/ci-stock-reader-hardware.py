@@ -6,39 +6,97 @@ import subprocess
 import sys
 import time
 
+from google.protobuf.empty_pb2 import Empty
 import grpc
 import emulator_controller_pb2 as pb
 import emulator_controller_pb2_grpc as stubs
 
-def control():
-    roots = [pathlib.Path.home()/".android"/"avd"/"running",
-             pathlib.Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/"+str(os.getuid())))/"avd"/"running",
-             pathlib.Path("/tmp")/("android-"+os.environ["USER"])/"avd"/"running"]
-    for root in roots:
-        for file in root.glob("pid_*.ini"):
-            values=dict(line.split("=",1) for line in file.read_text().splitlines() if "=" in line)
-            if values.get("avd.name")!="AstravarStockReader" and values.get("avd.id")!="AstravarStockReader": continue
-            assert values.get("port.serial")=="5582" and values["grpc.token"]
-            address="127.0.0.1:"+str(int(values["grpc.port"]))
-            ch=grpc.insecure_channel(address)
-            grpc.channel_ready_future(ch).result(timeout=8)
-            return stubs.EmulatorControllerStub(ch),[("authorization","Bearer "+values["grpc.token"])]
-    raise RuntimeError("Missing authenticated advertisement for the single owned emulator")
+adb=["adb","-s","emulator-5582"]
 
-controller,metadata=control()
+def read_host_advertisement():
+    # Pin the advertised local file to this runner's owned QEMU launch log.
+    log=pathlib.Path(os.environ["RUNNER_TEMP"])/"stock-reader-emulator.log"
+    root=pathlib.Path(os.environ["XDG_RUNTIME_DIR"])
+    paths=set(root.rglob("pid_*.ini"))
+    for line in log.read_text(errors="replace").splitlines():
+        if "Advertising in:" in line:
+            paths.update(pathlib.Path(p) for p in re.findall(r'(/[^\s\x1b"<>]*pid_[0-9]+\.ini)',line))
+    for folder in [pathlib.Path.home()/".android",pathlib.Path("/run/user")/str(os.getuid()),
+                   pathlib.Path("/tmp")/("android-"+os.environ["USER"]),pathlib.Path("/tmp/avd/running")]:
+        if folder.exists():
+            paths.update(folder.glob("avd/running/pid_*.ini"))
+            paths.update(folder.glob("pid_*.ini"))
+    for file in sorted(paths):
+        if not file.is_file() or file.is_symlink() or file.stat().st_uid != os.getuid(): continue
+        values=dict(line.split("=",1) for line in file.read_text().splitlines() if "=" in line)
+        name=values.get("avd.id") or values.get("avd.name")
+        serial=values.get("port.serial")
+        port=values.get("grpc.port")
+        token=values.get("grpc.token")
+        print("Local QEMU advertisement: owned AVD="+str(name=="AstravarStockReader")+
+              " console="+str(serial=="5582")+" port="+str(bool(port))+" authenticated="+str(bool(token)),flush=True)
+        if serial!="5582" or name not in (None,"AstravarStockReader") or not token or not port: continue
+        ch=grpc.insecure_channel("127.0.0.1:"+str(int(port)))
+        try:
+            grpc.channel_ready_future(ch).result(timeout=6)
+            endpoint=stubs.EmulatorControllerStub(ch)
+            auth=[("authorization","Bearer "+token)]
+            endpoint.getStatus(Empty(),metadata=auth,timeout=5)
+            return endpoint,auth
+        except (grpc.RpcError,grpc.FutureTimeoutError):
+            print("SDK controller did not accept the private session; using authenticated owned console",flush=True)
+            ch.close()
+    return None,None
+
+controller,metadata=read_host_advertisement()
+assert subprocess.check_output(adb+["emu","avd","name"],text=True,timeout=8).splitlines()[0].strip()=="AstravarStockReader"
+
+def console_events(events):
+    raw=subprocess.run(adb+["emu","event","send"]+["%d:%d:%d"%event for event in events]+["0:0:0"],
+                       timeout=4,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,check=True)
+    if "OK" not in raw.stdout or "KO:" in raw.stdout: raise ValueError("Emulator refused the hardware event")
+
+screen=tuple(map(int,re.search(r"Physical size: (\d+)x(\d+)",subprocess.check_output(adb+["shell","wm","size"],text=True)).groups()))
+def axes_for_console():
+    # Use the actual x/y raw caps recorded by the OS, never assume they are screen pixels.
+    desc=subprocess.check_output(adb+["shell","dumpsys","input"],text=True,timeout=8)
+    axes=re.search(r"Raw Touch Axes:.*?\bX:\s*min=(\d+),\s*max=(\d+).*?\bY:\s*min=(\d+),\s*max=(\d+)",desc,re.S)
+    if not axes: raise RuntimeError("No reported raw touch coordinates on the owned emulator")
+    return tuple(map(int,axes.groups()))
+
+axes=None if controller else axes_for_console()
+print("Physical input route "+("local authenticated emulator controller" if controller else "authenticated emulator console, reported touch axes "+str(axes)),flush=True)
+finger=False
+tracking=0
 def touch(x,y,p):
-    assert 0<=x<2000 and 0<=y<4000 and 0<=p<=255
-    controller.sendTouch(pb.TouchEvent(touches=[pb.Touch(x=x,y=y,identifier=0,pressure=p)]),metadata=metadata,timeout=5)
+    global finger,tracking
+    assert 0<=x<screen[0] and 0<=y<screen[1] and 0<=p<=255
+    if controller:
+        controller.sendTouch(pb.TouchEvent(touches=[pb.Touch(x=x,y=y,identifier=0,pressure=p)]),metadata=metadata,timeout=5)
+        return
+    if not p:
+        console_events([(3,47,0),(3,57,-1),(1,330,0)])
+        finger=False
+        return
+    rx=axes[0]+round(x*(axes[1]-axes[0])/(screen[0]-1))
+    ry=axes[2]+round(y*(axes[3]-axes[2])/(screen[1]-1))
+    entries=[(3,47,0)]
+    if not finger:
+        tracking+=1
+        entries.append((3,57,tracking))
+    console_events(entries+[(3,53,rx),(3,54,ry),(3,58,p),(1,330,1)])
+    finger=True
 
 def chord(keys):
     allowed={"KEYCODE_META_LEFT":125,"KEYCODE_ALT_LEFT":56,"KEYCODE_SHIFT_LEFT":42,"KEYCODE_ENTER":28,"KEYCODE_SPACE":57,"KEYCODE_CTRL_LEFT":29,"KEYCODE_C":46,"KEYCODE_BACK":158}
     assert 1<=len(keys)<=3 and all(k in allowed for k in keys)
-    for k in keys:
-        controller.sendKey(pb.KeyboardEvent(codeType=pb.KeyboardEvent.Evdev,eventType=pb.KeyboardEvent.keydown,keyCode=allowed[k]),metadata=metadata,timeout=5)
-        time.sleep(.030)
-    for k in reversed(keys):
-        controller.sendKey(pb.KeyboardEvent(codeType=pb.KeyboardEvent.Evdev,eventType=pb.KeyboardEvent.keyup,keyCode=allowed[k]),metadata=metadata,timeout=5)
-        time.sleep(.020)
+    for values,pressed in [(keys,True),(list(reversed(keys)),False)]:
+        for key in values:
+            if controller:
+                event=pb.KeyboardEvent.keydown if pressed else pb.KeyboardEvent.keyup
+                controller.sendKey(pb.KeyboardEvent(codeType=pb.KeyboardEvent.Evdev,eventType=event,keyCode=allowed[key]),metadata=metadata,timeout=4)
+            else: console_events([(1,allowed[key],int(pressed))])
+            time.sleep(.025)
 
 def send(command, args):
     if command=="EXPLORE":
