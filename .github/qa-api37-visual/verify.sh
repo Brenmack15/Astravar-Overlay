@@ -10,12 +10,16 @@ sudo chmod 666 /dev/kvm
 export ANDROID_AVD_HOME="$RUNNER_TEMP/visual-avd" ANDROID_USER_HOME="$RUNNER_TEMP/visual-user"
 mkdir -p "$ANDROID_AVD_HOME" "$ANDROID_USER_HOME"
 printf 'no\n' | avdmanager create avd --force -n AstravarHpCI -p "$ANDROID_AVD_HOME/AstravarHpCI.avd" -k 'system-images;android-37.0;default;x86_64' --device pixel_6
-"$ANDROID_HOME/emulator/emulator" -avd AstravarHpCI -port 5584 -accel on -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader -memory 4096 >"$RUNNER_TEMP/owned-visual-avd.log" 2>&1 &
+"$ANDROID_HOME/emulator/emulator" -avd AstravarHpCI -port 5584 -accel on -no-window -no-audio -no-snapshot -no-boot-anim -writable-system -gpu swiftshader -memory 4096 >"$RUNNER_TEMP/owned-visual-avd.log" 2>&1 &
 guest=$!
 cleanup() {
   local status=$?
   trap - EXIT
   if [[ "$status" != 0 ]] && [[ "$(adb -s "$serial" emu avd name 2>/dev/null | tr -d '\r' | head -1)" == AstravarHpCI ]]; then
+    if test -f "$RUNNER_TEMP/visual-continuous.log"; then
+      grep -Ei 'system_server|system server|systemui.*ANR|FATAL EXCEPTION|Zygote|Watchdog|Kernel panic|sys.powerctl|init.*killing|boot completed|starting service.*zygote|lowmemorykiller|Fatal signal' "$RUNNER_TEMP/visual-continuous.log" | tail -240 >"$art/failed-system-service.txt" || true
+      cp "$RUNNER_TEMP/owned-visual-avd.log" "$art/failed-emulator.txt" || true
+    fi
     adb -s "$serial" shell logcat -d -s ActivityManager:E 'AndroidRuntime:E' 'Watchdog:E' > "$art/failed-guest-services.txt" || true
     adb -s "$serial" shell dumpsys window displays | awk '/mCurrentFocus/ {print}' > "$art/failed-guest-focus.txt" || true
   fi
@@ -33,9 +37,13 @@ done
 test "$(adb -s "$serial" emu avd name | tr -d '\r' | head -1)" = AstravarHpCI
 test "$(adb -s "$serial" shell getprop ro.kernel.qemu | tr -d '\r')" = 1
 test "$(adb -s "$serial" shell getprop ro.build.version.sdk | tr -d '\r')" = 37
-adb -s "$serial" root || true
-timeout 20 adb -s "$serial" wait-for-device
-test "$(adb -s "$serial" shell id -u | tr -d '\r')" = 0
+astravar_serial="$serial"
+astravar_output="$art"
+astravar_emulator_pid="$guest"
+astravar_verified_emulator=1
+astravar_expected_api=37
+source .github/qa-api37-visual/official-guest-setup.sh
+adb -s "$serial" logcat -b all -v threadtime >"$RUNNER_TEMP/visual-continuous.log" &
 for k in window_animation_scale transition_animation_scale animator_duration_scale; do
   adb -s "$serial" shell settings put global "$k" 0
 done
