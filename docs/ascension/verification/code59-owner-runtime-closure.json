@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "type": "release acceptance disposition",
+  "productSource": "9ded49ee06b22f389c4d5f5553f975cb02fa762f",
+  "versionName": "4.1.0",
+  "versionCode": 59,
+  "ownerApkSha256": "a817773f7ef933d05b7dc3773de3097292fb6bd48574e723341a524c0a70c0a3",
+  "verified": [
+    "original owner certificate and signed artifact",
+    "independent private retrieval including file size and SHA-256",
+    "all 212 optimized payload members match official CI input"
+  ],
+  "existingNativeEvidence": {
+    "runId": 45962475021,
+    "nativeJobId": 140386863924,
+    "scope": "CI-certificate Android 16 ordered chain and Android 17 code 58 to 59 upgrade with independent installed-state, UI and receipt observations"
+  },
+  "ownerCertificateUpgrade": {
+    "status": "INCOMPLETE",
+    "stockImage": "Code 58 PackageInstaller failed before commit; independent package lookup confirmed the package was absent.",
+    "automatedTestDevice": "PackageManager became available. The guest stopped before any owner APK installation.",
+    "privateGuestsTestedCode59": false,
+    "bothGuestsStopped": true,
+    "workStoppedAtOwnerRequest": true
+  },
+  "ownerSignedRuntime": [
+    {
+      "sourceRows": [
+        "BL26-0106",
+        "EQ26-0075",
+        "EQ26-0092"
+      ],
+      "scope": "Source-backed mechanical companion, owned equipment, actual pools, heavy form and immutable receipts",
+      "status": "UNMEASURED"
+    },
+    {
+      "sourceRows": [
+        "BL26-0192"
+      ],
+      "scope": "Normal signed native and authorized DM read/write for the same canonical records",
+      "status": "UNMEASURED"
+    },
+    {
+      "sourceRows": [
+        "BL26-0254"
+      ],
+      "scope": "Rendered asset and independent media receipt/readback",
+      "status": "UNMEASURED"
+    },
+    {
+      "sourceRows": [
+        "BL26-0360"
+      ],
+      "scope": "Persistent header, six ability cards and unified source/training controls",
+      "status": "UNMEASURED"
+    },
+    {
+      "sourceRows": [
+        "BL26-0419"
+      ],
+      "scope": "Archive, restore and permanent deletion of explicitly identified synthetic records",
+      "status": "UNMEASURED"
+    }
+  ],
+  "separateOwnerAcceptance": [
+    "Physical Galaxy S26 installation and use",
+    "Optional Pushy delivery under vendor device restrictions"
+  ],
+  "production": {
+    "hosting": "Awaiting separate authorization",
+    "campaignMigrated": false,
+    "cloudAuthorityActivatedForExistingCampaign": false
+  },
+  "historicalTestsRerunForThisDisposition": false
+}

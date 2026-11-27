@@ -8,7 +8,7 @@ The tested product is Astravar 4.1.0, version code 59, at `9ded49ee06b22f389c4d5
 
 Android and the registered DM exercised all 118 shared operations against the isolated authoritative service. The worker separately checked owner-only settings. The current cross-reference contains 793 engineering rows, including all 344 original checklist paragraphs. Each row links to its scoped evidence. [Requirement and capability cross-reference](verification/release-cross-check.md) · [Primary matrices](requirements.md)
 
-The isolated original-certificate Android 17 upgrade and the signed-client forms, media, training and archive tests are in progress. The named physical Galaxy, commercial transport and production hosting have separate dependencies. Phase 7 campaign migration and authority cutover require separate owner authorization. [Current release acceptance](RELEASE-GAPS.md)
+The private original-certificate code 58→59 emulator upgrade ended incomplete. The stock system service restarted during the code 58 package installation. An independent lookup found the package absent. The alternate image reached PackageManager and was stopped before installation. Neither guest tested code 59. The signed release has no completed installed observation for companion and form parity, media, the header and training, or Archive Manager and permanent deletion. The owner will conduct physical Galaxy S26 acceptance separately. Commercial Pushy delivery remains unmeasured. Production hosting and Phase 7 campaign migration require separate authorization. [Owner-runtime closure](verification/code59-owner-runtime-closure.json) · [Current release acceptance](RELEASE-GAPS.md)
 
 ## Earlier planning and implementation checkpoints
 

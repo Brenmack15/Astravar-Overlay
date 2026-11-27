@@ -13,6 +13,8 @@ Use the row ID to find the full acceptance condition, implementation paths and r
 
 The standalone CSV contains engineering identifiers, status and references. A capability, a directive and its individual acceptance tests can refer to the same observed result.
 
+The owner signed and privately received the exact release. The original-certificate private emulator upgrade ended incomplete. Signed-package native observations and the separate physical Galaxy checks remain open. The table preserves the statuses and accepted tests from that boundary. [Owner artifact](code59-owner-artifact.json) · [Owner-runtime closure](code59-owner-runtime-closure.json)
+
 **Primary source rows awaiting some or all acceptance**
 
 - PARTIAL · BL26-0072, BL26-0091, BL26-0096, BL26-0105, BL26-0106, BL26-0107, BL26-0192, BL26-0254, BL26-0360, BL26-0419, BL26-0945
