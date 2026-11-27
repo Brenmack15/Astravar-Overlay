@@ -201,7 +201,7 @@ class PlayerFirstJourneyInstrumentationTest {
         tap("Enter physical dice faces")
         enter("Faces in order (comma separated)", "13")
         tap("Validate entered dice")
-        find("13")
+        find(if (ascension) "Custom roll · 13" else "13")
         tap("Save roll")
         assertTrue("Saving returns to the current sheet and confirms the committed roll",
             device.wait(Until.hasObject(By.text(if (ascension) "Custom roll · 13" else "Roll saved · 13").pkg(product)), 10_000))
@@ -213,6 +213,26 @@ class PlayerFirstJourneyInstrumentationTest {
         tap("Dice details")
         find("13 on d20 · Modifier +0")
         capture("roll-history-breakdown")
+        if (ascension) {
+            tap("13")
+            tap("Find a saved roll")
+            val search = By.clazz("android.widget.EditText").focused(true).pkg(product)
+            ui.snapshot(search, "History search is ready to receive the copied result", refreshCache = true) { field ->
+                true.takeIf { field.isFocused && field.isEnabled }
+            }
+            assertTrue("Paste the copied result into the native search field",
+                device.pressKeyCode(KeyEvent.KEYCODE_V, KeyEvent.META_CTRL_ON))
+            ui.snapshot(search, "Named result copied from the saved physical die", refreshCache = true) { field ->
+                true.takeIf { field.text == "Custom roll: (13) = 13" }
+            }
+            ui.setFocusedField("Custom roll", product, "Filter to the saved physical roll")
+            device.pressBack()
+            ui.assertFocusedField("Custom roll", product, "Named roll filter")
+            val manual = "1d20 · Manual · Player"
+            find(manual)
+            assertEquals("Copying or filtering the result must retain exactly one player-owned manual roll",
+                listOf(manual), ui.texts(By.text(manual).pkg(product), "Saved physical result after clipboard readback"))
+        }
         instrumentation.sendStatus(0, Bundle().apply {
             putString("stream", "\nCHECKPOINT: native manual roll saved without leaving the sheet; explicit history opens the saved formula, face and modifier\n")
         })

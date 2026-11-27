@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.AstravarApp
@@ -145,12 +146,26 @@ class CloudInventionGenealogyInteropTest {
                 assertTrue(references("mount").any { it.jsonObject.cloudText("to_id")==revisionId })
             } finally { stageActivity.pause().stop().destroy() }
             command("resolve_construction_stage","""{"stageId":"mount","outcome":"completed","rollId":null,"worldTimeSpent":"One confirmed interval","evidence":"Confirmed inspection","source":"$source"}""")
-            f.refresh()
+            val projectRevision = f.refresh().version.revision
             val integrationActivity=mount()
             try {
-                projects();press("Carrier project");press("Component rules")
-                confirms("Record a proposed extraction or detachment")
+                projects()
+                node(hasText("Cloud · revision $projectRevision")).assertExists()
+                press("Carrier project")
+                val inProject = hasAnyAncestor(isDialog())
+                val projectEntry = inProject and hasClickAction()
+                // These asynchronous rows appear above the disclosure and change its physical tap position.
+                node(projectEntry and hasText("Early drawing") and hasText("Blueprint version")).assertExists()
+                node(projectEntry and hasText("Revised carrier drawing") and hasText("Blueprint version")).assertExists()
+                node(projectEntry and hasText("Assembly fitting") and hasText("completed")).assertExists()
+
+                val componentRules = compose.onNode(projectEntry and hasText("Component rules"))
+                componentRules.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
+                    .performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
+                componentRules.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
+                node(inProject and hasText("Record a proposed extraction or detachment", substring = true)).assertExists()
                 val before = f.refresh().version.revision
+                assertEquals(projectRevision, before)
                 val proposed = json("""{"eventId":"unapproved","projectId":"first","stageId":"mount","donorItemId":"lens","outputItemId":"carrier","method":"enchantment_extraction","quantity":1,"evidence":"Proposed only","source":"$source"}""")
                 val refusal = runCatching { f.command("integrate_component",proposed) }
                 assertTrue(refusal.exceptionOrNull()?.message.orEmpty().contains("INVALID_COMMAND") ||
