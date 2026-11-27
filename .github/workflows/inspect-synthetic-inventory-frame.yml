@@ -1,0 +1,61 @@
+name: Read synthetic Inventory failure frame
+on:
+  push:
+    branches: ['verification/ascension-inventory-frame-20261127']
+    paths: ['.github/workflows/inspect-synthetic-inventory-frame.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Inspect pinned synthetic Android 16 evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          api="/repos/$GITHUB_REPOSITORY/actions/artifacts/15171911113"
+          test "$(gh api "$api" --jq .workflow_run.id)" = 45933900764
+          test "$(gh api "$api" --jq .workflow_run.head_sha)" = 2016cf1f08b90950a8a0f67f8902cd4cb8bd130d
+          gh api "$api/zip" > "$RUNNER_TEMP/fixture.zip"
+          echo "dac29a24172311368ec029350ed6b5eb96ebb6fa89dfa023456133dc79117987  $RUNNER_TEMP/fixture.zip" | sha256sum -c -
+          python3 - <<'PY'
+          from hashlib import sha256
+          import json, os, struct
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          from zipfile import ZipFile
+          case="VisualRebirthJourneyInstrumentationTest-resourcesCompanionGearJournalAndLargeText"
+          with ZipFile(Path(os.environ["RUNNER_TEMP"])/"fixture.zip") as z:
+              names=z.namelist()
+              def read_single(suffix):
+                  hits=[n for n in names if n==suffix or n.endswith("/"+suffix)]
+                  assert len(hits)==1,(suffix,hits)
+                  return z.read(hits[0])
+              xml=read_single("emulator-evidence/failure-"+case+".xml")
+              failure_png=read_single("emulator-evidence/failure-"+case+".png")
+              resource=read_single("emulator-evidence/rebirth-resource-persistence.png")
+              before_reset=[n for n in names if "rebirth-failure-before-display-reset" in n]
+              print("ARCHIVE",json.dumps({"beforeResetMembers":before_reset,"UI_sha256":sha256(xml).hexdigest(),"screen":struct.unpack(">II",failure_png[16:24]),"restarted_resource_sha256":sha256(resource).hexdigest()}))
+              print("ORIGINAL COUNTER",json.dumps(json.loads(read_single("archived-journey-controls.json"))[case]))
+              tree=ET.fromstring(xml)
+              parents={n:p for p in tree.iter() for n in p}
+              for node in tree.iter("node"):
+                  if node.get("package")!="com.yazsras.astravar": continue
+                  if node.get("scrollable")=="true" or node.get("class") in ("android.widget.ScrollView","android.widget.HorizontalScrollView"):
+                      print("VIEWPORT",node.get("class"),node.get("bounds"),node.get("scrollable"))
+                  for attr in ("text","content-desc"):
+                      value=node.get(attr)
+                      if not value: continue
+                      anc=node
+                      for _ in range(6):
+                          if anc.get("clickable")=="true" or anc.get("selected")=="true" or anc not in parents: break
+                          anc=parents[anc]
+                      print("CONTROL",json.dumps([attr,value[:130],node.get("bounds"),anc.get("clickable"),anc.get("selected"),anc.get("bounds")]))
+              for name in ("native-visual-rebirth.txt",):
+                  rows=read_single(name).decode().splitlines()
+                  for s in rows:
+                      if "VisualRebirthJourneyInstrumentationTest.kt" in s or "Missing product control" in s: print("FAILURE",s[:280])
+          PY
