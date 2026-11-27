@@ -36,9 +36,9 @@ internal fun cloudTrainingDraft(actorId: String, category: String, key: String?,
 internal fun cloudSkillTrainingDraft(actorId: String, skillId: String, definition: JsonObject?): JsonObject = buildJsonObject {
     put("actorId", actorId)
     put("skillId", skillId)
-    for (field in listOf("name", "ability", "rank")) {
-        definition?.get(field)?.takeUnless { it == JsonNull }?.let { put(field, it) }
-    }
+    definition.field("name")?.let { put("name", it) }
+    definition.field("ability")?.let { put("ability", it) }
+    definition.field("rank")?.toIntOrNull()?.takeIf { it in 0..2 }?.let { put("rank", it) }
 }
 
 @Composable internal fun CloudAbilityTraining(actorId: String, stat: String, actor: JsonObject?, sheet: JsonObject?,

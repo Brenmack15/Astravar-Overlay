@@ -124,6 +124,8 @@ class CloudSheetAccessibilityInteropTest {
         node(dialog and hasText("WIS") and hasClickAction()).assertExists();press("Cancel");press("Discard")
         assertEquals(other,data(f,"b-companion"));assertEquals(before+2,revision(f))
         assertEquals(json("""{"actorId":"a","skillId":"id"}"""),cloudSkillTrainingDraft("a","id",json("""{"rank":null,"ability":null,"name":null}""")))
+        assertEquals(JsonPrimitive(2),cloudSkillTrainingDraft("a","id",json("""{"rank":"2"}"""))["rank"])
+        assertFalse("rank" in cloudSkillTrainingDraft("a","id",json("""{"rank":"unrecorded"}""")))
     }
 
     @Test @Config(sdk=[35],qualifiers="w860dp-h430dp-land-xhdpi")
