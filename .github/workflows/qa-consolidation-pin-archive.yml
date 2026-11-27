@@ -1,0 +1,50 @@
+name: Inspect the recorded consolidation pin viewport
+on:
+  push:
+    branches: [verification/ascension-skill-pins]
+    paths: ['.github/workflows/qa-consolidation-pin-archive.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Read the original fixture hierarchy and instrumentation result
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          endpoint="repos/$GITHUB_REPOSITORY/actions/artifacts/15169480338"
+          gh api "$endpoint" > "$RUNNER_TEMP/pin-archive.json"
+          gh api "$endpoint/zip" > "$RUNNER_TEMP/pin-archive.zip"
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, zipfile
+          from xml.etree import ElementTree as ET
+          tmp = pathlib.Path(os.environ["RUNNER_TEMP"])
+          package = "com.yazsras.astravar"
+          meta = json.loads((tmp/"pin-archive.json").read_text())
+          expected = "e64264a44dfb4a15f890cc6b11f74a5aa5880546e09868d25ffc072119274efd"
+          assert meta["name"] == "remaining-android16-journeys" and meta["digest"] == "sha256:" + expected
+          assert meta["workflow_run"]["id"] == 45930254901 and meta["workflow_run"]["head_sha"] == "8372986c62a7bb3707af345f28878e452ffbe52a"
+          with (tmp/"pin-archive.zip").open("rb") as file:
+              assert hashlib.file_digest(file, "sha256").hexdigest() == expected
+          with zipfile.ZipFile(tmp/"pin-archive.zip") as archive:
+              suffix = "failure-GenesisConsolidationInstrumentationTest-characterArmorSkillsAndRestart.xml"
+              candidates = [name for name in archive.namelist() if name.endswith(suffix)]
+              assert len(candidates) == 1
+              log = [name for name in archive.namelist() if name.endswith("native-genesis-consolidation.txt")]
+              assert len(log) == 1
+              assert "No fresh accessibility snapshot: persisted standard pin" in archive.read(log[0]).decode()
+              nodes = ET.fromstring(archive.read(candidates[0])).findall(".//node")
+              names = [{k:n.get(k,"") for k in ("text","content-desc","bounds","class")}
+                       for n in nodes if n.get("package")==package and (n.get("text") or n.get("content-desc"))]
+              focused = [n for n in names if re.search("pinned|unpin|arcana|alchemy|skills|acrobatics|character",n["text"]+" "+n["content-desc"],re.I)]
+              print("Captured screen", candidates[0], "package", package, "visible semantic labels",len(names))
+              print(json.dumps(focused,indent=2,ensure_ascii=False))
+              print("Visible labels in reading order:", [(n["text"] or n["content-desc"])[:80] for n in names])
+              shots = [n for n in archive.namelist() if n.endswith(suffix[:-3]+"png")]
+              assert len(shots)==1 and archive.read(shots[0])[:8] == b"\x89PNG\r\n\x1a\n"
+              print("Recorded native screenshot SHA-256", hashlib.sha256(archive.read(shots[0])).hexdigest())
+          PY
