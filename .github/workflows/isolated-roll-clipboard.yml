@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 702f55d97a2766c3673cfc85922c12514ae37661
+          ref: 4aa4cb04e283dd62291a6c685bb7f66f0b724f40
           persist-credentials: false
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
@@ -64,7 +64,7 @@ jobs:
           device shell wm dismiss-keyguard
           mkdir -p validation/sheet
           timeout -k 5s 240s adb -s "$serial" shell am instrument -w -r -e class com.yazsras.astravar.ui.AscensionAccessibleRollClipboardTest "$product.test/androidx.test.runner.AndroidJUnitRunner" | tee validation/sheet/paste-native.txt
-          grep -q '^OK (1 test)' validation/sheet/paste-native.txt
+          grep -q '^OK (2 tests)' validation/sheet/paste-native.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
