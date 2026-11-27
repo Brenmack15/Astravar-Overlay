@@ -1,0 +1,95 @@
+name: Installed connected attack-variant preservation
+on:
+  push:
+    branches: ['verification/ascension-native-variant-readback-20261127']
+    paths: ['.github/workflows/check-connected-variants.yml']
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          cache-read-only: true
+      - name: Prepare SDK and the official disposable API 37 AOSP image
+        run: |
+          bash scripts/ci-android-sdk.sh
+          bash scripts/ci-android17-sdk.sh
+      - name: Compile the unmodified product and narrow native test
+        run: bash gradlew --console=plain --build-cache :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Two installed processes read the same immutable attack choices across replacement
+        timeout-minutes: 20
+        env:
+          ASTRAVAR_BASELINE_DEBUG_APK: app/build/outputs/apk/debug/app-debug.apk
+          ASTRAVAR_VERSION_CODE: '59'
+          ASTRAVAR_BOOTSTRAP_GATE: 'true'
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          src = Path('scripts/ci-owner-hp-native.sh').read_text()
+          cutoff = 'timeout 10s adb -s "$astravar_serial" shell dumpsys connectivity >"$astravar_output/connectivity-before-tests.txt"'
+          assert src.count(cutoff) == 1
+          prefix = src.partition(cutoff)[0]
+          snapstart = 'snapshot() {'
+          snapend = 'snapshot "$astravar_output/update-before.sha256"'
+          clockstart = '# After proving fresh AVD ownership again,'
+          clockend = 'if [[ "$astravar_bootstrap_gate" == true ]]; then\n  # Each test is mandatory'
+          assert all(src.count(mark) == 1 for mark in (snapstart,snapend,clockstart,clockend))
+          snapshot = snapstart+src.partition(snapstart)[2].partition(snapend)[0]
+          clock = clockstart+src.partition(clockstart)[2].partition(clockend)[0]
+          assert 'files/ci-https-config.json' in clock and 'grep -q' in snapshot
+          steps = r'''
+          set -euo pipefail
+          verify_owned_emulator
+          node scripts/ci-ascension-cloud-gateway.mjs setup "$astravar_private" > "$astravar_output/variant-initial.json"
+          run_test 'com.yazsras.astravar.data.AscensionCloudNativeTest#pairAndCachePreStopState' pairing.txt
+          node scripts/ci-ascension-attack-variants.mjs seed "$astravar_private" > "$astravar_output/variant-seed.json"
+          run_test 'com.yazsras.astravar.data.AscensionAttackVariantNativeTest#chooseSeparateVariantsThroughTheInstalledActor' variant-before.txt 360
+          verify_owned_emulator
+          timeout 10s adb -s "$astravar_serial" shell am force-stop "$astravar_product"
+          identity() {
+            timeout 10s adb -s "$astravar_serial" shell dumpsys package "$astravar_product" | tr -d '\r' | grep -E '^ *(userId=|appId=|firstInstallTime=|versionCode=)' > "$1"
+            grep -qE '(userId|appId)=[0-9]+' "$1"
+            grep -q 'firstInstallTime=' "$1"
+            grep -q 'versionCode=59 ' "$1"
+          }
+          identity "$astravar_output/variant-package-before.txt"
+          snapshot "$astravar_output/variant-stores-before.sha256"
+          timeout 45s adb -s "$astravar_serial" install -r app/build/outputs/apk/debug/app-debug.apk | tee "$astravar_output/variant-install.txt"
+          grep -qx Success "$astravar_output/variant-install.txt"
+          identity "$astravar_output/variant-package-after.txt"
+          cmp "$astravar_output/variant-package-before.txt" "$astravar_output/variant-package-after.txt"
+          snapshot "$astravar_output/variant-stores-after.sha256"
+          cmp "$astravar_output/variant-stores-before.sha256" "$astravar_output/variant-stores-after.sha256"
+          verify_owned_emulator
+          run_test 'com.yazsras.astravar.data.AscensionAttackVariantNativeTest#reopenStoredVariantsAfterPackageReplacement' variant-after.txt 240
+          for phase in before after; do
+            adb -s "$astravar_serial" pull "/sdcard/Android/data/$astravar_product/files/ascension-cloud/variant-$phase.json" "$astravar_output/variant-$phase.json" >/dev/null
+          done
+          node scripts/ci-ascension-attack-variants.mjs verify "$astravar_private" "$astravar_output" | tee "$astravar_output/variant-proof.json"
+          '''
+          Path(os.environ['RUNNER_TEMP'],'native-variant-replace.sh').write_text(prefix+snapshot+clock+'\n'+steps+'\n')
+          PY
+          bash "$RUNNER_TEMP/native-variant-replace.sh"
+      - name: Store synthetic native and registered DM observations
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: connected-variant-replacement
+          path: |
+            validation/owner-hp-native/variant-*
+            validation/owner-hp-native/pairing.txt
+          retention-days: 7
