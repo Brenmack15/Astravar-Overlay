@@ -6,6 +6,8 @@ import android.graphics.Rect
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Direction
+import androidx.test.uiautomator.Until
 import androidx.test.uiautomator.UiDevice
 import org.junit.Assert.*
 import org.junit.Rule
@@ -130,6 +132,12 @@ class VisualRebirthJourneyInstrumentationTest {
         ui.expandDisclosure(product, "Changes & saved revisions")
         val prefix = "Use CI Native Charges · revision "
         val selector = By.textStartsWith(prefix).pkg(product)
+        // An expanded disclosure can sit flush with the viewport bottom while
+        // its first persisted change is below it. Reveal that exact named row.
+        for (attempt in 1..6) {
+            if (device.wait(Until.hasObject(selector), 500)) break
+            if (ui.scrollForObservation(product, Direction.DOWN) != true) break
+        }
         val revision = ui.snapshot(selector, "Committed change for this named resource", refreshCache = true) {
             device.findObjects(selector).singleOrNull()?.text?.removePrefix(prefix)
         }
@@ -271,6 +279,11 @@ class VisualRebirthJourneyInstrumentationTest {
                 }
                 // Read-only primary-destination captures retain their upper
                 // headings and actions for the same enlarged-text review.
+                if (ascension) {
+                    ui.ensurePrimaryTab(product, "Inventory")
+                    find("CI Native Hero Revised's equipment and campaign records")
+                    capture("party-inventory-font-$scale", "Inventory", "Add item", interactiveMarker = true)
+                }
                 ui.campaignItems(product)
                 capture("inventory-font-$scale", "Inventory", "Equipment, treasures & discoveries")
                 campaignHome()
