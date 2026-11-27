@@ -10,7 +10,7 @@ permissions:
   contents: read
 jobs:
   talkback:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 32
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -20,6 +20,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
         with:
           cache-read-only: true
@@ -139,9 +142,15 @@ jobs:
           service=com.google.android.marvin.talkback/.TalkBackService
           device shell cmd package query-services --brief --components --user 0 -a android.accessibilityservice.AccessibilityService | tr -d '\r' | grep -Fx "$service" | tee "$report/reader-service.txt"
           device shell cmd package query-services --brief --components --user 0 -a android.intent.action.TTS_SERVICE | tr -d '\r' | tee "$report/tts-service.txt"
-          device shell settings put secure enabled_accessibility_services "$service"
-          device shell settings put secure accessibility_enabled 1
-          for _ in $(seq 1 60); do device shell dumpsys accessibility | tr -d '\r' > "$RUNNER_TEMP/reader-state.txt"; if grep -q 'touchExplorationEnabled=true' "$RUNNER_TEMP/reader-state.txt" && grep -q 'Bound services:.*label=TalkBack' "$RUNNER_TEMP/reader-state.txt"; then break; fi; sleep 1; done
+          for _ in $(seq 1 90); do
+            if device shell pm list instrumentation 2>/dev/null | grep -Fq 'com.yazsras.astravar.v2uidebug.test/androidx.test.runner.AndroidJUnitRunner' &&
+               device shell settings put secure enabled_accessibility_services "$service" >/dev/null 2>&1 &&
+               device shell settings put secure accessibility_enabled 1 >/dev/null 2>&1; then
+              device shell dumpsys accessibility 2>/dev/null | tr -d '\r' > "$RUNNER_TEMP/reader-state.txt" || true
+              if grep -q 'touchExplorationEnabled=true' "$RUNNER_TEMP/reader-state.txt" && grep -q 'Bound services:.*label=TalkBack' "$RUNNER_TEMP/reader-state.txt"; then break; fi
+            fi
+            sleep 1
+          done
           awk '/attributes:.*touchExplorationEnabled|Bound services:/{print}' "$RUNNER_TEMP/reader-state.txt" | tee "$report/reader-state.txt"
           grep -q 'Bound services:.*label=TalkBack' "$report/reader-state.txt"
           grep -q 'touchExplorationEnabled=true' "$report/reader-state.txt"
@@ -150,7 +159,7 @@ jobs:
           target=com.yazsras.astravar.v2uidebug
           testclass=com.yazsras.astravar.ui.AscensionStockTalkBackTest
           echo "Preparing official emulator controller bindings"
-          /usr/bin/python3 -m venv "$RUNNER_TEMP/reader-env"
+          python -m venv "$RUNNER_TEMP/reader-env"
           "$RUNNER_TEMP/reader-env/bin/python" -m pip install --quiet --only-binary=:all: --disable-pip-version-check grpcio-tools==1.74.0
           mkdir -p "$RUNNER_TEMP/reader-proto"
           proto=$(find "$ANDROID_HOME/emulator" -name emulator_controller.proto -type f | head -1)
