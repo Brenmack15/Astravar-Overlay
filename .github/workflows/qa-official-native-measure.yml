@@ -1,0 +1,24 @@
+name: Independently read the completed Android 17 acceptance archive
+on:
+  push:
+    branches: [verification/ascension-official-native-archive-20261127]
+    paths: ['.github/qa-official-native-measure.py', '.github/workflows/qa-official-native-measure.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  retained-reading:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read exact archived images, APK update identity and stopped Room stores
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/qa-official-native-measure.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-native-archive-measurement
+          path: native-archive-measurement.json
+          if-no-files-found: error
+          retention-days: 7
