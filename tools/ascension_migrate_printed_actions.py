@@ -32,6 +32,12 @@ def printed_action_terms(row):
         verify(0 < int(reach) <= 1200 and 0 < int(dc) <= 100 and 0 < int(minutes) <= 99, "Invalid area, duration or DC")
         return {"range":int(reach),"saveAbility":ability,"saveDc":int(dc),
                 "durationSeconds":int(minutes)*60,"cost":1}
+    teleport = re.fullmatch(r"Bonus Action [A-Za-z][A-Za-z -]{0,40} <=(\d{1,3})ft to visible unoccupied destination, "
+                            r"(\d{1,2})/LR shared both forms; (?:Large|Huge|Gargantuan) [A-Za-z -]+ must arrive grounded\.",text)
+    if teleport:
+        verify(row.get("actionType") == "Bonus Action" and row.get("resourceId") and
+               0 < int(teleport[1]) <= 1200 and int(teleport[2]) > 0, "Invalid shared teleport action")
+        return {"range":int(teleport[1]),"maximum":int(teleport[2]),"cost":1}
     replacement = re.search(r"(?:^|\. )Replace at most one with ([A-Za-z][A-Za-z -]{0,40})\.(?: |$)",text)
     if replacement and len(re.findall(r"\breplace\b",text,re.I)) == 1:
         verify(not re.search(r"\b(?:if|unless|instead|proposed|optional|hypothetical|example)\b",text,re.I), "Conditional substitution")
@@ -61,6 +67,12 @@ def validate_printed_witness(source, destination, target, transform):
         if data.get("type") == "multiattack" and key == ["maximum"]:
             verify(data.get("excludedForms") and destination == ["data","substitutions",0,"maximum"] and transform=="exact",
                    "Printed substitution limit belongs to a different action")
+            return
+        if data.get("type") == "teleport" and key in (["range"],["cost"]):
+            correct = ["data","cost","amount"] if key==["cost"] else ["data","range"]
+            verify(data.get("sourceItemId") and data.get("requiresOperating") is True and
+                   data.get("timing")=="bonus_action" and not data.get("formId") and not data.get("excludedForms") and
+                   destination==correct and transform=="exact","Shared teleport requires its operating physical source and exact range or cost")
             return
         if data.get("type") == "frighten" and len(key)==1 and key[0] in ("cost","range","saveAbility","saveDc","durationSeconds"):
             correct = ["data","cost","amount"] if key == ["cost"] else ["data",*key]

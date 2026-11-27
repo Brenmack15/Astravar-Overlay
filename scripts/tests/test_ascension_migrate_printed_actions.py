@@ -35,6 +35,12 @@ class PrintedActionTermsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             printed_action_terms({**row,"description":row["description"]+" The save changes later."})
 
+    def test_shared_grounded_teleport(self):
+        row=entry("Bonus Action Phase Gate <=45ft to visible unoccupied destination, 2/LR shared both forms; Huge Golem must arrive grounded.","Bonus Action")
+        self.assertEqual(printed_action_terms(row),{"range":45,"maximum":2,"cost":1})
+        with self.assertRaises(ValueError):
+            printed_action_terms({**row,"description":row["description"].replace("visible unoccupied","any")})
+
     def test_wrong_target_field_is_rejected(self):
         attack={"kind":"attack","title":"Horn","data":{"formId":"fixture-form"}}
         path=["$printedAction","attacks","Horn","dice"]
