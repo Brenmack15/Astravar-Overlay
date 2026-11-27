@@ -32,10 +32,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
         with:
           cache-read-only: true
-      - name: Locate Android SDK and install the official API 37 system image
-        run: |
-          bash scripts/ci-android-sdk.sh
-          bash scripts/ci-android17-sdk.sh
+      - name: Locate Android command-line tools
+        run: bash scripts/ci-android-sdk.sh
+      - name: Install the official API 37 system image
+        run: bash scripts/ci-android17-sdk.sh
       - name: Build existing product and instrumented assertions
         run: bash gradlew --console=plain --build-cache :app:assembleDebug :app:assembleDebugAndroidTest
       - name: Play five attack families and source effects on a fresh emulator
