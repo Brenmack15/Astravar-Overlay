@@ -187,76 +187,12 @@ jobs:
           copy_upgrade_stores validation/remaining-start
           python3 scripts/genesis-upgrade-readback.py validation/remaining-start --synthetic-emulator --expected-room-schema 9 --verify-write validation/remaining-precondition.json --output validation/remaining-start.json
           '''
-          # A presentation failure still makes the diagnostic fail. Permit
-          # unrelated data/import evidence only once the actual Genesis flow
-          # and its existing SQLite and backup comparisons have passed.
+          # Preserve all failures at the final gate. Run dependent evidence only
+          # when the native Genesis journey and its storage comparisons succeed.
           gate = 'test "$astravar_prerequisites_ok" = 1'
           assert tail.count(gate) == 1
-          genesis = "grep -qxF 
-          location.write_text(preamble + setup + "\n" + end + tail)
-          PY
-          python3 - <<'PY'
-          import json, os, re, subprocess, time
-          from pathlib import Path
-          env = os.environ.copy()
-          env.pop("GH_TOKEN",None)
-          env.pop("GITHUB_TOKEN",None)
-          result = subprocess.Popen(["bash",os.environ["RUNNER_TEMP"]+"/remaining-journeys.sh"],env=env)
-          states = Path("validation/native-stages.tsv")
-          seen = 0
-          def post(line):
-              status,stage,name = line.split("\t")
-              if status not in ("PASS","FAIL") or not re.fullmatch(r"[A-Za-z0-9#]+",stage) or not re.fullmatch(r"[a-zA-Z0-9_.-]+\.txt",name): return
-              description=status+" "+stage
-              if status == "FAIL" and Path("validation",name).exists():
-                  stderr = Path("validation",name).read_text(errors="replace")
-                  stack = re.search(r"INSTRUMENTATION_STATUS: stack=([^\n]+)",stderr)
-                  if stack: description += " "+stack.group(1).split(": ",1)[-1]
-              subprocess.run(["gh","api","-X","POST","/repos/"+os.environ["GITHUB_REPOSITORY"]+"/statuses/"+os.environ["GITHUB_SHA"],"-f","state="+("success" if status=="PASS" else "failure"),"-f","context=journey/"+name.removesuffix(".txt"),"-f","target_url="+os.environ["GITHUB_SERVER_URL"]+"/"+os.environ["GITHUB_REPOSITORY"]+"/actions/runs/"+os.environ["GITHUB_RUN_ID"],"-f","description="+description[:137],"--silent"],check=False)
-          while True:
-              if states.exists():
-                  lines=states.read_text().splitlines()
-                  for line in lines[seen:]:
-                      if line.count("\t")==2:post(line)
-                  seen=len(lines)
-              code=result.poll()
-              if code is not None:break
-              time.sleep(8)
-          raise SystemExit(code)
-          PY
-          test -s validation/RELEASE-UI-RESULT.txt
-          cat validation/native-stages.tsv
-      - name: Retain scoped synthetic acceptance
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: remaining-android16-journeys
-          path: |
-            validation/RELEASE-UI-RESULT.txt
-            validation/remaining-start.json
-            validation/archived-counter.json
-            validation/native-stages.tsv
-            validation/*-result.json
-            validation/*-readback.json
-            validation/native-*.txt
-            validation/emulator-evidence/failure-*.xml
-            validation/emulator-evidence/failure-*.png
-            validation/emulator-evidence/genesis-upgrade-companion.png
-            validation/emulator-evidence/genesis-after-code59-sheet.png
-            validation/emulator-evidence/genesis-canonical-write-after-restart.png
-          if-no-files-found: warn
-          retention-days: 7
-      - name: Record private synthetic acceptance status
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          JOB_STATE: ${{ job.status }}
-        run: |
-          state=failure
-          if [ "$JOB_STATE" = success ]; then state=success; fi
-          gh api -X POST "/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$state" -f context=isolated-remaining-journeys -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" -f description='Native gameplay and campaign test sequence complete' --silent
-PASS\\tGenesisJourneyInstrumentationTest\\tnative-genesis.txt' validation/native-stages.tsv"
-          tail = tail.replace(gate, genesis)
+          passed = "PASS\tGenesisJourneyInstrumentationTest\tnative-genesis.txt"
+          tail = tail.replace(gate, 'grep -qxF "' + passed + '" validation/native-stages.tsv')
           final = "printf '%s\\n' 'PASS: every ordered stage recorded"
           assert tail.count(final) == 1
           tail = tail.replace(final, gate + "\n" + final)
