@@ -57,6 +57,7 @@ class CloudSheetAccessibilityInteropTest {
             seed("set_skill_training","""{"actorId":"a-artisan","skillId":"tool-kit","name":"Tinker's Tools","ability":"INT","rank":2}""")
             seed("set_skill_training","""{"actorId":"a-artisan","skillId":"precision","name":"Fine component precision calibration","ability":"DEX","rank":0}""")
             seed("set_skill_training","""{"actorId":"b-companion","skillId":"tool-kit","name":"Companion tool","ability":"WIS","rank":1}""")
+            seed("define_effect","""{"actorId":"a-artisan","effectId":"check-practice","name":"Measured check practice","source":"Reviewed training","target":"ability_check","key":"STR","operation":"add","amount":1}""")
             seed("set_skill_pin","""{"actorId":"a-artisan","skillId":"tool-kit","pinned":true}""")
             val first=runBlocking { f.refresh() }
             val activity=Robolectric.buildActivity(ComponentActivity::class.java).setup()
@@ -118,7 +119,7 @@ class CloudSheetAccessibilityInteropTest {
         val roll=data(f,rollId)
         assertEquals("tool-kit",roll.cloudText("key"));assertEquals(20,roll.getValue("total").jsonPrimitive.int)
         assertEquals("player_physical",roll.cloudText("origin"));assertEquals(1,rolls(f).size)
-        select("Fixture companion");node(hasContentDescription("Roll Companion tool +4")).assertExists()
+        select("Fixture companion");node(hasContentDescription("Roll Companion tool unknown")).assertIsNotEnabled()
         skill("tool-kit");node(dialog and hasText("Pin skill")).assertExists();press("Edit skill training")
         field("Name").assertTextContains("Companion tool");field("Rank").assertTextContains("1")
         node(dialog and hasText("WIS") and hasClickAction()).assertExists();press("Cancel");press("Discard")
@@ -153,8 +154,7 @@ class CloudSheetAccessibilityInteropTest {
         }
         hit(hasTestTag("section-Sheet")).performClick()
         node(hasTestTag("section-Sheet") and isSelected()).assertExists()
-        val pager=SemanticsMatcher.keyIsDefined(SemanticsActions.PageRight)
-        val page=node(pager).assertIsDisplayed()
+        val page=node(hasTestTag("cloud-character-pager")).assertIsDisplayed()
         page.performTouchInput { swipeLeft() }
         node(hasTestTag("section-Actions") and isSelected()).assertExists()
         page.performTouchInput { swipeRight() }
@@ -166,7 +166,7 @@ class CloudSheetAccessibilityInteropTest {
     fun cardTitleScoreAndBorderInspectWhileNestedSaveAndCheckOwnTheirGestures() = fixture { f ->
         select("Fixture artisan")
         val before=revision(f)
-        node(hasContentDescription("Strength ability check +5")).assertExists()
+        node(hasContentDescription("Strength ability check +6, ability modifier +5")).assertExists()
         val hp=node(hasContentDescription("Hit points, 16 of 20")).getUnclippedBoundsInRoot()
         val conditions=node(hasText("Conditions") and hasClickAction()).getUnclippedBoundsInRoot()
         assertTrue("Conditions $conditions should sit below HP $hp",conditions.top>=hp.bottom && conditions.left<hp.right && conditions.right>hp.left)
@@ -183,10 +183,18 @@ class CloudSheetAccessibilityInteropTest {
                 node(dialog and hasText(label)).assertExists()
             press("Close");assertEquals(before,revision(f));assertTrue(rolls(f).isEmpty())
         }
-        val check=hit(hasContentDescription("Strength ability check +5"))
-        check.assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).performTouchInput{longClick()}
+        val check=hit(hasContentDescription("Strength ability check +6, ability modifier +5"))
+        compose.onNode(hasAnyAncestor(hasTestTag("Strength ability check tile")) and hasText("+5"),useUnmergedTree=true).assertExists()
+        check.assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).performClick()
+        node(dialog and hasText("Transaction result"));press("Close")
+        val checkCommand=countable(f,"record_check").getValue("args").jsonObject
+        val checkRoll=data(f,checkCommand.cloudText("rollId"))
+        val face=checkRoll.getValue("faces").jsonArray.single().jsonObject.getValue("value").jsonPrimitive.int
+        assertEquals(face+6,checkRoll.getValue("total").jsonPrimitive.int)
+        assertEquals("ability",checkRoll.cloudText("kind"))
+        hit(hasContentDescription("Strength ability check +6, ability modifier +5")).performTouchInput{longClick()}
         press("Disadvantage");node(dialog and hasText("2 d20 · Disadvantage")).assertExists()
-        press("Close");assertEquals(before,revision(f))
+        press("Close");assertEquals(before+1,revision(f))
         val save=hit(hasContentDescription("Strength saving throw +5, not proficient"))
         save.performSemanticsAction(SemanticsActions.OnLongClick)
         press("Advantage");field("Physical d20 faces, in order").performTextReplacement("1,17")
@@ -197,6 +205,6 @@ class CloudSheetAccessibilityInteropTest {
         assertEquals("save",rolled.cloudText("kind"));assertEquals("STR",rolled.cloudText("key"))
         assertEquals("player_physical",rolled.cloudText("origin"));assertEquals(22,rolled.getValue("total").jsonPrimitive.int)
         val faces=rolled.getValue("faces").jsonArray.map {it.jsonObject.getValue("value").jsonPrimitive.int}
-        assertEquals(listOf(1,17),faces);assertEquals(1,rolls(f).size);assertEquals(before+1,revision(f))
+        assertEquals(listOf(1,17),faces);assertEquals(2,rolls(f).size);assertEquals(before+2,revision(f))
     }
 }

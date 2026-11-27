@@ -47,7 +47,11 @@ class AscensionAccessibleRollClipboardTest {
         return found
     }
 
-    @Test fun screenReaderOptionsEnterOnePlayerFaceAndPasteItsExactNamedResultInASecondPackage() {
+    @Test fun androidAccessibilityOptionsOpenWithoutRolling() = exercise(platformOptions = true)
+
+    @Test fun aSecondPackagePastesTheOriginalNamedRollFromTheSystemClipboard() = exercise(platformOptions = false)
+
+    private fun exercise(platformOptions: Boolean) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val device = UiDevice.getInstance(instrumentation)
         val context = ApplicationProvider.getApplicationContext<Context>()
@@ -78,6 +82,7 @@ class AscensionAccessibleRollClipboardTest {
             } } }
             compose.waitUntil(20000) { compose.onAllNodesWithTag("reforge-check-STR").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("reforge-check-STR").performScrollTo().assertIsDisplayed().assertContentDescriptionEquals("Strength check +3")
+            if (platformOptions) {
             var exported: AccessibilityNodeInfo? = null
             var details = ""
             try {
@@ -86,8 +91,14 @@ class AscensionAccessibleRollClipboardTest {
                     val visible=roots.flatMap(::nodes)
                     val described=visible.filter { n->n.packageName==context.packageName && !n.contentDescription.isNullOrBlank() }
                     details=described.joinToString("\n"){ n->"${n.className} ${n.contentDescription} visible=${n.isVisibleToUser} actions=${n.actionList.joinToString { it.id.toString()+"/"+it.label }}" }.take(8000)
-                    exported=described.firstOrNull { n->n.contentDescription.toString().contains("Strength check +3") &&
-                        n.actionList.any { it.id==AccessibilityNodeInfo.ACTION_LONG_CLICK } }
+                    val controls=described.filter { it.contentDescription.toString()=="Strength check +3" }
+                        .flatMap { label -> generateSequence(label) { it.parent }.take(6).toList() }
+                    details=controls.joinToString("\n") { n ->
+                        "${n.className} ${n.contentDescription} ${n.text} ${n.actionList.joinToString { it.id.toString()+"/"+it.label }}"
+                    } + "\n" + details
+                    exported=controls.firstOrNull { n -> n.isVisibleToUser && n.actionList.any {
+                        it.id==AccessibilityNodeInfo.ACTION_LONG_CLICK && it.label?.toString()=="Options for Strength check"
+                    } }
                     exported != null
                 }
             } catch (failure: AssertionError) {
@@ -96,9 +107,16 @@ class AscensionAccessibleRollClipboardTest {
                 throw AssertionError("Framework options absent. Focused package ${device.currentPackageName}.\n$details", failure)
             }
             assertTrue(requireNotNull(exported).performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK))
+            } else {
+                compose.onNodeWithTag("reforge-check-STR").performTouchInput { longClick(center) }
+            }
             val manual = hasText("Enter physical dice faces") and hasClickAction()
             compose.waitUntil(12000) { compose.onAllNodes(manual).fetchSemanticsNodes().isNotEmpty() }
             assertTrue(runBlocking { repo.rollHistory(actor.id).first() }.isEmpty())
+            if(platformOptions) {
+                assertEquals(before,runBlocking { requireNotNull(repo.get(actor.id)) })
+                return
+            }
             compose.onNode(manual).performScrollTo().performClick()
             compose.onNode(hasText("Faces in order (comma separated)") and hasSetTextAction()).performScrollTo().performTextReplacement("17")
             compose.onNodeWithText("Validate entered dice").performScrollTo().performClick()
