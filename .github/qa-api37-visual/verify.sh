@@ -44,6 +44,8 @@ astravar_emulator_pid="$guest"
 astravar_verified_emulator=1
 astravar_expected_api=37
 source .github/qa-api37-visual/official-guest-setup.sh
+grep -F 'Selecting Vulkan device: SwiftShader Device' "$RUNNER_TEMP/owned-visual-avd.log" > "$art/guest-renderer.txt"
+grep -F 'androidboot.hardware.vulkan=ranchu' "$RUNNER_TEMP/owned-visual-avd.log" >> "$art/guest-renderer.txt"
 adb -s "$serial" logcat -b all -v threadtime >"$RUNNER_TEMP/visual-continuous.log" &
 for k in window_animation_scale transition_animation_scale animator_duration_scale; do
   adb -s "$serial" shell settings put global "$k" 0
