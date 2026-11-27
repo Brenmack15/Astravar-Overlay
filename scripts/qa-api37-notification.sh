@@ -10,7 +10,7 @@ avd=AscensionNotificationCI
 serial=emulator-5576
 device() { adb -s "$serial" "$@"; }
 printf 'no\n' | avdmanager create avd -f -n "$avd" -k 'system-images;android-37.0;default;x86_64' --device pixel_6
-"$qa_sdk/emulator/emulator" -avd "$avd" -port 5576 -accel on -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect > "$RUNNER_TEMP/notification-emulator.log" 2>&1 &
+"$qa_sdk/emulator/emulator" -avd "$avd" -port 5576 -accel on -no-window -no-audio -no-snapshot -no-boot-anim -memory 4096 -gpu swiftshader > "$RUNNER_TEMP/notification-emulator.log" 2>&1 &
 qemu_pid=$!
 trap 'kill "$qemu_pid" 2>/dev/null || true' EXIT
 timeout 140 adb -s "$serial" wait-for-device
@@ -34,11 +34,22 @@ for key in "global device_provisioned" "secure user_setup_complete" "global zen_
   read -r table name <<< "$key"
   echo "Before $table $name: $(device shell settings get "$table" "$name")"
 done
-# The standard notification UI is not available to third-party apps before user setup.
-device shell settings put global device_provisioned 1
-device shell settings put secure user_setup_complete 1
-test "$(device shell settings get global device_provisioned | tr -d '\r')" = 1
-test "$(device shell settings get secure user_setup_complete | tr -d '\r')" = 1
+# Keep the quiet production channel. AOSP 37 hides silent status icons by default.
+preference() { python3 scripts/qa-android17-silent-icons.py "$serial" "$avd" "$@"; }
+was_hidden=$(preference read)
+printf 'Framework hideSilentStatusBar before test: %s\n' "$was_hidden" | tee "$dir/silent-visibility.txt"
+restore_and_stop() {
+  local code=$?
+  trap - EXIT
+  if test "$was_hidden" = true; then preference hide || code=1; else preference show || code=1; fi
+  echo "Framework hideSilentStatusBar after restoration: $(preference read)" | tee -a "$dir/silent-visibility.txt"
+  kill "$qemu_pid" 2>/dev/null || true
+  exit "$code"
+}
+trap restore_and_stop EXIT
+preference show
+test "$(preference read)" = false
+echo "Framework hideSilentStatusBar during test: false" | tee -a "$dir/silent-visibility.txt"
 device shell am start -W -a android.intent.action.MAIN -c android.intent.category.HOME | head -8
 # Restrict saved diagnostics to notification visibility and this one disposable app.
 (
