@@ -1,0 +1,51 @@
+name: Inspect the recorded landscape Features frame
+on:
+  push:
+    branches: [verification/ascension-genesis-landscape]
+    paths: ['.github/workflows/qa-genesis-feature-archive.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Inspect the original API 36 hierarchy and bitmap dimensions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          path="repos/$GITHUB_REPOSITORY/actions/artifacts/15171828691"
+          test "$(gh api "$path" --jq '.workflow_run.head_sha')" = 6e3ea597ecab1e42fad481898be83f0e7677408d
+          test "$(gh api "$path" --jq '.workflow_run.id')" = 45933831235
+          gh api "$path/zip" > "$RUNNER_TEMP/evidence.zip"
+          printf '%s  %s\n' 06d1f54782a2e94e9ee7b887bf4487fe3c966f064ae5c9537269c9d56fcb2596 "$RUNNER_TEMP/evidence.zip" | sha256sum -c -
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,struct,zipfile
+          import xml.etree.ElementTree as ET
+          z = zipfile.ZipFile(pathlib.Path(os.environ["RUNNER_TEMP"])/"evidence.zip")
+          names = z.namelist()
+          package = "com.yazsras.astravar"
+          for name in names:
+              if '/emulator-evidence/' not in name or not name.endswith('.xml') or not any(s in name for s in ('failure-GenesisJourney','genesis-landscape')):
+                  continue
+              scene = ET.fromstring(z.read(name))
+              png = z.read(name.removesuffix('.xml')+'.png')
+              assert png.startswith(b'\x89PNG\r\n\x1a\n')
+              width,height=struct.unpack('>II',png[16:24])
+              print('Recorded scene:',name, 'bitmap',width,height,'rotation',scene.get('rotation'),'SHA256',hashlib.sha256(png).hexdigest())
+              selected = []
+              for n in scene.iter('node'):
+                  if n.get('package') != package: continue
+                  desc,label,cls=(n.get(k,'') for k in ('content-desc','text','class'))
+                  if (label in ['Features','Character','Edit identity & features','Identity & background','Genesis Native Hero','Notes','Level up']
+                      or desc.startswith(('Character controls','HP 14 / 20','Features, page')) or cls=='android.widget.ScrollView'):
+                      selected.append((cls,label or desc,n.get('bounds'),n.get('selected'),n.get('scrollable')))
+              print(json.dumps(selected,indent=2,ensure_ascii=False))
+          logs = [x for x in names if x.endswith('native-genesis.txt')]
+          assert len(logs) == 1
+          failure = next(x for x in z.read(logs[0]).decode().splitlines() if x.startswith('INSTRUMENTATION_STATUS: stack='))
+          print('Exact original failure:',failure)
+          assert 'Rect(465, 647 - 1199, 648)' in failure and '(0, 16)' in failure
+          PY
