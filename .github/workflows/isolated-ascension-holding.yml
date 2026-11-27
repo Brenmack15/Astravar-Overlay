@@ -50,6 +50,30 @@ jobs:
                               if 'Revised survey marker' in v or 'CloudItemCustomizationInteropTest.sharedCatalog' in v:
                                   for line in records[max(0,i-1):i+4]:print(line[:1400])
           PY
+      - name: Inspect the adjacent routed test's original failure
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          root="/repos/$GITHUB_REPOSITORY/actions/artifacts/15168814684"
+          test "$(gh api "$root" --jq .workflow_run.id)" = "45931922571"
+          gh api "$root/zip" > "$RUNNER_TEMP/group.zip"
+          python3 - <<'PY'
+          import os, zipfile
+          from xml.etree import ElementTree as ET
+          with zipfile.ZipFile(os.path.join(os.environ['RUNNER_TEMP'],'group.zip')) as z:
+              for p in z.namelist():
+                  if not p.endswith(".xml"): continue
+                  root=ET.fromstring(z.read(p))
+                  if root.get('tests')!='0': print('Observed group',root.get('name'),root.get('tests'),root.get('failures'))
+                  for test in root.findall('testcase'):
+                      failure=test.find('failure')
+                      if failure is None: continue
+                      print('Observed adjacent failure', root.get('name'),test.get('name'))
+                      for line in (failure.text or '').splitlines():
+                          if any(word in line for word in ('CloudInventionGenealogyInteropTest.kt:','Missing ','Text =','ContentDescription','Disabled','TestTag','InputText =','EditableText =')):
+                              print(line[:360])
+          PY
       - name: Record the archive inspection result
         if: always()
         env:
