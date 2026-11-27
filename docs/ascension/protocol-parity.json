@@ -1,0 +1,1563 @@
+{
+  "version": 1,
+  "scope": "Registered MCP and authenticated Android HTTP wire protocols, synthetic SQL fixtures",
+  "summary": {
+    "declaredOperations": 119,
+    "bidirectionallyExercised": 118,
+    "exactRetryAndIndependentReceiptChecked": true,
+    "commandsPerDirection": 1227,
+    "independentRowsPerDirection": 1957,
+    "ownerOnly": [
+      "update_continuity_settings"
+    ]
+  },
+  "operations": {
+    "acquire_item": {
+      "scope": "inventory",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 79,
+        "readbacks": 158
+      },
+      "device": {
+        "commands": 79,
+        "readbacks": 158
+      }
+    },
+    "adjust_coins": {
+      "scope": "economy",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 2
+      }
+    },
+    "advance_actor_level": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 5,
+        "readbacks": 14
+      },
+      "device": {
+        "commands": 5,
+        "readbacks": 14
+      }
+    },
+    "advance_actor_time": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 15,
+        "readbacks": 15
+      },
+      "device": {
+        "commands": 15,
+        "readbacks": 15
+      }
+    },
+    "advance_encounter_turn": {
+      "scope": "combat",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 37,
+        "readbacks": 37
+      },
+      "device": {
+        "commands": 37,
+        "readbacks": 37
+      }
+    },
+    "apply_hp_change": {
+      "scope": "combat",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 13,
+        "readbacks": 20
+      },
+      "device": {
+        "commands": 13,
+        "readbacks": 20
+      }
+    },
+    "archive_records": {
+      "scope": "lifecycle",
+      "ownerReview": true,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 2
+      }
+    },
+    "assign_primary_image": {
+      "scope": "media",
+      "ownerReview": true,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "begin_form_deployment": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 10,
+        "readbacks": 22
+      },
+      "device": {
+        "commands": 10,
+        "readbacks": 22
+      }
+    },
+    "bind_item_charge_pool": {
+      "scope": "inventory",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 6,
+        "readbacks": 6
+      },
+      "device": {
+        "commands": 6,
+        "readbacks": 6
+      }
+    },
+    "cast_spell": {
+      "scope": "spells",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 14,
+        "readbacks": 27
+      },
+      "device": {
+        "commands": 14,
+        "readbacks": 27
+      }
+    },
+    "change_form": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 19,
+        "readbacks": 32
+      },
+      "device": {
+        "commands": 19,
+        "readbacks": 32
+      }
+    },
+    "complete_actor_care": {
+      "scope": "resources",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 10
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 10
+      }
+    },
+    "complete_dawn_recovery": {
+      "scope": "resources",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 3
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 3
+      }
+    },
+    "complete_pending_check": {
+      "scope": "rolls",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 2
+      }
+    },
+    "complete_rest": {
+      "scope": "resources",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 13,
+        "readbacks": 41
+      },
+      "device": {
+        "commands": 13,
+        "readbacks": 41
+      }
+    },
+    "correct_resource_balance": {
+      "scope": "resources",
+      "ownerReview": true,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "customize_item": {
+      "scope": "inventory",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 4
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 4
+      }
+    },
+    "define_action": {
+      "scope": "combat",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 41,
+        "readbacks": 41
+      },
+      "device": {
+        "commands": 41,
+        "readbacks": 41
+      }
+    },
+    "define_actor": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 90,
+        "readbacks": 90
+      },
+      "device": {
+        "commands": 90,
+        "readbacks": 90
+      }
+    },
+    "define_attack": {
+      "scope": "combat",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 50,
+        "readbacks": 50
+      },
+      "device": {
+        "commands": 50,
+        "readbacks": 50
+      }
+    },
+    "define_care_protocol": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 3,
+        "readbacks": 6
+      },
+      "device": {
+        "commands": 3,
+        "readbacks": 6
+      }
+    },
+    "define_connection": {
+      "scope": "world",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 5,
+        "readbacks": 5
+      },
+      "device": {
+        "commands": 5,
+        "readbacks": 5
+      }
+    },
+    "define_construction_stage": {
+      "scope": "crafting",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 5,
+        "readbacks": 5
+      },
+      "device": {
+        "commands": 5,
+        "readbacks": 5
+      }
+    },
+    "define_effect": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 123,
+        "readbacks": 246
+      },
+      "device": {
+        "commands": 123,
+        "readbacks": 246
+      }
+    },
+    "define_feature": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 25,
+        "readbacks": 38
+      },
+      "device": {
+        "commands": 25,
+        "readbacks": 38
+      }
+    },
+    "define_form": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 20,
+        "readbacks": 20
+      },
+      "device": {
+        "commands": 20,
+        "readbacks": 20
+      }
+    },
+    "define_item_definition": {
+      "scope": "inventory",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 73,
+        "readbacks": 73
+      },
+      "device": {
+        "commands": 73,
+        "readbacks": 73
+      }
+    },
+    "define_objective": {
+      "scope": "chronicle",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 2
+      }
+    },
+    "define_resource": {
+      "scope": "resources",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 83,
+        "readbacks": 169
+      },
+      "device": {
+        "commands": 83,
+        "readbacks": 169
+      }
+    },
+    "define_spell": {
+      "scope": "spells",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 19,
+        "readbacks": 19
+      },
+      "device": {
+        "commands": 19,
+        "readbacks": 19
+      }
+    },
+    "define_story_arc": {
+      "scope": "chronicle",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 2
+      }
+    },
+    "define_wallet": {
+      "scope": "economy",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 13,
+        "readbacks": 13
+      },
+      "device": {
+        "commands": 13,
+        "readbacks": 13
+      }
+    },
+    "duplicate_form": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 3,
+        "readbacks": 5
+      },
+      "device": {
+        "commands": 3,
+        "readbacks": 5
+      }
+    },
+    "edit_connection": {
+      "scope": "world",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "edit_item_definition": {
+      "scope": "inventory",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 2
+      }
+    },
+    "enable_effect": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "end_encounter": {
+      "scope": "combat",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 5,
+        "readbacks": 17
+      },
+      "device": {
+        "commands": 5,
+        "readbacks": 17
+      }
+    },
+    "equip_item": {
+      "scope": "inventory",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 63,
+        "readbacks": 126
+      },
+      "device": {
+        "commands": 63,
+        "readbacks": 126
+      }
+    },
+    "exchange_coins": {
+      "scope": "economy",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 2
+      }
+    },
+    "exchange_party_assets": {
+      "scope": "economy",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 18
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 18
+      }
+    },
+    "execute_roll_preset": {
+      "scope": "rolls",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 4
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 4
+      }
+    },
+    "grant_spell": {
+      "scope": "spells",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 14,
+        "readbacks": 14
+      },
+      "device": {
+        "commands": 14,
+        "readbacks": 14
+      }
+    },
+    "integrate_component": {
+      "scope": "crafting",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 5,
+        "readbacks": 10
+      },
+      "device": {
+        "commands": 5,
+        "readbacks": 10
+      }
+    },
+    "interrupt_form_deployment": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 4,
+        "readbacks": 8
+      },
+      "device": {
+        "commands": 4,
+        "readbacks": 8
+      }
+    },
+    "link_cast_roll": {
+      "scope": "spells",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 8,
+        "readbacks": 9
+      },
+      "device": {
+        "commands": 8,
+        "readbacks": 9
+      }
+    },
+    "link_completed_invention": {
+      "scope": "crafting",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 5,
+        "readbacks": 5
+      },
+      "device": {
+        "commands": 5,
+        "readbacks": 5
+      }
+    },
+    "link_project_dependency": {
+      "scope": "crafting",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 0
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 0
+      }
+    },
+    "merge_stacks": {
+      "scope": "inventory",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 3
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 3
+      }
+    },
+    "move_form": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 3,
+        "readbacks": 6
+      },
+      "device": {
+        "commands": 3,
+        "readbacks": 6
+      }
+    },
+    "pay_construction_cost": {
+      "scope": "crafting",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 4
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 4
+      }
+    },
+    "permanently_delete_records": {
+      "scope": "lifecycle",
+      "ownerReview": true,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 0
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 0
+      }
+    },
+    "prepare_spell": {
+      "scope": "spells",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "propose_invention": {
+      "scope": "crafting",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 5,
+        "readbacks": 5
+      },
+      "device": {
+        "commands": 5,
+        "readbacks": 5
+      }
+    },
+    "purchase_item": {
+      "scope": "economy",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 5,
+        "readbacks": 20
+      },
+      "device": {
+        "commands": 5,
+        "readbacks": 20
+      }
+    },
+    "reconcile_wallet_denomination": {
+      "scope": "economy",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 4
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 4
+      }
+    },
+    "record_blueprint_version": {
+      "scope": "crafting",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "record_campaign_session": {
+      "scope": "chronicle",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 2
+      }
+    },
+    "record_check": {
+      "scope": "rolls",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 45,
+        "readbacks": 46
+      },
+      "device": {
+        "commands": 45,
+        "readbacks": 46
+      }
+    },
+    "record_chronicle_event": {
+      "scope": "chronicle",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 5,
+        "readbacks": 5
+      },
+      "device": {
+        "commands": 5,
+        "readbacks": 5
+      }
+    },
+    "record_historical_item_event": {
+      "scope": "inventory",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 2
+      }
+    },
+    "record_known_fact": {
+      "scope": "world",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 3,
+        "readbacks": 3
+      },
+      "device": {
+        "commands": 3,
+        "readbacks": 3
+      }
+    },
+    "record_objective_milestone": {
+      "scope": "chronicle",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 3,
+        "readbacks": 3
+      },
+      "device": {
+        "commands": 3,
+        "readbacks": 3
+      }
+    },
+    "record_relationship": {
+      "scope": "world",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "record_research": {
+      "scope": "crafting",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 2
+      }
+    },
+    "record_roll_batch": {
+      "scope": "rolls",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 2
+      }
+    },
+    "recover_item": {
+      "scope": "inventory",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 2
+      }
+    },
+    "remove_custom_skill": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "remove_primary_image": {
+      "scope": "media",
+      "ownerReview": true,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "resolve_action_save": {
+      "scope": "combat",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 3,
+        "readbacks": 9
+      },
+      "device": {
+        "commands": 3,
+        "readbacks": 9
+      }
+    },
+    "resolve_attack": {
+      "scope": "combat",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 45,
+        "readbacks": 77
+      },
+      "device": {
+        "commands": 45,
+        "readbacks": 77
+      }
+    },
+    "resolve_attack_rider": {
+      "scope": "combat",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 3
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 3
+      }
+    },
+    "resolve_attack_target": {
+      "scope": "combat",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 10,
+        "readbacks": 24
+      },
+      "device": {
+        "commands": 10,
+        "readbacks": 24
+      }
+    },
+    "resolve_cast_target": {
+      "scope": "spells",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 4,
+        "readbacks": 8
+      },
+      "device": {
+        "commands": 4,
+        "readbacks": 8
+      }
+    },
+    "resolve_concentration_check": {
+      "scope": "spells",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 3
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 3
+      }
+    },
+    "resolve_construction_stage": {
+      "scope": "crafting",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 6,
+        "readbacks": 11
+      },
+      "device": {
+        "commands": 6,
+        "readbacks": 11
+      }
+    },
+    "resolve_pool_recharge": {
+      "scope": "resources",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 3,
+        "readbacks": 3
+      },
+      "device": {
+        "commands": 3,
+        "readbacks": 3
+      }
+    },
+    "restore_records": {
+      "scope": "lifecycle",
+      "ownerReview": true,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 2
+      }
+    },
+    "retire_unresolved_effect_charges": {
+      "scope": "resources",
+      "ownerReview": true,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 2
+      }
+    },
+    "revise_campaign_session": {
+      "scope": "chronicle",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "revise_effect": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "revise_feature": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 3,
+        "readbacks": 5
+      },
+      "device": {
+        "commands": 3,
+        "readbacks": 5
+      }
+    },
+    "revise_form": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 3,
+        "readbacks": 3
+      },
+      "device": {
+        "commands": 3,
+        "readbacks": 3
+      }
+    },
+    "revise_invention_plan": {
+      "scope": "crafting",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "revise_known_fact": {
+      "scope": "world",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 3,
+        "readbacks": 3
+      },
+      "device": {
+        "commands": 3,
+        "readbacks": 3
+      }
+    },
+    "revise_objective": {
+      "scope": "chronicle",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "revise_research_finding": {
+      "scope": "crafting",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "revise_resource": {
+      "scope": "resources",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 3,
+        "readbacks": 6
+      },
+      "device": {
+        "commands": 3,
+        "readbacks": 6
+      }
+    },
+    "revise_spell": {
+      "scope": "spells",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "revise_spell_grant": {
+      "scope": "spells",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "revise_story_arc": {
+      "scope": "chronicle",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "roll_attack_damage": {
+      "scope": "combat",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 4,
+        "readbacks": 4
+      },
+      "device": {
+        "commands": 4,
+        "readbacks": 4
+      }
+    },
+    "roll_damage_only": {
+      "scope": "combat",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 2
+      }
+    },
+    "save_checkpoint": {
+      "scope": "chronicle",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 3,
+        "readbacks": 3
+      },
+      "device": {
+        "commands": 3,
+        "readbacks": 3
+      }
+    },
+    "save_roll_preset": {
+      "scope": "rolls",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "select_damage_variant": {
+      "scope": "combat",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 7,
+        "readbacks": 7
+      },
+      "device": {
+        "commands": 7,
+        "readbacks": 7
+      }
+    },
+    "sell_item": {
+      "scope": "economy",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 5
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 5
+      }
+    },
+    "set_actor_ability": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 2
+      }
+    },
+    "set_actor_dormancy": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 4
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 4
+      }
+    },
+    "set_actor_membership": {
+      "scope": "character",
+      "ownerReview": true,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 2
+      }
+    },
+    "set_actor_profile": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 2
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 2
+      }
+    },
+    "set_actor_training": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 3,
+        "readbacks": 3
+      },
+      "device": {
+        "commands": 3,
+        "readbacks": 3
+      }
+    },
+    "set_condition": {
+      "scope": "combat",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 24,
+        "readbacks": 25
+      },
+      "device": {
+        "commands": 24,
+        "readbacks": 25
+      }
+    },
+    "set_dice_delegation": {
+      "scope": "character",
+      "ownerReview": true,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "set_item_attunement": {
+      "scope": "inventory",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 6,
+        "readbacks": 12
+      },
+      "device": {
+        "commands": 6,
+        "readbacks": 12
+      }
+    },
+    "set_item_favorite": {
+      "scope": "inventory",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "set_item_operating": {
+      "scope": "inventory",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 8,
+        "readbacks": 20
+      },
+      "device": {
+        "commands": 8,
+        "readbacks": 20
+      }
+    },
+    "set_roll_context": {
+      "scope": "character",
+      "ownerReview": true,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "set_skill_pin": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "set_skill_training": {
+      "scope": "character",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 19,
+        "readbacks": 19
+      },
+      "device": {
+        "commands": 19,
+        "readbacks": 19
+      }
+    },
+    "spend_resource": {
+      "scope": "resources",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 3,
+        "readbacks": 3
+      },
+      "device": {
+        "commands": 3,
+        "readbacks": 3
+      }
+    },
+    "split_stack": {
+      "scope": "inventory",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 3,
+        "readbacks": 9
+      },
+      "device": {
+        "commands": 3,
+        "readbacks": 9
+      }
+    },
+    "start_encounter": {
+      "scope": "combat",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 9,
+        "readbacks": 29
+      },
+      "device": {
+        "commands": 9,
+        "readbacks": 29
+      }
+    },
+    "transfer_coins": {
+      "scope": "economy",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 2,
+        "readbacks": 6
+      },
+      "device": {
+        "commands": 2,
+        "readbacks": 6
+      }
+    },
+    "transfer_item": {
+      "scope": "inventory",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 7,
+        "readbacks": 34
+      },
+      "device": {
+        "commands": 7,
+        "readbacks": 34
+      }
+    },
+    "update_attack": {
+      "scope": "combat",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 4,
+        "readbacks": 4
+      },
+      "device": {
+        "commands": 4,
+        "readbacks": 4
+      }
+    },
+    "update_continuity_settings": {
+      "scope": "campaign",
+      "ownerReview": false,
+      "ownerOnly": true,
+      "mcp": {
+        "commands": 0,
+        "readbacks": 0
+      },
+      "device": {
+        "commands": 0,
+        "readbacks": 0
+      }
+    },
+    "update_relationship": {
+      "scope": "world",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 1,
+        "readbacks": 1
+      },
+      "device": {
+        "commands": 1,
+        "readbacks": 1
+      }
+    },
+    "use_action": {
+      "scope": "combat",
+      "ownerReview": false,
+      "ownerOnly": false,
+      "mcp": {
+        "commands": 32,
+        "readbacks": 77
+      },
+      "device": {
+        "commands": 32,
+        "readbacks": 77
+      }
+    }
+  }
+}

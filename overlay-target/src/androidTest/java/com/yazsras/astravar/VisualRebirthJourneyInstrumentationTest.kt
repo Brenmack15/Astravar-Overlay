@@ -6,6 +6,8 @@ import android.graphics.Rect
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Direction
+import androidx.test.uiautomator.Until
 import androidx.test.uiautomator.UiDevice
 import org.junit.Assert.*
 import org.junit.Rule
@@ -116,11 +118,44 @@ class VisualRebirthJourneyInstrumentationTest {
             }
         }
     }
+    private fun charges(remaining: Int): String {
+        val balance = if (ascension) "$remaining/3" else "$remaining / 3"
+        find("CI Native Charges")
+        find(balance)
+        if (ascension) ui.bounds(By.desc("$balance remaining").pkg(product),
+            "Accessible remaining uses on the saved three-charge pool", refreshCache = true)
+        return balance
+    }
+
+    private fun verifySavedChargeUse() {
+        ui.selectSection(product, "History")
+        ui.expandDisclosure(product, "Changes & saved revisions")
+        val prefix = "Use CI Native Charges · revision "
+        val selector = By.textStartsWith(prefix).pkg(product)
+        // An expanded disclosure can sit flush with the viewport bottom while
+        // its first persisted change is below it. Reveal that exact named row.
+        for (attempt in 1..6) {
+            if (device.wait(Until.hasObject(selector), 500)) break
+            if (ui.scrollForObservation(product, Direction.DOWN) != true) break
+        }
+        val revision = ui.snapshot(selector, "Committed change for this named resource", refreshCache = true) {
+            device.findObjects(selector).singleOrNull()?.text?.removePrefix(prefix)
+        }
+        val parts = revision.split(" → ")
+        assertEquals("The saved expenditure must include both revisions", 2, parts.size)
+        assertEquals("One use advances exactly one saved character revision",
+            parts[0].toLong() + 1, parts[1].toLong())
+    }
+
+    private val ascension get() = ui.isAscension(product)
+    private val companions get() = if (ascension) "Connections" else "Companions"
+    private val chronicle get() = if (ascension) "Chronicle" else "Campaign"
     private fun campaignHome() {
         ui.campaignJournal(product)
     }
     private fun companionRoster() {
-        ui.ensurePrimaryTab(product, "Companions")
+        ui.ensurePrimaryTab(product, companions)
+        if (ascension && !device.hasObject(By.text("Back to companions").pkg(product))) ui.selectSection(product, "Companions")
         // A process restart can restore the exact playable companion route.
         // Use its real Back action before returning from profile to roster.
         if (device.hasObject(By.text("Back to companions").pkg(product))) tap("Back to companions")
@@ -134,7 +169,11 @@ class VisualRebirthJourneyInstrumentationTest {
         ui.ensurePrimaryTab(product, "Character")
         ui.selectSection(product, "Sheet")
         find("CI Native Hero Revised")
-        capture("character-statistics", "Character", "Saving throws")
+        if (ascension) {
+            val save=By.descStartsWith("Strength save ").pkg(product)
+            ui.descriptionBounds("Strength save ",product)
+            ui.captureStablePage(File(files,"rebirth-character-statistics.png"),product,"Character",listOf(save))
+        } else capture("character-statistics", "Character", "Saving throws")
 
         // Resource use is explicit; neither a rest nor a refill is inferred.
         ui.selectSection(product, "Resources")
@@ -144,22 +183,22 @@ class VisualRebirthJourneyInstrumentationTest {
         enter("Current uses (blank = unknown)", "2")
         tap("Review & save")
         tap("Save resource")
-        find("CI Native Charges")
-        find("2 / 3")
+        charges(2)
         find("none")
         tap("Use one")
-        find("1 / 3")
+        charges(1)
         restart()
         ui.ensurePrimaryTab(product, "Character")
         ui.selectSection(product, "Resources")
-        find("CI Native Charges")
         find("none")
-        capture("resource-persistence", "Character", "1 / 3")
+        val persistedBalance = charges(1)
+        capture("resource-persistence", "Character", persistedBalance)
+        if (ascension) verifySavedChargeUse()
 
         // Gear belongs to the exact reviewed companion and projects into its
         // shared source record without changing the selected main character.
         companionRoster()
-        capture("companion-selection", "Companions", "CI Native Ally")
+        capture("companion-selection", companions, "CI Native Ally")
         tap("CI Native Ally")
         tap("Open playable sheet")
         ui.selectSection(product, "Equipment")
@@ -178,14 +217,17 @@ class VisualRebirthJourneyInstrumentationTest {
         tap("Open playable sheet")
         ui.selectSection(product, "Equipment")
         find("CI Native Ally Charm")
-        capture("companion-equipped-after-restart", "Companions", "Worn · Quantity 1")
+        capture("companion-equipped-after-restart", companions, "Worn · Quantity 1")
         tap("Back to companions")
 
         // A real directory edit, entered through the native keyboard, must
         // survive a process restart before its saved text is accepted.
         campaignHome()
-        capture("campaign-dashboard", "Campaign", "Connections")
-        tap("Connections")
+        capture("campaign-dashboard", chronicle, if(ascension) "Encounters" else "Connections")
+        if (ascension) {
+            ui.ensurePrimaryTab(product, "Connections")
+            ui.selectSection(product, "World")
+        } else tap("Connections")
         ui.tap(By.desc("Add connection").pkg(product), "Add fictional campaign connection")
         enter("Connection name", "CI Native Archivist")
         enter("Overview & appearance", "Fictional archive keeper for native verification.")
@@ -197,7 +239,10 @@ class VisualRebirthJourneyInstrumentationTest {
         find("Connection saved locally.")
         restart()
         campaignHome()
-        tap("Connections")
+        if (ascension) {
+            ui.ensurePrimaryTab(product, "Connections")
+            ui.selectSection(product, "World")
+        } else tap("Connections")
         tap("CI Native Archivist")
         find("Fictional archive keeper; edited and retained.")
         ui.captureStableDialog(File(files, "rebirth-campaign-npc-after-restart.png"), product, "CI Native Archivist",
@@ -218,7 +263,13 @@ class VisualRebirthJourneyInstrumentationTest {
                 val hp = By.descStartsWith("HP 31 / 37").pkg(product)
                 ui.bounds(hp, "unchanged main-character health at font scale $scale", refreshCache = true)
                 ui.captureStablePage(File(files, "rebirth-character-font-$scale.png"), product, "Character", listOf(hp))
-                capture("character-actions-font-$scale", "Character", "Roll dice", interactiveMarker = true)
+                if (ascension) {
+                    val dice=By.desc("Roll Manager").pkg(product)
+                    val bounds=ui.controlBounds(dice,"Persistent dice control",refreshCache=true)
+                    val minimum=(48 * instrumentation.targetContext.resources.displayMetrics.density).toInt()
+                    assertTrue("Roll Manager has a 48dp target at font scale $scale",bounds.width()>=minimum && bounds.height()>=minimum)
+                    ui.captureStablePage(File(files,"rebirth-character-actions-font-$scale.png"),product,"Character",listOf(dice))
+                } else capture("character-actions-font-$scale", "Character", "Roll dice", interactiveMarker = true)
                 ui.selectSection(product, "Spells")
                 capture("spellbook-font-$scale", "Character", "CI Native Signal")
                 // Traversing every direct section also verifies that horizontal
@@ -228,10 +279,15 @@ class VisualRebirthJourneyInstrumentationTest {
                 }
                 // Read-only primary-destination captures retain their upper
                 // headings and actions for the same enlarged-text review.
+                if (ascension) {
+                    ui.ensurePrimaryTab(product, "Inventory")
+                    find("CI Native Hero Revised's equipment and campaign records")
+                    capture("party-inventory-font-$scale", "Inventory", "Add item", interactiveMarker = true)
+                }
                 ui.campaignItems(product)
                 capture("inventory-font-$scale", "Inventory", "Equipment, treasures & discoveries")
                 campaignHome()
-                capture("campaign-font-$scale", "Campaign", "Your living world")
+                capture("campaign-font-$scale", chronicle, "Your living world")
                 ui.ensurePrimaryTab(product, "Character")
                 ui.selectSection(product, "Sheet")
                 find("CI Native Hero Revised")

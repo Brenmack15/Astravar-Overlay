@@ -8,17 +8,24 @@ import { fileURLToPath } from 'node:url';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const output = resolve(process.argv[2] || resolve(root, 'build'));
-const modules = [
-  ['core.mjs', 'CORE'], ['native-source.mjs', 'NATIVE_SOURCE'], ['campaign.mjs', 'CAMPAIGN_SYNC'], ['campaign-push.mjs', 'CAMPAIGN_PUSH'], ['campaign-tools.mjs','CAMPAIGN_TOOLS_MODULE'], ['live-hp.mjs', 'LIVE_HP'], ['http.mjs', 'HTTP'], ['mcp.mjs', 'MCP'],
-  ['bootstrap.mjs', 'BOOTSTRAP'], ['worker.mjs', 'ENTRY'],
-];
-const names = new Map(modules.map(([file, name]) => [`./${file}`, name]));
+// Traverse only static sibling modules reachable from the production entry point.
+const modules = [['worker.mjs', 'ENTRY']];
+const names = new Map([['./worker.mjs', 'ENTRY']]);
+const compiled = new Map();
 let bundle = '// Generated from tracked Astravar owner-bridge modules. Do not edit.\n';
 for (const [file, name] of modules) {
+  const dependencies = new Set();
   let source = await readFile(resolve(root, file), 'utf8');
   const exported = [...source.matchAll(/\bexport\s+(?:async\s+)?(?:class|function|const|let)\s+([A-Za-z_$][\w$]*)/g)].map(match => match[1]);
   source = source.replace(/^import\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"];?\s*$/gm, (_, bindings, dependency) => {
-    if (!names.has(dependency)) throw Error(`Unsupported Worker import in ${file}`);
+    if (!/^\.\/[a-z][a-z0-9-]*\.mjs$/.test(dependency)) throw Error(`Unsupported Worker import in ${file}`);
+    if (!names.has(dependency)) {
+      const filename = dependency.slice(2);
+      const identifier = 'WORKER_' + filename.slice(0, -4).replaceAll('-', '_').toUpperCase();
+      names.set(dependency, identifier);
+      modules.push([filename, identifier]);
+    }
+    dependencies.add(names.get(dependency));
     return `const {${bindings}} = ${names.get(dependency)};`;
   });
   let hasDefault = false;
@@ -26,8 +33,21 @@ for (const [file, name] of modules) {
   source = source.replace(/\bexport\s+(?=(?:async\s+)?(?:class|function|const|let)\b)/g, '');
   if (/^\s*(?:import|export)\s/m.test(source)) throw Error(`Unsupported module syntax in ${file}`);
   const entries = [...exported, ...(hasDefault ? ['default: __default'] : [])];
-  bundle += `const ${name} = (() => {\n${source}\nreturn {${entries.join(',')}};\n})();\n`;
+  const text = `const ${name} = (() => {\n${source}\nreturn {${entries.join(',')}};\n})();\n`;
+  compiled.set(name, { text, dependencies });
 }
+const emitted = new Set(), active = new Set();
+function emit(name) {
+  if (emitted.has(name)) return;
+  if (active.has(name)) throw Error(`Cyclic Worker dependency at ${name}`);
+  active.add(name);
+  const unit = compiled.get(name);
+  for (const dependency of unit.dependencies) emit(dependency);
+  bundle += unit.text;
+  active.delete(name);
+  emitted.add(name);
+}
+for (const name of compiled.keys()) emit(name);
 bundle += '\nexport default ENTRY.default;\n';
 await mkdir(resolve(output, 'server'), { recursive: true });
 await writeFile(resolve(output, 'server/index.js'), bundle);

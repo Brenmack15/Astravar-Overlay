@@ -452,30 +452,10 @@ private class WeaponBackupPageLifetime { var active = true }
 }
 
 @Composable fun SettingsPage(app: AstravarApp, s: Campaign, a: Actions, start: () -> Unit, grant: () -> Unit, stop: () -> Unit) {
-    val prefs by app.preferences.flow.collectAsState(initial = com.yazsras.astravar.data.OverlayPrefs())
-    val context = LocalContext.current
     var mode by rememberSaveable { mutableStateOf<String?>(null) }
-    val image = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) a.run("Artwork selected") {
-            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            app.preferences.image(uri.toString())
-        }
-    }
     Page {
         PlayerHeading("Appearance & feedback")
-        Text("Make your table feel like yours.", color = RebuildPalette.Muted)
-        PlayerHeading("Feedback")
-        Toggle("Haptic feedback", prefs.haptics, !a.busy) { value -> a.run("Feedback updated") { app.preferences.haptics(value) } }
-        Text("Screen transitions follow the system animation scale. Text follows your Android font size.", color = RebuildPalette.Muted, style = MaterialTheme.typography.bodySmall)
-        HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .4f))
-        PlayerHeading("Artwork")
-        Text(if (prefs.image.isBlank()) "Included Astravar artwork is active." else "A personal image is selected.", color = RebuildPalette.Muted)
-        PlayerButton(enabled = !a.busy, onClick = { image.launch(arrayOf("image/*")) }) { Text("Choose personal artwork") }
-        PlayerOutlinedButton(enabled = !a.busy, onClick = { a.run("Original artwork restored") { app.preferences.image("") } }) { Text("Use included Astravar artwork") }
-        PlayerDisclosure("Advanced dice controls") {
-            Toggle("Advanced: manual roll override", prefs.manualOverrides, !a.busy) { value -> a.run("Manual override updated") { app.preferences.manualOverrides(value) } }
-            Text("External dice become available in weapon shot options and are recorded separately from Astravar's rolls.", color = RebuildPalette.Muted)
-        }
+        DeviceAppearancePreferences(app.preferences, a.busy, a::run)
         if (s.demo) PlayerEntry("Leave demo", "Begin an empty campaign after review", "More", { a.message = ""; mode = "demo" })
         if (a.message.isNotBlank()) Text(a.message, color = RebuildPalette.Ice)
     }

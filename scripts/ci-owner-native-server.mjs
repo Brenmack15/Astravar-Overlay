@@ -40,7 +40,7 @@ try {
 finally { expectedFixture.close(); }
 console.log(JSON.stringify({ syntheticOnly: true, databaseInitialization: reusedFixture ? 'VERIFIED_EXISTING' : 'FRESH',
   schemaSha256: createHash('sha256').update(masterSchema).digest('hex') }));
-const env = { DB: db, OWNER_SITE_USER_ID: config.ownerId, SITES_SERVICE_ACCESS_BEARER: config.serviceBearer };
+const env = { DB: db, OWNER_SITE_USER_ID: config.ownerId, SITES_SERVICE_ACCESS_BEARER: config.serviceBearer, ASTRAVAR_CLOUD_ENABLED:'1', ASTRAVAR_CLOUD_ENV:'isolated' };
 let offline = false;
 let dropNextDecision = false;
 const equal = (a, b) => typeof a === 'string' && typeof b === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -67,7 +67,8 @@ async function dispatch(req, bytes) {
       return json({ expired: true });
     }
     if (path === '/__ci/owner') {
-      const allowed = input.path === '/mcp' || input.path === '/owner/bootstrap/bundle' ||
+      const cloudFixture = /^\/v3\/continuities\/qa-api37-reconnect\/(?:isolated|grants\/(?:sites-mcp|device:[0-9a-f-]{36})|approvals\/native-pending-world\/verify)$/.test(input.path);
+      const allowed = cloudFixture || input.path === '/mcp' || input.path === '/owner/bootstrap/bundle' ||
         input.path === '/v1/owner/pairings/approve' || input.path === '/v1/owner/devices' || input.path === '/v1/owner/devices/revoke';
       if (!allowed || !['GET', 'POST'].includes(input.method)) return json({ error: 'CI_ROUTE_DENIED' }, 403);
       const headers = { 'Content-Type': 'application/json', Origin: origin, 'oai-authenticated-user-id': config.ownerId };
@@ -107,7 +108,7 @@ const server = https.createServer({ key: readFileSync(resolve(directory, 'server
 let tlsReady = false;
 let dnsReady = false;
 function ready() {
-  if (tlsReady && dnsReady) writeFileSync(resolve(directory, 'server-ready.json'), JSON.stringify({ ready: true, syntheticOnly: true, origin }));
+  if (tlsReady && dnsReady) writeFileSync(resolve(directory, 'server-ready.json'), JSON.stringify({ ready: true, syntheticOnly: true, origin, port:server.address().port }));
 }
 server.listen(Number(process.env.ASTRAVAR_CI_PORT || 18443), '127.0.0.1', () => { tlsReady = true; ready(); });
 

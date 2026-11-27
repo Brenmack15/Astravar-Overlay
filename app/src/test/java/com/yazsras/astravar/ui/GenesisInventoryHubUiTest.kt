@@ -2,6 +2,16 @@ package com.yazsras.astravar.ui
 
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.*
 import com.yazsras.astravar.data.*
 import com.yazsras.astravar.rules.reforge.*
@@ -80,6 +90,8 @@ class GenesisInventoryHubUiTest {
                 GenesisInventoryContent(entries, listOf(first, second), "actor-b", emptyMap(), emptySet(), { opened = it }, { sourcesOpened = true })
             } }
             compose.onNodeWithTag("genesis-inventory-item-other-blade").assertExists()
+            compose.onNodeWithTag("genesis-inventory-item-shared:blade").assertExists()
+            compose.onNodeWithText("My items").performClick()
             compose.onNodeWithTag("genesis-inventory-item-shared:blade").assertDoesNotExist()
             compose.onNodeWithText("Add item").performClick()
             compose.runOnIdle { assertEquals(ReforgeSearchDestination.Character("actor-b", "Equipment", "Item"), opened) }
@@ -93,6 +105,53 @@ class GenesisInventoryHubUiTest {
             compose.onNodeWithTag("genesis-inventory-item-shared:blade").assertExists()
             compose.onNodeWithTag("genesis-inventory-item-other-blade").assertDoesNotExist()
         } finally { activity.pause().stop().destroy() }
+    }
+
+    @Config(qualifiers = "w400dp-h889dp")
+    @Test fun enlargedPartyControlsAndHoldingsShareAnAccessibleScrollSurface() {
+        val actor = saved("actor", "CI Native Hero Revised")
+        val entries = genesisInventoryProjection(listOf(actor), emptyList(), emptyList())
+        var openedSources = 0
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        try {
+            activity.get().setContent {
+                val density = LocalDensity.current.density
+                CompositionLocalProvider(LocalDensity provides Density(density, fontScale = 2f)) {
+                    AstravarTheme {
+                        Scaffold(
+                            topBar = { RebuildAppHeader(true, {}, {}, {}) },
+                            bottomBar = { RebuildPrimaryNavigation("Inventory") {} }
+                        ) { insets ->
+                            Box(Modifier.fillMaxSize().padding(insets).testTag("party-inventory-viewport")) {
+                                GenesisInventoryContent(entries, listOf(actor), "actor", emptyMap(), emptySet(),
+                                    open = { error("Opening source history must preserve gameplay state") },
+                                    openCampaignRecords = { openedSources++ }, openInventions = {})
+                            }
+                        }
+                    }
+                }
+            }
+            val sourceLink = compose.onNode(hasText("Campaign items") and hasClickAction())
+            val original = sourceLink.fetchSemanticsNode().boundsInRoot
+            val minimum = with(compose.density) { 48.dp.toPx() }
+            val viewport = compose.onNodeWithTag("party-inventory-viewport").fetchSemanticsNode().boundsInRoot
+            println("Party inventory with double text: viewport=$viewport, source control=$original, minimum=$minimum")
+            if (original.height + 1f < minimum || original.bottom > viewport.bottom) sourceLink.performScrollTo()
+            val visible = sourceLink.fetchSemanticsNode().boundsInRoot
+            assertTrue("The full 48dp source control must be accessible in its viewport: $visible, $viewport",
+                visible.height + 1f >= minimum && visible.bottom <= viewport.bottom + 1f)
+            sourceLink.assertIsDisplayed().performClick()
+            compose.runOnIdle { assertEquals(1, openedSources) }
+            val item = hasTestTag("genesis-inventory-item-shared:blade")
+            val list = compose.onNodeWithTag("genesis-inventory-list")
+            val listBounds = list.fetchSemanticsNode().boundsInRoot
+            assertTrue("A full item touch target must fit in the scrollable holdings area: $listBounds",
+                listBounds.height + 1f >= minimum)
+            list.performScrollToNode(item)
+            compose.onNode(item).assertIsDisplayed()
+        } finally {
+            activity.pause().stop().destroy()
+        }
     }
 
     @Test fun absentOrArchivedActorCannotReceiveNewEquipmentImplicitly() {

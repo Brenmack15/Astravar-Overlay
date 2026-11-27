@@ -32,8 +32,8 @@ jobs:
       # regression batch before the first touch on every 3.1 candidate.
       REFORGE_FULL_GATE: 'true'
       GENESIS_GATE: 'true'
-      EXPECTED_VERSION_NAME: '4.0.0-convergence5'
-      EXPECTED_VERSION_CODE: '58'
+      EXPECTED_VERSION_NAME: '4.1.0'
+      EXPECTED_VERSION_CODE: '59'
       INVENTORY_BETA: 'false'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -140,6 +140,7 @@ jobs:
             python3 scripts/ci-baseline.py --version-code 54 --cache-dir "$RUNNER_TEMP/astravar-baseline-cache" --output-dir validation/upgrade-baseline --candidate app/build/outputs/apk/release/app-release.apk
             python3 scripts/ci-baseline.py --version-code 56 --cache-dir "$RUNNER_TEMP/astravar-baseline-cache" --output-dir validation/upgrade-baseline --candidate app/build/outputs/apk/release/app-release.apk
             python3 scripts/ci-baseline.py --version-code 57 --cache-dir "$RUNNER_TEMP/astravar-baseline-cache" --output-dir validation/upgrade-baseline --candidate app/build/outputs/apk/release/app-release.apk
+            python3 scripts/ci-baseline.py --version-code 58 --cache-dir "$RUNNER_TEMP/astravar-baseline-cache" --output-dir validation/upgrade-baseline --candidate app/build/outputs/apk/release/app-release.apk
             echo 'ASTRAVAR_BASELINE_APK=validation/upgrade-baseline/code49-ci.apk' >> "$GITHUB_ENV"
             echo 'ASTRAVAR_GENESIS_BASELINE_APK=validation/upgrade-baseline/code50-ci.apk' >> "$GITHUB_ENV"
             echo 'ASTRAVAR_CONVERGENCE_BASELINE_APK=validation/upgrade-baseline/code54-ci.apk' >> "$GITHUB_ENV"
@@ -192,15 +193,18 @@ jobs:
           sha256sum app/build/outputs/apk/release/app-release.apk >> validation/product-provenance.txt
           chmod +x gradlew
           timeout -k 10s 210s ./gradlew --console=plain --build-cache --profile :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
-      - name: Native authorization upgrade, Notion import and independent campaign readback
+      - name: Android 17 authorization, force-stopped cloud gameplay, code 58 upgrade and visual verification
+        id: android17_acceptance
         if: env.GENESIS_GATE == 'true'
-        timeout-minutes: 25
+        timeout-minutes: 50
         env:
           ASTRAVAR_BOOTSTRAP_GATE: 'true'
           ASTRAVAR_VERSION_CODE: ${{ env.EXPECTED_VERSION_CODE }}
-        run: timeout -k 10s 1440s bash scripts/ci-owner-hp-native.sh
+        run: timeout -k 10s 2880s bash scripts/ci-owner-hp-native.sh
       - name: Ordered release UI, import, recovery and in-place update on Android 16
-        if: env.INVENTORY_BETA != 'true'
+        # The two emulators have distinct packages, data and devices. A failed Android 17
+        # run remains a failed job while the independent historical journey still runs.
+        if: (success() || (failure() && steps.android17_acceptance.outcome == 'failure')) && env.INVENTORY_BETA != 'true'
         timeout-minutes: 90
         env:
           ASTRAVAR_TEST_APK: app/build/outputs/apk/release/app-release.apk

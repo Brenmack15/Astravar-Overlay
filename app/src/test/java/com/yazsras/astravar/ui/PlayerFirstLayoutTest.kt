@@ -59,9 +59,9 @@ class PlayerFirstLayoutTest {
                     AstravarTheme { Column { RebuildPrimaryNavigation("Character", selected::add) } }
                 }
             }
-            for (name in listOf("Character", "Inventory", "Companions", "Campaign"))
+            for (name in listOf("Character", "Inventory", "Connections", "Chronicle"))
                 compose.onNode(hasText(name) and hasClickAction()).assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
-            assertEquals(listOf("Character", "Inventory", "Companions", "Campaign"), selected)
+            assertEquals(listOf("Character", "Inventory", "Connections", "Chronicle"), selected)
         } finally { activity.pause().stop().destroy() }
     }
 

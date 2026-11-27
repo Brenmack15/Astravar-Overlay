@@ -1,0 +1,19 @@
+# Prior engineering evidence
+
+Source locators reference the private engineering audit in directive §3.2. AV identifiers belong to the original historical test register. Code 58 and the PR #41 feature head precede cloud authority. The latest conflicting source must be resolved per field and per operation, rather than by the age of the page.
+
+| Audit anchors | Original observation / limitation | Consequence for 4.1 acceptance |
+|---|---|---|
+| AV-001–004, AU26 lines 28–31 | Owner grant, native publication, base actor and physical placement were independently readable. | Exercise current scope and rights on canonical cloud state. A successful old publication proves its recorded scope only. |
+| AV-005–007, AU26 lines 32–42 | A generic metadata write had a real receipt while direct typed conditional equipment behavior still required implementation. | Verify source-linked typed modifiers by activating/deactivating the same item and observing the effective score. |
+| AV-008–009, AU26 lines 35–49, 261–272 | Earlier typed damage decoding and split-database import problems acquired corrective code and regression coverage. | Re-check historical representations, canonical Room instance, failure rollback and duplicate prevention during import. |
+| AV-010–014, AU26 lines 151–155 | Grant, base statistics, audit history, placement and a historical receipt were readable. A historical base-stat edit could not establish a reversible effect. | Test current source breakdown, active state, unchanged base stat and independent transaction receipt. |
+| AV-015–020, AU26 lines 156–161 | Empty or partial scoped views existed for wealth, resources, companions, projects, connections and combat. | Use distinct synthetic records in each category; distinguish actual zero, unknown, hidden and incomplete. |
+| AV-021–026, AU26 lines 162–167, 183–220 | A synthetic milestone and source/CI/receipt checks demonstrated different levels of evidence. Subsequent idempotency testing refined these classifications. | Record isolated backend, real native client, physical/device and current cloud evidence separately. |
+| AU26 lines 222–321 | Source adjudication, compatible spell/actor mapping, migration rehearsals and source-native readback work retained history and unknown values. | Exercise fixture-based parity, version conversion, exact pool slots and preservation. Current release excludes production reconciliation. |
+| AU26 lines 322–401 | Later branches and integrated native upgrades combined verified release ancestry, identity, transactions, source membership and Android testing. | Recover from the functioning release branch. Use the integration points and exact tests without resetting the app. |
+| AU26 lines 402–460 | Subsequent migration and native editing milestones describe actual committed historical state and newer device/owner release evidence. | Verify the current architecture using fresh isolated records. Do not repeat historical edits or recovery. |
+| AU26 lines 461–503 | Synthetic cleanup, training, record/published-view differences and proposal status required independent evidence. | Test identified disposable data and a scoped review queue. Do not infer deletion candidates or commit from queued proposals. |
+| AU26 lines 504–end | Historical atomic-purchase conflict was followed by code-58 correction, compatible owner release and later independent physical purchase acceptance. | Preserve prior receipts; test a new isolated economic event, exact retry, conflicting event and safe failure rollback. |
+
+The companion tracker further records a later successful progression that supersedes an earlier uncommitted assumption. Historical source values are fixture references. Ordinary resources must never be initialized from a brief recap or by running a rest to match an example.

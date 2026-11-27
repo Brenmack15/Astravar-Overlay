@@ -83,7 +83,9 @@ class FrozenBaselineTests(unittest.TestCase):
             baseline.payload_entries(self.apk)
 
     def test_baseline_identities_are_frozen_and_distinct(self):
-        self.assertEqual({49, 50, 54, 56, 57}, set(baseline.BASELINES))
+        self.assertEqual({49, 50, 54, 56, 57, 58}, set(baseline.BASELINES))
+        self.assertEqual("883198a3140ae2b707b31f81829c94cd821189b9", baseline.expected_inputs(58)["source_sha"])
+        self.assertEqual("4.0.0-convergence5", baseline.expected_inputs(58)["version_name"])
         self.assertEqual("613360f61121390ec925d8229587a7dd95a354b2", baseline.expected_inputs(54)["source_sha"])
         self.assertNotEqual(baseline.expected_inputs(49), baseline.expected_inputs(50))
         with self.assertRaises(KeyError):

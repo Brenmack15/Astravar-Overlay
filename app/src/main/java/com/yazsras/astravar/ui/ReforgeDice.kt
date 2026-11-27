@@ -1,6 +1,10 @@
 package com.yazsras.astravar.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.semantics.Role
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -19,10 +23,11 @@ import com.yazsras.astravar.rules.reforge.*
 import java.util.UUID
 
 @Serializable internal data class ReforgeRollRequest(val label: String, val formula: DiceFormula?, val kind: RollKind = RollKind.CUSTOM,
-    val key: String = "", val attackId: String? = null, val characterRevision: Long? = null, val profileId: String? = null)
+    val key: String = "", val attackId: String? = null, val characterRevision: Long? = null, val profileId: String? = null, val immediateAttackOnly: Boolean = false)
 
 @Composable internal fun ReforgeRollDialog(character: ReforgeCharacter, revision: Long, request: ReforgeRollRequest,
-    onDismiss: () -> Unit, saving: Boolean = false, saveError: String = "", onSave: (ReforgeRollRecord, ReforgeCharacter?) -> Unit) {
+    onDismiss: () -> Unit, saving: Boolean = false, saveError: String = "", onEditSkill: (() -> Unit)? = null, onSave: (ReforgeRollRecord, ReforgeCharacter?) -> Unit) {
+    val clipboard = LocalClipboardManager.current
     var expression by rememberSaveable { mutableStateOf(request.formula?.let(SecureDice::format) ?: "1d20") }
     var advantage by rememberSaveable { mutableStateOf(false) }
     var disadvantage by rememberSaveable { mutableStateOf(false) }
@@ -66,7 +71,8 @@ import java.util.UUID
         if (!canSave) return
         val roll = result ?: return
         val components = listOf(ReforgeRollComponent(if (request.attackId != null) "Attack" else request.label,
-            roll.faces.map { ReforgeRollDie(it.sides, it.face, it.kept, it.sign) }, roll.formula.flat)) +
+            roll.faces.map { ReforgeRollDie(it.sides, it.face, it.kept, it.sign) }, roll.formula.flat, mode = roll.mode,
+            subjectId = request.key, checkKind = request.kind.name, formId = CharacterCalculator.activeForm(character)?.id)) +
             damage.map { (component, rolled) -> ReforgeRollComponent(component.label, rolled.faces.map { ReforgeRollDie(it.sides, it.face, it.kept, it.sign) }, rolled.formula.flat, component.type.name) }
         onSave(ReforgeRollRecord(id = rollId, profileId = character.id, characterRevision = revision,
             label = request.label, formula = SecureDice.format(roll.formula) + if (damage.isNotEmpty()) " · damage ${damage.joinToString(" + ") { SecureDice.format(it.second.formula) }}" else "",
@@ -80,8 +86,34 @@ import java.util.UUID
             error = e.message ?: "Review the attack before saving."
         }
     }
+    fun resolveRoll(withDamage: Boolean) {
+        if (!canSave || result != null || restriction != null) return
+        try {
+            val initial = request.attackId?.let { AttackRules.preview(character, it, rollContext) }
+            val baseFormula = initial?.attackBonus?.value?.let { DiceFormula(listOf(DiceTerm(1, 20)), it) }
+                ?: if (request.attackId != null) error("Attack bonus is unknown") else SecureDice.parse(expression)
+            val extra = situationalBonus.trim().takeIf { it.isNotBlank() }?.let(SecureDice::parse) ?: DiceFormula()
+            val formula = DiceFormula(baseFormula.dice + extra.dice, Math.addExact(baseFormula.flat, extra.flat))
+            val rolled = if (manual) SecureDice.manual(formula, manualFaces.split(',', ' ').filter { it.isNotBlank() }.map { it.toIntOrNull() ?: error("Enter whole die faces") }, mode) else SecureDice.roll(formula, mode)
+            if (request.attackId != null) {
+                val attack = AttackRules.preview(character, request.attackId, rollContext, critical = rolled.naturalD20 == 20)
+                preview = attack
+                damage = if (withDamage) attack.components.map { it to SecureDice.roll(it.formula) } else emptyList()
+            }
+            result = rolled; error = ""
+        } catch (e: Exception) { error = e.message ?: "Unable to roll" }
+    }
+    var triggered by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(rollId) {
+        if (request.immediateAttackOnly && !triggered) {
+            triggered = true
+            resolveRoll(false)
+        }
+    }
     PlayerSheet(request.label, onDismiss, dirty = result != null, dismissEnabled = !saving) {
         if (result == null) {
+            if (onEditSkill != null) PlayerTextButton(onClick = onEditSkill, enabled = !stale && !saving,
+                modifier = Modifier.testTag("skill-edit-${request.key}")) { Text("Edit skill") }
             if (request.attackId == null) Field("Dice formula", expression, { expression = it }, enabled = request.formula == null)
             else Text("Uses your calculated attack bonus and active equipment damage. The DM determines the hit.", color = RebuildPalette.Muted)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -90,7 +122,7 @@ import java.util.UUID
             }
             Text("Effective mode · ${mode.name.lowercase()}", color = RebuildPalette.Ice)
             if (advantage && disadvantage) Text("Advantage and Disadvantage cancel.", color = RebuildPalette.Muted)
-            if (request.attackId == null) Toggle("Enter physical dice faces", manual) { manual = it }
+            Toggle("Enter physical dice faces", manual) { manual = it }
             if (manual) Field("Faces in order (comma separated)", manualFaces, { manualFaces = it })
             PlayerDisclosure("Circumstances & extra dice") {
                 Field("Situational bonus (optional: 1d4 or +2)", situationalBonus, { situationalBonus = it })
@@ -109,30 +141,36 @@ import java.util.UUID
                 Text("Each roll requires a tap. This setting labels who owns the result and never starts autonomous rolls.", color = RebuildPalette.Muted)
             }
             if (restriction != null) Text(restriction, color = MaterialTheme.colorScheme.error)
-            PlayerButton(enabled = restriction == null && !stale, onClick = {
-                try {
-                    val initial = request.attackId?.let { AttackRules.preview(character, it, rollContext) }
-                    val baseFormula = initial?.attackBonus?.value?.let { DiceFormula(listOf(DiceTerm(1, 20)), it) }
-                        ?: if (request.attackId != null) error("Attack bonus is unknown") else SecureDice.parse(expression)
-                    val extra = situationalBonus.trim().takeIf { it.isNotBlank() }?.let(SecureDice::parse) ?: DiceFormula()
-                    val formula = DiceFormula(baseFormula.dice + extra.dice, Math.addExact(baseFormula.flat, extra.flat))
-                    val rolled = if (manual) SecureDice.manual(formula, manualFaces.split(',', ' ').filter { it.isNotBlank() }.map { it.toIntOrNull() ?: error("Enter whole die faces") }, mode) else SecureDice.roll(formula, mode)
-                    if (request.attackId != null) {
-                        val attack = AttackRules.preview(character, request.attackId, rollContext, critical = rolled.naturalD20 == 20)
-                        preview = attack
-                        damage = attack.components.map { it to SecureDice.roll(it.formula) }
-                    }
-                    result = rolled; error = ""
-                } catch (e: Exception) { error = e.message ?: "Unable to roll" }
-            }, modifier = Modifier.testTag("reforge-roll-now")) { Text(if (manual) "Validate entered dice" else "Roll now") }
+            if (request.attackId != null) {
+                val configuration = runCatching { AttackRules.preview(character, request.attackId, rollContext) }.getOrNull()
+                Text("Attack 1d20 ${reforgeSigned(configuration?.attackBonus?.value)}", color = RebuildPalette.Ice)
+                configuration?.components?.forEach { Text("${it.label} · ${SecureDice.format(it.formula)} ${it.type.name.lowercase()}") }
+                PlayerOutlinedButton(enabled = restriction == null && canSave, onClick = { resolveRoll(false) }) { Text("Roll attack only") }
+            }
+            PlayerButton(enabled = restriction == null && canSave, onClick = { resolveRoll(request.attackId != null) }, modifier = Modifier.testTag("reforge-roll-now")) {
+                Text(if (manual) "Validate entered dice" else if (request.attackId != null) "Roll attack & damage" else "Roll now")
+            }
         } else {
             val rolled = requireNotNull(result)
-            Text(rolled.total.toString(), style = MaterialTheme.typography.displayLarge, color = RebuildPalette.GoldBright,
-                modifier = Modifier.testTag("reforge-roll-result"))
+            Text("${request.label} · ${rolled.total}", style = MaterialTheme.typography.displayLarge, color = RebuildPalette.GoldBright,
+                modifier = Modifier.testTag("reforge-roll-result").clickable(role = Role.Button, onClickLabel = "Copy result") {
+                    clipboard.setText(AnnotatedString(ReforgeRollComponent(request.label,
+                        rolled.faces.map { ReforgeRollDie(it.sides, it.face, it.kept, it.sign) }, rolled.formula.flat).copyResult()))
+                })
             Text(rolled.breakdown(), color = RebuildPalette.Ice)
             if (request.attackId != null) {
                 Text(when (rolled.naturalD20) { 20 -> "Natural 20 · critical damage dice"; 1 -> "Natural 1 · automatic miss"; else -> "Attack total · DM determines the hit" }, color = RebuildPalette.Muted)
-                damage.forEach { (component, rolledDamage) -> Text("${component.label} · ${rolledDamage.total} ${component.type.name.lowercase()}\n${rolledDamage.breakdown()}", style = MaterialTheme.typography.bodyMedium) }
+                damage.forEach { (component, rolledDamage) -> Text("${component.label} · ${rolledDamage.total} ${component.type.name.lowercase()}\n${rolledDamage.breakdown()}",
+                    style = MaterialTheme.typography.bodyMedium, modifier = Modifier.clickable(role = Role.Button, onClickLabel = "Copy ${component.label}") {
+                        clipboard.setText(AnnotatedString(ReforgeRollComponent("${request.label} · ${component.label}", rolledDamage.faces.map { ReforgeRollDie(it.sides, it.face, it.kept, it.sign) },
+                            rolledDamage.formula.flat, component.type.name).copyResult()))
+                    }) }
+                if (damage.isNotEmpty()) PlayerTextButton(onClick = {
+                    val parts = listOf(ReforgeRollComponent(request.label, rolled.faces.map { ReforgeRollDie(it.sides, it.face, it.kept, it.sign) }, rolled.formula.flat)) +
+                        damage.map { (component, result) -> ReforgeRollComponent("${request.label} · ${component.label}",
+                            result.faces.map { ReforgeRollDie(it.sides, it.face, it.kept, it.sign) }, result.formula.flat, component.type.name) }
+                    clipboard.setText(AnnotatedString(parts.joinToString("\n") { it.copyResult() }))
+                }) { Text("Copy attack result") }
                 val attack = preview
                 if (attack != null) {
                     if (attack.chargeCosts.isNotEmpty()) Text("On a confirmed hit: ${attack.chargeCosts.entries.joinToString { (id, cost) -> "$cost ${character.resources.firstOrNull { it.id == id }?.name ?: "charge"}" }}", color = RebuildPalette.GoldBright)
@@ -161,13 +199,35 @@ import java.util.UUID
     }
 }
 
+internal fun ReforgeRollComponent.copyResult(title: String = label): String {
+    val oneCheck = dice.count { it.kept && it.sides == 20 && it.sign == 1 } == 1 && damageType == null
+    val terms = dice.mapIndexed { index, die ->
+        val face = if (oneCheck && die.sides == 20 && die.kept && die.face in setOf(1, 20)) "Nat ${die.face}" else "${die.face}"
+        (if (die.sign < 0) "−" else if (index > 0 && die.kept) "+ " else "") + if (die.kept) "($face)" else "[$face discarded]"
+    }
+    val mod = if (modifier == 0 && terms.isNotEmpty()) "" else when {
+        terms.isEmpty() -> modifier.toString()
+        modifier < 0 -> " − ${-modifier.toLong()}"
+        else -> " + $modifier"
+    }
+    return "$title: ${terms.joinToString(" ")}$mod = $total${damageType?.let { " ${it.lowercase()}" } ?: ""}"
+}
+
 internal val ReforgeRollRecord.displayTotal: String
-    get() = if (components.any { it.damageType != null }) "Attack ${components.first().total}" else total.toString()
+    get() = if (components.firstOrNull()?.damageType == null && components.any { it.damageType != null }) "Attack ${components.first().total}" else total.toString()
+
+internal fun ReforgeRollRecord.resultLines(): List<String> = components.map { part ->
+    part.copyResult(if (components.size == 1) label else "$label · ${part.label}")
+}
 
 @Composable internal fun ReforgeSavedRollCard(roll: ReforgeRollRecord) {
+    val clipboard = LocalClipboardManager.current
+    val lines = roll.resultLines()
     PlayerCard {
         Text(roll.label, style = MaterialTheme.typography.titleMedium)
-        Text(roll.displayTotal, style = MaterialTheme.typography.headlineMedium, color = RebuildPalette.GoldBright)
+        Text(roll.displayTotal, style = MaterialTheme.typography.headlineMedium, color = RebuildPalette.GoldBright,
+            modifier = Modifier.clickable(role = Role.Button, onClickLabel = "Copy ${roll.label}") { clipboard.setText(AnnotatedString(lines.firstOrNull().orEmpty())) })
+        if (lines.size > 1) PlayerTextButton(onClick = { clipboard.setText(AnnotatedString(lines.joinToString("\n"))) }) { Text("Copy all") }
         Text("${roll.formula} · ${if (roll.manual) "Manual" else "Random"} · ${roll.ownership}", color = RebuildPalette.Muted)
         val damage = roll.components.filter { it.damageType != null }
         if (damage.isNotEmpty()) {

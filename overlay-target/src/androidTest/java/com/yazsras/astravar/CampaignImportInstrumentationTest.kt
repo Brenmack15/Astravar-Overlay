@@ -38,6 +38,9 @@ class CampaignImportInstrumentationTest {
     private val device = UiDevice.getInstance(instrumentation)
     private val ui = ObservedUi(device)
     private val product = InstrumentationRegistry.getArguments().getString("astravarPackage") ?: "com.yazsras.astravar"
+    private val ascension by lazy { ui.isAscension(product) }
+    private val journalTab get() = if (ascension) "Chronicle" else "Campaign"
+    private val partyTab get() = if (ascension) "Connections" else "Companions"
     private val files = instrumentation.targetContext.getExternalFilesDir(null)!!
     private val fixtureName = "astravar-native-fictional-campaign.json"
 
@@ -171,9 +174,21 @@ class CampaignImportInstrumentationTest {
 
     private fun campaignEntry(name: String) {
         if (name == "Inventory") { ui.campaignItems(product); return }
+        if (ascension && name == "Connections") {
+            ui.ensurePrimaryTab(product, partyTab)
+            ui.selectSection(product, "World")
+            return
+        }
         ui.campaignJournal(product)
         if (name in listOf("Campaign import", "Reference Library")) ui.expandDisclosure(product, "Library & source records")
         tap(name)
+    }
+
+    private fun openMappedOperator() {
+        ui.ensurePrimaryTab(product, partyTab)
+        if (ascension) ui.selectSection(product, "Companions")
+        tap("Fictional Mapped Operator")
+        find("Fictional Mapped Operator")
     }
 
     private fun launchImportPage() {
@@ -728,33 +743,51 @@ class CampaignImportInstrumentationTest {
 
         // Imported source values remain inspectable without adopting them as
         // current mechanics or reopening the retired Armor Systems interface.
-        ui.openTool(product, "Character sources")
-        find("Fictional Mapped Operator")
-        assertTrue("Character sources must display the imported manual ability independently of weapon mechanics",
-            device.wait(Until.hasObject(By.descContains("Intelligence score 14").pkg(product)), 10_000))
-        captureMapped("armor", "Character", "Fictional Mapped Operator", "Ability scores", dialogTitle = "Character sources")
-        openMappedSourceEntry("Armor source references")
+        if (ascension) {
+            openMappedOperator()
+            find("Ability scores")
+            val score = "Intelligence score 14;"
+            ui.descriptionBounds(score, product)
+            ui.tap(By.descStartsWith(score).pkg(product), "Inspect the operator's recorded Intelligence", refreshCache = true)
+            captureMapped("armor", partyTab, "Intelligence modifier", "+2", dialogTitle = "Edit Intelligence")
+            ui.expandDisclosure(product, "Advanced · recorded modifiers & sources")
+            val sourceAbility = payload.getJSONObject("mapped").getJSONObject("records").getJSONArray("characterAbilities")
+                .let { rows -> (0 until rows.length()).map(rows::getJSONObject) }
+                .single { it.getString("profileId") == "local-player" && it.getString("key") == "INT" }
+            find(sourceAbility.getString("source"))
+            find(sourceAbility.getString("notes"))
+            assertFalse("Source inspection must leave the imported ability clean", actionEnabled("Save ability"))
+            tap("Close")
+            ui.touch(ui.textBounds("‹ Party", product, interactive = true, firstDirection = Direction.UP), "Return to the source roster")
+            campaignEntry("Reference Library")
+        } else {
+            ui.openTool(product, "Character sources")
+            find("Fictional Mapped Operator")
+            assertTrue("Character sources must display the imported manual ability independently of weapon mechanics",
+                device.wait(Until.hasObject(By.descContains("Intelligence score 14").pkg(product)), 10_000))
+            captureMapped("armor", "Character", "Fictional Mapped Operator", "Ability scores", dialogTitle = "Character sources")
+            openMappedSourceEntry("Armor source references")
+        }
         find("1 of 1 references")
-        observations.put(JSONObject().put("route", "armor-source-entry").put("primaryTab", "Campaign")
+        observations.put(JSONObject().put("route", "armor-source-entry").put("primaryTab", journalTab)
+            .put("sourceEntry", if (ascension) "Operator ability sources and Chronicle Reference Library" else "Armor source references")
             .put("visibleMarker", "1 of 1 references"))
 
-        ui.ensurePrimaryTab(product, "Companions")
-        tap("Fictional Mapped Operator")
-        find("Fictional Mapped Operator")
+        openMappedOperator()
         ui.expandDisclosure(product, "Identity & progression")
-        captureMapped("party", "Companions", "Class / role", "Fictional archival operator")
+        captureMapped("party", partyTab, "Class / role", "Fictional archival operator")
         openTypedPartyTab("Equipment")
-        captureMapped("equipment", "Companions", "Fictional Mapped Lens", "Carried", "Unknown")
+        captureMapped("equipment", partyTab, "Fictional Mapped Lens", "Carried", "Unknown")
         openTypedPartyTab("Currency")
-        captureMapped("currency", "Companions", "Fictional Mapped Purse", "? cp · 2 sp · 7 gp · ? ep · ? pp")
+        captureMapped("currency", partyTab, "Fictional Mapped Purse", "? cp · 2 sp · 7 gp · ? ep · ? pp")
         tap("‹ Party")
         tap("Fictional Mapped Owl")
         observeMappedOwlHeader()
         ui.expandDisclosure(product, "Identity & progression")
-        captureMapped("companion", "Companions", "Class / role", "Fictional archival owl")
+        captureMapped("companion", partyTab, "Class / role", "Fictional archival owl")
         openMappedSourceEntry("Party source dossiers")
         find("1 of 1 references")
-        observations.put(JSONObject().put("route", "party-source-entry").put("primaryTab", "Campaign")
+        observations.put(JSONObject().put("route", "party-source-entry").put("primaryTab", journalTab)
             .put("visibleMarker", "1 of 1 references"))
 
         campaignEntry("Inventory")
@@ -768,35 +801,38 @@ class CampaignImportInstrumentationTest {
         tap("Close")
         openMappedSourceEntry("Inventory source archive")
         find("1 of 1 references")
-        observations.put(JSONObject().put("route", "inventory-source-entry").put("primaryTab", "Campaign")
+        observations.put(JSONObject().put("route", "inventory-source-entry").put("primaryTab", journalTab)
             .put("visibleMarker", "1 of 1 references"))
 
-        ui.campaignJournal(product)
+        if (ascension) ui.openTool(product, "Campaign management") else ui.campaignJournal(product)
         tap("Choose campaign")
         tap(payload.getString("title"))
         assertTrue("The selected imported campaign must close the picker",
             device.wait(Until.gone(By.text("Imported campaign · fictional-native-typed").pkg(product)), 10_000))
         find(payload.getString("title"))
+        if (ascension) tap("Close")
         campaignEntry("Inventions")
+        val inventionTab = if (ascension) "Inventory" else journalTab
+        if (ascension) ui.ensurePrimaryTab(product, inventionTab)
         tap("Fictional Proposed Device")
-        captureMapped("invention", "Campaign", "Concept & Blueprint", "Fictional proposal only; no equipment was constructed.", dialogTitle = "Fictional Proposed Device")
+        captureMapped("invention", inventionTab, "Concept & Blueprint", "Fictional proposal only; no equipment was constructed.", dialogTitle = "Fictional Proposed Device")
         tap("Physical output")
         find("No linked physical output or equipment")
         tap("Close")
 
         campaignEntry("Connections")
         tap("Fictional Mapped Contact")
-        captureMapped("connection", "Campaign", "Fictional contact notes preserved.", "Known Information", dialogTitle = "Fictional Mapped Contact")
+        captureMapped("connection", if (ascension) partyTab else journalTab, "Fictional contact notes preserved.", "Known Information", dialogTitle = "Fictional Mapped Contact")
         find("Fictional historical fact preserved.")
         tap("Close")
 
         campaignEntry("Checkpoints")
-        captureMapped("checkpoint", "Campaign", "Fictional Mapped Checkpoint", "Fictional room; no time advances.")
+        captureMapped("checkpoint", journalTab, "Fictional Mapped Checkpoint", "Fictional room; no time advances.")
 
         campaignEntry("Reference Library")
         find("1 of 1 references")
         tap("Fictional Typed Source")
-        captureMapped("reference", "Campaign", "Original source text", "Fictional typed snapshot source. No gameplay is executed.", dialogTitle = "Fictional Typed Source")
+        captureMapped("reference", journalTab, "Original source text", "Fictional typed snapshot source. No gameplay is executed.", dialogTitle = "Fictional Typed Source")
         tap("Close")
 
         // Every view above is read-only. The original receipt must still verify after the entire sweep.
@@ -808,7 +844,13 @@ class CampaignImportInstrumentationTest {
             .put("package", product).put("packageSha256", envelope.getString("payloadSha256"))
             .put("observations", observations).put("screenshots", screenshots)
             .put("postViewDatabaseReadbackPassed", true).put("gameplayActionsInvoked", false).toString(2))
-        instrumentation.sendStatus(0, Bundle().apply { putString("stream", "\nCHECKPOINT: fictional typed archive selected with SAF and separately confirmed; Armor, Party, companion sheet, equipment, currency, Inventory, Inventions, Connections, Checkpoints, Reference Library and all three source entry points rendered imported records; post-view database readback passed without gameplay mutations\n") })
+        val sourceViews = if (ascension) "operator ability inspector, companion dossier and inventory source archive"
+            else "Armor, Party and Inventory source entry points"
+        instrumentation.sendStatus(0, Bundle().apply {
+            putString("stream", "\nCHECKPOINT: fictional typed archive selected with SAF and separately confirmed; " +
+                "imported records rendered in the $sourceViews, character equipment, currency, Inventions, " +
+                "Connections, Checkpoints and Reference Library; post-view database readback passed without gameplay mutations\n")
+        })
     }
 
     /** Invoke only after the host has independently copied and verified the applied mapped database. */
@@ -821,7 +863,7 @@ class CampaignImportInstrumentationTest {
         awaitText("Recovered the verified pre-import campaign snapshot. Original import and recovery receipts are retained.")
         campaignEntry("Reference Library")
         find("0 of 0 references")
-        ui.captureStablePage(File(files, "native-mapped-rollback.png"), product, "Campaign", listOf(By.text("0 of 0 references").pkg(product)))
+        ui.captureStablePage(File(files, "native-mapped-rollback.png"), product, journalTab, listOf(By.text("0 of 0 references").pkg(product)))
         instrumentation.sendStatus(0, Bundle().apply { putString("stream", "\nCHECKPOINT: separately confirmed typed archive recovery restored the pre-import campaign; immutable receipts retained and Reference Library read back empty\n") })
     }
 }

@@ -8,15 +8,19 @@ GitHub Actions uses disposable verification keys and never receives that key.
 
 ## Current recovered baseline
 
-The previous owner build is `4.0.0-unification2`, code 53, source
-`718a9e24bf856cf7e8dee32673ab75270bdd90c4`. The inspected APK SHA-256 is
-`f5150b768be0ccbfe2d784cb6fc459503ecec5acefba37ee092cc18f5516a9af`.
-Its package, single owner certificate, v2/v3 signatures and 16 KiB alignment
-were verified directly from the original APK.
+The verified predecessor for Ascension is `4.0.0-convergence5`, code 58, from
+`883198a3140ae2b707b31f81829c94cd821189b9`. The owner APK SHA-256 is
+`ce78eadc25e5f8d982788605a70aba8caaa59f4dc7ffac5c7a7171f30bf34d91`.
+The signing preflight checks that exact file and its owner certificate.
+The Ascension development candidate is `4.1.0`, code 59.
+Its source checkout and both CI gates must pass private release review.
 
-`scripts/owner_release_sign.py` pins this baseline digest and requires the
-candidate version code to exceed 53. For each subsequent owner release, verify
-the previous APK bytes before advancing the baseline and minimum code.
+Previously verified predecessors include code 57 with SHA-256
+`d9c985290810f84933da0fc465e52b947ce5b25019574498ffacc61b6badcf45`
+and code 53 with SHA-256
+`f5150b768be0ccbfe2d784cb6fc459503ecec5acefba37ee092cc18f5516a9af`.
+Historical proofs remain available for recovery. For each subsequent release,
+verify the previous signed APK before advancing the digest and minimum code.
 
 ## Release inputs and gates
 

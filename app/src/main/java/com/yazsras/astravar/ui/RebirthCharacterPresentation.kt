@@ -1,12 +1,19 @@
 package com.yazsras.astravar.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -116,26 +123,102 @@ import com.yazsras.astravar.rules.reforge.*
     }
 }
 
-@Composable internal fun RebirthAbilities(projection: CharacterProjection, onInspect: (Stat) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Stat.entries.chunked(if (LocalDensity.current.fontScale >= 1.5f) 2 else 3).forEach { stats ->
-            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+internal fun ReforgeCharacter.visiblePortrait(): String? {
+    val source = CharacterCalculator.activeFormSource(this) ?: return portraitRef
+    return source.first.formPortraitRefs[source.second.id] ?: portraitRef
+}
+
+@Composable internal fun SheetPortraitEditor(character: ReforgeCharacter, dismiss: () -> Unit, onSave: (ReforgeCharacter) -> Unit) {
+    val context = LocalContext.current
+    val original = requireNotNull(rememberReforgeSnapshot(character))
+    val source = remember(original) { CharacterCalculator.activeFormSource(original) }
+    val initial = if (source == null) original.portraitRef else source.first.formPortraitRefs[source.second.id]
+    var candidate by rememberSaveable { mutableStateOf(initial) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val preview = rememberSheetPortrait(candidate)
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && uri.scheme == "content") { candidate = uri.toString(); error = null }
+    }
+    PlayerSheet(source?.second?.name?.let { "$it portrait" } ?: "Character portrait", dismiss, dirty = candidate != initial, actions = {
+        PlayerButton(enabled = character.revision == original.revision && candidate != initial && (candidate == null || preview != null), onClick = {
+            try {
+                candidate?.let { context.contentResolver.takePersistableUriPermission(android.net.Uri.parse(it), android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                val updated = if (source == null) original.copy(portraitRef = candidate) else original.copy(items = original.items.map { item ->
+                    if (item.id != source.first.id) item else item.copy(formPortraitRefs = candidate?.let { item.formPortraitRefs + (source.second.id to it) }
+                        ?: (item.formPortraitRefs - source.second.id))
+                })
+                onSave(updated)
+            } catch (_: SecurityException) { error = "Read access to the selected image expired. Choose it again." }
+        }) { Text("Save image") }
+    }) {
+        if (preview != null) androidx.compose.foundation.Image(preview, "Selected portrait", Modifier.size(144.dp), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+        else if (candidate == null) ReforgePortrait(if (source == null) null else original.portraitRef, Modifier.size(144.dp))
+        else Text("Waiting for a readable image preview. Images must be 8 MB or smaller.")
+        PlayerOutlinedButton(onClick = { picker.launch(arrayOf("image/*")) }) { Text(if (candidate == null) "Choose image" else "Replace image") }
+        if (candidate != null) PlayerTextButton(onClick = { candidate = null }) { Text("Remove image") }
+        if (character.revision != original.revision) Text("This character changed. Reopen the portrait to edit the current revision.")
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+internal val Stat.fullLabel: String get() = when (this) {
+    Stat.STR -> "Strength"; Stat.DEX -> "Dexterity"; Stat.CON -> "Constitution"
+    Stat.INT -> "Intelligence"; Stat.WIS -> "Wisdom"; Stat.CHA -> "Charisma"
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable internal fun SheetRollTarget(label: String, value: Int?, onRoll: () -> Unit, onOptions: () -> Unit,
+    modifier: Modifier = Modifier, small: Boolean = false, proficient: Boolean? = null, rollValue: Int? = value) {
+    val shape = RoundedCornerShape(6.dp)
+    Box(modifier.heightIn(min = 48.dp).widthIn(min = 48.dp)
+        .combinedClickable(enabled = rollValue != null, role = Role.Button, onClickLabel = "Roll $label",
+            onLongClickLabel = "Options for $label", onLongClick = onOptions, onClick = onRoll)
+        .semantics(mergeDescendants = true) {
+            contentDescription = "$label ${reforgeSigned(rollValue)}" + when (proficient) { true -> ", proficient"; false -> ", untrained"; null -> "" }
+        }, contentAlignment = Alignment.Center) {
+        Row(Modifier.clip(shape).background(RebuildPalette.Panel).border(1.dp, RebuildPalette.Outline, shape)
+            .padding(horizontal = if (small) 5.dp else 9.dp, vertical = if (small) 1.dp else 3.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            if (proficient != null) Text(if (proficient) "●" else "○", color = RebuildPalette.GoldBright, style = MaterialTheme.typography.labelSmall)
+            Text(reforgeSigned(value), style = if (small) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleLarge,
+                color = if (value == null) RebuildPalette.Muted else RebuildPalette.GoldBright)
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable internal fun SheetDamageTarget(components: List<DamageComponent>, onDamage: () -> Unit, onOptions: () -> Unit) {
+    val formula = components.joinToString(" + ") { SecureDice.format(it.formula) }
+    Column(Modifier.widthIn(min = 48.dp, max = 124.dp).heightIn(min = 48.dp).combinedClickable(
+        enabled = components.isNotEmpty(), role = Role.Button, onClickLabel = "Roll damage", onLongClickLabel = "Damage options",
+        onLongClick = onOptions, onClick = onDamage).padding(horizontal = 5.dp), verticalArrangement = Arrangement.Center) {
+        Text("Damage", style = MaterialTheme.typography.labelSmall, color = RebuildPalette.Muted)
+        Text(formula.ifBlank { "—" }, color = RebuildPalette.GoldBright, style = MaterialTheme.typography.labelLarge)
+    }
+}
+
+@Composable internal fun RebirthAbilities(character: ReforgeCharacter, projection: CharacterProjection,
+    onInspect: (Stat) -> Unit, onCheck: (Stat, Boolean) -> Unit, onSave: (Stat, Boolean) -> Unit) {
+    val proficientSaves = remember(character) { CharacterCalculator.saveProficiencies(character) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Stat.entries.chunked(3).forEach { stats ->
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 stats.forEach { stat ->
                     val ability = projection.abilities.getValue(stat)
-                    Column(Modifier.weight(1f).fillMaxHeight().heightIn(min = 80.dp).testTag("reforge-${stat.name}")
-                        .clip(RoundedCornerShape(8.dp)).border(1.dp, RebuildPalette.Outline, RoundedCornerShape(8.dp))
-                        .clickable(role = Role.Button) { onInspect(stat) }.padding(vertical = 10.dp, horizontal = 8.dp)
-                        .semantics(mergeDescendants = true) {
-                            contentDescription = if (ability.effective.value == null) "${stat.name} Not set"
-                                else "${stat.name} ${ability.effective.value} ${reforgeSigned(ability.modifier)}"
-                        }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically)) {
-                        Text(stat.name, style = MaterialTheme.typography.labelMedium, color = RebuildPalette.Muted)
-                        Text(reforgeSigned(ability.modifier), color = RebuildPalette.GoldBright,
-                            style = if (ability.modifier == null) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.SemiBold)
-                        ability.effective.value?.let { score ->
-                            Text("Score $score", style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Silver)
-                        }
+                    val shape = RoundedCornerShape(8.dp)
+                    Column(Modifier.weight(1f).fillMaxHeight().testTag("reforge-${stat.name}").semantics { contentDescription = "${stat.fullLabel} score ${ability.effective.value ?: "unknown"}" }.clip(shape)
+                        .border(1.dp, RebuildPalette.Outline, shape).clickable(role = Role.Button,
+                            onClickLabel = "Inspect ${stat.fullLabel} and training") { onInspect(stat) }
+                        .padding(vertical = 5.dp, horizontal = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(stat.fullLabel.uppercase(), style = MaterialTheme.typography.labelSmall,
+                            textAlign = TextAlign.Center, color = RebuildPalette.Silver)
+                        SheetRollTarget("${stat.fullLabel} save", projection.saves[stat]?.value,
+                            { onSave(stat, true) }, { onSave(stat, false) }, Modifier.testTag("reforge-save-${stat.name}"),
+                            small = true, proficient = stat in proficientSaves)
+                        SheetRollTarget("${stat.fullLabel} check", ability.modifier, { onCheck(stat, true) }, { onCheck(stat, false) },
+                            modifier = Modifier.testTag("reforge-check-${stat.name}"), rollValue = projection.abilityChecks[stat]?.value)
+                        Text(ability.effective.value?.toString() ?: "?", modifier = Modifier.border(1.dp, RebuildPalette.Outline, RoundedCornerShape(50))
+                            .padding(horizontal = 10.dp, vertical = 2.dp), style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
@@ -234,9 +317,51 @@ import com.yazsras.astravar.rules.reforge.*
     }
 }
 
-@Composable internal fun RebirthSectionLabel(title: String, action: (@Composable () -> Unit)? = null) {
+internal fun sheetAttackAvailable(character: ReforgeCharacter, attack: AttackDefinition): Boolean {
+    val form = CharacterCalculator.activeForm(character)?.id
+    if (attack.requiredFormId != null && attack.requiredFormId != form || form != null && form in attack.excludedFormIds) return false
+    val required = attack.requiredItemId ?: return true
+    return character.items.any { it.id == required && it.operating && it.quantity == 1 && it.state in setOf(ItemState.HELD, ItemState.WORN) } &&
+        character.items.none { required in it.donorInstanceIds }
+}
+
+@Composable internal fun SheetAvailableActions(character: ReforgeCharacter, busy: Boolean,
+    onReview: (String, ReforgeCharacter) -> Unit, onError: (String) -> Unit) {
+    val form = CharacterCalculator.activeForm(character)?.id
+    val active = character.features.filter { it.actionType.lowercase() in setOf("action", "bonus action", "reaction", "free") &&
+        (it.requiredFormId == null || it.requiredFormId == form) }
+    val equipment = character.items.filter { item -> item.operating && item.quantity == 1 && item.state in setOf(ItemState.WORN, ItemState.HELD) &&
+        character.items.none { item.id in it.donorInstanceIds }
+    }.mapNotNull { i -> character.itemDefinitions.firstOrNull { it.id == i.definitionId && (!it.requiresAttunement || i.attuned) }?.let { i to it } }
+    listOf("action" to "Actions", "bonus action" to "Bonus Actions", "reaction" to "Reactions", "free" to "Other").forEach { (timing, label) ->
+        val features = active.filter { it.actionType.equals(timing, true) }
+        val items = equipment.mapNotNull { (item, source) -> source.activations.filter {
+            it.actionType.equals(timing, true) || (timing=="free" && !it.actionType.lowercase().contains("action") && !it.actionType.equals("reaction", true))
+        }.takeIf { it.isNotEmpty() }?.let { Triple(item,source,it) } }
+        if (features.isNotEmpty() || items.isNotEmpty()) {
+            RebirthSectionLabel(label)
+            features.forEach { f -> key(f.id) {
+                PlayerDisclosure(f.name) {
+                    Text(f.source.name, color=RebuildPalette.Muted)
+                    if (f.description.isNotBlank()) ReforgeRichText(f.description)
+                    val resource = character.resources.firstOrNull { it.id == f.resourceId }
+                    if(resource!=null) Text("${resource.name} · ${resource.current ?: "?"}/${resource.maximum ?: "?"} · ${resource.recharge.name.lowercase().replace('_',' ')}")
+                    val use = runCatching { GameplayRules.useFeature(character, f.id) }
+                    use.exceptionOrNull()?.message?.let { Text(it,color=RebuildPalette.Muted) }
+                    PlayerOutlinedButton({ use.getOrNull()?.let { onReview("Use ${f.name}", it) } }, enabled=!busy && use.isSuccess) { Text("Use ${f.name}") }
+                }
+            } }
+            items.forEach { (item,definition,activations) -> key(item.id) {
+                PlayerDisclosure(definition.name) { NativeItemActions(character, item, definition.copy(activations=activations), busy, onReview, onError) }
+            } }
+        }
+    }
+}
+
+@Composable internal fun RebirthSectionLabel(title: String, onTitle: (() -> Unit)? = null, action: (@Composable () -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge)
+        Text(title, Modifier.weight(1f).then(if (onTitle == null) Modifier else Modifier.clickable(role = Role.Button, onClick = onTitle)
+            .heightIn(min = 48.dp).padding(vertical = 8.dp)).semantics { heading() }, style = MaterialTheme.typography.titleLarge)
         action?.invoke()
     }
 }

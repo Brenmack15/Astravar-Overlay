@@ -199,6 +199,7 @@ class LiveHpConnectionClient internal constructor(private val context: Context, 
         vault.enroll(OwnerSyncCredential(id, value.campaignId, value.origin, response.getValue("expiresAt").jsonPrimitive.long, pending.bearer))
         dao.settings(value.copy(deviceId = id, accountLabel = response.getValue("ownerLabel").jsonPrimitive.content, scopesJson = scopes.toString(),
             deviceCode = "", userCode = "", verificationUri = "", pairingExpiresAt = 0, initialPublicationPending = true, status = "Paired · synchronizing selected character HP"))
+        CampaignSyncPreferences(context).resumeLegacyPublishing(value.origin, value.campaignId, id)
         LiveHpConnectionSyncJob.schedule(context)
         try { syncUnlocked() } catch (e: CancellationException) { throw e } catch (_: Exception) { dao.settings(setting().copy(status = "Paired · initial HP publication awaiting connection")) }
         snapshotUnlocked()
@@ -238,7 +239,8 @@ class LiveHpConnectionClient internal constructor(private val context: Context, 
     }
     suspend fun foreground(): JsonObject = lock.withLock {
         val value = setting()
-        if (value.campaignId.isBlank() || value.deviceId.isBlank() || CampaignSyncPreferences(context).paused) return@withLock snapshotUnlocked()
+        val controls=CampaignSyncPreferences(context)
+        if (value.campaignId.isBlank() || value.deviceId.isBlank() || controls.paused || !controls.allowsLegacyPublishing(value.origin,value.campaignId,value.deviceId)) return@withLock snapshotUnlocked()
         automaticOperation = true
         try { syncUnlocked(); snapshotUnlocked() }
         catch (e: CancellationException) { throw e }
@@ -271,6 +273,7 @@ class LiveHpConnectionClient internal constructor(private val context: Context, 
     private suspend fun syncUnlocked() {
         var value = scoped(setting()); credential(value)
         if (value.revokePending) { revokeUnlocked(value); return }
+        if (CloudCampaignClient.fencesLegacy(context, value.campaignId)) return
         for (p in dao.commands().filter { belongs(it, value) && it.state == "APPROVING" }) finishLocal(p)
         for (p in dao.commands().filter { belongs(it, value) && it.state == "DECISION_CONFLICT" && it.receiptJson == null }) quarantineDecision(value, p)
         for (p in dao.commands().filter { belongs(it, value) && it.state in setOf("APPLIED_PENDING", "REJECTED_PENDING") }) flushDecision(value, p)
@@ -426,6 +429,7 @@ class LiveHpConnectionClient internal constructor(private val context: Context, 
         put("localFields", if (approved) LiveHpConnectionProtocol.fields(verifiedLocalOutcome(p, requireNotNull(receipt))) else JsonNull)
     })
     private suspend fun finishLocal(p: LiveHpCommand) {
+        if (CloudCampaignClient.fencesLegacy(context, p.campaignId)) throw OwnerSyncFailure("CLOUD_AUTHORITY_FENCE")
         requireAutomaticAllowed()
         parsed(p); require(p.state == "APPROVING")
         val frozen = campaignJson.decodeFromString<CharacterProfile>(requireNotNull(p.baselineProfileJson)); require(frozen.id == p.profileId && frozen.revision == p.expectedRevision)

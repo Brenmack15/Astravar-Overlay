@@ -22,6 +22,18 @@ import java.util.Date
 /** Device-local transport controls. These never change owner grants or discard the journal. */
 class CampaignSyncPreferences(private val context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences("campaign-sync-controls-v1", Context.MODE_PRIVATE)
+    private fun legacyKey(origin:String,continuity:String,credential:String) =
+        "device-publishing-41-" + OwnerSyncProtocol.hash("$origin|$continuity|$credential")
+    fun allowsLegacyPublishing(origin:String,continuity:String,credential:String):Boolean {
+        if (preferences.getBoolean(legacyKey(origin,continuity,credential),false)) return true
+        @Suppress("DEPRECATION")
+        val installed=context.packageManager.getPackageInfo(context.packageName,0)
+        return installed.firstInstallTime==installed.lastUpdateTime
+    }
+    fun resumeLegacyPublishing(origin:String,continuity:String,credential:String) {
+        require(credential.isNotBlank() && continuity.isNotBlank())
+        check(preferences.edit().putBoolean(legacyKey(origin,continuity,credential),true).commit())
+    }
     var paused: Boolean
         get() = preferences.getBoolean("paused", false)
         set(value) {
@@ -153,7 +165,7 @@ object CampaignSyncNotifications {
             else -> "No successful device sync has been verified."
         }
         val notification = NotificationCompat.Builder(context, CHANNEL)
-            .setSmallIcon(R.drawable.ic_crystal)
+            .setSmallIcon(R.drawable.ic_astravar_notification)
             .setContentTitle("Astravar Background Sync · ${status.label()}")
             .setContentText(detail)
             .setStyle(NotificationCompat.BigTextStyle().bigText(detail))

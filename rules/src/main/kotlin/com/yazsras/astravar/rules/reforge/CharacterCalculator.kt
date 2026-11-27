@@ -6,16 +6,24 @@ object CharacterCalculator {
     internal data class ActiveEffect(val effect: EffectDefinition, val instanceId: String?)
     internal data class EvaluatedEffects(val active: List<ActiveEffect>, val statuses: List<EffectStatus>)
 
+    fun saveProficiencies(character: ReforgeCharacter, context: CalculationContext = CalculationContext()): Set<Stat> =
+        saveProficiencies(character, evaluateEffects(character, context).active)
+
+    private fun saveProficiencies(character: ReforgeCharacter, active: List<ActiveEffect>): Set<Stat> =
+        character.saveProficiencies + active.mapNotNull { (it.effect.payload as? EffectPayload.Proficiency)?.save }
+
     fun abilityModifier(score: Int): Int = Math.floorDiv(Math.subtractExact(score,10), 2)
     fun proficiencyBonus(level: Int): Int { require(level in 1..20); return 2 + (level - 1) / 4 }
 
     /** A timed form becomes mechanically inactive at expiry even before a UI publication. */
-    fun activeForm(character: ReforgeCharacter): WearableForm? = character.items.firstNotNullOfOrNull { item ->
+    fun activeForm(character: ReforgeCharacter): WearableForm? = activeFormSource(character)?.second
+
+    fun activeFormSource(character: ReforgeCharacter): Pair<ItemInstance, WearableForm>? = character.items.firstNotNullOfOrNull { item ->
         val id = item.formId ?: return@firstNotNullOfOrNull null
         val definition = character.itemDefinitions.find { it.id == item.definitionId } ?: return@firstNotNullOfOrNull null
         val form = definition.forms.find { it.id == id } ?: return@firstNotNullOfOrNull null
         if (item.state != ItemState.WORN || !item.operating ||
-            (form.durationSeconds != null && (item.modesUntil["form:$id"] ?: 0L) <= character.gameSeconds)) null else form
+            (form.durationSeconds != null && (item.modesUntil["form:$id"] ?: 0L) <= character.gameSeconds)) null else item to form
     }
 
     fun calculate(character: ReforgeCharacter, context: CalculationContext = CalculationContext()): CharacterProjection {
@@ -46,17 +54,21 @@ object CharacterCalculator {
             CalculatedAbility(permanent,effective,effective.value?.let(::abilityModifier))
         }
         val pb = character.reviewedProficiency?.bonus ?: proficiencyBonus(character.level)
+        val proficientSaves = saveProficiencies(character, active)
         val saves = Stat.entries.associateWith { stat ->
-            val proficient = stat in character.saveProficiencies || active.any { (it.effect.payload as? EffectPayload.Proficiency)?.save == stat }
+            val proficient = stat in proficientSaves
             val base = abilities.getValue(stat).modifier?.plus(if(proficient) pb else 0)
             number(base, NumericTarget.SAVE, stat.name,active,"${stat.name} modifier${if(proficient) " + proficiency $pb" else ""}")
+        }
+        val checks = Stat.entries.associateWith { stat ->
+            number(abilities.getValue(stat).modifier, NumericTarget.ABILITY_CHECK, stat.name, active, "${stat.name} ability modifier")
         }
         val trainings=standardSkills.mapValues { (_,stat)->SkillTraining(stat) }+character.skills
         val skills = trainings.mapValues { (key,training) ->
             val grants = active.mapNotNull { it.effect.payload as? EffectPayload.Proficiency }.filter { it.skill.equals(key,true) }
             val multiplier = when { training.expertise || grants.any { it.expertise } -> 2; training.proficient || grants.isNotEmpty() -> 1; else -> 0 }
             val prof = if(multiplier > 0) pb*multiplier else if(training.halfProficiency) pb/2 else 0
-            number(abilities.getValue(training.ability).modifier?.plus(prof), NumericTarget.SKILL,key,active,
+            number(checks.getValue(training.ability).value?.plus(prof), NumericTarget.SKILL,key,active,
                 "${training.ability.name} modifier${if(prof!=0) " + ${if(multiplier==2) "Expertise" else "proficiency"} $prof" else ""}")
         }
         val customSkills = character.customSkills.associate { skill ->
@@ -64,7 +76,8 @@ object CharacterCalculator {
             val grants = active.mapNotNull { it.effect.payload as? EffectPayload.Proficiency }.filter { it.skill.equals(skill.id, true) }
             val multiplier = when { training.expertise || grants.any { it.expertise } -> 2; training.proficient || grants.isNotEmpty() -> 1; else -> 0 }
             val prof = if (multiplier > 0) pb * multiplier else if (training.halfProficiency) pb / 2 else 0
-            val baseline = skill.baselineOverride ?: abilities.getValue(training.ability).modifier?.let { it + prof + skill.bonus }
+            val baseline = if (skill.baselineOverride != null) number(skill.baselineOverride, NumericTarget.ABILITY_CHECK,
+                training.ability.name, active, "Explicit skill baseline").value else checks.getValue(training.ability).value?.let { it + prof + skill.bonus }
             val label = if (skill.baselineOverride != null) "Explicit skill baseline override (active effects still apply)"
                 else "${training.ability.name} modifier + training $prof + bonus ${skill.bonus}"
             skill.id to number(baseline, NumericTarget.SKILL, skill.id, active, label)
@@ -90,6 +103,12 @@ object CharacterCalculator {
             if(character.spellcastingClassLevel!=null && !legacyArtificer && character.slotMaximaOverride == null) add("This class version needs explicit spell-slot capacities; legacy Artificer slots were not substituted.")
             if(character.items.any { i->character.itemDefinitions.none { it.id==i.definitionId } }) add("Some inventory definitions are missing; their effects are inactive.")
         }
+        val passives = skills.filterKeys { it in setOf("Perception","Investigation","Insight") }.mapValues { (key, skill) ->
+            val mode = rollMode(character, RollKind.SKILL, key, context)
+            val circumstance = when (mode) { DiceMode.ADVANTAGE -> 5; DiceMode.DISADVANTAGE -> -5; DiceMode.NORMAL -> 0 }
+            number(skill.value?.let { 10 + it + circumstance }, NumericTarget.PASSIVE, key, active,
+                "10 + $key check${if (circumstance != 0) " + $circumstance from ${mode.name.lowercase()}" else ""}")
+        }
         return CharacterProjection(abilities,pb,saves,skills,
             number(dex,NumericTarget.INITIATIVE,"",active,"Dexterity modifier"),
             number(acBase,NumericTarget.ARMOR_CLASS,"",active,"Armor calculation"),hp,
@@ -99,13 +118,13 @@ object CharacterCalculator {
             number(casting?.plus(pb+8),NumericTarget.SPELL_DC,"",active,"8 + spellcasting modifier + proficiency $pb"),
             maxSlots,
             if(legacyArtificer && character.spellcastingClassLevel!=null) casting?.let { maxOf(1,it+character.spellcastingClassLevel/2) } else null,
-            skills.filterKeys { it in setOf("Perception","Investigation","Insight") }.mapValues { (key,value)->value.value?.let { 10+it+when(rollMode(character,RollKind.SKILL,key,context)) { DiceMode.ADVANTAGE->5;DiceMode.DISADVANTAGE->-5;else->0 } } }, effects.statuses,
+            passives.mapValues { it.value.value }, effects.statuses,
             active.mapNotNull { it.effect.payload as? EffectPayload.Defense },
             active.mapNotNull { (it.effect.payload as? EffectPayload.ConditionImmunity)?.condition }.toSet(),resources,warnings,
             movement.mapValues { (key,base)->
                 if (selectedForm?.grounded == true && key == "fly") null else
                     number(base,NumericTarget.SPEED,key,active,"$key speed").value?.let { value->maxOf(0,if(character.rules.core==RuleFamily.LEGACY_2014 && character.exhaustionLevel>=2) value/2 else value) }
-            },character.senses,customSkills)
+            },character.senses,customSkills,checks,passives)
     }
 
     internal fun number(base: Int?,target: NumericTarget,key: String,active: List<ActiveEffect>,baseLabel: String): CalculatedNumber {
@@ -158,7 +177,11 @@ object CharacterCalculator {
         val immunities=candidates.mapNotNull { (it.effect.payload as? EffectPayload.ConditionImmunity)?.condition }.toSet()
         val immuneConditions=if(character.conditions.any { it.equals("petrified",true) }) immunities+"poisoned" else immunities
         ConditionRules.effects(character.copy(conditions=ConditionRules.activeConditions(character,immuneConditions))).forEach { consider(it,null,null) }
-        val selected=candidates.groupBy { it.effect.stackingKey ?: it.effect.id }.values.map { group ->
+        val selected=candidates.groupBy { candidate ->
+            val effect = candidate.effect
+            val number = effect.payload as? EffectPayload.Number
+            Triple(effect.stackingKey ?: effect.id, number?.target, number?.key?.lowercase())
+        }.values.map { group ->
             group.sortedWith(compareByDescending<ActiveEffect>{it.effect.priority}.thenByDescending{(it.effect.payload as? EffectPayload.Number)?.amount ?: 0}.thenBy{it.effect.id}.thenBy{it.instanceId ?: ""}).first()
         }
         candidates.filter { it !in selected }.forEach { dropped ->
@@ -207,6 +230,7 @@ object CharacterCalculator {
     fun validate(c:ReforgeCharacter) {
         GenesisArmorRules.validate(c.armor)
         SkillRules.validate(c)
+        RollManagerRules.validate(c.rollPresets)
         require(c.id.isNotBlank() && c.id.length<=200 && c.name.length in 1..200)
         require(c.level in 1..20 && c.revision>=0 && c.schemaVersion==1)
         c.reviewedProficiency?.let {

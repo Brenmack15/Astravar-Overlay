@@ -12,6 +12,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
@@ -31,7 +33,6 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
 import com.yazsras.astravar.rules.reforge.CharacterProjection
 import com.yazsras.astravar.rules.reforge.ReforgeCharacter
 import kotlinx.coroutines.launch
@@ -53,14 +54,14 @@ data class GenesisCharacterRoute(val profileId: String, val section: String = "S
     requestToken: Int = 0,
     sectionOnly: Boolean = false,
     modalOpen: Boolean = false,
-    showPageHint: Boolean = true,
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.(String) -> Unit
 ) {
     key(actorId, sectionOnly) {
-        val pages = if (sectionOnly) listOf(requestedSection.takeIf { it in genesisCharacterSections } ?: "Equipment")
+        val sectionKey = if (requestedSection == "Actions") "Combat" else requestedSection
+        val pages = if (sectionOnly) listOf(sectionKey.takeIf { it in genesisCharacterSections } ?: "Equipment")
             else genesisCharacterSections
-        val state = rememberPagerState(initialPage = pages.indexOf(requestedSection).coerceAtLeast(0)) { pages.size }
+        val state = rememberPagerState(initialPage = pages.indexOf(sectionKey).coerceAtLeast(0)) { pages.size }
         var consumedRequest by rememberSaveable { mutableIntStateOf(requestToken) }
         val pageStates = rememberSaveableStateHolder()
         val scope = rememberCoroutineScope()
@@ -71,7 +72,7 @@ data class GenesisCharacterRoute(val profileId: String, val section: String = "S
         LaunchedEffect(requestToken) {
             if (consumedRequest != requestToken) {
                 consumedRequest = requestToken
-                pages.indexOf(requestedSection).takeIf { it >= 0 }?.let { moveTo(it) }
+                pages.indexOf(sectionKey).takeIf { it >= 0 }?.let { moveTo(it) }
             }
         }
         // Back closes a modal first, then returns to the sheet, then follows the
@@ -81,31 +82,18 @@ data class GenesisCharacterRoute(val profileId: String, val section: String = "S
         }
         Column(modifier.fillMaxSize()) {
             if (!sectionOnly) {
-                PlayerTabs(pages, pages[state.currentPage], { label ->
-                    scope.launch { moveTo(pages.indexOf(label)) }
+                val labels = pages.map { if (it == "Combat") "Actions" else it }
+                PlayerTabs(labels, labels[state.currentPage], { label ->
+                    scope.launch { moveTo(labels.indexOf(label)) }
                 }, Modifier.padding(horizontal = 4.dp).testTag("genesis-character-tabs"))
-                // Keep the page hint in the same foreground layer as PlayerTabs;
-                // partially scrolled controls must not hide it from accessibility.
-                if (showPageHint) Row(Modifier.fillMaxWidth().zIndex(1f).padding(horizontal = 16.dp, vertical = 3.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Text("Swipe between sections", modifier = Modifier.weight(1f).padding(end = 12.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = RebuildPalette.Muted)
-                    Text("${state.currentPage + 1} / ${pages.size}", style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1, softWrap = false,
-                        color = RebuildPalette.GoldBright,
-                        modifier = Modifier.testTag("genesis-page-indicator").semantics {
-                            stateDescription = "${pages[state.currentPage]}, page ${state.currentPage + 1} of ${pages.size}"
-                        })
-                }
             }
             HorizontalPager(
                 state = state,
                 key = { pages[it] },
                 userScrollEnabled = !sectionOnly && !modalOpen,
                 modifier = Modifier.weight(1f).fillMaxWidth().testTag("genesis-character-pager").semantics {
-                    stateDescription = "${pages[state.currentPage]}, page ${state.currentPage + 1} of ${pages.size}"
+                    val page = pages[state.currentPage]
+                    stateDescription = "${if (page == "Combat") "Actions" else page}, page ${state.currentPage + 1} of ${pages.size}"
                 },
                 verticalAlignment = Alignment.Top
             ) { index ->
@@ -118,7 +106,10 @@ data class GenesisCharacterRoute(val profileId: String, val section: String = "S
                         Column(Modifier.widthIn(max = 900.dp).fillMaxWidth()
                             .testTag("genesis-page-$section")
                             .verticalScroll(scroll).padding(horizontal = 16.dp, vertical = 14.dp),
-                            verticalArrangement = Arrangement.spacedBy(14.dp)) { content(section) }
+                            verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                content(section)
+                                Spacer(Modifier.height(56.dp))
+                            }
                     }
                 }
             }
@@ -146,87 +137,99 @@ internal fun Modifier.genesisHorizontalControl(): Modifier = nestedScroll(Genesi
         detectHorizontalDragGestures { change, _ -> change.consume() }
     }
 
-/** Small persistent status strip; full abilities and detail remain in the pages. */
+/** Character interactions use the selected actor's verified projection. */
 @Composable internal fun GenesisCharacterHeader(
-    character: ReforgeCharacter,
-    projection: CharacterProjection,
-    onSwitch: (() -> Unit)?,
-    onHp: () -> Unit,
-    onDefense: () -> Unit,
-    onInitiative: () -> Unit,
-    compact: Boolean = false,
-    onControls: (() -> Unit)? = null
+    character: ReforgeCharacter, projection: CharacterProjection, compact: Boolean,
+    onProfile: () -> Unit, onPortrait: () -> Unit, onControls: () -> Unit,
+    onHp: () -> Unit, onDefense: () -> Unit, onConditions: () -> Unit, onRest: () -> Unit,
+    onInitiative: () -> Unit, onInitiativeOptions: () -> Unit
 ) {
-    val largeText = LocalDensity.current.fontScale >= 1.5f
-    // Short windows keep the reading surface usable. All full controls remain
-    // one tap away in a scrollable sheet; text keeps the user's chosen scale.
-    if (compact && onControls != null) {
-        Row(Modifier.fillMaxWidth().background(RebuildPalette.Canvas).padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(character.name, Modifier.weight(1f).semantics { heading() },
-                style = MaterialTheme.typography.titleMedium, color = RebuildPalette.Silver,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Column(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onHp)
-                .semantics(mergeDescendants = true) {
-                    contentDescription = "HP ${projection.currentHp ?: "Not set"} / ${projection.maximumHp.value ?: "Not set"}"
-                }.padding(vertical = 6.dp), verticalArrangement = Arrangement.Center) {
-                Text("HP ${projection.currentHp ?: "?"} / ${projection.maximumHp.value ?: "?"}",
-                    style = MaterialTheme.typography.titleMedium, color = RebuildPalette.Cyan)
+    val hp = projection.currentHp
+    val max = projection.maximumHp.value
+    val temp = character.temporaryHp?.takeIf { it > 0 }
+    if (compact && androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 560) {
+        Row(Modifier.fillMaxWidth().background(RebuildPalette.Canvas).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(character.name, Modifier.weight(1f).heightIn(min = 48.dp).clickable(role = Role.Button, onClickLabel = "Open Character Profile", onClick = onProfile)
+                .semantics { heading() }, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            PlayerTextButton(onClick = onDefense, modifier = Modifier.semantics { contentDescription = "Armor Class" }) { Text("AC ${projection.armorClass.value ?: "?"}") }
+            SheetRollTarget("Initiative", projection.initiative.value, onInitiative, onInitiativeOptions, small = true)
+            IconButton(onClick = onRest, modifier = Modifier.size(48.dp).semantics { contentDescription = "Rest" }) {
+                ArcaneIcon("fire", Modifier.size(22.dp), RebuildPalette.GoldBright)
             }
-            IconButton(onClick = onControls, modifier = Modifier.size(48.dp)
-                .testTag("genesis-character-controls").semantics { contentDescription = "Character controls" }) {
-                ArcaneIcon("Settings", Modifier.size(24.dp), RebuildPalette.GoldBright)
+            IconButton(onClick = onControls, modifier = Modifier.size(48.dp).testTag("genesis-character-controls").semantics { contentDescription = "Character controls" }) {
+                ArcaneIcon("Settings", Modifier.size(22.dp), RebuildPalette.GoldBright)
+            }
+            ReforgePortrait(character.visiblePortrait(), Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)).clickable(role = Role.Button, onClick = onPortrait)
+                .semantics { contentDescription = "Manage ${character.name} portrait" })
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("${hp ?: "?"} / ${max ?: "?"}${temp?.let { " ($it)" } ?: ""}", Modifier.heightIn(min = 48.dp)
+                    .clickable(role = Role.Button, onClick = onHp).semantics { contentDescription = "HP ${hp ?: "Not set"} / ${max ?: "Not set"}" +
+                        (temp?.let { ", $it temporary" } ?: "") }, style = MaterialTheme.typography.titleMedium, color = RebuildPalette.Cyan)
+            }
+            IconButton(onClick = onConditions, modifier = Modifier.size(48.dp).semantics { contentDescription = "Conditions" }) {
+                ArcaneIcon("Armor", Modifier.size(20.dp), RebuildPalette.GoldBright)
             }
         }
         return
     }
-    Column(Modifier.fillMaxWidth().background(RebuildPalette.Canvas).padding(horizontal = 16.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
+    Column(Modifier.fillMaxWidth().background(RebuildPalette.Canvas).padding(horizontal = 12.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).heightIn(min = 48.dp).clickable(role = Role.Button,
+                onClickLabel = "Open Character Profile", onClick = onProfile), verticalArrangement = Arrangement.Center) {
                 Text(character.name, style = MaterialTheme.typography.titleLarge, fontFamily = DisplayFace,
-                    color = RebuildPalette.Silver, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.semantics { heading() })
-                Text("Level ${character.level} · Proficiency +${projection.proficiencyBonus}", style = MaterialTheme.typography.labelMedium,
-                    color = RebuildPalette.GoldBright, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            if (onSwitch != null) PlayerTextButton(onClick = onSwitch,
-                modifier = Modifier.widthIn(max = if (largeText) 156.dp else 112.dp)
-                    .semantics { contentDescription = "Switch character" }) { Text("Switch character") }
-            if (onControls != null) IconButton(onClick = onControls, modifier = Modifier.size(48.dp)
-                .testTag("genesis-character-controls").semantics { contentDescription = "Character controls" }) {
-                ArcaneIcon("Settings", Modifier.size(24.dp), RebuildPalette.GoldBright)
+                    maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { heading() })
+                if (!compact) Text(listOf("Level ${character.level}", character.className, character.species)
+                    .filter(String::isNotBlank).joinToString(" · "), style = MaterialTheme.typography.labelMedium,
+                    color = RebuildPalette.GoldBright)
             }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Column(Modifier.weight(if (largeText) 1.5f else 2f).heightIn(min = 48.dp)
-                .clickable(role = Role.Button, onClick = onHp)
-                .semantics(mergeDescendants = true) {
-                    contentDescription = "HP ${projection.currentHp ?: "Not set"} / ${projection.maximumHp.value ?: "Not set"}"
-                }.padding(vertical = 4.dp)) {
-                Text("HP ${projection.currentHp ?: "?"} / ${projection.maximumHp.value ?: "?"}",
-                    style = MaterialTheme.typography.titleMedium, color = RebuildPalette.Cyan)
-                Text("Temp HP ${character.temporaryHp ?: "?"}", style = MaterialTheme.typography.labelSmall,
-                    color = RebuildPalette.Muted)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(Modifier.weight(1.2f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).heightIn(min = 48.dp).clickable(role = Role.Button,
+                        onClickLabel = "Inspect armor class", onClick = onDefense).semantics { contentDescription = "Armor Class" }, horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("AC", style = MaterialTheme.typography.labelSmall)
+                        Text(projection.armorClass.value?.toString() ?: "?", style = MaterialTheme.typography.titleLarge, color = RebuildPalette.GoldBright)
+                    }
+                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("INIT", style = MaterialTheme.typography.labelSmall)
+                        SheetRollTarget("Initiative", projection.initiative.value, onInitiative, onInitiativeOptions)
+                    }
+                }
+                Row {
+                    IconButton(onClick = onRest, modifier = Modifier.weight(1f).semantics { contentDescription = "Rest" }) {
+                        ArcaneIcon("fire", Modifier.size(22.dp), RebuildPalette.GoldBright)
+                    }
+                    IconButton(onClick = onControls, modifier = Modifier.weight(1f).testTag("genesis-character-controls")
+                        .semantics { contentDescription = "Character controls" }) {
+                        ArcaneIcon("Settings", Modifier.size(22.dp), RebuildPalette.GoldBright)
+                    }
+                }
             }
-            GenesisHeaderStat("AC", projection.armorClass.value?.toString() ?: "?", "Armor Class",
-                Modifier.weight(1f), onDefense)
-            GenesisHeaderStat("INIT", reforgeSigned(projection.initiative.value), "Roll initiative",
-                Modifier.weight(if (largeText) 1.3f else 1f), onInitiative,
-                enabled = projection.initiative.value != null)
+            ReforgePortrait(character.visiblePortrait(), Modifier.size(if (compact) 48.dp else 66.dp)
+                .clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button, onClick = onPortrait)
+                .semantics { contentDescription = "Manage ${character.name} portrait" })
+            Column(Modifier.weight(1.25f)) {
+                Column(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(8.dp))
+                    .background(RebuildPalette.Panel).clickable(role = Role.Button, onClickLabel = "Manage hit points", onClick = onHp)
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "HP ${hp ?: "Not set"} / ${max ?: "Not set"}" + (temp?.let { ", $it temporary" } ?: "")
+                    }.padding(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("HP", style = MaterialTheme.typography.labelSmall, color = RebuildPalette.Muted)
+                    Text(androidx.compose.ui.text.buildAnnotatedString {
+                        append("${hp ?: "?"} / ${max ?: "?"}")
+                        if (temp != null) {
+                            pushStyle(androidx.compose.ui.text.SpanStyle(color = RebuildPalette.Ice))
+                            append(" ($temp)"); pop()
+                        }
+                    }, style = MaterialTheme.typography.titleMedium)
+                    if (hp != null && max != null && max > 0) LinearProgressIndicator(progress = { (hp.toFloat()/max).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().height(3.dp), color = RebuildPalette.Cyan, trackColor = RebuildPalette.Outline)
+                }
+                PlayerTextButton(onClick = onConditions) { Text(if (character.conditions.isEmpty()) "Conditions" else "Conditions (${character.conditions.size})") }
+            }
         }
-        if (character.conditions.isNotEmpty()) Text(character.conditions.joinToString(" · "),
-            style = MaterialTheme.typography.labelSmall, color = RebuildPalette.GoldBright,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-@Composable private fun GenesisHeaderStat(label: String, value: String, description: String,
-    modifier: Modifier, onClick: () -> Unit, enabled: Boolean = true) {
-    Column(modifier.heightIn(min = 48.dp).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-        .semantics(mergeDescendants = true) { contentDescription = description }
-        .padding(vertical = 4.dp), verticalArrangement = Arrangement.Center) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = RebuildPalette.Muted)
-        Text(value, style = MaterialTheme.typography.titleMedium, color = RebuildPalette.GoldBright)
     }
 }

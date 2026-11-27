@@ -28,7 +28,7 @@ private data class GenesisInventoryView(
 
 /** One projection of saved physical identities. Browsing never copies, approves or mutates records. */
 @Composable fun GenesisInventoryHub(repository: CampaignLedgerRepository, local: ReforgeRepository,
-    open: (ReforgeSearchDestination) -> Unit, openCampaignRecords: () -> Unit) {
+    open: (ReforgeSearchDestination) -> Unit, openCampaignRecords: () -> Unit, openInventions: (() -> Unit)? = null) {
     val context = LocalContext.current.applicationContext
     val preferences = remember(context) { ReforgePreferences.open(context) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -55,7 +55,7 @@ private data class GenesisInventoryView(
             PlayerOutlinedButton(onClick = openCampaignRecords) { Text("Campaign items") }
         }
     } else GenesisInventoryContent(current.entries, current.profiles, current.activeId, current.ownerNames,
-        current.companionIds, open, openCampaignRecords)
+        current.companionIds, open, openCampaignRecords, openInventions)
 }
 
 internal fun genesisInventoryBelongsTo(entry: GenesisInventoryEntry, profileId: String): Boolean =
@@ -66,10 +66,10 @@ internal fun genesisInventoryOwnerRoute(owner: GenesisInventoryOwner, companionI
 
 @Composable internal fun GenesisInventoryContent(entries: List<GenesisInventoryEntry>, profiles: List<ReforgeSavedCharacter>,
     activeProfileId: String?, ownerNames: Map<String, String>, companionIds: Set<String>,
-    open: (ReforgeSearchDestination) -> Unit, openCampaignRecords: () -> Unit) {
+    open: (ReforgeSearchDestination) -> Unit, openCampaignRecords: () -> Unit, openInventions: (() -> Unit)? = null) {
     val active = profiles.firstOrNull { it.character.id == activeProfileId && !it.character.archived }?.character
     var query by rememberSaveable { mutableStateOf("") }
-    var filter by rememberSaveable(activeProfileId) { mutableStateOf(if (active == null) "All items" else "My items") }
+    var filter by rememberSaveable { mutableStateOf("All items") }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     val visible = remember(entries, active?.id, query, filter, ownerNames) {
         entries.filter { entry ->
@@ -79,58 +79,62 @@ internal fun genesisInventoryOwnerRoute(owner: GenesisInventoryOwner, companionI
                     entry.sourcePlacement?.holderProfileId?.let { ownerNames[it] }.orEmpty()).joinToString(" ").contains(query.trim(), true))
         }
     }
-    Column(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            PlayerHeading("Inventory") {
-                PlayerButton(enabled = active != null, onClick = {
-                    active?.let { open(ReforgeSearchDestination.Character(it.id, "Equipment", "Item", it.id in companionIds)) }
-                }) { Text("Add item") }
-            }
-            Text(active?.let { "${it.name}'s equipment and campaign records" }
-                ?: "Create or review a character before adding playable equipment.",
-                color = RebuildPalette.Muted, style = MaterialTheme.typography.bodyMedium)
-            PlayerOutlinedButton(enabled = active != null, onClick = {
-                active?.let { open(ReforgeSearchDestination.Character(it.id, "Equipment", "NotionImport", it.id in companionIds)) }
-            }, modifier = Modifier.fillMaxWidth().testTag("inventory-notion-transfer")) {
-                Text("Import character & inventory from Notion file")
-            }
-            PlayerSearch(query, { query = it }, "Find an item or owner")
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { PlayerTabs(if (active == null) listOf("All items") else listOf("My items", "All items"), filter, { filter = it }) }
-            }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("${visible.size} ${if (visible.size == 1) "item" else "items"}", style = MaterialTheme.typography.labelMedium, color = RebuildPalette.Muted)
-                PlayerTextButton(onClick = openCampaignRecords) { Text("Campaign items") }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().testTag("genesis-inventory-list"),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 8.dp)
+    ) {
+        item {
+            Column(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                PlayerHeading("Inventory") {
+                    PlayerButton(enabled = active != null, onClick = {
+                        active?.let { open(ReforgeSearchDestination.Character(it.id, "Equipment", "Item", it.id in companionIds)) }
+                    }) { Text("Add item") }
+                }
+                Text(active?.let { "${it.name}'s equipment and campaign records" }
+                    ?: "Create or review a character before adding playable equipment.",
+                    color = RebuildPalette.Muted, style = MaterialTheme.typography.bodyMedium)
+                PlayerOutlinedButton(enabled = active != null, onClick = {
+                    active?.let { open(ReforgeSearchDestination.Character(it.id, "Equipment", "NotionImport", it.id in companionIds)) }
+                }, modifier = Modifier.fillMaxWidth().testTag("inventory-notion-transfer")) {
+                    Text("Import character & inventory from Notion file")
+                }
+                if (openInventions != null) PlayerTextButton(onClick = openInventions) { Text("Inventions & research") }
+                PlayerSearch(query, { query = it }, "Find an item or owner")
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) { PlayerTabs(if (active == null) listOf("All items") else listOf("My items", "All items"), filter, { filter = it }) }
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("${visible.size} ${if (visible.size == 1) "item" else "items"}", style = MaterialTheme.typography.labelMedium, color = RebuildPalette.Muted)
+                    PlayerTextButton(onClick = openCampaignRecords) { Text("Campaign items") }
+                }
             }
         }
-        LazyColumn(Modifier.weight(1f).testTag("genesis-inventory-list"), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
-            if (visible.isEmpty()) item {
-                PlayerEmpty(if (query.isNotBlank()) "No matching items" else "No items here yet",
-                    if (query.isNotBlank()) "Try another name or owner." else if (filter == "My items") "Show all items to find campaign equipment and review its owner."
-                    else "Create equipment or open campaign items to review saved source records.", "Bag")
-            }
-            items(visible, key = { it.itemId }) { entry ->
-                Column(Modifier.fillMaxWidth().testTag("genesis-inventory-item-${entry.itemId}")
-                    .clickable(role = Role.Button, onClickLabel = "Inspect ${entry.displayName}") { selectedId = entry.itemId }
-                    .padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        ArcaneIcon("Bag", Modifier.size(28.dp), RebuildPalette.Gold)
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(entry.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(genesisInventoryOwnerLabel(entry, ownerNames), style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
-                        }
-                        Text(entry.currentQuantity?.let { "×$it" } ?: "?", style = MaterialTheme.typography.titleMedium, color = RebuildPalette.Silver)
+        if (visible.isEmpty()) item {
+            PlayerEmpty(if (query.isNotBlank()) "No matching items" else "No items here yet",
+                if (query.isNotBlank()) "Try another name or owner." else if (filter == "My items") "Show all items to find campaign equipment and review its owner."
+                else "Create equipment or open campaign items to review saved source records.", "Bag")
+        }
+        items(visible, key = { it.itemId }) { entry ->
+            Column(Modifier.fillMaxWidth().testTag("genesis-inventory-item-${entry.itemId}")
+                .clickable(role = Role.Button, onClickLabel = "Inspect ${entry.displayName}") { selectedId = entry.itemId }
+                .padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ArcaneIcon("Bag", Modifier.size(28.dp), RebuildPalette.Gold)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(entry.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(genesisInventoryOwnerLabel(entry, ownerNames), style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
                     }
-                    val status = when (entry.authority) {
-                        GenesisInventoryAuthority.PLAYABLE -> "In play"
-                        GenesisInventoryAuthority.CAMPAIGN_SOURCE -> "Campaign record"
-                        GenesisInventoryAuthority.REVIEW_REQUIRED -> "Ownership needs review"
-                    }
-                    Text(status + if (entry.reviewIssues.isNotEmpty() && entry.authority != GenesisInventoryAuthority.REVIEW_REQUIRED) " · Check details" else "",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (entry.reviewIssues.isEmpty()) RebuildPalette.Ice else RebuildPalette.GoldBright)
-                    HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .4f))
+                    Text(entry.currentQuantity?.let { "×$it" } ?: "?", style = MaterialTheme.typography.titleMedium, color = RebuildPalette.Silver)
                 }
+                val status = when (entry.authority) {
+                    GenesisInventoryAuthority.PLAYABLE -> "In play"
+                    GenesisInventoryAuthority.CAMPAIGN_SOURCE -> "Campaign record"
+                    GenesisInventoryAuthority.REVIEW_REQUIRED -> "Ownership needs review"
+                }
+                Text(status + if (entry.reviewIssues.isNotEmpty() && entry.authority != GenesisInventoryAuthority.REVIEW_REQUIRED) " · Check details" else "",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (entry.reviewIssues.isEmpty()) RebuildPalette.Ice else RebuildPalette.GoldBright)
+                HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .4f))
             }
         }
     }

@@ -34,7 +34,7 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 
 /** Player-facing manager. No UI state is accepted as evidence of a successful device commit. */
-@Composable fun CampaignConnectionPage() {
+@Composable fun CampaignConnectionPage(openTool: ((String)->Unit)? = null) {
     val context = LocalContext.current.applicationContext
     val connectedEnvironment = LocalGenesisConnectedEnvironment.current
     val client = remember(context) { CampaignConnectionClient(context) }
@@ -158,7 +158,7 @@ import java.io.IOException
         val view = campaignConnectionView(snapshot).copy(busy = busy, error = error, message = message,
             automaticSyncPaused = syncPaused, syncNotificationEnabled = syncNotifications,
             syncNotificationAvailable = notificationAvailable, pushEnabled = pushyEnabled)
-        CampaignConnectionContent(view,
+        CampaignConnectionContent(view,openTool=openTool,
             onPair = { origin, profile, name, reads, writes -> operate {
                 val result = client.beginPairing(origin, profile, name, reads, writes)
                 snapshot = result
@@ -175,6 +175,7 @@ import java.io.IOException
             onRenew = { origin, profile -> operate { val url = client.startServiceAuthorization(origin, profile); openOwner(url, origin); client.snapshot() } },
             onImportAuthorization = { importAuthorization.launch(arrayOf("application/json", "application/octet-stream")) },
             onDiagnostics = { diagnostics = true },
+            onReceiptPage = { before -> operate { client.showReceiptPage(before) } },
             onPrepareCampaign = {
                 val environment = connectedEnvironment
                 if (environment == null || view.campaignId != "local-campaign") {

@@ -47,6 +47,7 @@ data class LiveHpConnectionView(val origin: String = "", val profiles: List<Live
     val shown = view.current ?: selected
     Page {
         PlayerHeading("Owner connection")
+        if (view.connected) LegacyPublishingConsent(view.origin, view.campaignId, view.deviceId)
         PlayerCard {
             Text("Character HP", style = MaterialTheme.typography.titleLarge, color = RebuildPalette.GoldBright)
             Text("ChatGPT can read this character's saved HP and propose an HP connection test. Each change waits for your approval here.", color = RebuildPalette.Muted)

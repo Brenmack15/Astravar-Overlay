@@ -1,5 +1,7 @@
 package com.yazsras.astravar
 
+import android.graphics.Rect
+import android.view.accessibility.AccessibilityWindowInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
@@ -19,6 +21,7 @@ class GenesisUpgradeInstrumentationTest {
     private val device get() = UiDevice.getInstance(instrumentation)
     private val product get() = InstrumentationRegistry.getArguments().getString("astravarPackage") ?: "com.yazsras.astravar"
     private val candidateVersion get() = InstrumentationRegistry.getArguments().getString("astravarExpectedVersion")?.toInt() ?: 51
+    private fun retainedHp(value: Int) = "HP $value / 32" + if (candidateVersion >= 59) ", 3 temporary" else ""
     private val ui get() = ObservedUi(device)
     private val files get() = instrumentation.targetContext.getExternalFilesDir(null)!!
     private fun tap(label: String) = ui.tapText(label, product, scrollAttempts = 18)
@@ -31,6 +34,81 @@ class GenesisUpgradeInstrumentationTest {
         assertEquals("Upgrade fixtures require an emulator", "1", device.executeShellCommand("getprop ro.kernel.qemu").trim())
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
         ui.awaitMainAfterSavedDialogs(product)
+    }
+
+    private fun enterNamed(label: String, value: String) {
+        val field = By.clazz("android.widget.EditText").pkg(product).hasDescendant(By.text(label))
+        find(label)
+        ui.tap(field, "Focus $label")
+        val editor = ui.snapshot(field, "$label has focus", refreshCache = true) { box ->
+            box.takeIf { it.isFocused && it.isEnabled && !it.visibleBounds.isEmpty }
+        }
+        // Edit this named accessibility node once. A hardware keyboard can leave the IME hidden.
+        editor.text = value
+        ui.snapshot(field, "Exact input for $label", refreshCache = true) { box ->
+            box.text?.takeIf { box.isFocused && it == value }
+        }
+        val imeVisible = instrumentation.uiAutomation.windows.any { window ->
+            window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD &&
+                !Rect().also { window.getBoundsInScreen(it) }.isEmpty
+        }
+        if (imeVisible) device.pressBack()
+        ui.assertFocusedField(value, product, label)
+        ui.snapshot(field, "Saved input for $label", refreshCache = true) { box ->
+            box.text?.takeIf { it == value && box.isFocused }
+        }
+    }
+
+    @Test fun seedAscensionCode58() {
+        launch()
+        assertTrue(device.executeShellCommand("dumpsys package $product").contains("versionCode=58 "))
+        ui.ensurePrimaryTab(product, "Character")
+        tap("Create character")
+        enterNamed("Name", "Ascension upgrade fixture")
+        tap("Next")
+        listOf("STR" to "8", "DEX" to "12", "CON" to "14", "INT" to "15", "WIS" to "10", "CHA" to "10").forEach { (stat,value) -> enterNamed(stat, value) }
+        tap("Next")
+        enterNamed("Unequipped maximum HP", "32")
+        enterNamed("Current HP (blank = unknown)", "17")
+        enterNamed("Temporary HP", "3")
+        enterNamed("Unequipped Armor Class", "16")
+        tap("Review & save")
+        find("STR 8 · DEX 12 · CON 14 · INT 15 · WIS 10 · CHA 10")
+        find("17 / 32")
+        tap("Save character")
+        ui.descriptionBounds("HP 17 / 32", product)
+        ui.captureStablePage(File(files, "api37-before-code58.png"), product, "Character",
+            listOf(By.text("Ascension upgrade fixture").pkg(product)))
+    }
+
+    @Test fun verifyAscensionOnAndroid17() {
+        assertEquals(37, android.os.Build.VERSION.SDK_INT)
+        assertEquals("17", android.os.Build.VERSION.RELEASE)
+        assertTrue(candidateVersion >= 59)
+        val theme = InstrumentationRegistry.getArguments().getString("ascensionTheme")
+        require(theme in setOf("light", "dark"))
+        launch()
+        assertTrue(device.executeShellCommand("dumpsys package $product").contains("versionCode=$candidateVersion "))
+        ui.ensurePrimaryTab(product, "Character")
+        find("Ascension upgrade fixture")
+        ui.descriptionBounds(retainedHp(17), product)
+        ui.selectSection(product, "Sheet")
+        val intelligence = ui.descriptionBounds("Intelligence score 15", product)
+        // The title lies above the independent check/save targets within the same card.
+        assertTrue(device.click(intelligence.centerX(), intelligence.top + maxOf(1, intelligence.height() / 22)))
+        find("Permanent 15 → effective 15")
+        tap("Character source evidence")
+        find("INT · base 15 · effective 15")
+        find("Ascension upgrade fixture")
+        tap("Close")
+        ui.descriptionBounds(retainedHp(17), product)
+        val markers = mapOf("Character" to By.desc(retainedHp(17)), "Inventory" to By.text("Inventions & research"),
+            "Connections" to By.text("Companions"), "Chronicle" to By.text("Encounters"))
+        for ((tab, marker) in markers) {
+            ui.ensurePrimaryTab(product, tab)
+            ui.captureStablePage(File(files, "api37-$theme-$tab.png"), product, tab, listOf(marker.pkg(product)))
+        }
+        ui.ensurePrimaryTab(product, "Character")
     }
 
     @Test fun seedCode49() {
@@ -105,8 +183,8 @@ class GenesisUpgradeInstrumentationTest {
             device.executeShellCommand("dumpsys package $product").contains("versionCode=$candidateVersion "))
         ui.ensurePrimaryTab(product, "Character")
         find("Genesis Legacy Retention Actor")
-        ui.descriptionBounds("HP 17 / 32", product)
-        find("Temp HP 3")
+        ui.descriptionBounds(retainedHp(17), product)
+        if (candidateVersion < 59) find("Temp HP 3")
         ui.captureStablePage(File(files, "genesis-after-code$candidateVersion-sheet.png"), product, "Character",
             listOf(By.text("Genesis Legacy Retention Actor").pkg(product)))
         ui.selectSection(product, "Equipment")
@@ -116,8 +194,13 @@ class GenesisUpgradeInstrumentationTest {
         find("Carried · Quantity 3")
         ui.selectSection(product, "Resources")
         find("Genesis Legacy Retention Charges")
-        find("2 / 5")
-        ui.ensurePrimaryTab(product, "Companions")
+        if (candidateVersion >= 59) {
+            find("2/5")
+            ui.bounds(By.desc("2/5 remaining").pkg(product), "Accessible retained resource balance")
+        } else find("2 / 5")
+        val companionTab = if (candidateVersion >= 59) "Connections" else "Companions"
+        ui.ensurePrimaryTab(product, companionTab)
+        if (candidateVersion >= 59) ui.selectSection(product, "Companions")
         if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
         tap("Genesis Legacy Retention Ally")
         // Reopening a companion may restore the scroll offset from its Relationships
@@ -126,11 +209,11 @@ class GenesisUpgradeInstrumentationTest {
         ui.expandDisclosure(product, "Relationships")
         find("Genesis Legacy Retention Actor")
         find("Fictional retained ally")
-        ui.captureStablePage(File(files, "genesis-upgrade-companion.png"), product, "Companions",
+        ui.captureStablePage(File(files, "genesis-upgrade-companion.png"), product, companionTab,
             listOf(By.text("Fictional retained ally").pkg(product)))
         ui.ensurePrimaryTab(product, "Character")
         ui.selectSection(product, "Sheet")
-        ui.descriptionBounds("HP 17 / 32", product)
+        ui.descriptionBounds(retainedHp(17), product)
     }
 
     /** Runs only after host comparison proves the untouched schema6→8 cutover. */
@@ -140,19 +223,19 @@ class GenesisUpgradeInstrumentationTest {
             device.executeShellCommand("dumpsys package $product").contains("versionCode=$candidateVersion "))
         ui.ensurePrimaryTab(product, "Character")
         find("Genesis Legacy Retention Actor")
-        ui.descriptionBounds("HP 17 / 32", product)
-        ui.tap(By.desc("HP 17 / 32").pkg(product), "Open retained actor hit points")
+        ui.descriptionBounds(retainedHp(17), product)
+        ui.tap(By.desc(retainedHp(17)).pkg(product), "Open retained actor hit points")
         enter("Damage or healing amount", "1")
         tap("Heal")
-        ui.descriptionBounds("HP 18 / 32", product)
+        ui.descriptionBounds(retainedHp(18), product)
         device.executeShellCommand("am force-stop $product")
         launch()
         ui.ensurePrimaryTab(product, "Character")
         find("Genesis Legacy Retention Actor")
-        ui.descriptionBounds("HP 18 / 32", product)
-        find("Temp HP 3")
+        ui.descriptionBounds(retainedHp(18), product)
+        if (candidateVersion < 59) find("Temp HP 3")
         ui.captureStablePage(File(files, "genesis-canonical-write-after-restart.png"), product, "Character",
-            listOf(By.text("Genesis Legacy Retention Actor").pkg(product), By.desc("HP 18 / 32").pkg(product)))
+            listOf(By.text("Genesis Legacy Retention Actor").pkg(product), By.desc(retainedHp(18)).pkg(product)))
         // The host reads all three stopped stores next: exactly this revision
         // and its receipt must be canonical; the original file must be intact.
     }

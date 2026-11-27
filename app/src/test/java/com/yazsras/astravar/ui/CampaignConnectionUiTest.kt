@@ -20,13 +20,14 @@ import org.robolectric.annotation.LooperMode
 @LooperMode(LooperMode.Mode.PAUSED)
 class CampaignConnectionUiTest {
     @get:Rule val compose = createAstravarComposeRule()
+    private fun expand(label: String) { compose.onNodeWithText(label).performScrollTo().performClick() }
     private fun show(view: CampaignConnectionView, auto: (Set<String>) -> Unit = {}, decision: (String, Boolean) -> Unit = { _, _ -> },
         restrict: (Set<String>,Set<String>) -> Unit = { _, _ -> }, pause: (Boolean) -> Unit = {}, sync: () -> Unit = {},
         prepare: () -> Unit = {}, review: () -> Unit = {}, combatReview: () -> Unit = {}): AutoCloseable {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         activity.get().setContent { AstravarTheme {
             CampaignConnectionContent(view, { _, _, _, _, _ -> }, {}, sync, {}, auto, decision, {}, { _, _ -> }, {}, {}, restrict, pause,
-                onPrepareCampaign = prepare, onReviewMembership = review, onReviewCombatAccess = combatReview)
+                onPrepareCampaign = prepare, onReviewMembership = review, onReviewCombatAccess = combatReview, onReceiptPage = {})
         } }
         return AutoCloseable { activity.pause().stop().destroy() }
     }
@@ -36,6 +37,7 @@ class CampaignConnectionUiTest {
         show(CampaignConnectionView(connected = true, status = "Connected", campaignId = "local-campaign",
             selectedProfileId = "fictional-player", localRecordCount = 0, sourceCampaignPrepared = false),
             prepare = { prepares++ }).use {
+            expand("Sync details")
             compose.onNodeWithText("Local campaign records eligible for sync: 0").performScrollTo().assertExists()
             compose.onNodeWithText("Prepare connected local campaign").performScrollTo().performClick()
             assertEquals(1, prepares)
@@ -57,6 +59,8 @@ class CampaignConnectionUiTest {
             compose.onNodeWithTag("campaign-connection-status").assertTextEquals("Connected · no eligible records")
             compose.onNodeWithTag("campaign-gameplay-verification-time").performScrollTo()
                 .assertTextEquals("Last complete gameplay verification: Not yet verified")
+            compose.onNodeWithTag("campaign-service-response-time").assertDoesNotExist()
+            expand("Sync details")
             compose.onNodeWithText("Current records independently verified: 0 of 0").performScrollTo().assertExists()
             compose.onNodeWithTag("campaign-service-response-time").performScrollTo()
                 .assertTextEquals("Last successful service response: Not yet recorded")
@@ -139,6 +143,7 @@ class CampaignConnectionUiTest {
             compose.onNodeWithTag("campaign-connection-status").assertTextEquals("Paused")
             compose.onNodeWithText("Sync now").performScrollTo().assertIsEnabled().performClick()
             assertEquals(1, syncs)
+            expand("Sync settings")
             compose.onNodeWithTag("campaign-sync-pause").performScrollTo().assertIsOn().performClick()
             assertEquals(false, changedPause)
             assertNull(changedScopes)
@@ -149,6 +154,7 @@ class CampaignConnectionUiTest {
         var authorized: Set<String>? = null
         show(CampaignConnectionView(connected = true, grantRevision = 1, readScopes = setOf("hp", "inventory"), writeScopes = setOf("hp")),
             auto = { authorized = it }).use {
+            expand("Trusted DM Auto-Sync")
             compose.onNodeWithText("Saved authorization: manual approval.").performScrollTo().assertExists()
             compose.onNodeWithTag("trusted-dm-toggle").performScrollTo().performClick()
             assertNull(authorized)
@@ -165,6 +171,7 @@ class CampaignConnectionUiTest {
         var authorized: Set<String>? = null
         show(CampaignConnectionView(connected = true, grantRevision = 2, readScopes = setOf("hp"), writeScopes = setOf("hp"), autoSyncScopes = setOf("hp")),
             auto = { authorized = it }).use {
+            expand("Trusted DM Auto-Sync")
             compose.onNodeWithTag("trusted-dm-toggle").performScrollTo().performClick()
             assertNull(authorized)
             compose.onNodeWithTag("trusted-dm-save").performScrollTo().assertIsEnabled().performClick()
@@ -177,12 +184,33 @@ class CampaignConnectionUiTest {
         val operation = CampaignOperationView("adjust_hp", "player", 4, 5, listOf("currentHp" to "20"), listOf("currentHp" to "17"), previewVerified = true)
         show(CampaignConnectionView(connected = true, pending = listOf(CampaignPendingView("cmd", "PENDING_APPROVAL", "Player confirmed action", "", listOf(operation)))),
             decision = { _, _ -> decisions++ }).use {
-            compose.onNodeWithText("Current currentHp: 20").performScrollTo().assertExists()
-            compose.onNodeWithText("Proposed currentHp: 17").performScrollTo().assertExists()
-            compose.onNodeWithText("Approve reviewed transaction").performScrollTo().assertIsNotEnabled()
+            compose.onNodeWithText("Current HP · 20").performScrollTo().assertExists()
+            compose.onNodeWithText("Proposed HP · 17").performScrollTo().assertExists()
+            compose.onNodeWithText("Verify").performScrollTo().assertIsNotEnabled()
             assertEquals(0, decisions)
-            compose.onNodeWithText("Reject transaction").performScrollTo().performClick()
+            compose.onNodeWithText("Refuse").performScrollTo().performClick()
             assertEquals(1, decisions)
+        }
+    }
+
+    @Test fun successfulReceiptDetailsStayCollapsedWhileUnverifiedHistoryRemainsVisible() {
+        val committed = CampaignReceiptView("verified-fixture", "VERIFIED", "Saved", true, "event-1", "a".repeat(64),
+            listOf(CampaignReceiptOperationView("adjust_hp","scope-actor",4,9,5)))
+        val failed = CampaignReceiptView("pending-fixture","REPAIR_REVIEW","Earlier decision needs review",false)
+        show(CampaignConnectionView(connected = true, campaignId = "opaque-continuity", campaignName = "Reviewed continuity",
+            receipts = listOf(committed,failed), unverifiedHistoryCount = 1)).use {
+            compose.onNodeWithText("Campaign: Reviewed continuity").assertExists()
+            compose.onNodeWithText("opaque-continuity",substring = true).assertDoesNotExist()
+            compose.onNodeWithText("Receipts needing attention: 1").assertExists()
+            compose.onNodeWithText("Command pending-fixture").assertExists()
+            compose.onNodeWithText("Command verified-fixture").assertDoesNotExist()
+            expand("Recent activity and receipts")
+            compose.onNodeWithText("Command verified-fixture").performScrollTo().assertExists()
+            compose.onNodeWithText("Expected 4 · current 9 · committed 5").assertExists()
+            compose.onNodeWithText("Receipt event-1").assertExists()
+            expand("Sync settings")
+            compose.onNodeWithTag("campaign-sync-notification").assertExists()
+            compose.onNodeWithTag("campaign-sync-pushy").assertExists()
         }
     }
 
@@ -236,9 +264,9 @@ class CampaignConnectionUiTest {
             }) }
         }, now = 1000)
         show(view, decision = { id, approved -> decision = id to approved }).use {
-            compose.onNodeWithText("Proposed currentHp: 17").performScrollTo().assertExists()
+            compose.onNodeWithText("Proposed HP · 17").performScrollTo().assertExists()
             compose.onAllNodesWithText("Proposed delta: -3").assertCountEquals(0)
-            compose.onNodeWithText("Approve reviewed transaction").performScrollTo().assertIsEnabled().performClick()
+            compose.onNodeWithText("Verify").performScrollTo().assertIsEnabled().performClick()
             assertEquals("cmd-exact" to true, decision)
         }
     }
@@ -258,6 +286,7 @@ class CampaignConnectionUiTest {
         var narrowed: Pair<Set<String>,Set<String>>? = null
         show(CampaignConnectionView(connected = true, readScopes = setOf("hp", "inventory"), writeScopes = setOf("hp", "inventory")),
             restrict = { reads, writes -> narrowed = reads to writes }).use {
+            expand("Available record access")
             compose.onNodeWithText("Manage record permissions").performScrollTo().performClick()
             compose.onNodeWithContentDescription("Keep update access to HP, temporary HP and conditions").performScrollTo().performClick()
             assertNull(narrowed)
@@ -270,6 +299,7 @@ class CampaignConnectionUiTest {
         var narrowed: Pair<Set<String>,Set<String>>? = null
         show(CampaignConnectionView(connected = true, readScopes = setOf("hp", "inventory"), writeScopes = setOf("hp", "inventory")),
             restrict = { reads, writes -> narrowed = reads to writes }).use {
+            expand("Available record access")
             compose.onNodeWithText("Manage record permissions").performScrollTo().performClick()
             compose.onNodeWithContentDescription("Keep read access to Inventory and equipment").performScrollTo().performClick()
             compose.onNodeWithContentDescription("Keep update access to Inventory and equipment").performScrollTo().assertIsOff().assertIsNotEnabled()
@@ -293,10 +323,12 @@ class CampaignConnectionUiTest {
         assertEquals(setOf("hp"), view.readScopes); assertEquals(emptySet<String>(), view.writeScopes)
         assertTrue(view.autoSyncScopes.isEmpty()); assertTrue(view.authorizationPending)
         show(view).use {
+            expand("Available record access")
             compose.onNodeWithText("Manage record permissions").performScrollTo().performClick()
             compose.onAllNodesWithContentDescription("Keep read access to Inventory and equipment").assertCountEquals(0)
             compose.onNodeWithContentDescription("Keep read access to HP, temporary HP and conditions").performScrollTo().assertIsNotEnabled()
             compose.onNodeWithTag("campaign-permissions-save").performScrollTo().assertIsNotEnabled()
+            expand("Trusted DM Auto-Sync")
             compose.onNodeWithTag("trusted-dm-toggle").performScrollTo().assertIsNotEnabled()
         }
     }
@@ -304,7 +336,9 @@ class CampaignConnectionUiTest {
     @Test fun readOnlyCombatOffersAnOwnerReviewWithoutEnablingAutomaticSaves() {
         var requested = 0
         show(CampaignConnectionView(connected = true, readScopes = setOf("combat")), combatReview = { requested++ }).use {
+            expand("Available record access")
             compose.onNodeWithText("Combat mechanics and roll history · read only").performScrollTo().assertExists()
+            expand("Trusted DM Auto-Sync")
             compose.onNodeWithTag("trusted-dm-toggle").performScrollTo().assertIsNotEnabled()
             compose.onNodeWithText("Review combat update permission").performScrollTo().performClick()
             assertEquals(1, requested)
@@ -313,7 +347,9 @@ class CampaignConnectionUiTest {
 
     @Test fun grantedCombatIsWritableAndAutomaticSavingNeedsASeparateChoice() {
         show(CampaignConnectionView(connected = true, readScopes = setOf("combat"), writeScopes = setOf("combat"))).use {
+            expand("Available record access")
             compose.onNodeWithText("Combat mechanics and roll history · read and update").performScrollTo().assertExists()
+            expand("Trusted DM Auto-Sync")
             compose.onNodeWithTag("trusted-dm-toggle").performScrollTo().assertIsOff().performClick()
             compose.onNodeWithContentDescription("Automatically save Combat mechanics and roll history").performScrollTo().assertIsOff()
             compose.onAllNodesWithText("Review combat update permission").assertCountEquals(0)

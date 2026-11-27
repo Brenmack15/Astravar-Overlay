@@ -34,6 +34,13 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
 }.getOrDefault("Unavailable")
 
 @Composable fun AstravarScreen(app: AstravarApp,startOverlay: ()->Unit,grantOverlay: ()->Unit,stopOverlay: ()->Unit, ownerConnectionRequest: Long = 0L) {
+    CloudAuthorityRoute(app) {
+        LocalCampaignScreen(app, startOverlay, grantOverlay, stopOverlay, ownerConnectionRequest)
+    }
+}
+
+@Composable private fun LocalCampaignScreen(app: AstravarApp, startOverlay: () -> Unit, grantOverlay: () -> Unit,
+    stopOverlay: () -> Unit, ownerConnectionRequest: Long) {
     val storageStatus by app.genesisStorage.status.collectAsState()
     if (storageStatus != com.yazsras.astravar.data.GenesisStorageStatus.Ready) {
         AstravarTheme {
@@ -58,7 +65,8 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     var tab by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf("Character")}
     LaunchedEffect(Unit) {
         tab = when (tab) {
-            "Party" -> "Companions"
+            "Party", "Companions" -> "Connections"
+            "Campaign" -> "Chronicle"
             "Armor", "Combat", "More", "Config" -> "Character"
             in rebuildDestinations -> tab
             else -> "Character"
@@ -77,11 +85,20 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     var searchRouteToken by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     var searchIsCompanion by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var searchCampaignItemId by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    var connectionSection by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("Companions") }
+    var worldEntity by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    var inventoryProject by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    var showInbox by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var encounterReturn by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val searchRoute = searchProfileId?.let { GenesisCharacterRoute(it, searchSection, searchDetail, searchRouteToken) }
     LaunchedEffect(tool, selectedPlayerId) {
         val section = genesisRetiredToolSection(tool) ?: return@LaunchedEffect
-        searchProfileId = selectedPlayerId ?: "local-player"
+        if(tool=="Character sources" && companionPlayId!=null) {
+            searchProfileId=companionPlayId;searchIsCompanion=true;companionPlaySection=section
+            searchSection=section;searchDetail=null;searchRouteToken++;tool=null;tab="Connections"
+            return@LaunchedEffect
+        }
+        searchProfileId = if(tool=="Character sources") selectedPlayerId else selectedPlayerId ?: "local-player"
         searchSection = section; searchDetail = null; searchRouteToken++
         searchIsCompanion = false; companionPlayId = null; tool = null; tab = "Character"
     }
@@ -95,26 +112,26 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                 searchIsCompanion = destination.companion
                 companionPlayId = if (destination.companion) destination.profileId else null
                 companionPlaySection = destination.section
-                tab = if (destination.companion) "Companions" else "Character"
+                tab = if (destination.companion) "Connections" else "Character"
             }
             is ReforgeSearchDestination.Companion -> {
                 searchProfileId = null
-                companionPlayId = destination.profileId; companionPlaySection = "Sheet"; tab = "Companions"
+                companionPlayId = destination.profileId; companionPlaySection = "Sheet"; tab = "Connections"
             }
             is ReforgeSearchDestination.CampaignItem -> {
                 searchCampaignItemId = destination.itemId; tool = "Campaign item"
             }
             is ReforgeSearchDestination.Connection -> {
-                companionPlayId = null; tab = "Campaign"; campaignPage = "Connections:${destination.entityId}"
+                companionPlayId = null; tab = "Connections"; connectionSection = "World"; worldEntity = destination.entityId
             }
             is ReforgeSearchDestination.Invention -> {
-                companionPlayId = null; tab = "Campaign"; campaignPage = "Inventions:${destination.projectId}"
+                companionPlayId = null; tab = "Inventory"; requestedInventory = "Inventions"; inventoryProject = destination.projectId
             }
         }
     }
     fun returnToEncounter() {
         tool = null; searchProfileId = null; companionPlayId = null
-        encounterReturn = false; campaignPage = "Encounters"; tab = "Campaign"
+        encounterReturn = false; campaignPage = "Encounters"; tab = "Chronicle"
     }
     LaunchedEffect(ownerConnectionRequest) {
         if (ownerConnectionRequest > 0) {
@@ -171,13 +188,13 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     }
     LaunchedEffect(actions.message) {if(actions.message.isNotBlank()) {snackbar.showSnackbar(actions.message);actions.message=""}}
     androidx.activity.compose.BackHandler(enabled = tab != "Character" &&
-        (tab != "Campaign" || campaignPage == null) &&
-        (tab != "Companions" || companionPlayId == null) && tool == null) { tab = "Character" }
+        (tab != "Chronicle" || campaignPage == null) &&
+        (tab != "Connections" || companionPlayId == null) && tool == null) { tab = "Character" }
     androidx.activity.compose.BackHandler(enabled = tab == "Inventory" && requestedInventory == "Campaign items" &&
         tool == null) { requestedInventory = "My gear"; inventoryRoute++ }
-    androidx.activity.compose.BackHandler(enabled=tab=="Campaign" && campaignPage!=null && tool==null) {campaignPage=null}
+    androidx.activity.compose.BackHandler(enabled=tab=="Chronicle" && campaignPage!=null && tool==null) {campaignPage=null}
     // Register the route fallback before the sheet: its pager closes Combat to Sheet first.
-    androidx.activity.compose.BackHandler(enabled = encounterReturn && tab in listOf("Character", "Companions") && tool == null) {
+    androidx.activity.compose.BackHandler(enabled = encounterReturn && tab in listOf("Character", "Connections") && tool == null) {
         returnToEncounter()
     }
     AstravarTheme {
@@ -185,7 +202,8 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
             LocalGenesisArmorLegacy provides s?.let { GenesisArmorLegacy(it, prefs) }) {
         Scaffold(containerColor=RebuildPalette.Canvas,
             snackbarHost={SnackbarHost(snackbar)},
-            topBar={RebuildAppHeader(s?.demo==true, search = { tool = "Global search" }, tools = { tool = "Tools" })},
+            topBar={RebuildAppHeader(s?.demo==true, search = { tool = "Global search" }, tools = { tool = "Tools" },
+                notifications = { showInbox = true }, actionable = legacyActionableCount())},
             bottomBar={RebuildPrimaryNavigation(tab) { next ->
                 encounterReturn = false
                 if (next == "Inventory") { requestedInventory = "My gear"; inventoryRoute++ }
@@ -220,7 +238,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                     return@Column
                 }
                 if(actions.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                if (encounterReturn && tab in listOf("Character", "Companions")) {
+                if (encounterReturn && tab in listOf("Character", "Connections")) {
                     PlayerTextButton(onClick = ::returnToEncounter) { Text("‹ Return to encounter") }
                 }
                 if (remoteTestEnabled) Row(Modifier.fillMaxWidth().background(RebuildPalette.Active).padding(horizontal = 16.dp),
@@ -233,8 +251,9 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                         else { tool = null; remoteReviewId = next.commandId }
                     }) { Text(if (waitingRemote.isEmpty()) "Remote Updates" else "Review (${waitingRemote.size})") }
                 }
+                if (showInbox) LegacyApprovalInbox { showInbox = false }
                 val playId = companionPlayId
-                if (tab == "Companions" && playId != null && !remoteTestEnabled) {
+                if (tab == "Connections" && playId != null && !remoteTestEnabled) {
                     key(playId, companionPlaySection) {
                         androidx.activity.compose.BackHandler(enabled = tool == null && !encounterReturn) { companionPlayId = null; if (searchIsCompanion) searchProfileId = null }
                         ReforgeCharacterSheet(app.campaignLedger, playableRepository,
@@ -249,23 +268,30 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                                 navigationRequest = searchRoute?.takeUnless { searchIsCompanion })
                         "Armor" -> ArmorOverviewV2(current,app.campaignLedger,
                             combat={tool="Armor weapon"},systems={tool="Spell reservoir"},
-                            eek={tab="Campaign";campaignPage="Eek"},inventory={tab="Campaign";campaignPage="Inventory"},
+                            eek={tab="Chronicle";campaignPage="Eek"},inventory={tab="Chronicle";campaignPage="Inventory"},
                             elements=if(prefs.mode==Ability.ARCANE || prefs.mode==Ability.SPELL) emptyList() else prefs.elements,
                             selectElement={elementPicker=true},
                             characterProfileId=if(remoteTestEnabled) RemoteStatProtocol.PROFILE_ID else "local-player",
                             onOverlayVisibilityChanged={armorModalOpen=it},
-                            openReferences={tab="Campaign";campaignPage="Reference Library"})
+                            openReferences={tab="Chronicle";campaignPage="Reference Library"})
                         "Combat" -> ReforgeCharacterSheet(app.campaignLedger, initialSection = "Combat")
-                        "Inventory" -> if (requestedInventory == "Campaign items") Column(Modifier.fillMaxSize()) {
+                        "Inventory" -> if (requestedInventory == "Inventions") Column(Modifier.fillMaxSize()) {
+                            PlayerTextButton(onClick = { requestedInventory = "My gear"; inventoryProject = null }) { Text("‹ Inventory") }
+                            Box(Modifier.weight(1f)) { InventionsPageV2(app.campaignLedger, initialProjectId = inventoryProject) }
+                        } else if (requestedInventory == "Campaign items") Column(Modifier.fillMaxSize()) {
                             PlayerTextButton(onClick = { requestedInventory = "My gear" }) { Text("‹ Inventory") }
                             Box(Modifier.weight(1f)) { CampaignLedgerPage(app.campaignLedger,
-                                openReferences = { tab = "Campaign"; campaignPage = "Reference Library" }) }
+                                openReferences = { tab = "Chronicle"; campaignPage = "Reference Library" }) }
                         } else GenesisInventoryHub(app.campaignLedger, playableRepository,
                             open = ::openSearchDestination,
-                            openCampaignRecords = { requestedInventory = "Campaign items"; inventoryRoute++ })
-                        "Companions" -> if (remoteTestEnabled) Page { Text("Party records are isolated from the disposable Remote Stat Test. Disable Remote Updates to edit party records.") }
-                            else PartyPageV2(app.campaignLedger, current,
-                                openReferences = { tab = "Campaign"; campaignPage = "Reference Library" },
+                            openCampaignRecords = { requestedInventory = "Campaign items"; inventoryRoute++ },
+                            openInventions = { inventoryProject = null; requestedInventory = "Inventions" })
+                        "Connections" -> if (remoteTestEnabled) Page { Text("Party records are isolated from the disposable Remote Stat Test. Disable Remote Updates to edit party records.") }
+                            else Column(Modifier.fillMaxSize()) {
+                                PlayerTabs(listOf("Companions", "World"), connectionSection, { connectionSection = it; worldEntity = null })
+                                if (connectionSection == "World") ConnectionsPageV2(app.campaignLedger, initialEntityId = worldEntity)
+                                else PartyPageV2(app.campaignLedger, current,
+                                openReferences = { tab = "Chronicle"; campaignPage = "Reference Library" },
                                 openPlayable = { id, section ->
                                     if (searchIsCompanion) searchProfileId = null
                                     companionPlayId = id; companionPlaySection = section
@@ -273,17 +299,27 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                                 playableRepository = playableRepository) {
                                     requestedInventory = "Campaign items"; inventoryRoute++; tab = "Inventory"
                                 }
+                            }
                         "Party" -> if (remoteTestEnabled) Page { Text("Party records are isolated from the disposable Remote Stat Test. Disable Remote Updates to edit party records.") }
                             else PartyPageV2(app.campaignLedger, current,
-                                openReferences={tab="Campaign";campaignPage="Reference Library"}) {tab="Campaign";campaignPage="Inventory"}
-                        "Campaign" -> {
+                                openReferences={tab="Chronicle";campaignPage="Reference Library"}) {tab="Chronicle";campaignPage="Inventory"}
+                        "Chronicle" -> {
                             val page=campaignPage
                             if(page==null) screenStates.SaveableStateProvider("campaign-hub") {
-                                GenesisCampaignHub(connected, open = { campaignPage = it },
-                                    openActor = { id, companion -> openSearchDestination(ReforgeSearchDestination.Character(id, "Sheet", companion = companion)) })
+                                ChronicleLanding(app.campaignLedger) { route ->
+                                    when {
+                                        route == "Connections" || route.startsWith("Connections:") -> {
+                                            tab = "Connections"; connectionSection = "World"; worldEntity = route.substringAfter(':', "").ifBlank { null }
+                                        }
+                                        route == "Inventions" || route.startsWith("Inventions:") -> {
+                                            tab = "Inventory"; requestedInventory = "Inventions"; inventoryProject = route.substringAfter(':', "").ifBlank { null }
+                                        }
+                                        else -> campaignPage = route
+                                    }
+                                }
                             } else Column(Modifier.fillMaxSize()) {
                                 Row(Modifier.fillMaxWidth().padding(horizontal=8.dp),verticalAlignment=Alignment.CenterVertically) {
-                                    PlayerTextButton(onClick={campaignPage=null}) {Text("‹ Campaign")}
+                                    PlayerTextButton(onClick={campaignPage=null}) {Text("‹ Chronicle")}
                                     Spacer(Modifier.weight(1f))
                                 }
                                 Box(Modifier.weight(1f)) {screenStates.SaveableStateProvider("campaign-$page") {
@@ -313,30 +349,26 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
                 tool?.let {name->RebuildToolSheet(name,{tool=null}) {
                     when(name) {
                         "Tools" -> RebuildConfigHub { tool = it }
+                        "Campaign management" -> GenesisCampaignHub(connected, open = { tool = null; tab = "Chronicle"; campaignPage = it },
+                            openActor = { id, companion -> openSearchDestination(ReforgeSearchDestination.Character(id, "Sheet", companion = companion)) })
                         "Global search" -> ReforgeGlobalSearch(app.campaignLedger, open = ::openSearchDestination)
                         "Campaign item" -> CampaignLedgerPage(app.campaignLedger, initialItemId = searchCampaignItemId)
                         "Fictional sync" -> SandboxSyncPage(app.sandboxSync)
                         "Remote Updates" -> if(BuildConfig.DEBUG) RemoteUpdatesPage(app.remoteStats, characterAbilities) {id->
                             tool=null;remoteReviewId=id
                         }
-                        "Owner connection" -> CampaignConnectionPage()
+                        "Owner connection" -> CampaignConnectionPage { tool = it }
                         "Complete backup" -> GenesisUnifiedBackupPage(app.genesisStorage.backup)
                         "Campaign backup" -> CampaignBackupPageV2(app.campaignLedger)
                         "Character backup" -> ReforgeBackupPage(playableRepository)
                         "Campaign import" -> CampaignArchiveImportV21(app.campaignLedger)
                         "Weapon backup" -> Page {BackupPage(current,actions)}
                         "Armor systems", "Armor weapon", "Rules & profile", "Resources & recovery",
-                        "Spell reservoir", "Spell library", "Roll history" -> Text("Opening character…")
+                        "Spell reservoir", "Spell library", "Roll history", "Character sources" -> Text("Opening character…")
                         "ChatGPT Prompts", "ChatGPT toolkit" -> ChatGptPromptsPage(app.campaignLedger.prompts)
                         "Appearance", "Overlay & appearance" -> SettingsPage(app,current,actions,startOverlay,grantOverlay,stopOverlay)
-                        "Companions" -> PartyPageV2(app.campaignLedger, current, openReferences={tool=null;tab="Campaign";campaignPage="Reference Library"}) {
+                        "Companions" -> PartyPageV2(app.campaignLedger, current, openReferences={tool=null;tab="Chronicle";campaignPage="Reference Library"}) {
                             tool = null; requestedInventory = "Campaign items"; inventoryRoute++; tab = "Inventory"
-                        }
-                        "Character sources" -> Page {
-                            CharacterOverviewV2(app.campaignLedger, current)
-                            PlayerTextButton(onClick = { tool = null; tab = "Campaign"; campaignPage = "Reference Library" }) {
-                                Text("Armor source references")
-                            }
                         }
                         else -> HelpPage()
                     }
@@ -396,7 +428,7 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
     }
 }
 
-@Composable fun HelpPage() {
+@Composable fun HelpPage(cloudAuthoritative: Boolean = false) {
     val c=LocalContext.current
     val certificates = remember(c) { installedCertificateFingerprints(c) }
     Page {
@@ -412,8 +444,14 @@ private fun installedCertificateFingerprints(context: android.content.Context): 
             Text("${Build.MANUFACTURER} ${Build.MODEL}\nAndroid ${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}\nBuild ${Build.DISPLAY}\nPackage ${c.packageName}\nStandalone mode · overlay retired")
         }
         Section("Dice & your character sheet") {
-            Text("Your character sheet includes Combat, abilities, spells, and live equipment. Tap a score, skill, attack or spell to use its calculated modifiers; each saved roll retains its dice and explanation. Nothing rolls automatically. The DM determines ordinary hits. Damage previews are potential damage, and averages are estimates. Tools → Armor weapon retains the accepted specialized Astravar weapon engine. Complete backup preserves connected campaign and playable records together; partial backups remain available for unconnected records.")
+            if(cloudAuthoritative) {
+                Text("Your character, inventory and campaign share the same authoritative cloud state. An accepted change has an immutable receipt. Open Owner connection to check a submitted command or review a pending change.")
+                Text("Tap an eligible modifier to roll, hold it for options, or open the dice control to queue checks. Damage rolls remain potential damage until the target outcome is confirmed.")
+                Text("When the connection is unavailable, previously authorized cache records are marked with their last revision. Reconnect and refresh before committing gameplay.")
+            } else {
+            Text("Your character sheet includes Actions, abilities, spells, and live equipment. Tap a score, skill, attack or spell to use its calculated modifiers; each saved roll retains its dice and explanation. Nothing rolls automatically. The DM determines ordinary hits. Damage previews are potential damage, and averages are estimates. Tools → Armor weapon retains the accepted specialized Astravar weapon engine. Complete backup preserves connected campaign and playable records together; partial backups remain available for unconnected records.")
             Text("Astravar does not read, control, or synchronize D&D Beyond. Imported source records remain available for review and reconciliation. Playable character changes are saved on this device; their presence does not establish authoritative campaign synchronization. The optional public connectivity lab sends fixed fictional test messages only.")
+            }
             Text("Astravar runs as a standalone application. Overlay permissions, floating controls and the persistent overlay service are retired.")
             Text("Unofficial tabletop companion. Not affiliated with or endorsed by Wizards of the Coast, D&D Beyond, or Samsung.")
         }

@@ -24,6 +24,7 @@ class GenesisJourneyInstrumentationTest {
     private val device get() = UiDevice.getInstance(instrumentation)
     private val product get() = InstrumentationRegistry.getArguments().getString("astravarPackage") ?: "com.yazsras.astravar"
     private val ui get() = ObservedUi(device)
+    private val ascension by lazy { ui.isAscension(product) }
     private val files get() = instrumentation.targetContext.getExternalFilesDir(null)!!
     private fun tap(label: String) = ui.tapText(label, product, scrollAttempts = 18, preferLast = true)
     private fun find(label: String) = ui.textBounds(label, product, scrollAttempts = 18)
@@ -56,6 +57,28 @@ class GenesisJourneyInstrumentationTest {
                 if (left) bounds.left + inset else bounds.right - inset, bounds.centerY(), 25))
         device.waitForIdle(1_000)
     }
+    private fun revealFeatureEditor(minimumTarget: Int): Rect {
+        val label = "Edit identity & features"
+        val viewport = pageViewport()
+        assertTrue("The enlarged Features page has at least one touch target of scrollable space",
+            viewport.height() >= minimumTarget)
+        repeat(6) {
+            val marker = find(label)
+            val button = ui.controlBounds(By.text(label).pkg(product), "Feature editor button", refreshCache = true)
+            if (button.height() >= minimumTarget && button.width() >= minimumTarget &&
+                marker.top > viewport.top && marker.bottom < viewport.bottom) return button
+            // Compose can expose the first pixel of the label at a scroll edge.
+            // Move only the content, then measure this same button again before tapping.
+            val middle = viewport.centerY()
+            val offset = viewport.height() / 3
+            val start = if (marker.centerY() >= middle) middle + offset else middle - offset
+            assertTrue("Scroll the Features page to expose its editor",
+                device.swipe(viewport.centerX(), start, viewport.centerX(), middle, 30))
+            device.waitForIdle(1_000)
+        }
+        error("The enlarged Features page did not expose a 48dp editor button in $viewport")
+    }
+
     private fun capture(name: String, primary: String, vararg labels: String) {
         labels.forEach(::find)
         ui.captureStablePage(File(files, "genesis-$name.png"), product, primary, labels.map { By.text(it).pkg(product) })
@@ -100,18 +123,33 @@ class GenesisJourneyInstrumentationTest {
         ui.tap(By.text(Pattern.compile("(?i)save")).pkg(picker), "Save the document", timeoutMs = 10_000,
             refreshCache = true)
     }
+    private fun openCampaign() {
+        if (ascension) {
+            ui.openTool(product, "Campaign management")
+            ui.selectSection(product, "People")
+        } else {
+            ui.ensurePrimaryTab(product, "Campaign")
+            if (device.hasObject(By.text("‹ Campaign").pkg(product))) tap("‹ Campaign")
+        }
+        find("Choose campaign")
+    }
+
+    private fun leaveCampaign() {
+        if (ascension) {
+            find("Choose campaign")
+            tap("Close")
+        }
+    }
+
     private fun openBackup() {
-        tap("Tools")
-        tap("Records, backups & connection")
-        tap("Complete backup")
+        ui.openTool(product, "Complete backup")
         find("Keep connected records together")
     }
 
     @Test fun guidedCreationSwipesQuickActionsAndConnectedInventory() {
         assertEquals("Genesis write tests require an emulator", "1", device.executeShellCommand("getprop ro.kernel.qemu").trim())
         restart()
-        ui.ensurePrimaryTab(product, "Campaign")
-        if (device.hasObject(By.text("‹ Campaign").pkg(product))) tap("‹ Campaign")
+        openCampaign()
         tap("Choose campaign")
         tap("Create campaign")
         enter("Campaign name", "Genesis Native Campaign")
@@ -126,13 +164,17 @@ class GenesisJourneyInstrumentationTest {
         find("NPC saved in campaign records")
         find("Genesis Native Contact")
         restart()
-        ui.ensurePrimaryTab(product, "Campaign")
+        openCampaign()
         find("Genesis Native Campaign")
         find("Genesis Native Contact")
-        capture("connected-campaign", "Campaign", "Genesis Native Campaign", "Genesis Native Contact")
+        if (ascension) {
+            ui.captureStableDialog(File(files, "genesis-connected-campaign.png"), product, "Campaign management",
+                listOf(By.text("Genesis Native Campaign").pkg(product), By.text("Genesis Native Contact").pkg(product)))
+        } else capture("connected-campaign", "Campaign", "Genesis Native Campaign", "Genesis Native Contact")
+        leaveCampaign()
         ui.ensurePrimaryTab(product, "Character")
         find("CI Native Hero Revised")
-        ui.tap(By.desc("Switch character").pkg(product), "Switch character")
+        ui.openCharacterPicker(product)
         tap("Create character or companion")
         enter("Name", "Genesis Native Hero")
         tap("Health & defense")
@@ -144,15 +186,18 @@ class GenesisJourneyInstrumentationTest {
         find("Genesis Native Hero")
         ui.descriptionBounds("HP 14 / 20", product)
         assertSection("Sheet")
-        // Roll dice belongs near the top of Sheet. The observed code50 run
-        // exhausted discovery scrolling down through skills before reversing;
-        // reveal this known upper control first within the same 30-second budget.
-        ui.textBounds("Roll dice", product, scrollAttempts = 18, firstDirection = Direction.UP)
-        capture("character-sheet", "Character", "Genesis Native Hero", "Roll dice")
+        if (ascension) {
+            ui.descriptionBounds("Roll Manager", product)
+            ui.captureStablePage(File(files, "genesis-character-sheet.png"), product, "Character",
+                listOf(By.text("Genesis Native Hero").pkg(product), By.desc("Roll Manager").pkg(product)))
+        } else {
+            ui.textBounds("Roll dice", product, scrollAttempts = 18, firstDirection = Direction.UP)
+            capture("character-sheet", "Character", "Genesis Native Hero", "Roll dice")
+        }
 
         // Creation is already connected. Explicit review confirms the same identity
         // and membership, rather than silently manufacturing an independent copy.
-        ui.ensurePrimaryTab(product, "Campaign")
+        openCampaign()
         find("Genesis Native Hero")
         tap("Genesis Native Hero")
         tap("Review shared values")
@@ -162,7 +207,11 @@ class GenesisJourneyInstrumentationTest {
         tap("Accept reviewed values")
         find("Shared values connected and saved")
         tap("Close")
-        ui.ensurePrimaryTab(product, "Companions")
+        leaveCampaign()
+        if (ascension) {
+            ui.ensurePrimaryTab(product, "Connections")
+            ui.selectSection(product, "Companions")
+        } else ui.ensurePrimaryTab(product, "Companions")
         if (device.hasObject(By.text("Back to companions").pkg(product))) tap("Back to companions")
         if (device.hasObject(By.text("‹ Party").pkg(product))) tap("‹ Party")
         tap("+ Add companion")
@@ -190,22 +239,32 @@ class GenesisJourneyInstrumentationTest {
         val before = ui.bounds(By.text("Perception").pkg(product), "sheet reading position", refreshCache = true)
         ui.descriptionBounds("HP 14 / 20", product)
         swipePage(left = true)
-        assertSection("Combat")
-        find("Add attack")
-        capture("swiped-actions", "Character", "Add attack")
+        val actionsSection = if (ascension) "Actions" else "Combat"
+        assertSection(actionsSection)
+        if (ascension) {
+            capture("swiped-actions", "Character", "Attacks")
+            tap("Attacks")
+            find("Create attack")
+            tap("Close")
+        } else {
+            find("Add attack")
+            capture("swiped-actions", "Character", "Add attack")
+        }
         swipePage(left = false)
         assertSection("Sheet")
         val after = ui.bounds(By.text("Perception").pkg(product), "restored sheet reading position", refreshCache = true)
         assertTrue("Swiping back preserves the exact reading position", abs(before.top - after.top) <= 3)
         swipePage(left = true)
-        assertSection("Combat")
+        assertSection(actionsSection)
         device.pressBack()
         assertSection("Sheet")
 
         // Optional shortcuts now live in Character controls, away from the
         // primary page strip. Preserve their drag/tap and persistence coverage.
         assertFalse("The primary sheet has no redundant Health shortcut", device.hasObject(By.text("Health").pkg(product)))
-        assertFalse("The primary sheet has no redundant Actions shortcut", device.hasObject(By.text("Actions").pkg(product)))
+        val actionsLabels = device.findObjects(By.text("Actions").pkg(product)).count { !it.visibleBounds.isEmpty }
+        assertEquals("The sheet has only its Actions section tab and no duplicate shortcut",
+            if (ascension) 1 else 0, actionsLabels)
         ui.tap(By.desc("Character controls").pkg(product), "Open optional character controls")
         ui.tap(By.desc("Customize quick actions").pkg(product), "Customize quick actions")
         val health = ui.bounds(By.desc("Drag Health to reorder").pkg(product), "Health drag handle", refreshCache = true)
@@ -278,8 +337,13 @@ class GenesisJourneyInstrumentationTest {
             assertTrue("Compact HP remains a 48dp touch target", hp.width() >= minimumTarget && hp.height() >= minimumTarget)
             val controls = ui.controlBounds(By.desc("Character controls").pkg(product), "Compact character controls")
             assertTrue("Compact controls remain a 48dp touch target", controls.width() >= minimumTarget && controls.height() >= minimumTarget)
+            val editor = revealFeatureEditor(minimumTarget)
             capture("landscape-font200", "Character", "Edit identity & features")
-            ui.touch(controls, "Open all character controls at 200 percent")
+            ui.touch(editor, "Open the visible Features editor at 200 percent")
+            find("Identity & features")
+            tap("Close")
+            assertSection("Features")
+            ui.tap(By.desc("Character controls").pkg(product), "Open all character controls at 200 percent", refreshCache = true)
             ui.descriptionBounds("Switch character", product)
             tap("Health")
             find("Damage or healing amount")
@@ -315,11 +379,12 @@ class GenesisJourneyInstrumentationTest {
         tap("Confirm merge")
         find("Connected backup records merged and verified on this device.")
         restart()
-        ui.ensurePrimaryTab(product, "Campaign")
+        openCampaign()
         find("Genesis Native Campaign")
         find("Genesis Native Contact")
         find("Genesis Native Familiar")
         find("Genesis Native Hero")
+        leaveCampaign()
         ui.ensurePrimaryTab(product, "Inventory")
         find("Genesis Native Compass Revised")
         ui.ensurePrimaryTab(product, "Character")
@@ -328,7 +393,7 @@ class GenesisJourneyInstrumentationTest {
 
         // Leave the established fictional fixture selected for downstream
         // update-preservation stages. Genesis records remain for readback.
-        ui.tap(By.desc("Switch character").pkg(product), "Switch character")
+        ui.openCharacterPicker(product)
         tap("CI Native Hero Revised")
         ui.selectSection(product, "Sheet")
         ui.descriptionBounds("HP 31 / 37", product)

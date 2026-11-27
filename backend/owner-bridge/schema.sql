@@ -250,3 +250,494 @@ CREATE INDEX bridge_campaign_companion_resource ON bridge_campaign_records(owner
 ALTER TABLE bridge_campaign_publications ADD COLUMN device_build_json TEXT;
 --> statement-breakpoint
 CREATE INDEX bridge_campaign_verified_publication ON bridge_campaign_publications(grant_id,created_at DESC) WHERE expected_generation IS NOT NULL;
+
+-- Private campaign protocol v1. Existing campaigns acquire no authority or grant
+-- from installation of this migration. Their data remains in its original tables.
+CREATE TABLE cloud_continuities (
+  owner_id TEXT NOT NULL CHECK(length(owner_id) BETWEEN 1 AND 200),
+  continuity_id TEXT NOT NULL CHECK(length(continuity_id) BETWEEN 1 AND 200),
+  authority TEXT NOT NULL CHECK(authority IN ('legacy','staged','cloud')),
+  epoch INTEGER NOT NULL DEFAULT 1 CHECK(typeof(epoch)='integer' AND epoch BETWEEN 1 AND 9007199254740991),
+  revision INTEGER NOT NULL DEFAULT 0 CHECK(typeof(revision)='integer' AND revision BETWEEN 0 AND 9007199254740991),
+  schema_version INTEGER NOT NULL DEFAULT 1 CHECK(schema_version=1),
+  PRIMARY KEY(owner_id,continuity_id)
+) WITHOUT ROWID;
+--> statement-breakpoint
+CREATE TRIGGER cloud_continuity_identity BEFORE UPDATE ON cloud_continuities
+WHEN NEW.owner_id IS NOT OLD.owner_id OR NEW.continuity_id IS NOT OLD.continuity_id
+  OR NEW.revision<OLD.revision OR NEW.epoch<OLD.epoch OR NEW.epoch>OLD.epoch+1
+  OR (NEW.authority<>OLD.authority AND NEW.epoch<>OLD.epoch+1)
+BEGIN SELECT RAISE(ABORT,'CLOUD_AUTHORITY_EPOCH'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_continuity_no_replacement BEFORE INSERT ON cloud_continuities
+WHEN EXISTS(SELECT 1 FROM cloud_continuities WHERE owner_id=NEW.owner_id AND continuity_id=NEW.continuity_id)
+BEGIN SELECT RAISE(ABORT,'CLOUD_CONTINUITY_EXISTS'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_continuity_no_delete BEFORE DELETE ON cloud_continuities
+BEGIN SELECT RAISE(ABORT,'CLOUD_AUTHORITY_REQUIRED'); END;
+--> statement-breakpoint
+-- The discriminator in the compound parent key enforces an actor-typed FK
+-- even for out-of-order imports. An actor references its own stable identity.
+CREATE TABLE cloud_entities (
+  owner_id TEXT NOT NULL,
+  continuity_id TEXT NOT NULL,
+  id TEXT NOT NULL CHECK(length(id) BETWEEN 1 AND 200),
+  kind TEXT NOT NULL CHECK(length(kind) BETWEEN 1 AND 80 AND kind NOT GLOB '*[^a-z0-9_]*'),
+  actor_id TEXT,
+  title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 1000),
+  data_json TEXT NOT NULL CHECK(json_valid(data_json) AND json_type(data_json)='object'),
+  life TEXT NOT NULL DEFAULT 'active' CHECK(life IN ('active','archived')),
+  revision INTEGER NOT NULL CHECK(typeof(revision)='integer' AND revision BETWEEN 1 AND 9007199254740991),
+  actor_kind TEXT GENERATED ALWAYS AS (CASE WHEN actor_id IS NOT NULL THEN 'actor' END) VIRTUAL,
+  PRIMARY KEY(owner_id,continuity_id,id),
+  UNIQUE(owner_id,continuity_id,id,kind),
+  CHECK(kind<>'actor' OR (actor_id IS NOT NULL AND actor_id=id)),
+  FOREIGN KEY(owner_id,continuity_id) REFERENCES cloud_continuities(owner_id,continuity_id),
+  FOREIGN KEY(owner_id,continuity_id,actor_id,actor_kind)
+    REFERENCES cloud_entities(owner_id,continuity_id,id,kind) DEFERRABLE INITIALLY DEFERRED
+) WITHOUT ROWID;
+--> statement-breakpoint
+CREATE INDEX cloud_entities_by_kind ON cloud_entities(owner_id,continuity_id,kind,life,id);
+--> statement-breakpoint
+CREATE INDEX cloud_entities_by_actor ON cloud_entities(owner_id,continuity_id,actor_id,kind,life,id);
+--> statement-breakpoint
+CREATE TRIGGER cloud_entity_identity BEFORE UPDATE ON cloud_entities
+WHEN NEW.owner_id IS NOT OLD.owner_id OR NEW.continuity_id IS NOT OLD.continuity_id
+  OR NEW.id IS NOT OLD.id OR NEW.kind IS NOT OLD.kind OR NEW.revision<=OLD.revision
+BEGIN SELECT RAISE(ABORT,'CLOUD_ENTITY_REVISION'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_entity_insert_revision BEFORE INSERT ON cloud_entities
+WHEN EXISTS(SELECT 1 FROM cloud_entities WHERE owner_id=NEW.owner_id AND continuity_id=NEW.continuity_id
+  AND id=NEW.id AND (kind<>NEW.kind OR revision>=NEW.revision))
+BEGIN SELECT RAISE(ABORT,'CLOUD_ENTITY_REVISION'); END;
+--> statement-breakpoint
+CREATE TABLE cloud_links (
+  owner_id TEXT NOT NULL,
+  continuity_id TEXT NOT NULL,
+  from_id TEXT NOT NULL,
+  relation TEXT NOT NULL CHECK(length(relation) BETWEEN 1 AND 80 AND relation NOT GLOB '*[^a-z0-9_]*'),
+  to_id TEXT NOT NULL,
+  PRIMARY KEY(owner_id,continuity_id,from_id,relation,to_id),
+  FOREIGN KEY(owner_id,continuity_id,from_id) REFERENCES cloud_entities(owner_id,continuity_id,id) DEFERRABLE INITIALLY DEFERRED,
+  FOREIGN KEY(owner_id,continuity_id,to_id) REFERENCES cloud_entities(owner_id,continuity_id,id) DEFERRABLE INITIALLY DEFERRED
+) WITHOUT ROWID;
+--> statement-breakpoint
+CREATE INDEX cloud_links_to ON cloud_links(owner_id,continuity_id,to_id,relation,from_id);
+--> statement-breakpoint
+CREATE TABLE cloud_grants (
+  owner_id TEXT NOT NULL,
+  continuity_id TEXT NOT NULL,
+  subject TEXT NOT NULL CHECK(length(subject) BETWEEN 1 AND 240),
+  scopes_json TEXT NOT NULL CHECK(json_valid(scopes_json) AND json_type(scopes_json)='array'),
+  actors_json TEXT NOT NULL CHECK(json_valid(actors_json) AND json_type(actors_json)='array'),
+  auto_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(auto_json) AND json_type(auto_json)='array'),
+  expires_at INTEGER NOT NULL CHECK(typeof(expires_at)='integer' AND expires_at BETWEEN 0 AND 9007199254740991),
+  revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(typeof(revision)='integer' AND revision BETWEEN 1 AND 9007199254740991),
+  PRIMARY KEY(owner_id,continuity_id,subject),
+  FOREIGN KEY(owner_id,continuity_id) REFERENCES cloud_continuities(owner_id,continuity_id)
+) WITHOUT ROWID;
+--> statement-breakpoint
+CREATE TRIGGER cloud_grant_identity BEFORE UPDATE ON cloud_grants
+WHEN NEW.owner_id IS NOT OLD.owner_id OR NEW.continuity_id IS NOT OLD.continuity_id OR NEW.subject IS NOT OLD.subject
+  OR NEW.revision<>OLD.revision+1
+BEGIN SELECT RAISE(ABORT,'CLOUD_GRANT_REVISION'); END;
+--> statement-breakpoint
+-- Grant scope sets must remain structurally valid even after a reviewed import.
+-- Individual actor IDs can be granted before an authorized actor creation.
+CREATE VIEW cloud_invalid_grants AS
+SELECT g.owner_id,g.continuity_id,g.subject FROM cloud_grants g
+WHERE EXISTS(SELECT 1 FROM json_each(g.scopes_json) s WHERE s.type<>'text'
+  OR (s.value NOT GLOB '?*.read' AND s.value NOT GLOB '?*.write')
+  OR (s.value GLOB '*.write' AND substr(s.value,1,length(s.value)-6)||'.read' NOT IN (SELECT value FROM json_each(g.scopes_json))))
+  OR EXISTS(SELECT 1 FROM json_each(g.auto_json) a WHERE a.type<>'text' OR a.value NOT GLOB '?*.write'
+    OR a.value NOT IN (SELECT value FROM json_each(g.scopes_json)))
+  OR EXISTS(SELECT 1 FROM json_each(g.actors_json) a WHERE a.type<>'text' OR length(a.value) NOT BETWEEN 1 AND 200)
+  OR EXISTS(SELECT 1 FROM json_each(g.actors_json) a WHERE a.value='*' AND json_array_length(g.actors_json)<>1)
+  OR (SELECT count(DISTINCT value) FROM json_each(g.scopes_json))<>json_array_length(g.scopes_json)
+  OR (SELECT count(DISTINCT value) FROM json_each(g.auto_json))<>json_array_length(g.auto_json)
+  OR (SELECT count(DISTINCT value) FROM json_each(g.actors_json))<>json_array_length(g.actors_json);
+--> statement-breakpoint
+CREATE TRIGGER cloud_grant_validate_insert AFTER INSERT ON cloud_grants
+WHEN EXISTS(SELECT 1 FROM cloud_invalid_grants WHERE owner_id=NEW.owner_id AND continuity_id=NEW.continuity_id AND subject=NEW.subject)
+BEGIN SELECT RAISE(ABORT,'INVALID_CLOUD_GRANT'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_grant_validate_update AFTER UPDATE ON cloud_grants
+WHEN EXISTS(SELECT 1 FROM cloud_invalid_grants WHERE owner_id=NEW.owner_id AND continuity_id=NEW.continuity_id AND subject=NEW.subject)
+BEGIN SELECT RAISE(ABORT,'INVALID_CLOUD_GRANT'); END;
+--> statement-breakpoint
+CREATE TABLE cloud_requests (
+  owner_id TEXT NOT NULL,
+  continuity_id TEXT NOT NULL,
+  command_id TEXT NOT NULL CHECK(length(command_id) BETWEEN 1 AND 200),
+  subject TEXT NOT NULL CHECK(length(subject) BETWEEN 1 AND 240),
+  digest TEXT NOT NULL CHECK(length(digest)=64 AND digest NOT GLOB '*[^0-9a-f]*'),
+  request_json TEXT NOT NULL CHECK(json_valid(request_json) AND json_type(request_json)='object'),
+  access_json TEXT NOT NULL CHECK(json_valid(access_json) AND json_type(access_json)='array'),
+  status TEXT NOT NULL CHECK(status IN ('PENDING_APPROVAL','COMMITTED','REFUSED','CONFLICT','SUPERSEDED','FAILED')),
+  submitted_at INTEGER NOT NULL CHECK(typeof(submitted_at)='integer' AND submitted_at>=0),
+  terminal_command_id TEXT GENERATED ALWAYS AS (CASE WHEN status<>'PENDING_APPROVAL' THEN command_id END) VIRTUAL,
+  PRIMARY KEY(owner_id,continuity_id,command_id),
+  UNIQUE(owner_id,continuity_id,command_id,status),
+  FOREIGN KEY(owner_id,continuity_id) REFERENCES cloud_continuities(owner_id,continuity_id),
+  FOREIGN KEY(owner_id,continuity_id,terminal_command_id)
+    REFERENCES cloud_receipts(owner_id,continuity_id,command_id) DEFERRABLE INITIALLY DEFERRED
+) WITHOUT ROWID;
+--> statement-breakpoint
+CREATE INDEX cloud_pending_requests ON cloud_requests(owner_id,continuity_id,submitted_at,command_id)
+  WHERE status='PENDING_APPROVAL';
+--> statement-breakpoint
+CREATE TRIGGER cloud_request_no_replacement BEFORE INSERT ON cloud_requests
+WHEN EXISTS(SELECT 1 FROM cloud_requests WHERE owner_id=NEW.owner_id AND continuity_id=NEW.continuity_id AND command_id=NEW.command_id)
+BEGIN SELECT RAISE(ABORT,'CLOUD_COMMAND_EXISTS'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_request_immutable BEFORE UPDATE ON cloud_requests
+WHEN NEW.owner_id IS NOT OLD.owner_id OR NEW.continuity_id IS NOT OLD.continuity_id OR NEW.command_id IS NOT OLD.command_id
+  OR NEW.subject IS NOT OLD.subject OR NEW.digest IS NOT OLD.digest OR NEW.request_json IS NOT OLD.request_json
+  OR NEW.access_json IS NOT OLD.access_json OR NEW.submitted_at IS NOT OLD.submitted_at
+  OR OLD.status<>'PENDING_APPROVAL' OR NEW.status='PENDING_APPROVAL'
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_CLOUD_REQUEST'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_request_no_delete BEFORE DELETE ON cloud_requests
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_CLOUD_REQUEST'); END;
+--> statement-breakpoint
+CREATE TABLE cloud_receipts (
+  owner_id TEXT NOT NULL,
+  continuity_id TEXT NOT NULL,
+  command_id TEXT NOT NULL,
+  transaction_id TEXT NOT NULL CHECK(length(transaction_id) BETWEEN 1 AND 200),
+  status TEXT NOT NULL CHECK(status IN ('COMMITTED','REFUSED','CONFLICT','SUPERSEDED','FAILED')),
+  epoch INTEGER NOT NULL CHECK(typeof(epoch)='integer' AND epoch BETWEEN 1 AND 9007199254740991),
+  revision INTEGER NOT NULL CHECK(typeof(revision)='integer' AND revision BETWEEN 0 AND 9007199254740991),
+  result_json TEXT NOT NULL CHECK(json_valid(result_json) AND json_type(result_json)='object'),
+  access_json TEXT NOT NULL CHECK(json_valid(access_json) AND json_type(access_json)='array'),
+  created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at>=0),
+  PRIMARY KEY(owner_id,continuity_id,command_id),
+  UNIQUE(owner_id,continuity_id,transaction_id),
+  FOREIGN KEY(owner_id,continuity_id,command_id,status)
+    REFERENCES cloud_requests(owner_id,continuity_id,command_id,status) DEFERRABLE INITIALLY DEFERRED
+) WITHOUT ROWID;
+--> statement-breakpoint
+CREATE INDEX cloud_receipts_by_revision ON cloud_receipts(owner_id,continuity_id,revision,command_id);
+--> statement-breakpoint
+CREATE TRIGGER cloud_receipt_no_replacement BEFORE INSERT ON cloud_receipts
+WHEN EXISTS(SELECT 1 FROM cloud_receipts WHERE owner_id=NEW.owner_id AND continuity_id=NEW.continuity_id
+  AND (command_id=NEW.command_id OR transaction_id=NEW.transaction_id))
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_CLOUD_RECEIPT'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_receipt_no_update BEFORE UPDATE ON cloud_receipts
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_CLOUD_RECEIPT'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_receipt_no_delete BEFORE DELETE ON cloud_receipts
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_CLOUD_RECEIPT'); END;
+--> statement-breakpoint
+CREATE TABLE cloud_changes (
+  owner_id TEXT NOT NULL,
+  continuity_id TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK(typeof(revision)='integer' AND revision BETWEEN 1 AND 9007199254740991),
+  ordinal INTEGER NOT NULL CHECK(typeof(ordinal)='integer' AND ordinal>=0),
+  entity_id TEXT NOT NULL CHECK(length(entity_id) BETWEEN 1 AND 200),
+  kind TEXT NOT NULL CHECK(length(kind) BETWEEN 1 AND 80),
+  actor_id TEXT,
+  change_type TEXT NOT NULL CHECK(change_type IN ('upsert','delete')),
+  PRIMARY KEY(owner_id,continuity_id,revision,ordinal),
+  FOREIGN KEY(owner_id,continuity_id) REFERENCES cloud_continuities(owner_id,continuity_id)
+) WITHOUT ROWID;
+--> statement-breakpoint
+CREATE INDEX cloud_changes_by_actor ON cloud_changes(owner_id,continuity_id,actor_id,revision,ordinal);
+--> statement-breakpoint
+CREATE TRIGGER cloud_change_no_replacement BEFORE INSERT ON cloud_changes
+WHEN EXISTS(SELECT 1 FROM cloud_changes WHERE owner_id=NEW.owner_id AND continuity_id=NEW.continuity_id
+  AND revision=NEW.revision AND ordinal=NEW.ordinal)
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_CLOUD_CHANGE'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_change_no_update BEFORE UPDATE ON cloud_changes
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_CLOUD_CHANGE'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_change_no_delete BEFORE DELETE ON cloud_changes
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_CLOUD_CHANGE'); END;
+--> statement-breakpoint
+CREATE TABLE cloud_tombstones (
+  owner_id TEXT NOT NULL,
+  continuity_id TEXT NOT NULL,
+  id TEXT NOT NULL CHECK(length(id) BETWEEN 1 AND 200),
+  kind TEXT NOT NULL CHECK(length(kind) BETWEEN 1 AND 80),
+  deleted_revision INTEGER NOT NULL CHECK(typeof(deleted_revision)='integer' AND deleted_revision BETWEEN 1 AND 9007199254740991),
+  PRIMARY KEY(owner_id,continuity_id,id),
+  FOREIGN KEY(owner_id,continuity_id) REFERENCES cloud_continuities(owner_id,continuity_id)
+) WITHOUT ROWID;
+--> statement-breakpoint
+CREATE TRIGGER cloud_tombstone_insert BEFORE INSERT ON cloud_tombstones
+WHEN EXISTS(SELECT 1 FROM cloud_tombstones WHERE owner_id=NEW.owner_id AND continuity_id=NEW.continuity_id AND id=NEW.id)
+  OR EXISTS(SELECT 1 FROM cloud_entities WHERE owner_id=NEW.owner_id AND continuity_id=NEW.continuity_id AND id=NEW.id
+    AND (kind<>NEW.kind OR revision>=NEW.deleted_revision))
+BEGIN SELECT RAISE(ABORT,'CLOUD_TOMBSTONE_CONFLICT'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_tombstone_no_update BEFORE UPDATE ON cloud_tombstones
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_CLOUD_TOMBSTONE'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_tombstone_no_delete BEFORE DELETE ON cloud_tombstones
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_CLOUD_TOMBSTONE'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_entity_block_resurrection BEFORE INSERT ON cloud_entities
+WHEN EXISTS(SELECT 1 FROM cloud_tombstones WHERE owner_id=NEW.owner_id AND continuity_id=NEW.continuity_id AND id=NEW.id)
+BEGIN SELECT RAISE(ABORT,'DELETED_CLOUD_IDENTITY'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_entity_require_tombstone BEFORE DELETE ON cloud_entities
+WHEN NOT EXISTS(SELECT 1 FROM cloud_tombstones WHERE owner_id=OLD.owner_id AND continuity_id=OLD.continuity_id AND id=OLD.id AND kind=OLD.kind)
+BEGIN SELECT RAISE(ABORT,'CLOUD_TOMBSTONE_REQUIRED'); END;
+--> statement-breakpoint
+CREATE TABLE cloud_guards (ok INTEGER NOT NULL CHECK(ok=1));
+--> statement-breakpoint
+CREATE TRIGGER cloud_fence_v2_submit BEFORE INSERT ON bridge_campaign_commands
+WHEN EXISTS(SELECT 1 FROM cloud_continuities
+  WHERE owner_id=NEW.owner_id AND continuity_id=NEW.campaign_id AND authority='cloud')
+BEGIN SELECT RAISE(ABORT,'CLOUD_AUTHORITY_REQUIRED'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_fence_v2_publish BEFORE INSERT ON bridge_campaign_publications
+WHEN (json_array_length(NEW.records_json)>0 OR json_array_length(NEW.removed_json)>0) AND EXISTS(SELECT 1 FROM cloud_continuities
+  WHERE owner_id=NEW.owner_id AND continuity_id=NEW.campaign_id AND authority='cloud')
+BEGIN SELECT RAISE(ABORT,'CLOUD_AUTHORITY_REQUIRED'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_fence_v2_decide BEFORE INSERT ON bridge_campaign_receipts
+WHEN json_extract(NEW.receipt_json,'$.status')='APPLIED' AND EXISTS(SELECT 1 FROM cloud_continuities
+  WHERE owner_id=NEW.owner_id AND continuity_id=NEW.campaign_id AND authority='cloud')
+BEGIN SELECT RAISE(ABORT,'CLOUD_AUTHORITY_REQUIRED'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_fence_hp_submit BEFORE INSERT ON bridge_hp_proposals
+WHEN EXISTS(SELECT 1 FROM cloud_continuities
+  WHERE owner_id=NEW.owner_id AND continuity_id=NEW.campaign_id AND authority='cloud')
+BEGIN SELECT RAISE(ABORT,'CLOUD_AUTHORITY_REQUIRED'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_fence_hp_decide BEFORE INSERT ON bridge_hp_receipts
+WHEN NEW.status IN ('APPLIED','PUBLISHED') AND EXISTS(SELECT 1 FROM cloud_continuities
+  WHERE owner_id=NEW.owner_id AND continuity_id=NEW.campaign_id AND authority='cloud')
+BEGIN SELECT RAISE(ABORT,'CLOUD_AUTHORITY_REQUIRED'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_fence_v1_submit BEFORE INSERT ON bridge_proposals
+WHEN EXISTS(SELECT 1 FROM cloud_continuities
+  WHERE owner_id=NEW.owner_id AND continuity_id=NEW.campaign_id AND authority='cloud')
+BEGIN SELECT RAISE(ABORT,'CLOUD_AUTHORITY_REQUIRED'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_fence_v1_decide BEFORE INSERT ON bridge_receipts
+WHEN NEW.status IN ('APPLIED','PUBLISHED') AND EXISTS(SELECT 1 FROM cloud_continuities
+  WHERE owner_id=NEW.owner_id AND continuity_id=NEW.campaign_id AND authority='cloud')
+BEGIN SELECT RAISE(ABORT,'CLOUD_AUTHORITY_REQUIRED'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_enroll_existing BEFORE INSERT ON cloud_continuities
+WHEN NEW.authority='cloud' AND (
+  EXISTS(SELECT 1 FROM bridge_campaign_records WHERE owner_id=NEW.owner_id AND campaign_id=NEW.continuity_id)
+  OR EXISTS(SELECT 1 FROM bridge_hp_records WHERE owner_id=NEW.owner_id AND campaign_id=NEW.continuity_id)
+  OR EXISTS(SELECT 1 FROM bridge_records WHERE owner_id=NEW.owner_id AND campaign_id=NEW.continuity_id))
+BEGIN SELECT RAISE(ABORT,'STAGED_MIGRATION_REQUIRED'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_enroll_pending BEFORE INSERT ON cloud_continuities
+WHEN NEW.authority='cloud' AND (
+  EXISTS(SELECT 1 FROM bridge_campaign_commands c WHERE c.owner_id=NEW.owner_id AND c.campaign_id=NEW.continuity_id
+    AND NOT EXISTS(SELECT 1 FROM bridge_campaign_receipts r WHERE r.owner_id=c.owner_id AND r.campaign_id=c.campaign_id AND r.command_id=c.command_id)) OR EXISTS(SELECT 1 FROM bridge_hp_proposals c WHERE c.owner_id=NEW.owner_id AND c.campaign_id=NEW.continuity_id
+    AND NOT EXISTS(SELECT 1 FROM bridge_hp_receipts r WHERE r.owner_id=c.owner_id AND r.campaign_id=c.campaign_id AND r.command_id=c.command_id)) OR EXISTS(SELECT 1 FROM bridge_proposals c WHERE c.owner_id=NEW.owner_id AND c.campaign_id=NEW.continuity_id
+    AND NOT EXISTS(SELECT 1 FROM bridge_receipts r WHERE r.owner_id=c.owner_id AND r.campaign_id=c.campaign_id AND r.command_id=c.command_id)))
+BEGIN SELECT RAISE(ABORT,'LEGACY_COMMAND_PENDING'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_cutover_pending BEFORE UPDATE OF authority ON cloud_continuities
+WHEN OLD.authority<>'cloud' AND NEW.authority='cloud' AND (
+  EXISTS(SELECT 1 FROM bridge_campaign_commands c WHERE c.owner_id=NEW.owner_id AND c.campaign_id=NEW.continuity_id
+    AND NOT EXISTS(SELECT 1 FROM bridge_campaign_receipts r WHERE r.owner_id=c.owner_id AND r.campaign_id=c.campaign_id AND r.command_id=c.command_id)) OR EXISTS(SELECT 1 FROM bridge_hp_proposals c WHERE c.owner_id=NEW.owner_id AND c.campaign_id=NEW.continuity_id
+    AND NOT EXISTS(SELECT 1 FROM bridge_hp_receipts r WHERE r.owner_id=c.owner_id AND r.campaign_id=c.campaign_id AND r.command_id=c.command_id)) OR EXISTS(SELECT 1 FROM bridge_proposals c WHERE c.owner_id=NEW.owner_id AND c.campaign_id=NEW.continuity_id
+    AND NOT EXISTS(SELECT 1 FROM bridge_receipts r WHERE r.owner_id=c.owner_id AND r.campaign_id=c.campaign_id AND r.command_id=c.command_id)))
+BEGIN SELECT RAISE(ABORT,'LEGACY_COMMAND_PENDING'); END;
+
+-- An upload is a scoped, temporary candidate. Its reservation, a binding to
+-- exact bytes, is separate from the owner-reviewed primary image transaction.
+CREATE TABLE cloud_media_uploads (
+  owner_id TEXT NOT NULL, continuity_id TEXT NOT NULL,
+  upload_id TEXT NOT NULL CHECK(length(upload_id) BETWEEN 1 AND 128),
+  subject TEXT NOT NULL, epoch INTEGER NOT NULL CHECK(epoch>=1),
+  target_id TEXT NOT NULL, target_kind TEXT NOT NULL, target_revision INTEGER NOT NULL CHECK(target_revision>=1),
+  actor_id TEXT, digest TEXT NOT NULL CHECK(length(digest)=64 AND digest NOT GLOB '*[^0-9a-f]*'),
+  metadata_json TEXT NOT NULL CHECK(json_valid(metadata_json) AND json_type(metadata_json)='object'),
+  state TEXT NOT NULL CHECK(state IN ('uploading','ready','cleaning')),
+  created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL CHECK(expires_at>created_at),
+  PRIMARY KEY(owner_id,continuity_id,upload_id),
+  FOREIGN KEY(owner_id,continuity_id) REFERENCES cloud_continuities(owner_id,continuity_id)
+) WITHOUT ROWID;
+--> statement-breakpoint
+CREATE INDEX cloud_media_subject_time ON cloud_media_uploads(owner_id,continuity_id,subject,created_at);
+--> statement-breakpoint
+CREATE INDEX cloud_media_expiry ON cloud_media_uploads(owner_id,continuity_id,expires_at,upload_id);
+--> statement-breakpoint
+CREATE INDEX cloud_media_assets_by_upload ON cloud_entities(owner_id,continuity_id,json_extract(data_json,'$.uploadId'))
+  WHERE kind='media_asset';
+--> statement-breakpoint
+CREATE UNIQUE INDEX cloud_one_primary_image ON cloud_links(owner_id,continuity_id,from_id) WHERE relation='primary_image';
+--> statement-breakpoint
+CREATE TRIGGER cloud_media_quota BEFORE INSERT ON cloud_media_uploads
+WHEN (SELECT count(*) FROM cloud_media_uploads WHERE owner_id=NEW.owner_id AND continuity_id=NEW.continuity_id
+  AND subject=NEW.subject AND created_at>NEW.created_at-3600000)>=32
+BEGIN SELECT RAISE(ABORT,'CLOUD_MEDIA_UPLOAD_LIMIT'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_media_reservation_immutable BEFORE UPDATE ON cloud_media_uploads
+WHEN NEW.owner_id IS NOT OLD.owner_id OR NEW.continuity_id IS NOT OLD.continuity_id OR NEW.upload_id IS NOT OLD.upload_id
+  OR NEW.subject IS NOT OLD.subject OR NEW.epoch IS NOT OLD.epoch OR NEW.target_id IS NOT OLD.target_id
+  OR NEW.target_kind IS NOT OLD.target_kind OR NEW.target_revision IS NOT OLD.target_revision OR NEW.actor_id IS NOT OLD.actor_id
+  OR NEW.digest IS NOT OLD.digest OR NEW.metadata_json IS NOT OLD.metadata_json OR NEW.created_at IS NOT OLD.created_at
+  OR NEW.expires_at IS NOT OLD.expires_at OR (OLD.state='cleaning' AND NEW.state<>'cleaning')
+  OR (OLD.state='ready' AND NEW.state='uploading')
+BEGIN SELECT RAISE(ABORT,'CLOUD_MEDIA_RESERVATION_CONFLICT'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_media_asset_validate BEFORE INSERT ON cloud_entities
+WHEN NEW.kind='media_asset' AND EXISTS(SELECT 1 FROM cloud_continuities WHERE owner_id=NEW.owner_id
+    AND continuity_id=NEW.continuity_id AND authority='cloud')
+  AND NOT EXISTS(SELECT 1 FROM cloud_media_uploads u JOIN cloud_continuities c
+    ON c.owner_id=u.owner_id AND c.continuity_id=u.continuity_id AND c.epoch=u.epoch
+    WHERE u.owner_id=NEW.owner_id AND u.continuity_id=NEW.continuity_id AND u.state='ready'
+    AND u.upload_id=json_extract(NEW.data_json,'$.uploadId') AND u.digest=json_extract(NEW.data_json,'$.sha256')
+    AND u.actor_id IS NEW.actor_id
+    AND json_extract(u.metadata_json,'$.thumbnailSha256')=json_extract(NEW.data_json,'$.thumbnailSha256'))
+BEGIN SELECT RAISE(ABORT,'CLOUD_MEDIA_BYTES_UNAVAILABLE'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_media_version_immutable BEFORE UPDATE ON cloud_entities
+WHEN OLD.kind='media_asset' AND (OLD.data_json<>NEW.data_json OR OLD.actor_id IS NOT NEW.actor_id)
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_CLOUD_MEDIA_VERSION'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_media_link_kind BEFORE INSERT ON cloud_links
+WHEN NEW.relation='primary_image' AND NOT EXISTS(SELECT 1 FROM cloud_entities
+  WHERE owner_id=NEW.owner_id AND continuity_id=NEW.continuity_id AND id=NEW.to_id AND kind='media_asset' AND life='active')
+BEGIN SELECT RAISE(ABORT,'CLOUD_MEDIA_ASSET_REQUIRED'); END;
+
+CREATE TABLE cloud_media_previews (
+  owner_id TEXT NOT NULL, continuity_id TEXT NOT NULL, upload_id TEXT NOT NULL,
+  digest TEXT NOT NULL, target_id TEXT NOT NULL, target_kind TEXT NOT NULL, target_revision INTEGER NOT NULL,
+  requested_at INTEGER NOT NULL,
+  PRIMARY KEY(owner_id,continuity_id,upload_id),
+  FOREIGN KEY(owner_id,continuity_id,upload_id) REFERENCES cloud_media_uploads(owner_id,continuity_id,upload_id) ON DELETE CASCADE
+) WITHOUT ROWID;
+--> statement-breakpoint
+-- A cleanup may begin while a connector prepares its proposal. Validate the
+-- exact candidate again atomically when saving a pending approval request.
+CREATE TRIGGER cloud_media_request_stage BEFORE INSERT ON cloud_requests
+WHEN NEW.status='PENDING_APPROVAL' AND json_extract(NEW.request_json,'$.command.operation')='assign_primary_image'
+  AND NOT EXISTS(SELECT 1 FROM cloud_media_uploads u
+    WHERE u.owner_id=NEW.owner_id AND u.continuity_id=NEW.continuity_id AND u.state='ready'
+    AND u.upload_id=json_extract(NEW.request_json,'$.command.args.uploadId')
+    AND u.digest=json_extract(NEW.request_json,'$.command.args.sha256')
+    AND u.target_id=json_extract(NEW.request_json,'$.command.args.targetId')
+    AND u.target_kind=json_extract(NEW.request_json,'$.command.args.targetKind')
+    AND u.epoch=json_extract(NEW.request_json,'$.command.epoch'))
+BEGIN SELECT RAISE(ABORT,'CLOUD_MEDIA_CANDIDATE_CHANGED'); END;
+
+-- Command and receipt headers keep their immutable identity/digests. Detailed
+-- evidence is split by record so deletion can retain unrelated transaction legs.
+CREATE TABLE cloud_evidence_segments (
+  owner_id TEXT NOT NULL, continuity_id TEXT NOT NULL, command_id TEXT NOT NULL, part TEXT NOT NULL,
+  digest TEXT NOT NULL CHECK(length(digest)=64 AND digest NOT GLOB '*[^0-9a-f]*'),
+  payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
+  PRIMARY KEY(owner_id,continuity_id,command_id,part),
+  FOREIGN KEY(owner_id,continuity_id,command_id) REFERENCES cloud_requests(owner_id,continuity_id,command_id) DEFERRABLE INITIALLY DEFERRED
+) WITHOUT ROWID;
+--> statement-breakpoint
+CREATE TABLE cloud_evidence_subjects (
+  owner_id TEXT NOT NULL, continuity_id TEXT NOT NULL, command_id TEXT NOT NULL, part TEXT NOT NULL, entity_id TEXT NOT NULL,
+  PRIMARY KEY(owner_id,continuity_id,command_id,part,entity_id),
+  FOREIGN KEY(owner_id,continuity_id,command_id,part) REFERENCES cloud_evidence_segments(owner_id,continuity_id,command_id,part)
+    ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+) WITHOUT ROWID;
+--> statement-breakpoint
+CREATE INDEX cloud_evidence_by_entity ON cloud_evidence_subjects(owner_id,continuity_id,entity_id,command_id,part);
+--> statement-breakpoint
+CREATE TABLE cloud_evidence_erased (
+  owner_id TEXT NOT NULL, continuity_id TEXT NOT NULL, command_id TEXT NOT NULL, part TEXT NOT NULL,
+  digest TEXT NOT NULL, entity_id TEXT NOT NULL, deleted_revision INTEGER NOT NULL,
+  PRIMARY KEY(owner_id,continuity_id,command_id,part),
+  FOREIGN KEY(owner_id,continuity_id,command_id) REFERENCES cloud_requests(owner_id,continuity_id,command_id),
+  FOREIGN KEY(owner_id,continuity_id,entity_id) REFERENCES cloud_tombstones(owner_id,continuity_id,id)
+) WITHOUT ROWID;
+--> statement-breakpoint
+CREATE TRIGGER cloud_evidence_no_update BEFORE UPDATE ON cloud_evidence_segments
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_CLOUD_EVIDENCE'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_evidence_no_replacement BEFORE INSERT ON cloud_evidence_segments
+WHEN EXISTS(SELECT 1 FROM cloud_evidence_segments WHERE owner_id=NEW.owner_id AND continuity_id=NEW.continuity_id AND command_id=NEW.command_id AND part=NEW.part)
+  OR EXISTS(SELECT 1 FROM cloud_evidence_erased WHERE owner_id=NEW.owner_id AND continuity_id=NEW.continuity_id AND command_id=NEW.command_id AND part=NEW.part)
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_CLOUD_EVIDENCE'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_evidence_reviewed_purge BEFORE DELETE ON cloud_evidence_segments
+BEGIN
+  SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM cloud_evidence_subjects s JOIN cloud_tombstones t
+    ON t.owner_id=s.owner_id AND t.continuity_id=s.continuity_id AND t.id=s.entity_id
+    WHERE s.owner_id=OLD.owner_id AND s.continuity_id=OLD.continuity_id AND s.command_id=OLD.command_id AND s.part=OLD.part)
+  THEN RAISE(ABORT,'CLOUD_EVIDENCE_TOMBSTONE_REQUIRED') END;
+  INSERT INTO cloud_evidence_erased(owner_id,continuity_id,command_id,part,digest,entity_id,deleted_revision)
+    SELECT OLD.owner_id,OLD.continuity_id,OLD.command_id,OLD.part,OLD.digest,t.id,t.deleted_revision
+    FROM cloud_evidence_subjects s JOIN cloud_tombstones t ON t.owner_id=s.owner_id AND t.continuity_id=s.continuity_id AND t.id=s.entity_id
+    WHERE s.owner_id=OLD.owner_id AND s.continuity_id=OLD.continuity_id AND s.command_id=OLD.command_id AND s.part=OLD.part ORDER BY t.id LIMIT 1;
+END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_evidence_marker_no_update BEFORE UPDATE ON cloud_evidence_erased
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_CLOUD_EVIDENCE'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_evidence_marker_no_delete BEFORE DELETE ON cloud_evidence_erased
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_CLOUD_EVIDENCE'); END;
+--> statement-breakpoint
+CREATE TABLE cloud_media_gc (
+  owner_id TEXT NOT NULL, continuity_id TEXT NOT NULL, command_id TEXT NOT NULL, upload_id TEXT NOT NULL, digest TEXT NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('pending','removed')), PRIMARY KEY(owner_id,continuity_id,command_id,upload_id),
+  FOREIGN KEY(owner_id,continuity_id,command_id) REFERENCES cloud_requests(owner_id,continuity_id,command_id) DEFERRABLE INITIALLY DEFERRED
+) WITHOUT ROWID;
+--> statement-breakpoint
+CREATE TRIGGER cloud_media_retired_reservation BEFORE INSERT ON cloud_media_uploads
+WHEN EXISTS(SELECT 1 FROM cloud_media_gc g WHERE g.owner_id=NEW.owner_id AND g.continuity_id=NEW.continuity_id AND g.upload_id=NEW.upload_id)
+BEGIN SELECT RAISE(ABORT,'CLOUD_MEDIA_RETIRED_ID'); END;
+-- Security history remains separate from gameplay revision and from effective grants.
+CREATE TABLE cloud_grant_audit (
+  owner_id TEXT NOT NULL,
+  continuity_id TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  epoch INTEGER NOT NULL,
+  subject TEXT NOT NULL,
+  grant_revision INTEGER NOT NULL,
+  scopes_json TEXT NOT NULL CHECK(json_valid(scopes_json)),
+  actors_json TEXT NOT NULL CHECK(json_valid(actors_json)),
+  auto_json TEXT NOT NULL CHECK(json_valid(auto_json)),
+  expires_at INTEGER NOT NULL, revoked INTEGER NOT NULL CHECK(revoked IN (0,1)),
+  recorded_at INTEGER NOT NULL,
+  PRIMARY KEY(owner_id,continuity_id,event_id),
+  FOREIGN KEY(owner_id,continuity_id) REFERENCES cloud_continuities(owner_id,continuity_id)
+) WITHOUT ROWID;
+--> statement-breakpoint
+CREATE INDEX cloud_grant_audit_by_time ON cloud_grant_audit(owner_id,continuity_id,recorded_at,event_id);
+--> statement-breakpoint
+CREATE TRIGGER cloud_grant_log_insert AFTER INSERT ON cloud_grants
+BEGIN
+ INSERT INTO cloud_grant_audit(owner_id,continuity_id,event_id,epoch,subject,grant_revision,scopes_json,actors_json,auto_json,expires_at,revoked,recorded_at)
+ SELECT NEW.owner_id,NEW.continuity_id,lower(hex(randomblob(16))),c.epoch,NEW.subject,NEW.revision,NEW.scopes_json,NEW.actors_json,NEW.auto_json,NEW.expires_at,NEW.revoked,CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)
+ FROM cloud_continuities c WHERE c.owner_id=NEW.owner_id AND c.continuity_id=NEW.continuity_id;
+END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_grant_log_update AFTER UPDATE ON cloud_grants
+BEGIN
+ INSERT INTO cloud_grant_audit(owner_id,continuity_id,event_id,epoch,subject,grant_revision,scopes_json,actors_json,auto_json,expires_at,revoked,recorded_at)
+ SELECT NEW.owner_id,NEW.continuity_id,lower(hex(randomblob(16))),c.epoch,NEW.subject,NEW.revision,NEW.scopes_json,NEW.actors_json,NEW.auto_json,NEW.expires_at,NEW.revoked,CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)
+ FROM cloud_continuities c WHERE c.owner_id=NEW.owner_id AND c.continuity_id=NEW.continuity_id;
+END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_grant_log_no_update BEFORE UPDATE ON cloud_grant_audit
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_GRANT_AUDIT'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_grant_log_no_delete BEFORE DELETE ON cloud_grant_audit
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_GRANT_AUDIT'); END;
+--> statement-breakpoint
+CREATE TRIGGER cloud_grant_log_no_replace BEFORE INSERT ON cloud_grant_audit
+WHEN EXISTS(SELECT 1 FROM cloud_grant_audit WHERE owner_id=NEW.owner_id AND continuity_id=NEW.continuity_id AND event_id=NEW.event_id)
+BEGIN SELECT RAISE(ABORT,'IMMUTABLE_GRANT_AUDIT'); END;
+
+-- Private traffic accounting. Cold campaign recovery starts with fresh budgets.
+-- Only the gateway writes these rows. '*' is the owner-wide QA enrollment scope.
+CREATE TABLE cloud_rate_buckets (
+  owner_id TEXT NOT NULL CHECK (length(owner_id) > 0),
+  continuity_id TEXT NOT NULL CHECK (length(continuity_id) BETWEEN 1 AND 128),
+  subject TEXT NOT NULL CHECK (subject IN ('sites-owner','sites-mcp') OR (substr(subject,1,7)='device:' AND length(subject) BETWEEN 8 AND 135)),
+  next_ms INTEGER NOT NULL CHECK (typeof(next_ms)='integer' AND next_ms BETWEEN 0 AND 9007199254740991),
+  PRIMARY KEY (owner_id,continuity_id,subject),
+  CHECK (continuity_id<>'*' OR subject='sites-owner')
+) WITHOUT ROWID;

@@ -29,6 +29,23 @@ class NativeFailureEvidence : TestWatcher() {
 
 /** Test-only observations survive Activity/window recreation; actions are never retried. */
 internal class ObservedUi(private val device: UiDevice) {
+    /** The harness can observe historical and current packages in the same upgrade pipeline. */
+    fun isAscension(packageName: String): Boolean {
+        require(packageName.matches(Regex("[a-zA-Z0-9_.]+")))
+        val dump = device.executeShellCommand("dumpsys package $packageName")
+        val code = requireNotNull(Regex("""(?m)^\s*versionCode=(\d+)\b""").find(dump)) { "Missing installed version for $packageName" }
+        return code.groupValues[1].toLong() >= 59
+    }
+
+    fun openCharacterControls(packageName: String) {
+        tap(By.desc("Character controls").pkg(packageName), "Open character administration")
+    }
+
+    fun openCharacterPicker(packageName: String) {
+        if (isAscension(packageName)) openCharacterControls(packageName)
+        tap(By.desc("Switch character").pkg(packageName), "Open character selection")
+    }
+
     private fun clearObservationCache() {
         require(Build.VERSION.SDK_INT >= 34) { "Fresh native tab acceptance requires Android API34 or later" }
         assertTrue("The native accessibility observation cache must be cleared",
@@ -273,7 +290,7 @@ internal class ObservedUi(private val device: UiDevice) {
         primaryTabState(node)?.takeIf { it.enabled && it.selected }?.bounds
 
     fun ensurePrimaryTab(packageName: String, tab: String) {
-        require(tab in listOf("Character", "Inventory", "Companions", "Campaign")) { "Only primary tabs use tab-selection semantics" }
+        require(tab in listOf("Character", "Inventory", "Companions", "Campaign", "Connections", "Chronicle")) { "Only primary tabs use tab-selection semantics" }
         val deadline = SystemClock.uptimeMillis() + 30_000
         fun remaining() = (deadline - SystemClock.uptimeMillis()).coerceAtLeast(0)
         val selector = By.text(tab).pkg(packageName)
@@ -300,6 +317,14 @@ internal class ObservedUi(private val device: UiDevice) {
     /** Follow the same header and disclosure controls available to a player. */
     fun openTool(packageName: String, name: String) {
         tapText("Tools", packageName)
+        if (isAscension(packageName) && name in setOf("Complete backup", "Character backup", "Campaign backup", "Campaign import", "Original armor archive", "Weapon backup")) {
+            expandDisclosure(packageName, "Records, backups & connection")
+            tapText("Owner connection", packageName)
+            val archive = name in setOf("Original armor archive", "Weapon backup")
+            expandDisclosure(packageName, if (archive) "Archives" else "Backups and recovery")
+            tapText(if (archive) "Original armor archive" else name, packageName)
+            return
+        }
         val group = when (name) {
             "Armor weapon", "Spell reservoir", "Spell library", "Rules & profile", "Resources & recovery", "Roll history" -> "Advanced combat & magic"
             "Character sources", "Character backup", "Campaign backup", "Complete backup", "Campaign import", "Owner connection", "Weapon backup", "Original armor archive", "Fictional sync", "Remote Updates" -> "Records, backups & connection"
@@ -321,6 +346,11 @@ internal class ObservedUi(private val device: UiDevice) {
 
     /** Preserve source-directory journeys through the explicit Genesis Journal tab. */
     fun campaignJournal(packageName: String) {
+        if (isAscension(packageName)) {
+            ensurePrimaryTab(packageName, "Chronicle")
+            if (device.hasObject(By.text("‹ Chronicle").pkg(packageName))) tapText("‹ Chronicle", packageName)
+            return
+        }
         ensurePrimaryTab(packageName, "Campaign")
         if (device.hasObject(By.text("‹ Campaign").pkg(packageName))) tapText("‹ Campaign", packageName)
         // Older frozen builds expose the journal directly. This optional tab
@@ -329,18 +359,21 @@ internal class ObservedUi(private val device: UiDevice) {
     }
 
     /** Discover a flat section strip through native scrolling, then activate its tab once. */
-    fun selectSection(packageName: String, label: String) {
+    fun selectSection(packageName: String, requested: String) {
+        val combat = if (isAscension(packageName)) "Actions" else "Combat"
+        val label = if (requested == "Combat" || requested == "Actions") combat else requested
         // Restrict observation to the requested tab family inside its actual
         // horizontal strip. A body heading or unrelated filter is never a tab.
         val families = listOf(
             // Preserve both Genesis order and retained Party's Sheet/Equipment/Currency/History order.
-            listOf("Sheet", "Combat", "Equipment", "Currency", "Spells", "Features", "Resources", "History"),
+            listOf("Sheet", combat, "Equipment", "Currency", "Spells", "Features", "Resources", "History"),
             listOf("My gear", "Campaign items"),
             listOf("My items", "All items"),
             listOf("All gear", "Equipped", "Attuned", "Favorites"),
             listOf("All", "Prepared", "Cantrips"),
             listOf("All rolls", "Character", "Armor"),
-            listOf("People", "Journal")
+            listOf("People", "Journal"),
+            listOf("Companions", "World")
         )
         val family = families.singleOrNull { label in it } ?: error("Unknown tab family for $label")
         val requestedIndex = family.indexOf(label)

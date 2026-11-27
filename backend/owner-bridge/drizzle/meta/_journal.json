@@ -57,6 +57,48 @@
       "when": 1795384800000,
       "tag": "0007_device_publication_build",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1795712400000,
+      "tag": "0008_cloud_authority",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1795712460000,
+      "tag": "0009_private_media",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1795712520000,
+      "tag": "0010_media_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1795712580000,
+      "tag": "0011_lifecycle_evidence",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1795712580001,
+      "tag": "0012_cloud_grant_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1795712580002,
+      "tag": "0013_cloud_rate_limits",
+      "breakpoints": true
     }
   ]
 }

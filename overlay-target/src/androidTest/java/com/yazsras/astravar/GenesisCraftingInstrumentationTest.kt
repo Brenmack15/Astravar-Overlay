@@ -36,6 +36,16 @@ class GenesisCraftingInstrumentationTest {
         device.executeShellCommand("am start -W -n $product/com.yazsras.astravar.MainActivity")
         ui.awaitMainAfterSavedDialogs(product)
     }
+    private fun openInventions() {
+        if (ui.isAscension(product)) {
+            ui.ensurePrimaryTab(product, "Inventory")
+            if (device.hasObject(By.text("‹ Inventory").pkg(product))) tap("‹ Inventory")
+            tap("Inventions & research")
+        } else {
+            ui.campaignJournal(product)
+            tap("Inventions")
+        }
+    }
     private fun captureDialog(name: String, title: String, vararg labels: String) {
         labels.forEach(::find)
         ui.captureStableDialog(File(files, "genesis-crafting-$name.png"), product, title,
@@ -48,7 +58,7 @@ class GenesisCraftingInstrumentationTest {
         restart()
         ui.ensurePrimaryTab(product, "Character")
         // The preceding journey deliberately restores the older update fixture.
-        ui.tap(By.desc("Switch character").pkg(product), "Switch character")
+        ui.openCharacterPicker(product)
         tap(hero)
         find(hero)
         ui.ensurePrimaryTab(product, "Inventory")
@@ -62,10 +72,8 @@ class GenesisCraftingInstrumentationTest {
         find("Quantity 3 · carried")
         tap("Close")
 
-        // A real source invention and linked requirement are configured in the
-        // retained Journal UI. Merely proposing a recipe consumes no inventory.
-        ui.campaignJournal(product)
-        tap("Inventions")
+        // Creating a design and linking its material leaves the physical stack intact.
+        openInventions()
         tap("Add Invention")
         enter("Invention name", invention)
         tap("Save invention")
@@ -138,8 +146,7 @@ class GenesisCraftingInstrumentationTest {
         find("Carried · Quantity 1")
         captureDialog("character-output", output, "Carried · Quantity 1", "Fictional plain token with no mechanical effects")
         tap("Close")
-        ui.campaignJournal(product)
-        tap("Inventions")
+        openInventions()
         tap(invention)
         ui.expandDisclosure(product, "Required materials")
         find("1 required · 2 available")
@@ -150,7 +157,7 @@ class GenesisCraftingInstrumentationTest {
         tap("Close")
         // Preserve the selected fixture expected by later update/import stages.
         ui.ensurePrimaryTab(product, "Character")
-        ui.tap(By.desc("Switch character").pkg(product), "Switch character")
+        ui.openCharacterPicker(product)
         tap("CI Native Hero Revised")
         ui.selectSection(product, "Sheet")
         ui.descriptionBounds("HP 31 / 37", product)

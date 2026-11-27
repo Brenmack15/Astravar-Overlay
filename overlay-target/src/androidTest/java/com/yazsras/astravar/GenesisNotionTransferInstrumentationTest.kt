@@ -43,7 +43,7 @@ class GenesisNotionTransferInstrumentationTest {
             device.executeShellCommand("getprop ro.kernel.qemu").trim())
         restart()
         ui.ensurePrimaryTab(product, "Character")
-        ui.tap(By.desc("Switch character").pkg(product), "Switch character")
+        ui.openCharacterPicker(product)
         tap("Genesis Native Hero")
         find("Genesis Native Hero")
         ui.selectSection(product, "Equipment")

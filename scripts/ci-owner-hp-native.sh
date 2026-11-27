@@ -277,14 +277,50 @@ if [[ "$astravar_bootstrap_gate" == true ]]; then
   run_test 'com.yazsras.astravar.data.OwnerBootstrapNativeTest#invalidBundlesAndInterruptedPersistenceRemainRetryable' bootstrap-negative.txt
   run_test 'com.yazsras.astravar.data.NotionNativeImportTest#publicContextApplyBackupReimportAndRollbackPreserveIdentity' notion-public-import.txt 360
   run_test 'com.yazsras.astravar.data.CampaignNativeHttpsTest#authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts' native-campaign-https.txt 360
+  (source scripts/ci-ascension-cloud-native.sh)
+  astravar_notification_result=0
+  (
+    # The default AOSP 37 user preference hides every silent status icon. Exercise the
+    # real quiet channel with icons visible, then restore that user's original value.
+    icon_policy() { python3 scripts/ci-android17-silent-icons.py "$astravar_serial" AstravarHpCI "$1"; }
+    original_policy=$(icon_policy read) || exit 1
+    case "$original_policy" in
+      true) restore_policy=hide ;;
+      false) restore_policy=show ;;
+      *) exit 1 ;;
+    esac
+    restore_icon_policy() {
+      local result=$?
+      trap - EXIT
+      icon_policy "$restore_policy" || result=1
+      exit "$result"
+    }
+    trap restore_icon_policy EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    icon_policy show || exit 1
+    run_test 'com.yazsras.astravar.data.AscensionNotificationNativeTest#actualSmallEmblemInStatusBarAndShadeAcrossLightAndDarkThemes' notification-emblem.txt 360 || exit 1
+  ) || astravar_notification_result=$?
   git rev-parse HEAD >"$astravar_output/SOURCE_COMMIT.txt"
+  # An independent package/Room upgrade can still produce its own evidence after a visual failure.
+  bash scripts/ci-ascension-api37.sh
+  # The API 37 upgrade has installed the independent clipboard target on this emulator.
+  run_test 'com.yazsras.astravar.ui.AscensionAccessibleRollClipboardTest#androidAccessibilityOptionsOpenWithoutRolling' native-roll-accessibility.txt
+  run_test 'com.yazsras.astravar.ui.AscensionAccessibleRollClipboardTest#aSecondPackagePastesTheOriginalNamedRollFromTheSystemClipboard' native-roll-clipboard-paste.txt
+  if (( astravar_notification_result != 0 )); then
+    echo "Android 17 notification acceptance failed; see notification-emblem.txt." >&2
+    exit "$astravar_notification_result"
+  fi
   python3 - "$astravar_output/SCOPE.json" <<'PY_SCOPE'
 import json,os,pathlib,sys
 pathlib.Path(sys.argv[1]).write_text(json.dumps({
- 'fictionalOnly':True,'emulatorApi':37,'nativeAndroidKeyStore':True,
+ 'fictionalOnly':True,'emulatorApi':int(pathlib.Path('validation/ascension-api37/sdk.txt').read_text()),
+ 'androidRelease':pathlib.Path('validation/ascension-api37/release.txt').read_text().strip(),
+ 'nativeAndroidKeyStore':True,
  'webCryptoEncryptedBootstrap':True,'sameDebugKeyUpdate':'53 to '+os.environ['ASTRAVAR_VERSION_CODE'],
  'legacyAliasAndVaultPreserved':True,'nativePublicNotionImport':True,
- 'nativeCampaignHttpsAndIndependentReadback':True,
+ 'nativeCampaignHttpsAndIndependentReadback':True,'api37ForceStoppedCloudReconnect':True,
+ 'frameworkRollOptionsWithoutRoll':True,'crossPackageNamedRollPaste':True,
  'actualOwnerSigningIdentityTestedInCi':False,'realChatGptHostInvocation':False,
  'physicalGalaxy':False,'android17':True},indent=2)+'\n')
 PY_SCOPE

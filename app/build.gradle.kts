@@ -14,8 +14,8 @@ android {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(58)
-        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("4.0.0-convergence5")
+        versionCode = providers.environmentVariable("ASTRAVAR_VERSION_CODE").map(String::toInt).getOrElse(59)
+        versionName = providers.environmentVariable("ASTRAVAR_VERSION_NAME").getOrElse("4.1.0")
     }
     signingConfigs {
         create("owner") {
@@ -67,6 +67,13 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     forkEvery = testForkEvery
     inputs.property("astravarTestForks", testForks)
     inputs.property("astravarTestForkEvery", testForkEvery)
+    // Cross-client tests launch the actual Worker and the optional local recovery runtime.
+    inputs.files(rootProject.fileTree("backend/owner-bridge") { include("*.mjs", "schema.sql", "fixtures/*.mjs") })
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files(rootProject.fileTree("scripts") { include("verify-ascension-forms-recovery.cjs") },
+        rootProject.fileTree("tools") { include("ascension_provider.cjs", "ascension_migrate*.py") })
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.property("ascensionProviderAvailable", providers.environmentVariable("ASTRAVAR_MINIFLARE_PATH").map { it.isNotBlank() }.orElse(false))
     providers.gradleProperty("astravarScreenshots").orNull?.let {
         systemProperty("astravar.screenshots", it)
     }
@@ -105,6 +112,7 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:core:1.7.0")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

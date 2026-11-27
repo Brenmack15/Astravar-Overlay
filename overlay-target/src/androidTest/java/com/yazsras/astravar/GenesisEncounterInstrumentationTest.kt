@@ -50,8 +50,7 @@ class GenesisEncounterInstrumentationTest {
         }
     }
     private fun openEncounter() {
-        ui.ensurePrimaryTab(product, "Campaign")
-        if (device.hasObject(By.text("‹ Campaign").pkg(product))) tap("‹ Campaign")
+        ui.campaignJournal(product)
         ui.textBounds("Encounters", product, scrollAttempts = 18, firstDirection = Direction.UP)
         tap("Encounters")
         tap(encounter)
@@ -66,8 +65,12 @@ class GenesisEncounterInstrumentationTest {
         assertEquals("Encounter fixtures require a disposable emulator", "1",
             device.executeShellCommand("getprop ro.kernel.qemu").trim())
         restart()
-        ui.ensurePrimaryTab(product, "Campaign")
-        if (device.hasObject(By.text("‹ Campaign").pkg(product))) tap("‹ Campaign")
+        if (ui.isAscension(product)) {
+            ui.openTool(product, "Campaign management")
+        } else {
+            ui.ensurePrimaryTab(product, "Campaign")
+            if (device.hasObject(By.text("‹ Campaign").pkg(product))) tap("‹ Campaign")
+        }
         ui.selectSection(product, "People")
         find("Genesis Native Campaign")
         tap("Create NPC")
@@ -107,7 +110,7 @@ class GenesisEncounterInstrumentationTest {
 
         tap("Open $hero's actions")
         find(hero)
-        assertSection("Combat")
+        assertSection(if (ui.isAscension(product)) "Actions" else "Combat")
         find("Turn economy")
         ui.descriptionBounds("HP 14 / 20", product)
         device.pressBack()
@@ -149,12 +152,12 @@ class GenesisEncounterInstrumentationTest {
         capture("setup-after-restart", "Setup · confirm the order before starting", "Review start")
         tap("Close")
         ui.ensurePrimaryTab(product, "Character")
-        ui.tap(By.desc("Switch character").pkg(product), "Switch character")
+        ui.openCharacterPicker(product)
         tap("CI Native Hero Revised")
         ui.selectSection(product, "Sheet")
         ui.descriptionBounds("HP 31 / 37", product)
         instrumentation.sendStatus(0, Bundle().apply {
-            putString("stream", "\nCHECKPOINT: Fictional same-campaign hero and source-only NPC entered manually ordered initiative7/19, explicitly started, navigated to actor Combat and back through Sheet, advanced through two participants to round2, ended, restarted, explicitly reopened setup, and restarted again without automatic turns. Independent host proof must verify all actor/source mechanics and prior histories unchanged.\n")
+            putString("stream", "\nCHECKPOINT: Fictional same-campaign hero and source-only NPC entered manually ordered initiative7/19, explicitly started, opened the playable actor’s actions and returned through Sheet, advanced through two participants to round2, ended, restarted, explicitly reopened setup, and restarted again without automatic turns. Independent host proof must verify all actor/source mechanics and prior histories unchanged.\n")
         })
     }
 }

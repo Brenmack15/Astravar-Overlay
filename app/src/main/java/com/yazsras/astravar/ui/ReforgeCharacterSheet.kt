@@ -74,6 +74,7 @@ private enum class SpellbookFilter(val label: String) {
     var unavailableRouteId by rememberSaveable { mutableStateOf<String?>(null) }
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
     var inspecting by rememberSaveable { mutableStateOf<String?>(null) }
+    var sourceStat by rememberSaveable { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -88,6 +89,7 @@ private enum class SpellbookFilter(val label: String) {
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     val rollNotice = remember { SnackbarHostState() }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var savedRoll by remember { mutableStateOf<ReforgeRollRecord?>(null) }
     // A roster shortcut must never fall through to another character or change the default actor.
     val pendingNavigation = navigationRequest?.takeIf { it.token != consumedNavigation }
@@ -99,7 +101,7 @@ private enum class SpellbookFilter(val label: String) {
     val (gearFilter, setGearFilter) = key(chosenId) { rememberSaveable { mutableStateOf("All gear") } }
     var requestedSection by rememberSaveable(initialSection) { mutableStateOf(initialSection) }
     var sectionRequest by rememberSaveable { mutableIntStateOf(0) }
-    fun openSection(value: String) { requestedSection = value; sectionRequest++ }
+    fun openSection(value: String) { requestedSection = if (value == "Actions") "Combat" else value; sectionRequest++ }
     // A pending dialog or rolled preview belongs to the actor that opened it.
     // Restore it on recreation; dismiss it only when the selected actor actually changes.
     var lastActor by rememberSaveable { mutableStateOf(chosenId) }
@@ -130,7 +132,7 @@ private enum class SpellbookFilter(val label: String) {
             savedRoll = null
             return@LaunchedEffect
         }
-        if (rollNotice.showSnackbar("Roll saved · ${roll.displayTotal}", "View history",
+        if (rollNotice.showSnackbar("${roll.label} · ${roll.displayTotal}", "View history",
                 withDismissAction = true, duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) {
             openSection("History")
         }
@@ -172,6 +174,25 @@ private enum class SpellbookFilter(val label: String) {
     }
     fun requestRoll(label: String, modifier: Int, kind: RollKind = RollKind.CUSTOM, key: String = "") =
         openRoll(ReforgeRollRequest(label, DiceFormula(listOf(DiceTerm(1, 20)), modifier), kind, key))
+    fun rollCheck(label: String, value: Int?, kind: RollKind, id: String, quick: Boolean) {
+        val snapshot = saved ?: return
+        if (value == null) { error = "The modifier for $label is unknown."; return }
+        if (!quick) { requestRoll(label, value, kind, id); return }
+        action("Roll saved on this device") {
+            val actor = snapshot.character
+            val reason = ConditionRules.rollRestriction(actor, kind, id)
+            require(reason == null) { requireNotNull(reason) }
+            val formula = DiceFormula(listOf(DiceTerm(1, 20)), value)
+            val result = SecureDice.roll(formula, CharacterCalculator.rollMode(actor, kind, id))
+            val component = ReforgeRollComponent(label,
+                result.faces.map { ReforgeRollDie(it.sides, it.face, it.kept, it.sign) }, value, mode = result.mode,
+                subjectId = id, checkKind = kind.name, formId = CharacterCalculator.activeForm(actor)?.id)
+            savedRoll = local.appendRoll(ReforgeRollRecord(profileId = actor.id, characterRevision = snapshot.revision,
+                label = label, formula = SecureDice.format(formula), components = listOf(component),
+                ownership = if (companionProfileId == null) "Player" else "Companion"))
+            if (preferencesState.haptics) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+    }
     fun reviewProfile(id: String) = action("Profile ready for review") {
         adopting = local.readLegacyPreview(repository, id)
         dialog = "Adopt"
@@ -198,7 +219,7 @@ private enum class SpellbookFilter(val label: String) {
             error = "That saved sheet is unavailable or archived. No other character was opened."
         } else {
             if (companionProfileId == null) selectProfile(route.profileId)
-            openSection(route.section.takeIf { it in genesisCharacterSections } ?: "Sheet")
+            openSection(route.section.takeIf { it in genesisCharacterSections || it == "Actions" } ?: "Sheet")
             val target = active.first { it.character.id == route.profileId }.character
             dialog = route.detailDialog?.takeIf { detail ->
                 val id = detail.substringAfter(':', "")
@@ -278,74 +299,45 @@ private enum class SpellbookFilter(val label: String) {
                 }
         } else {
             key(character.id) {
-                Column(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxSize().padding(bottom = 56.dp)) {
                     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(horizontal = 16.dp).testTag("reforge-error"))
                     if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.labelSmall,
                         color = RebuildPalette.Ice, modifier = Modifier.padding(horizontal = 16.dp).testTag("reforge-save-status"))
-                    GenesisCharacterHeader(character, projection,
-                        onSwitch = if (companionProfileId == null) ({ dialog = "Characters" }) else null,
-                        onHp = { dialog = "HP" }, onDefense = { dialog = "Defense" },
-                        onInitiative = { projection.initiative.value?.let { requestRoll("Initiative", it, RollKind.INITIATIVE) } },
-                        compact = compactChrome, onControls = { dialog = "Controls" })
+                    GenesisCharacterHeader(character, projection, compact = compactChrome,
+                        onProfile = { dialog = "Profile" }, onPortrait = { dialog = "Portrait" }, onControls = { dialog = "Controls" },
+                        onHp = { dialog = "HP" }, onDefense = { dialog = "Defense" }, onConditions = { dialog = "Conditions" }, onRest = { dialog = "Rest" },
+                        onInitiative = { rollCheck("Initiative", projection.initiative.value, RollKind.INITIATIVE, "", true) },
+                        onInitiativeOptions = { rollCheck("Initiative", projection.initiative.value, RollKind.INITIATIVE, "", false) })
                     GenesisCharacterPager(
                         actorId = character.id,
                         requestedSection = if (lastActor != null && lastActor != chosenId) initialSection else requestedSection,
                         requestToken = sectionRequest,
                         sectionOnly = sectionOnly,
-                        showPageHint = !compactChrome,
                         modalOpen = dialog != null || inspecting != null || proposedChange != null || cast != null || rollRequest != null,
                         modifier = Modifier.weight(1f)
                     ) { section ->
                         when (section) {
                             "Sheet" -> {
-                                RebirthAbilities(projection) { inspecting = it.name }
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    PlayerButton(onClick = { openRoll(ReforgeRollRequest("Custom roll", null)) }, modifier = Modifier.weight(1f)) {
-                                        ArcaneIcon("d20", Modifier.size(20.dp), MaterialTheme.colorScheme.onPrimary)
-                                        Spacer(Modifier.width(8.dp)); Text("Roll dice")
-                                    }
-                                    PlayerTextButton(onClick = { dialog = "Setup" }, modifier = Modifier.weight(1f)) { Text("Character setup") }
-                                }
-                                RebirthSectionLabel("Saving throws") {
-                                    PlayerTextButton(onClick = { dialog = "Training" }) { Text("Training") }
-                                }
-                                BoxWithConstraints(Modifier.fillMaxWidth()) {
-                                    val columns = if (maxWidth >= 360.dp && LocalDensity.current.fontScale < 1.25f &&
-                                        Stat.entries.all { projection.saves[it]?.value != null }) 2 else 1
-                                    Column {
-                                        Stat.entries.chunked(columns).forEach { stats ->
-                                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                                                stats.forEach { stat ->
-                                                    Column(Modifier.weight(1f)) {
-                                                        val value = projection.saves[stat]?.value
-                                                        RebirthCheckRow("${stat.name} save", if (stat in character.saveProficiencies) "Proficient" else "", value,
-                                                            modifier = Modifier.testTag("reforge-save-${stat.name}")) {
-                                                            value?.let { requestRoll("${stat.name} save", it, RollKind.SAVE, stat.name) }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                GenesisSkills(character, projection, busy,
-                                    onAdd = { dialog = "Skill" }, onEdit = { dialog = "Skill:$it" },
+                                RebirthAbilities(character, projection, onInspect = { inspecting = it.name },
+                                    onCheck = { stat, quick -> rollCheck("${stat.fullLabel} check", projection.abilityChecks[stat]?.value, RollKind.ABILITY_CHECK, stat.name, quick) },
+                                    onSave = { stat, quick -> rollCheck("${stat.fullLabel} save", projection.saves[stat]?.value, RollKind.SAVE, stat.name, quick) })
+                                GenesisSkills(character, projection, busy, onAdd = { dialog = "Skill" },
                                     onPin = { id, pinned -> change(if (pinned) "Pin skill" else "Unpin skill", SkillRules.pin(character, id, pinned), false) },
-                                    onRoll = { name, value, id -> requestRoll(name, value, RollKind.SKILL, id) })
+                                    onRoll = { name, value, id, quick ->
+                                        if (!quick && value == null) dialog = "UnresolvedSkill:$id"
+                                        else rollCheck(name, value, RollKind.SKILL, id, quick)
+                                    })
                                 PlayerDisclosure("Passive scores & movement", initiallyOpen = true) {
                                     listOf("Perception", "Investigation", "Insight").forEach { name ->
-                                        val ability = reforgeSkills.getValue(name)
                                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                             Text(name, color = RebuildPalette.Muted)
-                                            Text("${projection.passiveScores[name] ?: projection.abilities[ability]?.modifier?.plus(10) ?: "Not set"}")
+                                            Text("${projection.passiveScores[name] ?: "Not set"}")
                                         }
                                     }
                                     Text("Walking speed · ${projection.speed.value?.let { "$it ft." } ?: "Not set"}")
                                 }
-                                PlayerTextButton(onClick = { dialog = "CampaignConnections" }) { Text("Campaign connections") }
-                                PlayerTextButton(onClick = { openSection("Features") }) { Text("Features & background") }
                                 if (saved!!.origin.sourceProfileId != null) PlayerDisclosure("Imported sheet · review before play") {
                                     Text("Training, attacks, spells, resources, and movement need your review before relying on calculated values.",
                                         color = RebuildPalette.GoldBright, style = MaterialTheme.typography.bodySmall,
@@ -359,10 +351,7 @@ private enum class SpellbookFilter(val label: String) {
                                 }
                             }
                             "Combat" -> {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    PlayerButton(onClick = { dialog = "HP" }, modifier = Modifier.weight(1f)) { Text("Damage / healing") }
-                                    PlayerOutlinedButton(onClick = { dialog = "Conditions" }, modifier = Modifier.weight(1f)) { Text("Conditions") }
-                                }
+                                PlayerOutlinedButton(onClick = { openSection("Spells") }) { Text("Cast a spell") }
                                 if (character.conditions.isNotEmpty() || character.concentrationSpellId != null) {
                                     Column(Modifier.fillMaxWidth().background(RebuildPalette.Panel, RoundedCornerShape(8.dp)).padding(12.dp),
                                         verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -374,40 +363,42 @@ private enum class SpellbookFilter(val label: String) {
                                         }
                                     }
                                 }
-                                GenesisArmorAdoption(character, legacyArmor?.campaign, legacyArmor?.preferences?.elements.orEmpty(),
-                                    alreadyAdoptedBy = all.firstOrNull { it.character.id != character.id && it.character.armor != null }?.character?.name,
-                                    onSave = { next, label -> change(label, next, false) })
-                                GenesisArmorCombat(character,
-                                    onSave = { next, label -> change(label, next, false) },
-                                    onRoll = { next, record -> action("Armor roll saved") {
-                                        local.commitRoll(character.id, saved!!.revision, next, "Rolled Astravar attack and damage", record)
-                                        savedRoll = record
-                                    } },
-                                    onHistory = { openSection("History") }, saving = busy)
-                                RebirthSectionLabel("Attacks") { PlayerTextButton(onClick = { dialog = "Attack" }) { Text("Add attack") } }
-                                GenesisSourceAttackReviewButton(repository, local, requireNotNull(saved))
+                                RebirthSectionLabel("Attacks", onTitle = { dialog = "AttackManagement" })
                                 if (character.attacks.isEmpty()) PlayerEmpty("Set up your attacks", "Add an attack using your accepted damage dice and ability.", "Weapon")
                                 Column {
-                                    character.attacks.forEach { attack -> key(attack.id) {
-                                        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                                Column(Modifier.weight(1f)) {
-                                                    Text(attack.name, style = MaterialTheme.typography.titleMedium)
-                                                    Text("${attack.actionType} · ${attack.range}", style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
-                                                }
-                                                PlayerTextButton(onClick = { dialog = "Attack:${attack.id}" }) { Text("Edit") }
-                                            }
-                                            if (attack.damage.isNotEmpty()) Text("Base damage · ${attack.damage.joinToString(" + ") { "${SecureDice.format(it.formula)} ${it.type.name.lowercase()}" }}",
-                                                color = RebuildPalette.Silver, style = MaterialTheme.typography.bodyMedium)
-                                            GenesisRecordedAttackEvidence(attack)
-                                            PlayerOutlinedButton(onClick = { openRoll(ReforgeRollRequest(attack.name, null, RollKind.ATTACK, attack.id, attack.id)) },
-                                                modifier = Modifier.fillMaxWidth()) {
-                                                ArcaneIcon("d20", Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Roll attack & damage")
-                                            }
+                                    character.attacks.filter { sheetAttackAvailable(character,it) }.forEach { attack -> key(attack.id) {
+                                        val preview = remember(character, attack) { runCatching { AttackRules.preview(character, attack.id) } }
+                                        val hit = preview.getOrNull()?.attackBonus?.value
+                                        val damage = preview.getOrNull()?.components.orEmpty()
+                                        fun openAttack(quick: Boolean) {
+                                            openRoll(ReforgeRollRequest(attack.name, null, RollKind.ATTACK, attack.id, attack.id, immediateAttackOnly = quick))
                                         }
+                                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Column(Modifier.weight(1f).heightIn(min = 48.dp).clickable(role = Role.Button,
+                                                onClickLabel = "Inspect ${attack.name}") { dialog = "InspectAttack:${attack.id}" }, verticalArrangement = Arrangement.Center) {
+                                                Text(attack.name, style = MaterialTheme.typography.titleMedium)
+                                                Text("${attack.actionType} · ${attack.range}", style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted)
+                                            }
+                                            SheetRollTarget("${attack.name} hit", hit, { openAttack(true) }, { openAttack(false) }, small = true)
+                                            SheetDamageTarget(damage, onDamage = {
+                                                action("Potential damage saved on this device") {
+                                                    val components = damage.map { part ->
+                                                        val rolled = SecureDice.roll(part.formula)
+                                                        ReforgeRollComponent(part.label, rolled.faces.map { ReforgeRollDie(it.sides, it.face, it.kept, it.sign) },
+                                                            rolled.formula.flat, part.type.name)
+                                                    }
+                                                    savedRoll = local.appendRoll(ReforgeRollRecord(profileId = character.id, characterRevision = saved!!.revision,
+                                                        label = "${attack.name} potential damage", formula = damage.joinToString(" + ") { SecureDice.format(it.formula) },
+                                                        components = components, ownership = if (companionProfileId == null) "Player" else "Companion"))
+                                                }
+                                            }, onOptions = { dialog = "InspectDamage:${attack.id}" })
+                                        }
+                                        preview.exceptionOrNull()?.message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = RebuildPalette.Muted) }
                                         HorizontalDivider(color = RebuildPalette.Outline.copy(alpha = .55f))
                                     } }
                                 }
+                                SheetAvailableActions(character, busy, onReview = { label, next -> proposedChange = label to next },
+                                    onError = { error = it })
                                 RebirthSectionLabel("Turn economy") { PlayerTextButton(onClick = { dialog = "Turn" }) { Text("Configure") } }
                                 if (character.turn.tracking) {
                                     Column {
@@ -513,12 +504,9 @@ private enum class SpellbookFilter(val label: String) {
                                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     Column(Modifier.weight(1f)) {
                                         Text("SPELL ATTACK", style = MaterialTheme.typography.labelSmall, color = RebuildPalette.Muted)
-                                        PlayerTextButton(enabled = projection.spellAttack.value != null, onClick = {
-                                            projection.spellAttack.value?.let { requestRoll("Spell attack", it, RollKind.SPELL_ATTACK) }
-                                        }, modifier = Modifier.semantics { contentDescription = "Roll spell attack" }) {
-                                            Text(reforgeSigned(projection.spellAttack.value), style = MaterialTheme.typography.headlineSmall)
-                                            Spacer(Modifier.width(8.dp)); ArcaneIcon("d20", Modifier.size(20.dp))
-                                        }
+                                        SheetRollTarget("Spell attack", projection.spellAttack.value,
+                                            onRoll = { rollCheck("Spell attack", projection.spellAttack.value, RollKind.SPELL_ATTACK, "", true) },
+                                            onOptions = { rollCheck("Spell attack", projection.spellAttack.value, RollKind.SPELL_ATTACK, "", false) })
                                     }
                                     Column(Modifier.weight(1f)) {
                                         Text("SAVE DC", style = MaterialTheme.typography.labelSmall, color = RebuildPalette.Muted)
@@ -532,8 +520,7 @@ private enum class SpellbookFilter(val label: String) {
                                             Column(Modifier.widthIn(min = 92.dp).clickable(role = Role.Button) { dialog = "Slots" }
                                                 .padding(vertical = 8.dp, horizontal = 4.dp)) {
                                                 Text("LEVEL $level", color = RebuildPalette.Muted, style = MaterialTheme.typography.labelSmall)
-                                                Text("${character.spellSlots[level] ?: "Not set"} / $max", color = RebuildPalette.Purple,
-                                                    style = MaterialTheme.typography.titleMedium)
+                                                PoolCounter(character.spellSlots[level], max)
                                             }
                                         }
                                     }
@@ -587,15 +574,9 @@ private enum class SpellbookFilter(val label: String) {
                                     "Add your accepted class features, feats and homebrew through Edit identity & features. Unreviewed source material does not become an active mechanic.")
                             }
                             "Resources" -> {
-                                Text("HP ${projection.currentHp ?: "Not set"} / ${projection.maximumHp.value ?: "Not set"} · Temporary HP ${character.temporaryHp ?: "Not set"}",
-                                    color = RebuildPalette.Ice)
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    PlayerOutlinedButton(onClick = { dialog = "HP" }) { Text("Adjust hit points") }
-                                    PlayerTextButton(onClick = { dialog = "Slots" }) { Text("Spell slots") }
-                                }
+                                PlayerTextButton(onClick = { dialog = "Slots" }) { Text("Spell slots") }
                                 GenesisArmorRecovery(character) { next, label -> change(label, next, false) }
                                 RebirthSectionLabel("Limited uses") { PlayerTextButton(onClick = { dialog = "Resource" }) { Text("Add resource") } }
-                                PlayerButton(onClick = { dialog = "Rest" }) { Text("Rest & recovery") }
                                 Column {
                                     character.resources.forEach { resource -> key(resource.id) {
                                         Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -605,8 +586,7 @@ private enum class SpellbookFilter(val label: String) {
                                                     Text(resource.recharge.name.lowercase().replace('_', ' '), color = RebuildPalette.Muted,
                                                         style = MaterialTheme.typography.bodySmall)
                                                 }
-                                                Text("${resource.current ?: "Not set"} / ${projection.resourceMaxima[resource.id] ?: "Not set"}",
-                                                    color = RebuildPalette.GoldBright, style = MaterialTheme.typography.titleLarge)
+                                                PoolCounter(resource.current, projection.resourceMaxima[resource.id])
                                             }
                                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                                 PlayerTextButton(onClick = { dialog = "Resource:${resource.id}" }) { Text("Edit") }
@@ -643,7 +623,23 @@ private enum class SpellbookFilter(val label: String) {
                 }
             }
         }
-        SnackbarHost(rollNotice, Modifier.align(Alignment.BottomCenter).widthIn(max = 600.dp))
+        if (character != null && projection != null) SmallFloatingActionButton(
+            onClick = { dialog = "RollManager" },
+            containerColor = RebuildPalette.GoldBright, contentColor = RebuildPalette.Canvas,
+            shape = androidx.compose.foundation.shape.CircleShape,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 8.dp).size(48.dp)
+                .semantics { contentDescription = "Roll Manager" }) {
+            ArcaneIcon("d20", Modifier.size(24.dp), RebuildPalette.Canvas)
+        }
+        SnackbarHost(rollNotice, Modifier.align(Alignment.BottomCenter).widthIn(max = 600.dp)) { notice ->
+            Snackbar(action = { TextButton(onClick = notice::performAction) { Text("View history") } },
+                dismissAction = { IconButton(onClick = notice::dismiss, modifier = Modifier.semantics { contentDescription = "Dismiss roll result" }) { Text("×") } }) {
+                val result = savedRoll
+                Text(notice.visuals.message, Modifier.clickable(enabled = result != null, role = Role.Button, onClickLabel = "Copy roll result") {
+                    result?.let { clipboard.setText(androidx.compose.ui.text.AnnotatedString(it.resultLines().joinToString("\n"))) }
+                })
+            }
+        }
         }
     }
     if (dialog == "Create") {
@@ -714,11 +710,67 @@ private enum class SpellbookFilter(val label: String) {
     if (character != null && projection != null) {
         when (dialog) {
             "Controls" -> PlayerSheet("Character controls", { dialog = null }) {
-                GenesisCharacterHeader(character, projection,
-                    onSwitch = if (companionProfileId == null) ({ dialog = "Characters" }) else null,
-                    onHp = { dialog = "HP" }, onDefense = { dialog = "Defense" },
-                    onInitiative = { projection.initiative.value?.let { dialog = null; requestRoll("Initiative", it, RollKind.INITIATIVE) } })
+                if (companionProfileId == null) PlayerOutlinedButton(onClick = { dialog = "Characters" },
+                    modifier = Modifier.semantics { contentDescription = "Switch character" }) { Text("Switch character") }
+                PlayerOutlinedButton(onClick = { dialog = "Setup" }) { Text("Character setup") }
+                PlayerOutlinedButton(onClick = { dialog = "Advance" }) { Text("Advancement") }
+                PlayerTextButton(onClick = { dialog = "CampaignConnections" }) { Text("Campaign membership") }
+                if (character.armor != null || legacyArmor?.campaign?.onboarded == true)
+                    PlayerTextButton(onClick = { dialog = "OriginalArmor" }) { Text("Original armor configuration") }
                 GenesisQuickActions(character.id, ::quickAction)
+            }
+            "OriginalArmor" -> PlayerSheet("Original armor configuration", { dialog = null }) {
+                Text("This view uses the saved legacy armor configuration. Current source-reviewed attacks appear in Actions.",
+                    color = RebuildPalette.Muted)
+                                GenesisArmorAdoption(character, legacyArmor?.campaign, legacyArmor?.preferences?.elements.orEmpty(),
+                                    alreadyAdoptedBy = all.firstOrNull { it.character.id != character.id && it.character.armor != null }?.character?.name,
+                                    onSave = { next, label -> change(label, next, false) })
+                                GenesisArmorCombat(character,
+                                    onSave = { next, label -> change(label, next, false) },
+                                    onRoll = { next, record -> action("Armor roll saved") {
+                                        local.commitRoll(character.id, saved!!.revision, next, "Rolled Astravar attack and damage", record)
+                                        savedRoll = record
+                                    } },
+                                    onHistory = { dialog = null; openSection("History") }, saving = busy)
+            }
+            "RollManager" -> AscensionRollManager(character, projection, local, { dialog = null }) {
+                dialog = null; openRoll(ReforgeRollRequest("Custom roll", null))
+            }
+            "Portrait" -> SheetPortraitEditor(character, { dialog = null }) { updated -> change("Edit portrait", updated) }
+            "Profile" -> PlayerSheet("Character Profile", { dialog = null }) {
+                Text(character.name, style = MaterialTheme.typography.headlineSmall)
+                PlayerDisclosure("Defenses", initiallyOpen = true) {
+                    projection.defenses.forEach { Text("${it.type.name.lowercase()} · ${it.kind.name.lowercase()}${if (it.nonmagicalOnly) " · nonmagical" else ""}") }
+                    projection.conditionImmunities.forEach { Text("Immune to $it") }
+                    PlayerTextButton(onClick = { dialog = "Defense" }) { Text("Inspect defenses and sources") }
+                }
+                PlayerDisclosure("Features & Traits") {
+                    character.features.forEach { feature -> PlayerDisclosure(feature.name) { ReforgeRichText(feature.description); Text(feature.source.name) } }
+                    PlayerOutlinedButton(onClick = { dialog = "Identity" }) { Text("Manage features and traits") }
+                    GenesisArmorAdoption(character, legacyArmor?.campaign, legacyArmor?.preferences?.elements.orEmpty(),
+                        alreadyAdoptedBy = all.firstOrNull { it.character.id != character.id && it.character.armor != null }?.character?.name,
+                        onSave = { next, label -> change(label, next, false) })
+                    GenesisArmorFeatures(character) { next, label -> change(label, next, false) }
+                }
+                PlayerDisclosure("Proficiencies & Training") {
+                    Text("Proficiency ${reforgeSigned(projection.proficiencyBonus)}")
+                    if (character.saveProficiencies.isNotEmpty()) Text(character.saveProficiencies.joinToString { it.fullLabel })
+                    if (character.toolProficiencies.isNotEmpty()) Text(character.toolProficiencies.joinToString())
+                    if (character.languages.isNotEmpty()) Text(character.languages.joinToString())
+                    PlayerTextButton(onClick = { dialog = null; inspecting = Stat.STR.name }) { Text("Ability inspector & training") }
+                }
+                PlayerDisclosure("Background") {
+                    Text(listOf(character.species, character.className, character.subclass).filter(String::isNotBlank).joinToString(" · "))
+                    ReforgeRichText(character.background)
+                    PlayerTextButton(onClick = { dialog = "Identity" }) { Text("Edit background") }
+                    PlayerTextButton(onClick = { dialog = "Notes" }) { Text("Character notes") }
+                    PlayerTextButton(onClick = { sourceStat=null;dialog = "HistoricalSources" }) { Text("Character source evidence") }
+                }
+            }
+            "HistoricalSources" -> LegacyCharacterSources(repository,local,requireNotNull(saved),sourceStat,{dialog=null})
+            "AttackManagement" -> PlayerSheet("Manage attacks", { dialog = null }) {
+                PlayerButton(onClick = { dialog = "Attack" }) { Text("Create attack") }
+                GenesisSourceAttackReviewButton(repository, local, requireNotNull(saved))
             }
             "Identity" -> ReforgeIdentityEditor(character, { dialog = null }) { change("Edit identity & features", it) }
             "Notes" -> ReforgeNotesEditor(saved!!, local, { dialog = null })
@@ -727,7 +779,7 @@ private enum class SpellbookFilter(val label: String) {
             "CampaignConnections" -> if (connected != null) GenesisActorMembershipEditor(connected, saved!!.character.id, { dialog = null },
                 initialRole = if (companionProfileId == null) GenesisActorRole.PLAYER else GenesisActorRole.COMPANION)
                 else ReforgeCampaignConnectionsDialog(saved!!, local, repository, { dialog = null })
-            "Training" -> ReforgeTrainingEditor(character, { dialog = null }) { change("Edit training", it) }
+
             "Skill" -> GenesisSkillEditor(character, busy = busy, saveError = error, onDismiss = { dialog = null },
                 onSave = { label, next -> change(label, next) })
             "Item" -> if (connected != null) GenesisConnectedItemEditor(connected, saved!!, { dialog = null }, onSaved = { dialog = null })
@@ -744,7 +796,29 @@ private enum class SpellbookFilter(val label: String) {
             "Rest" -> ReforgeRestDialog(character, { dialog = null }) { label, next -> proposedChange = label to next; dialog = null }
             "Defense" -> ReforgeCalculationDialog("Defenses", projection, { dialog = null })
         }
-        inspecting?.let { stat -> ReforgeAbilityInspector(character, projection, Stat.valueOf(stat), { inspecting = null }, { change("Edit permanent ${stat}", it) }) { label, modifier -> requestRoll(label, modifier, RollKind.ABILITY_CHECK, stat) } }
+        inspecting?.let { stat ->
+            ReforgeAbilityInspector(character, projection, Stat.valueOf(stat), { inspecting = null },
+                { change("Edit permanent $stat", it) }, { sourceStat=stat;inspecting = null; dialog = "HistoricalSources" }) { label, modifier ->
+                requestRoll(label, modifier, RollKind.ABILITY_CHECK, stat)
+            }
+        }
+        dialog?.takeIf { it.startsWith("InspectAttack:") || it.startsWith("InspectDamage:") }?.let { inspectingAttack ->
+            val attack = character.attacks.firstOrNull { it.id == inspectingAttack.substringAfter(':') }
+            if (attack != null) PlayerSheet(attack.name, { dialog = null }, actions = {
+                PlayerTextButton(onClick = { dialog = "Attack:${attack.id}" }) { Text("Edit attack") }
+            }) {
+                Text("${attack.actionType} · ${attack.range}")
+                val calculation = remember(character, attack) { runCatching { AttackRules.preview(character, attack.id) } }
+                calculation.getOrNull()?.let { preview ->
+                    Text("Hit ${reforgeSigned(preview.attackBonus.value)}")
+                    preview.components.forEach { Text("${it.label} · ${SecureDice.format(it.formula)} ${it.type.name.lowercase()}") }
+                    if (preview.components.isEmpty()) Text("No configured damage components")
+                    preview.attackBonus.explanation.forEach { line -> Text("${line.label} · ${line.value ?: "?"}", style = MaterialTheme.typography.bodySmall) }
+                }
+                calculation.exceptionOrNull()?.message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                GenesisRecordedAttackEvidence(attack)
+            }
+        }
         dialog?.takeIf { it.startsWith("HitDie:") }?.substringAfter(':')?.let { id ->
             ReforgeHitDieDialog(character, id, { dialog = null }) { record, next ->
                 action("Hit Die and healing saved on this device") {
@@ -843,6 +917,17 @@ private enum class SpellbookFilter(val label: String) {
                 }
             }
         }
+        dialog?.takeIf { it.startsWith("UnresolvedSkill:") }?.substringAfter(':')?.let { skillId ->
+            SkillRules.entries(character, projection).firstOrNull { it.id == skillId }?.let { entry ->
+                PlayerSheet(entry.name, { dialog = null }) {
+                    Text("The modifier is unknown.", color = RebuildPalette.GoldBright)
+                    entry.calculation.explanation.forEach { line -> Text(line.label, color = RebuildPalette.Muted) }
+                    if (entry.custom) PlayerTextButton(onClick = { dialog = "Skill:$skillId" },
+                        modifier = Modifier.testTag("skill-edit-$skillId")) { Text("Edit skill") }
+                    PlayerButton(enabled = false, onClick = {}, modifier = Modifier.testTag("reforge-roll-now")) { Text("Roll now") }
+                }
+            }
+        }
         dialog?.takeIf { it.startsWith("Skill:") }?.substringAfter(':')?.let { skillId ->
             key(skillId) { GenesisSkillEditor(character, skillId, busy, error, { dialog = null }) { label, next -> change(label, next) } }
         }
@@ -864,7 +949,10 @@ private enum class SpellbookFilter(val label: String) {
         } }
         proposedChange?.let { (label, next) -> ReforgeEquipmentPreview(label, character, next, { proposedChange = null }) { change(label, next) } }
         rollRequest?.takeIf { profilesState.first && actorSelection.first }?.let { request ->
-            ReforgeRollDialog(character, saved!!.revision, request, { rollRequest = null }, saving = busy, saveError = error) { record, next ->
+            ReforgeRollDialog(character, saved!!.revision, request, { rollRequest = null }, saving = busy, saveError = error,
+                onEditSkill = if (request.kind == RollKind.SKILL && character.customSkills.any { it.id == request.key }) ({
+                    rollRequest = null; dialog = "Skill:${request.key}"
+                }) else null) { record, next ->
                 action("Roll saved on this device") {
                     savedRoll = if (next == null) local.appendRoll(record) else {
                         local.commitRoll(record.profileId, record.characterRevision, next, "Resolved ${record.label}", record).roll

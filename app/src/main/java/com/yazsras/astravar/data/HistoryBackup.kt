@@ -157,7 +157,11 @@ class HistoryBackup(context: Context, private val repository: Repository,
         repository.awaitHistoryReady()
         val folder=temp()
         try { db.withTransaction {
-            val sql=db.openHelper.writableDatabase;val baseline=state(sql)
+            val sql=db.openHelper.writableDatabase
+            // Direct archive writes can precede another gameplay operation. Give their exact bytes
+            // the existing content-addressed identity in the same transaction as the snapshot.
+            HistoryPreservation.normalizePending(sql)
+            val baseline=state(sql)
             val working=repository.export().toByteArray(Charsets.UTF_8)
             require(working.size<=BackupCodec.MAX_BYTES)
             File(folder,"backup.json").writeBytes(working)

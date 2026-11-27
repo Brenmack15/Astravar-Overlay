@@ -12,6 +12,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.map
+import com.yazsras.astravar.rules.reforge.DiceMode
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -53,8 +56,15 @@ data class ReforgeChange(
 )
 
 @Serializable data class ReforgeRollDie(val sides: Int, val face: Int, val kept: Boolean = true, val sign: Int = 1)
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class ReforgeRollComponent(
-    val label: String, val dice: List<ReforgeRollDie>, val modifier: Int = 0, val damageType: String? = null
+    val label: String, val dice: List<ReforgeRollDie>, val modifier: Int = 0, val damageType: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val mode: DiceMode? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val batchId: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val subjectId: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val checkKind: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val formId: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val batchMemberIds: List<String> = emptyList()
 ) {
     val total: Int get() = dice.filter { it.kept }.sumOf { it.face * it.sign } + modifier
 }
@@ -368,6 +378,19 @@ class ReforgeRepository private constructor(private val db: RoomDatabase, privat
             throw IllegalArgumentException("This item was not added because a complete character backup could not be validated: ${error.message.orEmpty()} Your previous saved records are unchanged.", error)
         }
         outcome
+    }
+
+    /** Individual immutable roll receipts share one Room transaction and batch identity. */
+    suspend fun appendRollBatch(batchId: String, rolls: List<ReforgeRollRecord>): List<ReforgeRollRecord> = withTransaction {
+        checkId(batchId)
+        require(rolls.size in 1..24 && rolls.distinctBy { it.id }.size == rolls.size)
+        val first = rolls.first()
+        val memberIds = rolls.map { it.id }
+        require(first.id == batchId && first.components.firstOrNull()?.batchMemberIds == memberIds &&
+            rolls.drop(1).all { row -> row.components.all { it.batchMemberIds.isEmpty() } }) { "The batch identity and original membership must agree." }
+        require(rolls.all { roll -> roll.profileId == first.profileId && roll.characterRevision == first.characterRevision &&
+            roll.components.isNotEmpty() && roll.components.all { it.batchId == batchId } })
+        rolls.map { appendRoll(it) }
     }
 
     /** Only explicitly initiated results are submitted. A retry returns the original immutable result. */

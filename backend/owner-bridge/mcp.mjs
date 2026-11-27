@@ -1,3 +1,6 @@
+import { chargeCloudRequest, mcpRateCost, cloudRateResponse } from './cloud-rate.mjs';
+import { validCloudId } from './cloud-validation.mjs';
+import { CLOUD_TOOLS, cloudMcpArgs, cloudMcpCall } from './cloud-mcp.mjs';
 import {CAMPAIGN_TOOLS,CAMPAIGN_READ_KINDS} from './campaign-tools.mjs';
 import {canReadKind} from './campaign.mjs';
 /** Stateless Sites MCP adapter. Sites dispatch must be the only public entry point.
@@ -83,7 +86,7 @@ const safeError = error => typeof error?.code === 'string' && /^[A-Z0-9_]{1,64}$
  * This adapter must not be directly exposed on a host where callers can spoof
  * oai-authenticated-user-id. Ordinary bearer credentials are not MCP identity.
  */
-export async function handleMcp(request, bridge, { ownerId, allowPublicDiscovery = false, connectorScopes = ['character:read', 'proposal:create', 'proposal:read'], liveHp = null, hpConnectorScopes = ['hp:read', 'hp:propose', 'hp:receipt'], campaignBridge=null, campaignPush=null } = {}) {
+export async function handleMcp(request, bridge, { ownerId, allowPublicDiscovery = false, cloudService = null, connectorScopes = ['character:read', 'proposal:create', 'proposal:read'], liveHp = null, hpConnectorScopes = ['hp:read', 'hp:propose', 'hp:receipt'], campaignBridge=null, campaignPush=null } = {}) {
   if (request.method !== 'POST') return rpcError(null, -32600, 'POST_REQUIRED', 405);
   if (request.headers.get('content-type')?.split(';')[0].trim() !== 'application/json') return rpcError(null, -32600, 'JSON_REQUIRED', 415);
   let payload;
@@ -117,16 +120,23 @@ export async function handleMcp(request, bridge, { ownerId, allowPublicDiscovery
   if (method === 'notifications/initialized' && id === undefined) return new Response(null, { status: 202 });
   if (id === undefined) return rpcError(null, -32600, 'REQUEST_ID_REQUIRED', 400);
   if (method === 'server/discover') return result({ supportedVersions: [MCP_VERSION], capabilities: { tools: {} } });
-  if (method === 'initialize') return result({ protocolVersion: MCP_VERSION, capabilities: { tools: {} }, serverInfo: { name: 'Astravar Owner Connection', version: '2.2.0' }, instructions: 'Owner-private campaign records with per-category grants and Trusted DM Auto-Sync. Use submit_campaign_transaction for campaign gameplay updates, including adjust_hp for damage or healing already resolved in play; then get_campaign_command_receipt and a separate current record read. propose_hp_adjustment is the legacy HP-only manual-approval flow, not the campaign Auto-Sync write path. Read current values and revisions before submitting only resolved player-authorized actions. A queued command is not a saved result. Independently verify its immutable Android receipt and saved record readback; preserve unknowns and stale/offline status. Legacy fictional and HP approval protocols remain isolated.' });
-  if (method === 'tools/list') return result({ tools: TOOLS });
+  if (method === 'initialize') return result({ protocolVersion: MCP_VERSION, capabilities: { tools: {} }, serverInfo: { name: 'Astravar Owner Connection', version: '2.2.0' }, instructions: (cloudService?'For an enrolled cloud continuity use get_cloud_capabilities, submit_cloud_command, get_cloud_receipt and a separate get_cloud_state. A committed cloud receipt is independent of Android. Other continuities use the legacy device-authoritative protocol. ':'') + 'Owner-private campaign records with per-category grants and Trusted DM Auto-Sync. Use submit_campaign_transaction for campaign gameplay updates, including adjust_hp for damage or healing already resolved in play; then get_campaign_command_receipt and a separate current record read. propose_hp_adjustment is the legacy HP-only manual-approval flow, not the campaign Auto-Sync write path. Read current values and revisions before submitting only resolved player-authorized actions. A queued command is not a saved result. Independently verify its immutable Android receipt and saved record readback; preserve unknowns and stale/offline status. Legacy fictional and HP approval protocols remain isolated.' });
+  if (method === 'tools/list') return result({ tools: cloudService ? [...TOOLS,...CLOUD_TOOLS] : TOOLS });
   if (method !== 'tools/call') return rpcError(id, -32601, 'METHOD_NOT_FOUND');
   if (!params || typeof params !== 'object' || Array.isArray(params) || Object.keys(params).some(key => !['name', 'arguments', '_meta'].includes(key))) return rpcError(id, -32602, 'INVALID_PARAMS');
-  const tool = TOOLS.find(value => value.name === params.name);
+  const cloudTool = cloudService && CLOUD_TOOLS.find(value => value.name === params.name);
+  const tool = cloudTool || TOOLS.find(value => value.name === params.name);
   const args = Object.hasOwn(params, 'arguments') ? params.arguments : {};
-  if (!tool || !matches(args, tool.inputSchema)) return rpcError(id, -32602, 'INVALID_TOOL_ARGUMENTS');
+  if (!tool || (cloudTool ? !validCloudId(args?.continuityId) : !matches(args, tool.inputSchema))) return rpcError(id, -32602, 'INVALID_TOOL_ARGUMENTS');
   const isHpTool = HP_TOOLS.has(tool.name);
   const principal = { ownerId, role: 'connector', credentialId: 'sites-mcp', scopes: [...(isHpTool ? hpConnectorScopes : connectorScopes)] };
   try {
+    if(cloudTool){
+      await chargeCloudRequest(cloudService,principal,args.continuityId,mcpRateCost(tool.name));
+      if(!cloudMcpArgs(tool,args))return rpcError(id,-32602,'INVALID_TOOL_ARGUMENTS');
+      const value=await cloudMcpCall(cloudTool,args,cloudService,principal);
+      return result({content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value,isError:false});
+    }
     const hpBridge = liveHp ?? bridge.liveHp;
     if (isHpTool && !hpBridge) throw Object.assign(new Error(), { code: 'HP_CONNECTION_NOT_CONFIGURED' });
     let value;
@@ -186,6 +196,12 @@ export async function handleMcp(request, bridge, { ownerId, allowPublicDiscovery
     }
     return result({ content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value, isError: false });
   } catch (error) {
-    return result({ content: [{ type: 'text', text: JSON.stringify({ error: safeError(error), confirmation: 'UNVERIFIED' }) }], isError: true });
+    const limited=cloudTool && cloudRateResponse(error);
+    if(limited){
+      const reply=json({jsonrpc:'2.0',id,error:{code:-32029,message:limited.code,data:limited}},429);
+      reply.headers.set('Retry-After',String(limited.retryAfterSeconds));
+      return reply;
+    }
+    return result({ content: [{ type: 'text', text: JSON.stringify({ error: safeError(error), confirmation: 'UNVERIFIED', ...(cloudTool && error.conflict?{conflict:error.conflict}:{}) }) }], isError: true });
   }
 }
