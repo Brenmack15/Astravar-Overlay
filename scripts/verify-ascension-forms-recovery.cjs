@@ -88,6 +88,11 @@ async function seed(r) {
   for(const formId of ['original','civilian','winged-hybrid'])await command('change_form',{actorId:shape,formId,elapsedSeconds:0,willing:true});
   await command('use_action',{actorId:shape,actionId:'extended',useId:'source-enhancement',declared:true});
   await command('resolve_attack',{actorId:shape,attackId:'focused',attemptId:'resolved-route',mode:'normal',includeDamage:false});
+  if (process.argv.includes('--installed-preservation')) {
+    await command('apply_hp_change',{actorId:frame,kind:'temporary',amount:7});
+    await command('set_condition',{actorId:frame,key:'marked',enabled:true,sourceId:'fixture-note'});
+    await command('define_resource',{actorId:frame,poolId:'unmeasured-charge',name:'Unmeasured charge',type:'ordinary',maximum:6,current:null,recovery:'none',source:'No measured balance'});
+  }
   const pictures={};
   const colors=[[42,72,130],[74,188,155],[193,70,55],[153,173,86],[89,62,157],[170,103,47],[59,130,154]];
   for(const actor of profiles) for(const targetId of [actor.id,...actor.formIds]){

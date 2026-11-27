@@ -285,4 +285,56 @@ class CloudPresetManagementInteropTest {
         }
     }
 
+    @Test fun queuedPresetRecalculatesAfterEquipmentAndFormChangesAndCannotCrossActors() {
+        AscensionWorkerFixture.open(context).use { f ->
+            fun put(op:String, raw:String):JsonObject {
+                val r=f.command(op,Json.parseToJsonElement(raw).jsonObject)
+                assertEquals(op+" "+r,"COMMITTED",r.cloudText("status"))
+                assertEquals(r,f.receipt(r.cloudText("commandId")));return r
+            }
+            for (id in listOf("scholar","other")) put("define_actor","""{"actorId":"$id","name":"$id","role":"player","rulesProfile":"revised_2024","level":3,"abilities":{"INT":12}}""")
+            put("define_item_definition","""{"definitionId":"lens-def","name":"Research lens","category":"instrument","description":"Verified fixture","rarity":null,"stackable":false,"wearable":true,"handheld":false,"attunement":"none","source":"Test source"}""")
+            put("acquire_item","""{"itemId":"lens","definitionId":"lens-def","ownerId":"scholar","quantity":1,"source":"Test source"}""")
+            put("define_effect","""{"actorId":"scholar","effectId":"lens-check","name":"Reviewed lens bonus","target":"ability_check","key":"INT","operation":"add","amount":2,"sourceItemId":"lens","source":"Test source"}""")
+            put("define_form","""{"actorId":"scholar","formId":"investigator","name":"Investigator","timing":"other","activationSeconds":0,"abilityOverrides":{"INT":18},"source":"Test source"}""")
+            val config=put("save_roll_preset","""{"actorId":"scholar","presetId":"reused","name":"Researcher config","update":false,"entries":[{"kind":"ability","key":"INT","mode":"normal"}]}""")
+            val initial=f.record("reused")
+            val current=mutableStateOf(runBlocking{f.refresh()})
+            val who=mutableStateOf("scholar")
+            val activity=Robolectric.buildActivity(ComponentActivity::class.java).setup()
+            fun refresh(){val s=runBlocking{f.refresh()};compose.runOnIdle{current.value=s}}
+            fun openPreset(){ waitFor(hasTestTag("roll-preset-selector")).performScrollTo().performClick(); waitFor(hasTestTag("roll-preset-option-reused")).performScrollTo().performClick() }
+            fun count()=f.dm("get_cloud_state",buildJsonObject{put("kind","roll")}).getValue("records").jsonArray.size
+            fun expected(value:Int) {
+                waitFor(hasText("1d20+"+value)).assertExists()
+                val sheet=f.dm("get_cloud_actor_sheet",buildJsonObject{put("id","scholar")}).getValue("sheet").jsonObject
+                assertEquals(value,sheet.getValue("checks").jsonObject.getValue("INT").jsonObject.getValue("value").jsonPrimitive.int)
+            }
+            try {
+                activity.get().setContent{AstravarTheme{CloudRollManager(f.client,current.value,who.value,true,{})}}
+                openPreset();expected(1);assertEquals(0,count())
+                compose.runOnIdle{who.value="other"}
+                waitFor(hasTestTag("roll-preset-selector")).performClick()
+                waitFor(hasTestTag("roll-preset-option-template-research")).assertExists()
+                compose.onAllNodesWithTag("roll-preset-option-reused").assertCountEquals(0)
+                compose.runOnIdle{who.value="scholar"}
+                openPreset()
+                put("equip_item","""{"itemId":"lens","equipment":"worn","source":"Synthetic equip"}""");refresh();expected(3)
+                put("change_form","""{"actorId":"scholar","formId":"investigator","elapsedSeconds":0,"willing":true}""");refresh();expected(6)
+                assertEquals(0,count())
+                put("equip_item","""{"itemId":"lens","equipment":"packed","source":"Synthetic removal"}""");refresh();expected(4)
+                enter("Die faces in queue order, one roll per line","21")
+                press("Roll All");assertEquals(0,count())
+                enter("Die faces in queue order, one roll per line","16");press("Roll All")
+                waitFor(hasText("(16) + 4 = 20",substring=true)).assertExists()
+                val frozen=f.signal("observedDeviceCommand",buildJsonObject{put("operation","execute_roll_preset")})
+                val id=frozen.cloudText("commandId");val receipt=f.receipt(id)
+                assertEquals(receipt,f.signal("redeliverDeviceCommand",buildJsonObject{put("commandId",id)}))
+                assertEquals(1,count());assertEquals(initial,f.record("reused"))
+                f.resetCache();runBlocking{f.refresh()}
+                assertEquals(initial,runBlocking{f.client.record("reused")});assertEquals(config,f.receipt(config.cloudText("commandId")))
+                assertEquals(1,count())
+            } finally {activity.pause().stop().destroy()}
+        }
+    }
 }
