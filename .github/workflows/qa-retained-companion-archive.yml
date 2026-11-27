@@ -1,0 +1,54 @@
+name: Inspect the retained companion creation evidence
+on:
+  push:
+    branches: [verification/ascension-retained-companion-selection]
+    paths: ['.github/workflows/qa-retained-companion-archive.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Inspect the original API 36 hierarchy and bitmap dimensions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          path="repos/$GITHUB_REPOSITORY/actions/artifacts/15176732893"
+          test "$(gh api "$path" --jq '.workflow_run.head_sha')" = 2fb644414e8e57c135ab61ec78ba557f6b30b65e
+          test "$(gh api "$path" --jq '.workflow_run.id')" = 45945526008
+          gh api "$path/zip" > "$RUNNER_TEMP/evidence.zip"
+          printf '%s  %s\n' f9ed05d8cd1638d541b949cfd1dda73978672551680f26d7d18145b7ac0162a6 "$RUNNER_TEMP/evidence.zip" | sha256sum -c -
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,struct,zipfile
+          import xml.etree.ElementTree as ET
+          z=zipfile.ZipFile(pathlib.Path(os.environ['RUNNER_TEMP'])/'evidence.zip')
+          names=z.namelist()
+          print('Room stores',[(n,z.getinfo(n).date_time,len(z.read(n))) for n in names if n.endswith('astravar-campaign-ledger.db')])
+          print('Synthetic companion frames', [n for n in names if n.startswith('validation/emulator-evidence/') and n.endswith('.xml') and ('companion' in n.lower() or 'failure' in n.lower())])
+          for name in names:
+              if '/emulator-evidence/' not in name or not name.endswith('.xml') or not any(f in name for f in ('failure-PlayerFirst','failure-VisualRebirth','rebirth-companion-selection','player-first-spellbook-concentration-after-restart')):
+                  continue
+              scene=ET.fromstring(z.read(name))
+              png=z.read(name.removesuffix('.xml')+'.png')
+              assert png[:8]==b'\x89PNG\r\n\x1a\n'
+              print('RECORDED:',name, 'PNG',struct.unpack('>II',png[16:24]),hashlib.sha256(png).hexdigest())
+              for node in scene.iter('node'):
+                  if node.get('package')!='com.yazsras.astravar': continue
+                  text=node.get('text') or node.get('content-desc')
+                  if text or node.get('scrollable')=='true':
+                      print('AX',text or node.get('class'),node.get('bounds'),node.get('class'), 'click='+node.get('clickable'), 'sel='+node.get('selected'))
+          for name in names:
+              if name.endswith('logcat.txt') and name=='validation/logcat.txt':
+                  log=z.read(name).decode(errors='replace').splitlines()
+                  for term in ['AstravarNativeScroll','FATAL EXCEPTION','SQLiteConstraintException','CI Native Ally']:
+                      hits=[l for l in log if term in l]
+                      print('LOG',term,'count',len(hits))
+                      if term=='AstravarNativeScroll':
+                          for l in hits:
+                              if '06:13:' in l or '06:12:5' in l or '06:19:4' in l: print(l)
+                      else:
+                          for l in hits[-9:]: print(l)
+          PY
