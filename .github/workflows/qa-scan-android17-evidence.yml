@@ -1,0 +1,25 @@
+name: Inspect original hosted Android 17 evidence
+on: {push: {branches: [verification/ascension-api37-original-evidence-20261127]}}
+permissions: {actions: read, contents: read, checks: read, statuses: write}
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false}
+      - env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          set -eu
+          base="/repos/$GITHUB_REPOSITORY/actions"
+          run=45953670350
+          job=140356482210
+          test "$(gh api "$base/runs/$run" --jq '.head_sha')" = 90ea56725f4bd11c2741823f8039c0bc37e28203
+          gh api -X POST "/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=pending -f context=qa-api37-original-logs -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --silent
+          gh api "$base/jobs/$job" --jq '[.status,.steps[]|select(type!="object" or .number==14 or .number==15)]'
+          if ! gh api "$base/runs/$run/attempts/1/logs" > attempt.zip; then echo 'The attempt log archive is not yet published.'; fi
+          gh api "/repos/$GITHUB_REPOSITORY/check-runs/$job/annotations" --jq '[.[]|{annotation_level,title,message}]'
+          id=$(gh api "$base/runs/$run/artifacts" --jq '.artifacts[]|select(.name=="android-verification")|.id')
+          if [[ -n "$id" ]]; then gh api "$base/artifacts/$id/zip" > native.zip; else echo 'android-verification has not been published.'; fi
+          python3 scripts/qa-scan-android17-evidence.py
+          gh api -X POST "/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=success -f context=qa-api37-original-logs -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --silent
