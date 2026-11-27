@@ -133,8 +133,16 @@ class AscensionAccessibleRollClipboardTest {
             device.executeShellCommand("am start -W -n $app/.TargetActivity")
             val input = requireNotNull(device.wait(Until.findObject(By.pkg(app).clazz("android.widget.EditText")),15000))
             input.click()
+            val previous = "Prior synthetic receiver text"
+            input.text = previous
+            assertTrue(device.wait(Until.hasObject(By.pkg(app).clazz("android.widget.EditText").text(previous)), 5000))
             input.clear()
-            assertEquals("The disposable receiver field is empty before paste", "", input.text.orEmpty())
+            compose.waitUntil(8000) {
+                nodes(automation.rootInActiveWindow).any { field ->
+                    field.packageName == app && field.className == "android.widget.EditText" && field.isEditable &&
+                        (field.text.isNullOrEmpty() || field.isShowingHintText)
+                }
+            }
             assertTrue(device.wait(Until.hasObject(By.pkg(app).clazz("android.widget.EditText").focused(true)),8000))
             assertTrue(device.pressKeyCode(KeyEvent.KEYCODE_PASTE))
             val expected = "Strength check: (17) + 3 = 20"
