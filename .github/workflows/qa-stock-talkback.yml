@@ -77,12 +77,15 @@ jobs:
           test -n "$apk"
           device pull "$apk" "$RUNNER_TEMP/stock-reader.apk" >/dev/null
           signer=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
-          "$signer" verify --print-certs "$RUNNER_TEMP/stock-reader.apk" | grep -E '^Signer #[0-9]+ certificate (DN:|SHA-256 digest:)' | tee "$report/reader-signer.txt"
+          "$signer" verify --min-sdk-version 37 --verbose --print-certs "$RUNNER_TEMP/stock-reader.apk" >"$report/reader-signer.txt" 2>&1 || true
+          sed -n '1,25p' "$report/reader-signer.txt"
+          device shell cmd package help > "$RUNNER_TEMP/package-help.txt"
+          device shell dumpsys package "$package" | tr -d '\r' | grep -E 'SigningDetails|signatures=|apkSigningVersion|versionCode=|versionName=' | head -12 | tee "$report/package-signing-info.txt"
           device shell dumpsys package "$package" | tr -d '\r' | grep -E 'versionCode=|versionName=' | head -4 | tee "$report/reader-version.txt"
           device shell settings put secure enabled_accessibility_services "$service"
           device shell settings put secure accessibility_enabled 1
           for _ in $(seq 1 20); do device shell dumpsys accessibility | tr -d '\r' > "$RUNNER_TEMP/stock-accessibility-status.txt"; if grep -Eq 'Bound services:.*TalkBack|Service\[.*TalkBackService|id=com\.google\.android\.marvin\.talkback.*isConnected=true' "$RUNNER_TEMP/stock-accessibility-status.txt"; then break; fi; sleep 1; done
-          grep -Ei 'TalkBackService|Bound services|TouchExplorationEnabled' "$RUNNER_TEMP/stock-accessibility-status.txt" | head -30 | tee "$report/reader-service-state.txt"
+          awk 'BEGIN{IGNORECASE=1} /TalkBackService|Bound services|TouchExplorationEnabled/ && n++<30 {print}' "$RUNNER_TEMP/stock-accessibility-status.txt" | tee "$report/reader-service-state.txt"
           echo "Stock Google TalkBack service $service" | tee "$report/outcome.txt"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
