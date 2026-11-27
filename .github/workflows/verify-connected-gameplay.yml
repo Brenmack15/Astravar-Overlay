@@ -1,0 +1,103 @@
+name: Connected gameplay source verification
+on:
+  push:
+    branches: ['verification/ascension-connected-gameplay-7e8d835a']
+    paths: ['.github/workflows/verify-connected-gameplay.yml']
+permissions:
+  contents: read
+jobs:
+  gameplay:
+    name: 'Connected gameplay ${{ matrix.group }}'
+    runs-on: ubuntu-latest
+    timeout-minutes: 36
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - group: standard
+            forks: 2
+            reuse: 4
+          - group: shared-jvm
+            forks: 1
+            reuse: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: '7e8d835a26dec7f6b3375abbb33926e68e0b8cb1'
+          persist-credentials: false
+      - name: Confirm exact source
+        run: test "$(git rev-parse HEAD)" = 7e8d835a26dec7f6b3375abbb33926e68e0b8cb1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          cache-read-only: true
+      - uses: ./.github/actions/robolectric-runtime
+      - name: Set up Android and the pinned local provider
+        run: |
+          bash scripts/ci-android-sdk.sh
+          npm install --prefix "$RUNNER_TEMP/synthetic-provider" --no-audit --no-fund --no-save miniflare@5.20261123.1-beta
+          echo "ASTRAVAR_MINIFLARE_PATH=$RUNNER_TEMP/synthetic-provider/node_modules/miniflare" >> "$GITHUB_ENV"
+      - name: Run the mixed actor and gameplay suites on fresh synthetic campaigns
+        timeout-minutes: 25
+        env:
+          FORKS: ${{ matrix.forks }}
+          REUSE: ${{ matrix.reuse }}
+        run: |
+          set -euo pipefail
+          suites=(
+            CloudAttackBuilderTest
+            CloudCastingDiceInteropTest
+            CloudCharacterContinuityInteropTest
+            CloudCompanionTraitsInteropTest
+            CloudEncounterPanelTest
+            CloudEncounterWorkflowInteropTest
+            CloudFormDeploymentTest
+            CloudGameplayWorkflowsInteropTest
+            CloudPlayableToolsInteropTest
+            CloudProgressionInteropTest
+            CloudRestoredFormsInteropTest
+            CloudSpellRestUiTest
+            CloudWorldChronicleInteropTest
+          )
+          opts=()
+          for suite in "${suites[@]}"; do opts+=(--tests "com.yazsras.astravar.ui.$suite"); done
+          bash gradlew --no-daemon --console=plain --build-cache -PastravarTestForks="$FORKS" -PastravarTestForkEvery="$REUSE" :app:testDebugUnitTest --rerun "${opts[@]}"
+      - name: Verify the exact class and case inventory
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, sys, xml.etree.ElementTree as ET
+          expected = {"CloudAttackBuilderTest": 4,"CloudCastingDiceInteropTest": 1,"CloudCharacterContinuityInteropTest": 1,"CloudCompanionTraitsInteropTest": 5,"CloudEncounterPanelTest": 2,"CloudEncounterWorkflowInteropTest": 1,"CloudFormDeploymentTest": 4,"CloudGameplayWorkflowsInteropTest": 4,"CloudPlayableToolsInteropTest": 2,"CloudProgressionInteropTest": 3,"CloudRestoredFormsInteropTest": 1,"CloudSpellRestUiTest": 6,"CloudWorldChronicleInteropTest": 1}
+          seen = {}
+          for p in sorted(pathlib.Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')):
+              s = ET.parse(p).getroot()
+              name = s.get('name').rsplit('.',1)[-1]
+              seen[name] = {key:int(s.get(key,'0')) for key in ('tests','failures','errors','skipped')}
+              print(f"{name}: {seen[name]} duration {s.get('time')} s", flush=True)
+              for case in s.findall('testcase'):
+                  for kind in ('failure','error','skipped'):
+                      failure=case.find(kind)
+                      if failure is not None:
+                          print(f"{kind}: {name}.{case.get('name')} {failure.get('message','')[:1300]}", flush=True)
+                          print('\n'.join(line.strip() for line in (failure.text or '').splitlines() if 'com.yazsras.astravar' in line)[:1300],flush=True)
+          ok = set(seen)==set(expected) and all(v['tests']==expected[k] and not(v['skipped'] or v['errors'] or v['failures']) for k,v in seen.items())
+          result = {'source': '7e8d835a26dec7f6b3375abbb33926e68e0b8cb1','passed':ok,'expected':35,'results':seen}
+          pathlib.Path('connected-result.json').write_text(json.dumps(result,indent=2)+'\n')
+          print('CONNECTED_RESULT '+json.dumps(result,separators=(',',':')),flush=True)
+          sys.exit(0 if ok else 1)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: connected-gameplay-${{ matrix.group }}
+          path: |
+            connected-result.json
+            app/build/test-results/testDebugUnitTest/TEST-*.xml
+          retention-days: 7
