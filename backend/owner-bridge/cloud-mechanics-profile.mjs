@@ -19,7 +19,7 @@ const featureSchema=fields({actorId:identifier,featureId:identifier,name:named(1
   feat:fields({familyId:identifier,edition:option('legacy_2014','revised_2024','homebrew'),
     includedAbility:fields({ability:option(...stats),increase:whole(1,10)},['ability','increase']),
     includedExpertise:arrayOf(identifier,32)},['familyId','edition']),
-  mobility:option('flyby'),references:arrayOf(fields({id:identifier,kind:option(...featureKinds)},['id','kind']),24)},
+  mobility:option('flyby','hover'),references:arrayOf(fields({id:identifier,kind:option(...featureKinds)},['id','kind']),24)},
   ['actorId','featureId','name','kind','description','source','references']);
 const capacity=fields({poolId:identifier,previous:whole(),maximum:whole(),granted:whole()},['poolId','previous','maximum','granted']);
 const advancementSchema=fields({actorId:identifier,eventId:identifier,fromLevel:whole(1,19),toLevel:whole(2,20),source:named(300),

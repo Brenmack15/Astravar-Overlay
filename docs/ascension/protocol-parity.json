@@ -5,8 +5,8 @@
     "declaredOperations": 119,
     "bidirectionallyExercised": 118,
     "exactRetryAndIndependentReceiptChecked": true,
-    "commandsPerDirection": 1259,
-    "independentRowsPerDirection": 2014,
+    "commandsPerDirection": 1266,
+    "independentRowsPerDirection": 2026,
     "ownerOnly": [
       "update_continuity_settings"
     ]
@@ -17,12 +17,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 84,
-        "readbacks": 168
+        "commands": 85,
+        "readbacks": 170
       },
       "device": {
-        "commands": 84,
-        "readbacks": 168
+        "commands": 85,
+        "readbacks": 170
       }
     },
     "adjust_coins": {
@@ -264,12 +264,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 93,
-        "readbacks": 93
+        "commands": 94,
+        "readbacks": 94
       },
       "device": {
-        "commands": 93,
-        "readbacks": 93
+        "commands": 94,
+        "readbacks": 94
       }
     },
     "define_attack": {
@@ -329,12 +329,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 128,
-        "readbacks": 256
+        "commands": 129,
+        "readbacks": 258
       },
       "device": {
-        "commands": 128,
-        "readbacks": 256
+        "commands": 129,
+        "readbacks": 258
       }
     },
     "define_feature": {
@@ -342,12 +342,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 25,
-        "readbacks": 38
+        "commands": 26,
+        "readbacks": 40
       },
       "device": {
-        "commands": 25,
-        "readbacks": 38
+        "commands": 26,
+        "readbacks": 40
       }
     },
     "define_form": {
@@ -368,12 +368,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 77,
-        "readbacks": 77
+        "commands": 78,
+        "readbacks": 78
       },
       "device": {
-        "commands": 77,
-        "readbacks": 77
+        "commands": 78,
+        "readbacks": 78
       }
     },
     "define_objective": {
@@ -511,12 +511,12 @@
       "ownerReview": false,
       "ownerOnly": false,
       "mcp": {
-        "commands": 68,
-        "readbacks": 136
+        "commands": 70,
+        "readbacks": 140
       },
       "device": {
-        "commands": 68,
-        "readbacks": 136
+        "commands": 70,
+        "readbacks": 140
       }
     },
     "exchange_coins": {

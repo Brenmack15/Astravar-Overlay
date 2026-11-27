@@ -293,3 +293,14 @@ test('installed source eligibility follows its operating owner and cannot supply
   data.ownerId='other';assert.equal(await eligible(),false);data.ownerId='pilot';
   data.partyAccess=false;assert.equal(await eligible(),false);
 });
+
+test('hover depends on the active source and eligible flight',async t=>{
+  const f=await fixture(t,{speeds:{walk:20}});
+  await f.run('define_feature',{actorId,featureId:'stationary-flight',name:'Stationary flight',kind:'companion',source,
+    description:'Test airframe can hover during powered flight',references:[],mobility:'hover',sourceItemId:'focus',requiresOperating:true});
+  await f.effect('thrust','speed','fly',30,{operation:'set',sourceItemId:'focus',requiresOperating:true,requiresWorn:true});
+  await f.equip('worn');
+  assert.deepEqual((await f.sheet()).mobilityRules.map(r=>[r.kind,r.eligible]),[['hover',true]]);
+  await f.equip('packed');
+  assert.deepEqual((await f.sheet()).mobilityRules,[]);
+});
