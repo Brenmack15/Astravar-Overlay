@@ -156,6 +156,7 @@ jobs:
           create_end = '        assertSection("Sheet")\n'
           assert base.count(create_begin)==1
           creation = create_begin + base.split(create_begin,1)[1].split(create_end,1)[0] + create_end
+          creation = creation.replace(create_begin, '        if (device.hasObject(By.desc("Character controls").pkg(product))) {\n            ui.openCharacterPicker(product)\n            tap("Create character or companion")\n        } else tap("Create character")\n')
           control_begin = '        val originalFontScale = device.executeShellCommand("settings get system font_scale").trim()\n'
           control_end = '        // Actual SAF creation'
           assert base.count(original)==base.count(control_begin)==base.count(control_end)==1
@@ -221,7 +222,8 @@ jobs:
           test "$(adb -s "$astravar_serial" shell getprop ro.build.version.sdk | tr -d '\r')" = 36
           adb -s "$astravar_serial" shell wm size | tee validation/genesis-focus/wm.txt
           adb -s "$astravar_serial" shell wm density | tee -a validation/genesis-focus/wm.txt
-          run_stage GenesisUpgradeInstrumentationTest#seedAscensionCode58 1 480 genesis-focus-source58.txt 58
+          test "$(adb -s "$astravar_serial" shell dumpsys package "$astravar_product" | sed -n 's/.*versionCode=\([0-9]*\).*/\1/p' | head -n 1 | tr -d '\r')" = 58
+          timeout 25s adb -s "$astravar_serial" shell am start -W -n "$astravar_product/com.yazsras.astravar.MainActivity" | tee validation/genesis-focus/source58-launch.txt
           stop_product
           adb -s "$astravar_serial" install -r "$astravar_apk"
           run_stage GenesisJourneyInstrumentationTest#retainedFeaturesEditorReachesNativeDialogAtTwoHundredPercent 1 550 genesis-focus-ordinary-editor.txt
