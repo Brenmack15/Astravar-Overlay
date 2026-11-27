@@ -132,7 +132,7 @@ class CloudSheetAccessibilityInteropTest {
     fun landscapeCharacterSectionsKeepAnAccessibleDieAboveNavigationForEachActor() = fixture { f ->
         val start=revision(f)
         val viewport=compose.onAllNodes(isRoot()).onFirst().getUnclippedBoundsInRoot()
-        assertTrue("Actual landscape viewport: $viewport",viewport.width>viewport.height)
+        assertTrue("Actual landscape viewport: $viewport",viewport.right - viewport.left > viewport.bottom - viewport.top)
         val sections=listOf("Sheet","Actions","Equipment","Spells","Resources","Forms","History")
         for(name in listOf("Fixture artisan","Fixture companion")) {
             select(name)
@@ -167,6 +167,9 @@ class CloudSheetAccessibilityInteropTest {
         select("Fixture artisan")
         val before=revision(f)
         node(hasContentDescription("Strength ability check +5")).assertExists()
+        val hp=node(hasContentDescription("Hit points, 16 of 20")).getUnclippedBoundsInRoot()
+        val conditions=node(hasText("Conditions") and hasClickAction()).getUnclippedBoundsInRoot()
+        assertTrue("Conditions $conditions should sit below HP $hp",conditions.top>=hp.bottom && conditions.left<hp.right && conditions.right>hp.left)
         val card=compose.onNodeWithTag("ability-card-STR",useUnmergedTree=true)
         val outer=hasAnyAncestor(hasTestTag("ability-card-STR"))
         val actions=listOf<()->Unit>(
