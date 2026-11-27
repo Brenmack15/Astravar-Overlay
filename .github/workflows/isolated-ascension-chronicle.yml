@@ -59,6 +59,117 @@ jobs:
                       if t.find("skipped") is not None:
                           print("Release skip", t.get("classname"), t.get("name"))
           PY
+      - name: Measure retained isolated Android 17 status icon samples
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base="/repos/$GITHUB_REPOSITORY/actions/artifacts/15166880758"
+          test "$(gh api "$base" --jq '.workflow_run.id')" = "45923727140"
+          gh api "$base/zip" > "$RUNNER_TEMP/notification.zip"
+          python3 -m venv "$RUNNER_TEMP/icon-reader"
+          "$RUNNER_TEMP/icon-reader/bin/pip" -q install pillow==11.3.0 numpy==2.2.6
+          "$RUNNER_TEMP/icon-reader/bin/python" - <<'PY'
+          from base64 import b64encode
+          from collections import deque
+          from io import BytesIO
+          from os import environ
+          from pathlib import Path
+          import re
+          import zipfile
+          import numpy as np
+          from PIL import Image, ImageDraw
+
+          def groups(numbers, tolerated_gap=0):
+              values = sorted(set(numbers))
+              if not values: return []
+              runs = []; start = previous = values[0]
+              for n in values[1:]:
+                  if n - previous > tolerated_gap + 1:
+                      runs.append((start, previous)); start = n
+                  previous = n
+              runs.append((start, previous)); return runs
+
+          with zipfile.ZipFile(Path(environ["RUNNER_TEMP"])/"notification.zip") as z:
+              files=[p for p in z.namelist() if p.endswith("notification-emblem.txt")]
+              for p in files:
+                  print("Notification test output",p)
+                  for line in z.read(p).decode(errors="replace").splitlines():
+                      if "Assertion" in line or "FAILURES" in line or "nativeTest.kt:" in line:
+                          print(line[:380])
+              members=[p for p in z.namelist() if re.search(r"/api37-(light|dark)-(status|shade)(-icon)?\.png$",p)]
+              print("PNG members",members)
+              full=next(p for p in members if p.endswith("api37-light-status.png"))
+              icon=next((p for p in members if p.endswith("api37-light-status-icon.png")),None)
+              img=Image.open(BytesIO(z.read(full))).convert("RGB")
+              crop=Image.open(BytesIO(z.read(icon))).convert("RGB") if icon else None
+          w,h=img.size
+          height=min(160,max(64,h//12))
+          top=np.asarray(img.crop((0,0,w,height))).astype('int32')
+          lum=(top[...,0]*54+top[...,1]*183+top[...,2]*19)//256
+          bg=int(np.median(lum[:,w//2:2*w//3]))
+          dark=(bg-lum) > 36 if bg>=128 else (lum-bg)>36
+          print("Frame dimensions RGB",img.size,"upper scan height",height,"center background luminance",bg, "crop size",crop.size if crop else None)
+          ys,xs=np.where(dark)
+          print("Distinct foreground y bands",groups(ys.tolist()),"grouped x bands",groups(xs.tolist(),3)[:75])
+          components=[];marked=set()
+          for seed in zip(ys.tolist(),xs.tolist()):
+              if seed in marked:continue
+              marked.add(seed);todo=deque([seed]);points=[]
+              while todo:
+                  yy,xx=todo.pop();points.append((yy,xx))
+                  for y1 in range(max(0,yy-1),min(height,yy+2)):
+                      for x1 in range(max(0,xx-1),min(w,xx+2)):
+                          if dark[y1,x1] and (y1,x1) not in marked:
+                              marked.add((y1,x1));todo.append((y1,x1))
+              if len(points)>=4: components.append((min(p[1] for p in points),min(p[0] for p in points),max(p[1] for p in points)+1,max(p[0] for p in points)+1,len(points)))
+          print("Observed connected contrasting components (l,t,r,b,area)",sorted(components)[:90])
+          if crop:
+              pix=np.asarray(crop).astype("int32");ch,cw=pix.shape[:2]
+              ink=np.max(np.abs(pix-bg),axis=2)
+              ky,kx=np.unravel_index(ink.argmax(),ink.shape)
+              matches=[]
+              for y,x in np.argwhere(np.all(top==pix[ky,kx],axis=2)):
+                  top_y,left_x=int(y-ky),int(x-kx)
+                  if 0<=top_y<=height-ch and 0<=left_x<=w-cw and np.array_equal(top[top_y:top_y+ch,left_x:left_x+cw],pix):
+                      matches.append((left_x,top_y,cw,ch))
+                      if len(matches)==5:break
+              print("Android matcher saved-crop coordinates in same frame",matches)
+          for tag,small in (("bar",img.crop((0,0,w,height)).resize((min(650,w),max(1,round(height*min(650,w)/w))))),("crop",crop)):
+              if small is None:continue
+              buf=BytesIO();small.save(buf,format="PNG")
+              print("SYNTHETIC_ICON_"+tag.upper()+"_BASE64="+b64encode(buf.getvalue()).decode())
+
+          rings=[[(12,1),(20,8),(17,17),(12,23),(7,17),(4,8)],[(12,4),(7,8.3),(10.5,9)],[(7,10),(9.2,16),(11,18.4),(10.4,11)],[(13.6,10.8),(13,18.4),(15,16),(17,10)],[(12.8,4.5),(13.6,9),(17,8.3)]]
+          ref=Image.new("L",(384,384),0);draw=ImageDraw.Draw(ref)
+          for i,ring in enumerate(rings):
+              draw.polygon([(round(x*16),round(y*16)) for x,y in ring], fill=255 if i==0 else 0)
+          alpha=np.asarray(ref.resize((24,24),Image.Resampling.LANCZOS))
+          samples=[(x,y,int(alpha[y,x]>=220)) for y in range(2,23,2) for x in range(3,22,2) if alpha[y,x]>=220 or alpha[y,x]<=12]
+          n=len(samples);white=sum(q[2] for q in samples);black=n-white
+          print("24px reference sample counts",n,white,black)
+          bounds=min(w*3//4,w);L=lum[:height,:bounds].astype('float64')
+          locations=np.arange(bounds)[None,:]
+          winners=[None,None];best=[0.,0.]
+          for side in range(8,min(110,height,bounds)+1):
+              rows=(height-side)//2+1;cols=(bounds-side)//2+1
+              total=np.zeros((rows,cols));ink=np.zeros_like(total);squares=np.zeros_like(total)
+              for x,y,is_white in samples:
+                  dy=int((y+0.5)*side/24);dx=int((x+0.5)*side/24)
+                  p=L[dy:dy+rows*2:2,dx:dx+cols*2:2]
+                  total+=p;squares+=p*p
+                  if is_white:ink+=p
+              var=squares*n-total*total
+              allowed=(var>0)&(np.abs(ink/white-(total-ink)/black)>=25)
+              score=np.zeros_like(total)
+              np.divide(np.abs(ink*n-total*white),np.sqrt(np.maximum(0,var)*white*black),out=score,where=allowed)
+              for ix in (0,1):
+                  masked=score if ix==0 else np.where((locations[:,:cols]*2 > w*0.22)&(locations[:,:cols]*2 < w*0.70),score,0.)
+                  if masked.max()>best[ix]:
+                      yy,xx=np.unravel_index(masked.argmax(),masked.shape)
+                      best[ix]=float(masked[yy,xx]); winners[ix]=(int(2*xx),int(2*yy),side)
+          print("Diagnostic best masked luminance x/y/side over top 75 percent then post-clock center (not Android gate)",list(zip(winners,best)))
+          PY
       - name: Record the archive inspection result
         if: always()
         env:
