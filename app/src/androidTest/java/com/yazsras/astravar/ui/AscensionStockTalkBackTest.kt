@@ -9,8 +9,6 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
-import android.view.InputDevice
-import android.view.MotionEvent
 import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.ComponentActivity
@@ -72,14 +70,21 @@ class AscensionStockTalkBackTest {
     private fun requireObservation(description: String, condition: () -> Boolean) {
         if (!waitFor(15000, condition)) throw AssertionError("$description. Focus ${focusText()}. Windows ${windowText()}")
     }
-    private fun point(action: Int, down: Long, x: Float, y: Float) {
-        val event = MotionEvent.obtain(down,SystemClock.uptimeMillis(),action,x,y,0)
-        try { event.source=InputDevice.SOURCE_TOUCHSCREEN; assertTrue(observer.injectInputEvent(event,true)) }
-        finally { event.recycle() }
+    private var inputSequence = 0
+    private fun hardware(action: String) {
+        // The host injects physical touch/evdev keys through the owned emulator, upstream of TalkBack.
+        val sequence = ++inputSequence
+        instrumentation.sendStatus(0, Bundle().apply { putString("readerHardware", "$sequence $action") })
+        val ack = File(context.filesDir, "reader-hardware.ack")
+        val end = SystemClock.uptimeMillis() + 12000
+        while (SystemClock.uptimeMillis() < end) {
+            if (ack.isFile && ack.readText().trim() == sequence.toString()) return
+            SystemClock.sleep(50)
+        }
+        error("Missing host input acknowledgement for $sequence $action")
     }
-    private fun tap(x: Float,y: Float) {
-        val down=SystemClock.uptimeMillis()
-        point(MotionEvent.ACTION_DOWN,down,x,y);SystemClock.sleep(38);point(MotionEvent.ACTION_UP,down,x,y)
+    private fun actionableLabel() = generateSequence(requireNotNull(visible(label))) { it.parent }.take(6).first { n ->
+        n.isVisibleToUser && n.actionList.any { it.id==AccessibilityNodeInfo.ACTION_LONG_CLICK && it.label?.toString()=="Options for Strength check" }
     }
     private fun hasTargetFocus(): Boolean {
         val n=focus() ?: return false
@@ -90,8 +95,9 @@ class AscensionStockTalkBackTest {
     }
     private fun focusTarget(): Rect {
         requireObservation("Visible quick-roll control") { visible(label)!=null }
-        val r=bounds(requireNotNull(visible(label)))
-        if(!hasTargetFocus()) tap(r.exactCenterX(),r.exactCenterY())
+        val r=bounds(actionableLabel())
+        status("aim at actionable ${r.toShortString()} from ${focusText()}")
+        if(!hasTargetFocus()) hardware("EXPLORE ${r.centerX()} ${r.centerY()}")
         requireObservation("TalkBack must accessibility-focus the actual modifier") { hasTargetFocus() }
         return r
     }
@@ -127,18 +133,28 @@ class AscensionStockTalkBackTest {
                 var r=focusTarget()
                 val focusLabel=focusText()
                 status("focused $focusLabel")
+                hardware("COPY_LAST")
+                var spoken: String? = null
+                waitFor(2200) {
+                    activity.onActivity { a ->
+                        val clip=a.getSystemService(android.content.ClipboardManager::class.java).primaryClip
+                        val value=clip?.takeIf { it.itemCount>0 }?.getItemAt(0)?.text?.toString()
+                        if(value?.contains("Strength",ignoreCase=true)==true) spoken=value.take(160)
+                    }
+                    spoken!=null
+                }
                 assertTrue(history().isEmpty())
                 val control=generateSequence(requireNotNull(visible(label))) { it.parent }.take(5).first { n ->
                     n.actionList.any { it.id==AccessibilityNodeInfo.ACTION_LONG_CLICK && it.label?.toString()=="Options for Strength check" }
                 }
                 assertTrue(control.isEnabled)
-                val moves=shell("input swipe 300 1100 800 1100 120")
+                hardware("NEXT_SWIPE")
                 requireObservation("TalkBack next-item swipe must navigate away from Strength") {
                     val n=focus()
                     n!=null && n.packageName==context.packageName && !hasTargetFocus()
                 }
                 val adjacent=focusText()
-                status("swipe navigated to $adjacent; Android input: $moves")
+                status("TalkBack swipe navigated to $adjacent")
                 r=focusTarget()
                 val shown="Enter physical dice faces"
                 val shortcuts=listOf(
@@ -149,18 +165,17 @@ class AscensionStockTalkBackTest {
                 var activated: String?=null
                 for (keys in shortcuts) {
                     assertTrue("The same roll control remains focused",hasTargetFocus())
-                    shell("input keycombination -t 90 $keys")
+                    hardware("CHORD $keys")
                     if(waitFor(2200){visible(shown)!=null}) {activated=keys;break}
                     assertTrue("Shortcut exploration must not roll",history().isEmpty())
                 }
                 assertNotNull("TalkBack shortcut did not open native options. Focus ${focusText()}. Windows ${windowText()}",activated)
                 assertTrue("Opening options must not record a roll", history().isEmpty())
                 status("real reader shortcut $activated opened $shown; 0 rolls")
-                shell("input keyevent KEYCODE_BACK")
+                hardware("BACK")
                 requireObservation("Native options dismissed") { visible(shown)==null && visible(label)!=null }
                 r=focusTarget()
-                val x=r.exactCenterX();val y=r.exactCenterY()
-                tap(x,y);SystemClock.sleep(75);tap(x,y)
+                hardware("DOUBLE_TAP ${r.centerX()} ${r.centerY()}")
                 requireObservation("Genuine TalkBack double-tap must save one roll") { history().size==1 }
                 val only=history().single();val component=only.components.single();val die=component.dice.single()
                 assertEquals(qaId,only.profileId);assertEquals(before.revision,only.characterRevision)
@@ -171,7 +186,7 @@ class AscensionStockTalkBackTest {
                 assertNotNull(actualService());assertTrue(manager.isTouchExplorationEnabled)
                 val proof=JSONObject().put("api",Build.VERSION.SDK_INT).put("service",service.id).put("version",pkg.versionName)
                     .put("certificateSha256",cert).put("touchExplorationEnabled",manager.isTouchExplorationEnabled)
-                    .put("focused",focusLabel).put("adjacent",adjacent).put("frameworkActionLabel","Options for Strength check")
+                    .put("focused",focusLabel).put("adjacent",adjacent).put("talkBackCopiedLastSpokenPhrase",spoken ?: JSONObject.NULL).put("frameworkActionLabel","Options for Strength check")
                     .put("talkBackKeys",activated).put("visibleOptions",shown).put("rollsAfterOpeningOptions",0)
                     .put("rollsAfterDoubleTap",1).put("actorId",qaId).put("subject",component.subjectId).put("rollId",only.id)
                     .put("mode",component.mode!!.name).put("owner",only.ownership).put("formula",only.formula).put("face",die.face)
