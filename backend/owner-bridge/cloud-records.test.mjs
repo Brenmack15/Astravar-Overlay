@@ -127,6 +127,30 @@ test('packing passive gear preserves its condition and packing a manually activa
     destination:{type:'party_actor',actorId:'ally',recipientName:null,recipientId:null,locationId:null}});
   await equip('normal','held');assert.equal((await f.record('normal')).data.operating,false);
 });
+test('independent charge pools stay attached to the physical item across custody changes',async t=>{
+  const f=await fixture(t,true);
+  await f.run('define_item_definition',definition('device-def',false));
+  await f.run('acquire_item',{itemId:'device',definitionId:'device-def',ownerId:'hero',quantity:1,source});
+  for(const [poolId,current] of [['power',2],['ward',1]]) {
+    await f.run('define_resource',{actorId:'hero',poolId,name:poolId,type:'charge',current,maximum:4,recovery:'none',source});
+  }
+  const bind={itemId:'device',poolId:'ward',source};
+  await f.run('bind_item_charge_pool',{...bind,poolId:'power'});
+  await assert.rejects(f.run('bind_item_charge_pool',bind),/CHARGE_POOL_REVIEW_REQUIRED/);
+  await f.run('bind_item_charge_pool',{...bind,additionalToPoolId:'power'});
+  await assert.rejects(f.run('bind_item_charge_pool',{...bind,additionalToPoolId:'power'}),/CHARGE_POOL_REVIEW_REQUIRED/);
+  await f.run('define_action',{actorId:'hero',actionId:'second',name:'Ward',type:'use',timing:'other',
+    sourceItemId:'device',transfersWithItem:true,cost:{poolId:'ward',amount:1},source});
+  await f.run('transfer_item',{itemId:'device',quantity:1,splitId:null,source,reason:'Confirmed movement',
+    destination:{type:'party_actor',actorId:'ally',recipientName:null,recipientId:null,locationId:null}});
+  f.reopen();
+  assert.deepEqual((await f.record('hero')).data.poolIds,[]);
+  assert.deepEqual((await f.record('ally')).data.poolIds,['power','ward']);
+  assert.deepEqual((await f.record('device')).data.additionalResourcePoolIds,['ward']);
+  const [primary,additional]=[await f.record('power'),await f.record('ward')];
+  assert.deepEqual([primary.actorId,primary.data.current,additional.actorId,additional.data.current],['ally',2,'ally',1]);
+  assert.equal((await f.record('second')).actorId,'ally');
+});
 test('a second physical holding requires the actual reviewed common charge source to share a pool',async t=>{
   const f=await fixture(t,true);
   await f.run('define_item_definition',definition('charge-spec',false));

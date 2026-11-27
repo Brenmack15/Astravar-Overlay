@@ -1,3 +1,4 @@
+import { physicalChargePools } from './cloud-item-pools.mjs';
 import { currentDeployment, closeDeployment } from './cloud-form-deployment.mjs';
 import { recordsFail, recordObject, recordId, recordText, recordSource, recordTitle, recordChoice, recordMaybe, recordInt, recordArray, recordBool, recordsOperation, recordRead, recordNew, recordEdit, partyActor, validateRecordValue, historyRecordId } from './cloud-records-contract.mjs';
 
@@ -258,27 +259,27 @@ async function moveItemRules(ctx,item,next) {
     AND e.life='active' AND e.kind IN('attack','effect','action_definition')
     AND json_extract(e.data_json,'$.transfersWithItem')=1 ORDER BY e.id LIMIT 65`,...ctx.binding,item.id).all()).results;
   if(grants.length>64) recordsFail('ITEM_GRANT_REVIEW_LIMIT',409);
-  const poolId=item.data.resourcePoolId;
-  if(!grants.length && !poolId) return;
-  if(poolId){
+  const poolIds=physicalChargePools(item.data);
+  if(!grants.length && !poolIds.length) return;
+  if(poolIds.length){
     // Past expenditure and rest receipts keep their original actor. Active unrelated
     // consumers need explicit review before a physical item can take this pool away.
     const dependency=await ctx.service.s(`SELECT 1 AS present FROM cloud_links l JOIN cloud_entities e
       ON e.owner_id=l.owner_id AND e.continuity_id=l.continuity_id AND e.id=l.from_id
-      WHERE l.owner_id=? AND l.continuity_id=? AND l.to_id=? AND l.from_id<>?
+      WHERE l.owner_id=? AND l.continuity_id=? AND l.to_id IN(SELECT value FROM json_each(?)) AND l.from_id<>?
         AND l.relation IN('charge_pool','uses_pool') AND e.life='active'
         AND l.from_id NOT IN(SELECT value FROM json_each(?)) LIMIT 1`,
-      ...ctx.binding,poolId,item.id,JSON.stringify(grants.map(row=>row.id))).first();
+      ...ctx.binding,JSON.stringify(poolIds),item.id,JSON.stringify(grants.map(row=>row.id))).first();
     if(dependency) recordsFail('SHARED_CHARGE_POOL_TRANSFER_REVIEW_REQUIRED',409);
   }
   const records=[];
   for(const grant of grants) {
     const row=await recordRead(ctx,grant.kind,grant.id);
     if(row.data.formId || row.data.excludedForms?.length || row.data.sourceItemId!==item.id ||
-        (row.data.cost && row.data.cost.poolId!==poolId)) recordsFail('ITEM_GRANT_TRANSFER_REVIEW_REQUIRED',409);
+        ((row.data.cost || row.data.charge) && !poolIds.includes((row.data.cost ?? row.data.charge).poolId))) recordsFail('ITEM_GRANT_TRANSFER_REVIEW_REQUIRED',409);
     records.push(row);
   }
-  if(poolId){
+  for(const poolId of poolIds){
     const pool=await recordRead(ctx,'resource_pool',poolId);
     if(pool.data.effectHolds?.length)recordsFail('RESOURCE_HAS_PENDING_EFFECT_CHARGES',409);
     if(pool.data.type!=='charge') recordsFail('CHARGE_POOL_TRANSFER_REVIEW_REQUIRED',409);
@@ -286,7 +287,6 @@ async function moveItemRules(ctx,item,next) {
   }
   if(records.some(record=>record.actorId!==from)) recordsFail('ITEM_GRANT_CUSTODY_MISMATCH',409);
   const effectIds=grants.filter(row=>row.kind==='effect').map(row=>row.id);
-  const poolIds=poolId?[poolId]:[];
   for(const [actorId,attach] of [[from,false],[to,true]]) {
     if(actorId===null || (!effectIds.length && !poolIds.length)) continue;
     const actor=await partyActor(ctx,actorId);
@@ -585,22 +585,26 @@ export const HOLDING_OPERATIONS = Object.freeze({
     return {itemId:item.id,operating:args.operating,itemEventId:await itemEvent(ctx,'activation',item,result,'Operating state',args.source)};
   }),
   bind_item_charge_pool: recordsOperation('inventory',recordObject({itemId:recordId,poolId:recordId,source:recordSource,
-    sharedWithItemId:recordId},['itemId','poolId','source']),async(ctx,args)=>{
+    sharedWithItemId:recordId,additionalToPoolId:recordId},['itemId','poolId','source']),async(ctx,args)=>{
     const item=await recordRead(ctx,'item_instance',args.itemId);usable(item);
     const pool=await recordRead(ctx,'resource_pool',args.poolId);
-    if(item.data.quantity!==1 || item.data.holding!=='carried' || item.data.resourcePoolId || pool.actorId!==item.data.custodianId ||
+    const assigned=physicalChargePools(item.data);
+    if((args.additionalToPoolId ?? null) !== (item.data.resourcePoolId ?? null) || assigned.includes(pool.id) || assigned.length>=16 ||
+        item.data.quantity!==1 || item.data.holding!=='carried' || pool.actorId!==item.data.custodianId ||
         pool.data.type!=='charge') recordsFail('CHARGE_POOL_REVIEW_REQUIRED',409);
     const bound=await ctx.service.s(`SELECT 1 FROM cloud_entities WHERE owner_id=? AND continuity_id=?
-      AND kind='item_instance' AND id<>? AND json_extract(data_json,'$.resourcePoolId')=? LIMIT 1`,
-      ...ctx.binding,item.id,pool.id).first();
+      AND kind='item_instance' AND id<>? AND (json_extract(data_json,'$.resourcePoolId')=?
+      OR EXISTS(SELECT 1 FROM json_each(json_extract(data_json,'$.additionalResourcePoolIds')) WHERE value=?)) LIMIT 1`,
+      ...ctx.binding,item.id,pool.id,pool.id).first();
     if(Boolean(bound)!==Boolean(args.sharedWithItemId))recordsFail('PHYSICAL_CHARGE_SHARING_REVIEW_REQUIRED',409);
     if(args.sharedWithItemId){
       const other=await recordRead(ctx,'item_instance',args.sharedWithItemId);
       usable(other);
-      if(other.id===item.id||other.data.custodianId!==pool.actorId||other.data.resourcePoolId!==pool.id)
+      if(other.id===item.id||other.data.custodianId!==pool.actorId||!physicalChargePools(other.data).includes(pool.id))
         recordsFail('SHARED_PHYSICAL_CHARGE_SOURCE_MISMATCH',409);
     }
-    const result=recordEdit(item,{...item.data,resourcePoolId:pool.id,source:args.source});
+    const binding=assigned.length ? {additionalResourcePoolIds:[...assigned.slice(1),pool.id]} : {resourcePoolId:pool.id};
+    const result=recordEdit(item,{...item.data,...binding,source:args.source});
     await ctx.put(result);await ctx.link(item.id,'charge_pool',pool.id);
     return {itemId:item.id,poolId:pool.id,...(args.sharedWithItemId?{sharedWithItemId:args.sharedWithItemId}:{})};
   }),

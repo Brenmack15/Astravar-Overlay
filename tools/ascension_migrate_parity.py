@@ -67,7 +67,7 @@ def mechanical_parity(source_path, bundle):
         _, indexed = all_native_rows(raw)
         # check_database has already verified the independent pin and every grant.
         for grant in plan.get("reviewAuthority", {}).get("grants", []):
-            if grant["op"]=="correct" and grant["source"]==source_digest:
+            if grant["op"] in ("correct","consumeRemainder") and grant["source"]==source_digest:
                 approved[(grant["target"],grant["targetPath"][-1])] = grant
         for decision in plan["decisions"]:
             if decision["source"] == source_digest and decision["family"] == "playable.characters" and decision["disposition"] == "map" and decision["playerKnown"]:
@@ -148,11 +148,13 @@ def mechanical_parity(source_path, bundle):
             compare_fields("item_instance",item_id,expected,holding,found)
             for pool in item.get("pools", []):
                 candidates = {pool["id"], *aliases.get(("resource_pool",pool["id"]),set())}
-                chosen = holding.get("resourcePoolId")
-                if chosen not in candidates:
+                bound = {holding.get("resourcePoolId"), *holding.get("additionalResourcePoolIds", [])}
+                matches = candidates & bound
+                if len(matches) != 1:
                     holds.append({"kind":"item_resource","id":item_id,"pool":pool["id"],
                                   "reason":"The physical item does not identify this independently configured pool."})
                     continue
+                chosen = next(iter(matches))
                 scoped, pool_data = entities.get(chosen, ({},{}))
                 compare_fields("item_resource",chosen, {key:pool.get(key) for key in ("current","maximum")},
                                pool_data, scoped.get("kind")=="resource_pool" and scoped.get("actor_id")==identity)

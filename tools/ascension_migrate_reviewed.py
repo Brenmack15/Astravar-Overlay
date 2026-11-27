@@ -7,6 +7,7 @@ from ascension_migrate_range import native_attack_distance
 from ascension_migrate_legacy import (COINS, IDENTITY, encode, inspect_notion_transfer, loads,
                                       sha, source_families, verify)
 from ascension_migrate_funds import validate_fund_target
+from ascension_migrate_features import FEATURE_NORMALIZERS, native_feature_value
 from ascension_migrate_documents import FAMILY as DOCUMENT_FAMILY, FORMAT as DOCUMENT_FORMAT, index_documents
 from verify_campaign_archive import inspect_archive
 from ascension_migrate_weapon import archive_rows, working_rows
@@ -54,7 +55,7 @@ REF = {
               "poolIds": "resource_pool", "effectIds": "effect", "recoveryPoolIds": "resource_pool"},
     "resource_pool": {"recoveryActorId": "actor"}, "wallet": {"holderId": "actor"},
     "item_instance": {"definitionId": "item_definition", "ownerId": "actor", "custodianId": "actor",
-                      "locationId": "world_entity", "resourcePoolId": "resource_pool", "externalRecipientId": "world_entity"},
+                      "locationId": "world_entity", "resourcePoolId": "resource_pool", "additionalResourcePoolIds": "resource_pool", "externalRecipientId": "world_entity"},
     "story_arc":{"parentArcId":"story_arc","eventIds":"timeline_event"},
     "campaign_session":{"arcId":"story_arc","previousSessionId":"campaign_session","openingCheckpointId":"checkpoint",
                         "closingCheckpointId":"checkpoint","eventIds":"timeline_event"},
@@ -341,8 +342,11 @@ def check_target(row, entities):
                all(type(data[k]) is bool for k in ("partyAccess","attuned","operating")), "Invalid physical holding quantities or state")
         verify(aid==(data["custodianId"] if data["partyAccess"] and data["custodianId"] else data["ownerId"] if data["partyAccess"] else None),
                "Item projection disagrees with custody or party access")
-        if data.get("resourcePoolId"):
-            pool = entities.get(data["resourcePoolId"], {})
+        extra = data.get("additionalResourcePoolIds", [])
+        verify(isinstance(extra,list) and len(extra) <= 15 and (not extra or data.get("resourcePoolId")) and
+               data.get("resourcePoolId") not in extra, "Invalid additional physical charge pools")
+        for pool_id in ([data["resourcePoolId"]] + extra if data.get("resourcePoolId") else []):
+            pool = entities.get(pool_id, {})
             verify(data["quantity"] == 1 and pool.get("kind") == "resource_pool" and pool["data"].get("type") == "charge"
                    and (data["holding"] != "carried" or pool["actorId"] == data["custodianId"]), "Invalid physical item charge pool")
         definition = entities.get(data["definitionId"],{}).get("data",{})
@@ -602,6 +606,15 @@ def project(raw_by_hash, plan, tenant):
     denied_ids = {key[2][-1] for key in exclusions}
     verify(not (denied_ids.intersection(entities) or denied_ids.intersection(aliases.values())),
            "Owner-excluded physical identity entered the typed graph")
+    for target in entities.values():
+        extra = target["data"].get("additionalResourcePoolIds")
+        if target["kind"]=="item_instance" and extra:
+            original_id = aliases.get(target["id"],target["id"])
+            for pool_id in [target["data"]["resourcePoolId"],*extra]:
+                native = physical_pool_sources.get(pool_id)
+                verify(native is not None and native[-2] == original_id and
+                       native[-1] == aliases.get(pool_id,pool_id),
+                       "Additional pools need distinct nested identities from this physical holding")
     for key, decision in decisions.items():
         family, ids = key[1:]
         if decision["disposition"] != "map" or family not in ("playable.characters.itemDefinitions.effects",
@@ -643,7 +656,7 @@ def project(raw_by_hash, plan, tenant):
     witnesses={}
     for w in plan["parity"]:
         verify(isinstance(w,dict) and set(w)=={"source","family","identity","sourcePath","target","targetPath","transform"} and
-               isinstance(w["target"],str) and w["target"] in entities and w["transform"] in ("exact","omittedUnknown","scopedIdentity","canonicalRef","ownerCorrection","ownerConfirmedCapacity","confirmedFunds","consumedLifecycle","nativeSlotLevel","nativeSlotBalance","nativeAttackDistance",*SCALAR_RULES,*WIRE_ENUMS),
+               isinstance(w["target"],str) and w["target"] in entities and w["transform"] in ("exact","omittedUnknown","scopedIdentity","canonicalRef","ownerCorrection","ownerConfirmedCapacity","confirmedFunds","consumedLifecycle","nativeSlotLevel","nativeSlotBalance","nativeAttackDistance",*FEATURE_NORMALIZERS,*SCALAR_RULES,*WIRE_ENUMS),
                "Invalid mechanical evidence witness")
         key=source_key(w)
         verify(key in decisions and w["target"] in decisions[key]["targets"], "Mechanical evidence belongs to another row or target")
@@ -656,6 +669,8 @@ def project(raw_by_hash, plan, tenant):
         actual=path_value(entities[w["target"]],tp)
         if w["transform"] == "consumedLifecycle":
             expected = consumed_state(corrections,entities[w["target"]],key,sp,tp)
+        if w["transform"] in FEATURE_NORMALIZERS:
+            expected=native_feature_value(w["transform"],key,entries[key],sp,expected,entities[w["target"]],tp)
         if w["transform"] in ("nativeSlotLevel","nativeSlotBalance"):
             is_level = w["transform"] == "nativeSlotLevel"
             verify(key[1]=="playable.characters.spellSlots" and len(key[2])==2 and
@@ -809,7 +824,7 @@ def project(raw_by_hash, plan, tenant):
         seen.add((link["from"],link["relation"],link["to"]))
         links.append({"owner_id":tenant[0],"continuity_id":tenant[1],"from_id":link["from"],"relation":link["relation"],"to_id":link["to"]})
     # Cloud readers and eligibility use physical links, as well as the immutable original record.
-    must_link={"wallet":{"holderId":"held_by"},"item_instance":{"definitionId":"definition","ownerId":"owned_by","custodianId":"held_by","locationId":"located_at","resourcePoolId":"charge_pool"},
+    must_link={"wallet":{"holderId":"held_by"},"item_instance":{"definitionId":"definition","ownerId":"owned_by","custodianId":"held_by","locationId":"located_at","resourcePoolId":"charge_pool","additionalResourcePoolIds":"charge_pool"},
                "spell_grant":{"spellId":"grants_spell","sourceItemId":"requires_item","resourceId":"uses_pool"},
                "actor":{"activeFormId":"active_form","concentrationCastId":"concentrates_on"}}
     must_link["actor"]["activeDeploymentId"]="deploying"

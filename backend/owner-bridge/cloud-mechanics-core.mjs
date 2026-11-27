@@ -1,3 +1,4 @@
+import { physicalChargePools } from './cloud-item-pools.mjs';
 import { activeCastAids } from './cloud-cast-aid.mjs';
 import { BridgeError, sha256 } from './core.mjs';
 
@@ -132,7 +133,7 @@ export async function transferableSource(ctx,config){
     !config.formId && !config.excludedForms?.length,'TRANSFERABLE_RULE_REQUIRES_INDEPENDENT_ITEM');
   const cost=config.cost??config.charge;
   if(cost){
-    must(item.data.resourcePoolId===cost.poolId,'TRANSFERABLE_RULE_REQUIRES_ITEM_CHARGES');
+    must(physicalChargePools(item.data).includes(cost.poolId),'TRANSFERABLE_RULE_REQUIRES_ITEM_CHARGES');
     const pool=await owned(ctx,'resource_pool',cost.poolId,config.actorId);
     must(pool.data.type==='charge','TRANSFERABLE_RULE_REQUIRES_ITEM_CHARGES');
   }

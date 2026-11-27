@@ -22,6 +22,6 @@ jobs:
           "$test_python" -m unittest discover -s scripts/tests -p 'test_ascension*' -v
       - name: Verify the staged gameplay runtime and schema
         run: |
-          node --test backend/owner-bridge/cloud-structured-effects.test.mjs
+          node --test backend/owner-bridge/cloud-structured-effects.test.mjs backend/owner-bridge/cloud-records.test.mjs
           node scripts/verify-ascension-parity.mjs "$RUNNER_TEMP/protocol-parity.json"
           cmp docs/ascension/protocol-parity.json "$RUNNER_TEMP/protocol-parity.json"

@@ -43,6 +43,7 @@ async function dependencies(ctx,ids) {
   return {links:links.map(l=>({...l,fromTitle:names.get(l.from_id),toTitle:names.get(l.to_id)})),references:references.map(r=>{
     const d=JSON.parse(r.data_json);
     const gameplayUse=r.life==='active' && (protectedFields.some(f=>selectedIds.has(d[f])) ||
+      (r.kind==='item_instance' && (d.additionalResourcePoolIds??[]).some(id=>selectedIds.has(id))) ||
       (r.kind==='actor' && [d.poolIds??[],d.effectIds??[]].some(values=>values.some(id=>selectedIds.has(id)))) ||
       (r.kind==='form_deployment' && d.status==='deploying' && [d.formId,d.sourceItemId].some(id=>selectedIds.has(id))) ||
       (r.kind==='item_instance' && (selectedIds.has(d.ownerId)||selectedIds.has(d.custodianId))&&(d.attuned||d.operating||d.equipment!=='packed')) ||
