@@ -308,6 +308,9 @@ if [[ "$astravar_bootstrap_gate" == true ]]; then
     echo "Android 17 notification acceptance failed; see notification-emblem.txt." >&2
     exit "$astravar_notification_result"
   fi
+  # The API 37 upgrade has installed the independent clipboard target on this emulator.
+  run_test 'com.yazsras.astravar.ui.AscensionAccessibleRollClipboardTest#androidAccessibilityOptionsOpenWithoutRolling' native-roll-accessibility.txt
+  run_test 'com.yazsras.astravar.ui.AscensionAccessibleRollClipboardTest#aSecondPackagePastesTheOriginalNamedRollFromTheSystemClipboard' native-roll-clipboard-paste.txt
   python3 - "$astravar_output/SCOPE.json" <<'PY_SCOPE'
 import json,os,pathlib,sys
 pathlib.Path(sys.argv[1]).write_text(json.dumps({
@@ -317,6 +320,7 @@ pathlib.Path(sys.argv[1]).write_text(json.dumps({
  'webCryptoEncryptedBootstrap':True,'sameDebugKeyUpdate':'53 to '+os.environ['ASTRAVAR_VERSION_CODE'],
  'legacyAliasAndVaultPreserved':True,'nativePublicNotionImport':True,
  'nativeCampaignHttpsAndIndependentReadback':True,'api37ForceStoppedCloudReconnect':True,
+ 'frameworkRollOptionsWithoutRoll':True,'crossPackageNamedRollPaste':True,
  'actualOwnerSigningIdentityTestedInCi':False,'realChatGptHostInvocation':False,
  'physicalGalaxy':False,'android17':True},indent=2)+'\n')
 PY_SCOPE
