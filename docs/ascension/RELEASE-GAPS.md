@@ -59,10 +59,22 @@ The normal encounter view kept the recorded initiatives and turn on reconnection
 
 A real authenticated grant change left an explicitly paused Android cache at its observed revision. Manual refresh obtained the latest state, and owner revocation removed the native view accessible through that credential. The independent DM grant continued to work. [Connection verification](../../app/src/test/java/com/yazsras/astravar/ui/CloudConflictReviewInteropTest.kt)
 
+## Executed Android release checks
+
+| Source and environment | Observed result |
+|---|---|
+| Code 59 candidate `5e65a4c`, Android 17 emulator | The archived code 58 and 59 CI packages installed in place. The UID and first installation time stayed the same. The host independently compared ten cold Room table digests. Retained HP, temporary HP, the INT 15 source inspector and inactive cloud enrollment matched in light and dark themes. [Upgrade evidence](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45927324893/artifacts/15166553717) |
+| Code 59 candidate, Android 16 emulator | Nine native stages passed across codes 49, 50, 54, 56, 57, 58 and 59. Independent stopped-database comparisons agreed at the upgrade stages, and the final committed heal survived restart. [Nine-stage result](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45927469923/artifacts/15167348234) |
+| Android 17 SystemUI and production sync notification code | The faceted emblem matched the original silhouette threshold in both the status bar and expanded shade under light and dark themes. Both the focused run and the corrected eight-check host wrapper captured four full frames and four crops. The platform’s setting can hide quiet icons by default. The test exposed the quiet icon using the system control and restored the preference. [Default-visibility control](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45927426258) · [Four surfaces](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45927768946/artifacts/15167048431) · [Wrapper and images](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45928368239/artifacts/15166629784) |
+| Preceding application source `09fe029a` | All 213 rules tests passed. Across 203 suites in each Android variant, debug passed 1,163 with six private/live cases excluded, and release passed 1,149 with those six and fourteen debug-only cases excluded. Lint and APK inspection passed. The Android 17 force-stop/reconnect and twelve-receipt form stages passed before a separately corrected notification failure. [Full variants](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45917871906/artifacts/15165745913) · [Native stage log](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45917871906/job/140246088732) |
+| Code 59 candidate, focused Chronicle regression | Eight mixed scenario executions passed in each of three iterations, including opening the original recovered lore record. [24 executions](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45926305743/artifacts/15166766991) |
+
+The archived upgrade packages use a shared CI certificate. The notification evidence comes from a synthetic instrumented installation. Final aggregate verification, the owner-certificate APK and a physical Galaxy installation each require their own result.
+
 ## External evidence
 
 | Gate | Acceptance record |
 |---|---|
 | Owner signing and delivery, D41-31, 32-8 and 34 | Exact tested source, release version/code, ZIP alignment, manifest identity, original owner certificate and SHA-256 of the final APK, and a private retrievable artifact. The prior code 58 certificate proves the expected identity. |
-| Android 17 installation, icons and device continuity, D41-22-6, 25-3 and 28-10 | Executed API 37 upgrade and force-stop/reconnect artifacts, status bar and shade in both themes, and separately identified physical-device evidence wherever the owner device is required. A compiled instrumentation fixture establishes only its availability. |
+| Physical Android installation, D41-25-3 and 28-10 | The emulators demonstrated upgrade-in-place behavior under the CI certificate. The final APK still requires verification under the owner certificate and an authorized upgrade from the owner’s installation. |
 | Production operations, D41-4-5, 24 and 26 | Hosting account, billing limits, data residency, remote trust/secrets configuration, managed backup retention and authorized deployment require separate owner selection. Isolated workerd/D1/R2 tests and staged cutover do not enable the existing campaign. |
