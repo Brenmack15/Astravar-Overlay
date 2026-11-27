@@ -116,6 +116,29 @@ class VisualRebirthJourneyInstrumentationTest {
             }
         }
     }
+    private fun charges(remaining: Int): String {
+        val balance = if (ascension) "$remaining/3" else "$remaining / 3"
+        find("CI Native Charges")
+        find(balance)
+        if (ascension) ui.bounds(By.desc("$balance remaining").pkg(product),
+            "Accessible remaining uses on the saved three-charge pool", refreshCache = true)
+        return balance
+    }
+
+    private fun verifySavedChargeUse() {
+        ui.selectSection(product, "History")
+        ui.expandDisclosure(product, "Changes & saved revisions")
+        val prefix = "Use CI Native Charges · revision "
+        val selector = By.textStartsWith(prefix).pkg(product)
+        val revision = ui.snapshot(selector, "Committed change for this named resource", refreshCache = true) {
+            device.findObjects(selector).singleOrNull()?.text?.removePrefix(prefix)
+        }
+        val parts = revision.split(" → ")
+        assertEquals("The saved expenditure must include both revisions", 2, parts.size)
+        assertEquals("One use advances exactly one saved character revision",
+            parts[0].toLong() + 1, parts[1].toLong())
+    }
+
     private val ascension get() = ui.isAscension(product)
     private val companions get() = if (ascension) "Connections" else "Companions"
     private val chronicle get() = if (ascension) "Chronicle" else "Campaign"
@@ -152,17 +175,17 @@ class VisualRebirthJourneyInstrumentationTest {
         enter("Current uses (blank = unknown)", "2")
         tap("Review & save")
         tap("Save resource")
-        find("CI Native Charges")
-        find("2 / 3")
+        charges(2)
         find("none")
         tap("Use one")
-        find("1 / 3")
+        charges(1)
         restart()
         ui.ensurePrimaryTab(product, "Character")
         ui.selectSection(product, "Resources")
-        find("CI Native Charges")
         find("none")
-        capture("resource-persistence", "Character", "1 / 3")
+        val persistedBalance = charges(1)
+        capture("resource-persistence", "Character", persistedBalance)
+        if (ascension) verifySavedChargeUse()
 
         // Gear belongs to the exact reviewed companion and projects into its
         // shared source record without changing the selected main character.
