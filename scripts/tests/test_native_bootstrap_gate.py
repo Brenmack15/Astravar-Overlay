@@ -71,8 +71,18 @@ git() { printf '%s\\n' 0123456789012345678901234567890123456789; }
         self.assertFalse(scope['physicalGalaxy'])
         self.assertFalse((root/'legacy-path.txt').exists())
 
-    def test_each_failure_stops_dependents_and_cannot_write_success_evidence(self):
+    def test_notification_failure_checks_upgrade_without_marking_release_successful(self):
+        result, root, methods = self.run_gate('actualSmallEmblemInStatusBarAndShadeAcrossLightAndDarkThemes')
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(METHODS, methods)
+        self.assertTrue((root/'validation/ascension-api37/sdk.txt').is_file())
+        self.assertFalse((root/'SCOPE.json').exists())
+        self.assertFalse((root/'legacy-path.txt').exists())
+
+    def test_other_failures_stop_dependents_and_cannot_write_success_evidence(self):
         for index, method in enumerate(METHODS):
+            if method == 'actualSmallEmblemInStatusBarAndShadeAcrossLightAndDarkThemes':
+                continue
             with self.subTest(method=method):
                 result, root, methods = self.run_gate(method)
                 self.assertNotEqual(0, result.returncode)
