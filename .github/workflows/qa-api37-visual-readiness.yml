@@ -1,0 +1,39 @@
+name: Original API 37 dialog, visual and installed update verification
+on:
+  push:
+    branches: [verification/ascension-api37-visual-readiness-20261127]
+    paths: ['.github/workflows/qa-api37-visual-readiness.yml', '.github/qa-api37-visual/**']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  visual-and-upgrade:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 36
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 3
+      - name: Install verification tools
+        run: bash scripts/ci-android-sdk.sh
+      - name: Install Android 17 default image
+        run: bash scripts/ci-android17-sdk.sh
+      - name: Verify original run, digest and APK signatures
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/qa-api37-visual/exact-inputs.py .
+      - name: Original obstruction, normal recovery, light and dark surfaces and real code 58 update
+        run: bash .github/qa-api37-visual/verify.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api37-original-visual-readiness
+          path: |
+            validation/visual-original/*.txt
+            validation/visual-original/*.json
+            validation/ascension-api37/screen*/*.png
+            validation/ascension-api37/notification/*.png
+            validation/ascension-api37/*.txt
+            validation/ascension-api37/*.json
+          if-no-files-found: warn
+          retention-days: 5
