@@ -2,12 +2,13 @@
 
 ## Current release decision · November 27, 2026
 
+Astravar 4.1.0 (59) was signed using the original code 58 owner certificate. The independently retrieved private APK is 13,774,614 bytes with SHA-256 `a817773f7ef933d05b7dc3773de3097292fb6bd48574e723341a524c0a70c0a3`. The privately retrieved bytes, original certificate and payload parity are independently verified. [Verified owner artifact](verification/code59-owner-artifact.json)
+
 The code 59 release candidate passed the full Android 16 and Android 17 acceptance, functional regressions and aggregate on `9ded49ee06b22f389c4d5f5553f975cb02fa762f`. The original tested archive and all 212 optimized APK payload entries have recorded hashes. The independent recovery job retrieved and verified the archived copy. [Official release run](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45962475021) · [Retained source and payload evidence](https://github.com/Brenmack15/Astravar-Overlay/blob/0d612dc7a06a059cfb6b965b434e904fd55a908b/qa/ascension-signing-input-checkpoint.md)
 
 | Remaining gate | Current evidence and dependency |
 | --- | --- |
-| Owner signing and private APK delivery | The historical code 58 package and certificate were verified. The protected workspace disconnected before signing code 59. Resume there using the [accepted CI input](verification/code59-signing-input.json) and [owner release procedure](../OWNER_RELEASE_PROCEDURE.md). |
-| Original-certificate device acceptance | The retained synthetic code 58 guest has an independent cold-data and stored-portrait baseline. Install the final owner-signed APK over that package, verify the original data, and observe signed-client forms, artwork, training and archive workflows. The signed-package hash and outcomes remain pending. |
+| Original-certificate installation and native workflows | The protected original code 58 synthetic guest has independent baseline evidence. The signed 4.1 upgrade and four signed-client feature observations are in progress. |
 | Physical handset and optional commercial transport | Android 16 independently verified authenticated wake, duplicate suppression, constrained work in Doze, pause/manual behavior and notification actions. Physical Galaxy behavior and commercial Pushy delivery require a separate real-device observation. [Android 16 evidence](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45966842075/job/140397434597) |
 | Hosting and production data | Isolated cloud, migration and recovery rehearsals passed. Production hosting, real campaign reconciliation and authority cutover require separate authorization. Missing source bytes and bespoke unconfigured outcomes retain their reviewed dispositions. [Operational guide](OPERATIONS.md) · [Source and recovery coverage](RECOVERY.md) |
 

@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "9ded49ee06b22f389c4d5f5553f975cb02fa762f",
+  "package": "com.yazsras.astravar",
+  "versionName": "4.1.0",
+  "versionCode": 59,
+  "sdk": {
+    "minimum": 26,
+    "target": 36
+  },
+  "debuggable": false,
+  "ownerApk": {
+    "byteCount": 13774614,
+    "sha256": "a817773f7ef933d05b7dc3773de3097292fb6bd48574e723341a524c0a70c0a3",
+    "certificateSha256": "4c5cb0113cae5d0dee2619ee30f5b3c593d4aa897e1fa38dee7ed5561ec4e847",
+    "signatureSchemes": [
+      "v2",
+      "v3"
+    ],
+    "alignedTo16KiB": true
+  },
+  "originalCode58": {
+    "sha256": "ce78eadc25e5f8d982788605a70aba8caaa59f4dc7ffac5c7a7171f30bf34d91",
+    "matchingOwnerCertificate": true
+  },
+  "acceptedInput": {
+    "githubRun": 45962475021,
+    "githubArtifact": 15185466555,
+    "archiveSha256": "f34d8562f6c13fe775bd4ae79ed79f8d837227cfa07091c39332ab622accf309",
+    "ciApkSha256": "a45cb267e6a5e906aad7653f2120c29a2970dd6701d6086c93de7f7969afaef7"
+  },
+  "payload": {
+    "eachMemberCompared": true,
+    "uniqueMemberNames": 212,
+    "matchingNamesSizesAndUncompressedBytes": 212,
+    "recompiledDuringSigning": false,
+    "originalSortedNameSizeContentManifestSha256": "f98acc4e936853a5b5aaf822592a506cdc798a716fd80a1aa24cec2efd87bd1a"
+  },
+  "checks": [
+    "apksigner v2 and v3 verification of released artifact",
+    "apksigner certificate comparison with original version code 58",
+    "zipalign -c -P 16 4",
+    "aapt2 package, version, minimum SDK and target SDK inspection",
+    "independent original archive and signed package member comparison",
+    "independent retrieval of the first-party private file"
+  ],
+  "privateDelivery": {
+    "authorizedFirstParty": true,
+    "independentlyRetrieved": true,
+    "byteCount": 13774614,
+    "sha256": "a817773f7ef933d05b7dc3773de3097292fb6bd48574e723341a524c0a70c0a3"
+  },
+  "boundaries": [
+    "Cryptographic and file-delivery verification are independent of Android installation and runtime acceptance.",
+    "Physical Galaxy S26 testing, optional commercial transport, production hosting and live campaign cutover have separate evidence and authority."
+  ]
+}

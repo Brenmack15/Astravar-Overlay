@@ -1,12 +1,14 @@
 # Astravar 4.1 implementation ledger
 
-## Release checkpoint · November 27, 2026
+## Owner release checkpoint · November 27, 2026
+
+Astravar 4.1.0 (59) was signed using the original code 58 owner certificate. The independently retrieved private APK is 13,774,614 bytes with SHA-256 `a817773f7ef933d05b7dc3773de3097292fb6bd48574e723341a524c0a70c0a3`. The signed package contains all 212 accepted optimized payload entries byte for byte. Android SDK confirmed v2/v3 signing and 16 KiB alignment. [Verified owner artifact](verification/code59-owner-artifact.json)
 
 The tested product is Astravar 4.1.0, version code 59, at `9ded49ee06b22f389c4d5f5553f975cb02fa762f`. PR 42 retains the code 58 and Warform branches through PRs 40 and 41. The complete native Android 16 and 17 jobs, unfiltered regression gate, fast gate and aggregate passed on this commit. The original CI signing input has an independently verified recoverable copy through February 25, 2027. [Release run](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45962475021) · [Signing input and retention](https://github.com/Brenmack15/Astravar-Overlay/blob/0d612dc7a06a059cfb6b965b434e904fd55a908b/qa/ascension-signing-input-checkpoint.md)
 
 Android and the registered DM exercised all 118 shared operations against the isolated authoritative service. The worker separately checked owner-only settings. The current cross-reference contains 793 engineering rows, including all 344 original checklist paragraphs. Each row links to its scoped evidence. [Requirement and capability cross-reference](verification/release-cross-check.md) · [Primary matrices](requirements.md)
 
-The remaining release work is private owner signing, comparing the signed payload with the accepted original, the original-certificate code 58→59 upgrade and its four signed-client feature checks, followed by private delivery. The previously verified owner-signed code 58 package, certificate, synthetic upgrade baseline and portrait were established before the private workspace disconnected. Use the accepted native archive and literal CI evidence to continue without rebuilding the application. Physical Galaxy acceptance and production hosting, migration and cutover keep their separate authorization boundaries. [Signer input](verification/code59-signing-input.json) · [Owner signing procedure](../OWNER_RELEASE_PROCEDURE.md) · [Outstanding acceptance](RELEASE-GAPS.md)
+The isolated original-certificate Android 17 upgrade and the signed-client forms, media, training and archive tests are in progress. The named physical Galaxy, commercial transport and production hosting have separate dependencies. Phase 7 campaign migration and authority cutover require separate owner authorization. [Current release acceptance](RELEASE-GAPS.md)
 
 ## Earlier planning and implementation checkpoints
 
