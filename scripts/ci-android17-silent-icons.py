@@ -87,7 +87,7 @@ def require_clear_error_windows():
         time.sleep(.25)
     raise RuntimeError("The acknowledged System UI ANR is still visible")
 
-def prepare_visual_guest():
+def prepare_visual_guest(expected_package=None):
     if adb("shell", "getprop", "sys.boot_completed") != "1":
         raise RuntimeError("The Android guest has not completed boot")
     # WAKEUP is idempotent; POWER would put a guest that was already awake back to sleep.
@@ -98,20 +98,31 @@ def prepare_visual_guest():
     require_clear_error_windows()
     home = adb("shell", "cmd", "package", "resolve-activity", "--brief", "-a",
                "android.intent.action.MAIN", "-c", "android.intent.category.HOME").splitlines()[-1]
-    pkg = home.partition("/")[0]
-    if "/" not in home or pkg in ("android", "com.android.settings") or not re.fullmatch(r"[\w.]+", pkg):
+    launcher = home.partition("/")[0]
+    if "/" not in home or launcher in ("android", "com.android.settings") or not re.fullmatch(r"[\w.]+", launcher):
         raise RuntimeError(f"Expected the installed launcher, got {home}")
-    adb("shell", "input", "keyevent", "KEYCODE_HOME")
+    allowed = {expected_package} if expected_package else {
+        launcher, "com.android.settings", "com.yazsras.astravar",
+        "com.yazsras.astravar.target", "com.yazsras.astravar.v2uidebug"}
+    # The real UI tests launch their own activity. Forcing HOME from Settings
+    # crashes API 37's task-snapshot writer on the release AVD.
+    adb("shell", "cmd", "statusbar", "collapse")
+    def foreground():
+        displays = adb("shell", "dumpsys", "window", "displays")
+        match = re.search(r"(?m)^\s*mCurrentFocus=Window\{[^}\n]*\bu0\s+([\w.]+)/[^}\n]+\}", displays)
+        return match[1] if match else None
     end = time.monotonic() + 20
     observed = set()
     while time.monotonic() < end:
-        observed = {n.get("package") for n in hierarchy().iter("node")}
-        if pkg in observed:
-            print(f"Verified Android foreground {home}", file=sys.stderr)
-            return
         require_clear_error_windows()
+        current = foreground()
+        if current in allowed:
+            observed = {n.get("package") for n in hierarchy().iter("node")}
+            if current in observed and foreground() == current:
+                print(f"Verified focused and accessible Android package {current}", file=sys.stderr)
+                return
         time.sleep(.25)
-    raise RuntimeError(f"Launcher did not become accessible; observed packages: {sorted(observed)}")
+    raise RuntimeError(f"Expected a focused accessible activity; focus={foreground()}, observed={sorted(observed)}")
 
 def target_row(root, pkg):
     parents = {child: parent for parent in root.iter() for child in parent}
@@ -185,7 +196,7 @@ else:
 for _ in range(24):
     if hidden() == wanted:
         print(f"Verified Android hideSilentStatusBar={str(wanted).lower()} via the Settings switch", file=sys.stderr)
-        prepare_visual_guest()
+        prepare_visual_guest(pkg)
         sys.exit(0)
     time.sleep(.2)
 raise RuntimeError("The framework did not confirm the requested silent-icon preference")
