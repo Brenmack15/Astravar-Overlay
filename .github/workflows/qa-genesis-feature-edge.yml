@@ -160,10 +160,8 @@ jobs:
                               device.swipe(resetViewport.centerX(), top, resetViewport.centerX(), bottom, 65))
                           device.waitForIdle(1_000)
                       }
-                      val startingBounds = device.findObjects(By.text("Edit identity & features").pkg(product)).map { Rect(it.visibleBounds) }
-                      instrumentation.sendStatus(0, Bundle().apply {
-                          putString("stream", "\\nFEATURE_ORIGINAL_EDGE viewport=" + resetViewport + " label=" + startingBounds + "\\n")
-                      })
+                      device.takeScreenshot(File(files, "genesis-landscape-200-original-edge.png"))
+                      device.dumpWindowHierarchy(File(files, "genesis-landscape-200-original-edge.xml"))
                       observeLargeLandscape("before")
           '''
           journey = journey.replace('            if (button.height() >= minimumTarget', '            instrumentation.sendStatus(0, Bundle().apply { putString("stream","\\nFEATURE_SCROLL viewport=" + viewport + " label=" + marker + " button=" + button + " minimum=" + minimumTarget + "\\n") })\n            if (button.height() >= minimumTarget')
