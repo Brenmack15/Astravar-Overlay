@@ -1,0 +1,70 @@
+name: Isolated connected project genealogy acceptance
+on:
+  push:
+    branches: ['verification/ascension-genealogy-runs-20261127']
+permissions:
+  contents: read
+jobs:
+  genealogy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 28d713c40a1d25c039e07b9bddbd8934869c2dee
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          cache-read-only: true
+      - uses: ./.github/actions/robolectric-runtime
+      - run: bash scripts/ci-android-sdk.sh
+      - name: Repeat the exact registered-Worker native workflow under mixed test scheduling
+        env:
+          PRODUCT_SOURCE: 28d713c40a1d25c039e07b9bddbd8934869c2dee
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRODUCT_SOURCE"
+          git diff --check HEAD^ HEAD
+          mkdir -p validation/genealogy
+          for iteration in 1 2 3 4; do
+            tests=(--tests '*CloudInventionGenealogyInteropTest')
+            if [ "$iteration" != 4 ]; then
+              tests+=(--tests '*CloudItemCustomizationInteropTest' --tests '*CloudRecordScreensTest' --tests '*CloudWorldChronicleInteropTest' --tests '*CloudOwnerRecoveryInteropTest')
+            fi
+            mkdir -p "validation/genealogy/run-$iteration" "$RUNNER_TEMP/genealogy-screens"
+            result=0
+            bash gradlew --console=plain --build-cache :app:testDebugUnitTest --rerun "${tests[@]}" -PastravarScreenshots="$RUNNER_TEMP/genealogy-screens" || result=$?
+            cp app/build/test-results/testDebugUnitTest/TEST-*.xml "validation/genealogy/run-$iteration/"
+            python3 - "$iteration" <<'PY'
+          from pathlib import Path
+          import sys
+          from xml.etree import ElementTree as ET
+          run=int(sys.argv[1])
+          results={}; picked="com.yazsras.astravar.ui.CloudInventionGenealogyInteropTest"
+          for path in sorted(Path(f"validation/genealogy/run-{run}").glob("TEST-*.xml")):
+              suite=ET.parse(path).getroot()
+              if not int(suite.get("tests","0")): continue
+              errors=[(test.get("name"),(fail.text or "")[:8400]) for test in suite.findall("testcase") for tag in ("failure","error","skipped") for fail in test.findall(tag)]
+              for name,detail in errors: print(name,detail)
+              assert not errors,(suite.get("name"),errors)
+              results[suite.get("name")]=int(suite.get("tests","0"))
+              print("Iteration",run,suite.get("name"),suite.get("tests"),suite.get("time"))
+          assert results.get(picked)==1 and sum(results.values())==(9 if run!=4 else 1), results
+          PY
+            test "$result" = 0
+          done
+      - name: Preserve each native JUnit result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: connected-genealogy-junit
+          path: validation/genealogy/**
+          retention-days: 7
