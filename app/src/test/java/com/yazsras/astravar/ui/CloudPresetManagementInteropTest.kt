@@ -287,17 +287,17 @@ class CloudPresetManagementInteropTest {
 
     @Test fun queuedPresetRecalculatesAfterEquipmentAndFormChangesAndCannotCrossActors() {
         AscensionWorkerFixture.open(context).use { f ->
-            fun put(op:String, raw:String):JsonObject {
+            fun commitFixture(op:String, raw:String):JsonObject {
                 val r=f.command(op,Json.parseToJsonElement(raw).jsonObject)
                 assertEquals(op+" "+r,"COMMITTED",r.cloudText("status"))
                 assertEquals(r,f.receipt(r.cloudText("commandId")));return r
             }
-            for (id in listOf("scholar","other")) put("define_actor","""{"actorId":"$id","name":"$id","role":"player","rulesProfile":"revised_2024","level":3,"abilities":{"INT":12}}""")
-            put("define_item_definition","""{"definitionId":"lens-def","name":"Research lens","category":"instrument","description":"Verified fixture","rarity":null,"stackable":false,"wearable":true,"handheld":false,"attunement":"none","source":"Test source"}""")
-            put("acquire_item","""{"itemId":"lens","definitionId":"lens-def","ownerId":"scholar","quantity":1,"source":"Test source"}""")
-            put("define_effect","""{"actorId":"scholar","effectId":"lens-check","name":"Reviewed lens bonus","target":"ability_check","key":"INT","operation":"add","amount":2,"sourceItemId":"lens","source":"Test source"}""")
-            put("define_form","""{"actorId":"scholar","formId":"investigator","name":"Investigator","timing":"other","activationSeconds":0,"abilityOverrides":{"INT":18},"source":"Test source"}""")
-            val config=put("save_roll_preset","""{"actorId":"scholar","presetId":"reused","name":"Researcher config","update":false,"entries":[{"kind":"ability","key":"INT","mode":"normal"}]}""")
+            for (id in listOf("scholar","other")) commitFixture("define_actor","""{"actorId":"$id","name":"$id","role":"player","rulesProfile":"revised_2024","level":3,"abilities":{"INT":12}}""")
+            commitFixture("define_item_definition","""{"definitionId":"lens-def","name":"Research lens","category":"instrument","description":"Verified fixture","rarity":null,"stackable":false,"wearable":true,"handheld":false,"attunement":"none","source":"Test source"}""")
+            commitFixture("acquire_item","""{"itemId":"lens","definitionId":"lens-def","ownerId":"scholar","quantity":1,"source":"Test source"}""")
+            commitFixture("define_effect","""{"actorId":"scholar","effectId":"lens-check","name":"Reviewed lens bonus","target":"ability_check","key":"INT","operation":"add","amount":2,"sourceItemId":"lens","source":"Test source"}""")
+            commitFixture("define_form","""{"actorId":"scholar","formId":"investigator","name":"Investigator","timing":"other","activationSeconds":0,"abilityOverrides":{"INT":18},"source":"Test source"}""")
+            val config=commitFixture("save_roll_preset","""{"actorId":"scholar","presetId":"reused","name":"Researcher config","update":false,"entries":[{"kind":"ability","key":"INT","mode":"normal"}]}""")
             val initial=f.record("reused")
             val current=mutableStateOf(runBlocking{f.refresh()})
             val who=mutableStateOf("scholar")
@@ -319,10 +319,10 @@ class CloudPresetManagementInteropTest {
                 compose.onAllNodesWithTag("roll-preset-option-reused").assertCountEquals(0)
                 compose.runOnIdle{who.value="scholar"}
                 openPreset()
-                put("equip_item","""{"itemId":"lens","equipment":"worn","source":"Synthetic equip"}""");refresh();expected(3)
-                put("change_form","""{"actorId":"scholar","formId":"investigator","elapsedSeconds":0,"willing":true}""");refresh();expected(6)
+                commitFixture("equip_item","""{"itemId":"lens","equipment":"worn","source":"Synthetic equip"}""");refresh();expected(3)
+                commitFixture("change_form","""{"actorId":"scholar","formId":"investigator","elapsedSeconds":0,"willing":true}""");refresh();expected(6)
                 assertEquals(0,count())
-                put("equip_item","""{"itemId":"lens","equipment":"packed","source":"Synthetic removal"}""");refresh();expected(4)
+                commitFixture("equip_item","""{"itemId":"lens","equipment":"packed","source":"Synthetic removal"}""");refresh();expected(4)
                 enter("Die faces in queue order, one roll per line","21")
                 press("Roll All");assertEquals(0,count())
                 enter("Die faces in queue order, one roll per line","16");press("Roll All")
