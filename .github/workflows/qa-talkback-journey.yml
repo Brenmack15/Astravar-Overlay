@@ -10,7 +10,7 @@ permissions:
   contents: read
 jobs:
   talkback:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 32
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -25,8 +25,25 @@ jobs:
           cache-read-only: true
       - name: Locate Android SDK and package tools
         run: bash scripts/ci-android-sdk.sh
+      - name: Restore previously compiled public QA packages for these exact source trees
+        id: compiled
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          key: reader-qa-packages-v1-${{ hashFiles('app/src/**', 'rules/src/**', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
       - name: Build the synthetic native test and unmodified product
+        if: steps.compiled.outputs.cache-hit != 'true'
         run: bash gradlew --console=plain --build-cache :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Preserve the reproducible synthetic app and its test package for QA retries
+        if: steps.compiled.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          key: ${{ steps.compiled.outputs.cache-primary-key }}
       - name: Boot a fresh official Play SDK image and enable its original signed screen reader
         id: actual
         timeout-minutes: 19
@@ -44,8 +61,6 @@ jobs:
           qemu="$ANDROID_HOME/emulator/qemu/linux-x86_64/qemu-system-x86_64"
           if ldd "$qemu" | grep -F 'libpulse.so.0 => not found' >/dev/null; then sudo apt-get -qq update; sudo apt-get -qy install --no-install-recommends libpulse0; fi
           test -c /dev/kvm && sudo chmod a+rw /dev/kvm
-          export XDG_RUNTIME_DIR="$RUNNER_TEMP/stock-reader-runtime"
-          mkdir -m 700 "$XDG_RUNTIME_DIR"
           export ANDROID_AVD_HOME="$RUNNER_TEMP/stock-reader-avd"
           mkdir -p "$ANDROID_AVD_HOME"
           avd=AstravarStockReader
@@ -56,12 +71,29 @@ jobs:
           "$ANDROID_HOME/emulator/emulator" -avd "$avd" -port 5582 -grpc-use-token -accel on -no-window -no-audio -no-snapshot -no-boot-anim -memory 4096 -gpu swiftshader > "$RUNNER_TEMP/stock-reader-emulator.log" 2>&1 &
           qemu_pid=$!
           trap 'kill "$qemu_pid" 2>/dev/null || true' EXIT
+          echo "Waiting for private QA guest and its package service"
           timeout 140 adb -s "$serial" wait-for-device
           for _ in $(seq 1 110); do kill -0 "$qemu_pid"; if test "$(device shell getprop sys.boot_completed | tr -d '\r')" = 1; then break; fi; sleep 2; done
           test "$(device shell getprop sys.boot_completed | tr -d '\r')" = 1
+          cold_ready=0
+          for _ in $(seq 1 40); do
+            if device shell pm path android 2>/dev/null | grep -q '^package:' && device shell am get-started-user-state 0 2>/dev/null | grep -q 'RUNNING_UNLOCKED'; then cold_ready=1; break; fi
+            sleep 2
+          done
+          test "$cold_ready" = 1
           test "$(device shell getprop ro.kernel.qemu | tr -d '\r')" = 1
           test "$(device shell getprop ro.build.version.sdk | tr -d '\r')" = 37
-          test "$(device emu avd name | tr -d '\r' | head -1)" = "$avd"
+          echo "Verifying the reserved console port and fresh AVD identity"
+          own_guest=0
+          for _ in $(seq 1 20); do
+            if test "$(device emu avd name 2>/dev/null | tr -d '\r' | head -1)" = "$avd"; then own_guest=1; break; fi
+            sleep 1
+          done
+          if test "$own_guest" = 0; then
+            avd_property="$(device shell getprop ro.boot.qemu.avd_name | tr -d '\r')"
+            test "$avd_property" = "$avd"
+          fi
+          echo "Fresh API 37 AVD ready"
           device shell settings put global device_provisioned 1
           device shell settings put secure user_setup_complete 1
           device shell cmd statusbar collapse
@@ -70,6 +102,7 @@ jobs:
           device shell wm size reset
           device shell wm density 300
           for setting in window_animation_scale transition_animation_scale animator_duration_scale; do device shell settings put global "$setting" 0; done
+          echo "Installing the synthetic app and instrumentation"
           device install app/build/outputs/apk/debug/app-debug.apk
           device install app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
           service=com.google.android.marvin.talkback/.TalkBackService
@@ -85,6 +118,7 @@ jobs:
           device shell wm dismiss-keyguard
           target=com.yazsras.astravar.v2uidebug
           testclass=com.yazsras.astravar.ui.AscensionStockTalkBackTest
+          echo "Preparing official emulator controller bindings"
           /usr/bin/python3 -m venv "$RUNNER_TEMP/reader-env"
           "$RUNNER_TEMP/reader-env/bin/python" -m pip install --quiet --only-binary=:all: --disable-pip-version-check grpcio-tools==1.74.0
           mkdir -p "$RUNNER_TEMP/reader-proto"
@@ -92,6 +126,7 @@ jobs:
           test -f "$proto"
           "$RUNNER_TEMP/reader-env/bin/python" -m grpc_tools.protoc -I"$(dirname "$proto")" --python_out="$RUNNER_TEMP/reader-proto" --grpc_python_out="$RUNNER_TEMP/reader-proto" "$proto"
           export PYTHONPATH="$RUNNER_TEMP/reader-proto"
+          echo "Starting actual stock TalkBack gestures"
           timeout -k 5s 260s "$RUNNER_TEMP/reader-env/bin/python" scripts/ci-stock-reader-hardware.py | tee "$report/native-result.txt"
           grep -q '^OK (1 test)' "$report/native-result.txt"
           ! grep -qE 'FAILURES|INSTRUMENTATION_FAILED|Process crashed' "$report/native-result.txt"

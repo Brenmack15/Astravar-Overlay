@@ -16,7 +16,7 @@ adb=["adb","-s","emulator-5582"]
 def read_host_advertisement():
     # Pin the advertised local file to this runner's owned QEMU launch log.
     log=pathlib.Path(os.environ["RUNNER_TEMP"])/"stock-reader-emulator.log"
-    root=pathlib.Path(os.environ["XDG_RUNTIME_DIR"])
+    root=pathlib.Path(os.environ.get("XDG_RUNTIME_DIR","/run/user/"+str(os.getuid())))
     paths=set(root.rglob("pid_*.ini"))
     for line in log.read_text(errors="replace").splitlines():
         if "Advertising in:" in line:
@@ -49,7 +49,9 @@ def read_host_advertisement():
     return None,None
 
 controller,metadata=read_host_advertisement()
-assert subprocess.check_output(adb+["emu","avd","name"],text=True,timeout=8).splitlines()[0].strip()=="AstravarStockReader"
+name=subprocess.run(adb+["emu","avd","name"],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,timeout=8)
+boot_name=subprocess.check_output(adb+["shell","getprop","ro.boot.qemu.avd_name"],text=True,timeout=8).strip()
+assert "AstravarStockReader" in name.stdout.splitlines() or boot_name=="AstravarStockReader"
 
 def console_events(events):
     raw=subprocess.run(adb+["emu","event","send"]+["%d:%d:%d"%event for event in events]+["0:0:0"],
