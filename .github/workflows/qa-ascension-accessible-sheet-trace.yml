@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: d22237bbadd8465120ef59b832cc014db7841bf6
+          ref: f75750c8942cbcc2418d760ffd7c24faa5706747
           persist-credentials: false
       - name: Check release requirement, evidence and registered protocol references
         run: python3 tools/ascension_trace_check.py
