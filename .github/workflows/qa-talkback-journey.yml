@@ -47,11 +47,11 @@ jobs:
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
           key: ${{ steps.compiled.outputs.cache-primary-key }}
-      - name: Boot a fresh official Play SDK image and enable its original signed screen reader
+      - name: Boot a fresh official Google APIs SDK image and enable its original signed screen reader
         id: actual
         timeout-minutes: 19
         env:
-          QA_IMAGE: system-images;android-37.0;google_apis_playstore;x86_64
+          QA_IMAGE: system-images;android-37.0;google_apis;x86_64
         run: |
           set -euo pipefail
           mkdir -p validation/talkback
@@ -60,7 +60,7 @@ jobs:
           export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
           timeout -k 5s 80s sdkmanager --licenses < <(printf 'y\n%.0s' {1..100}) >/dev/null
           timeout -k 10s 540s sdkmanager emulator "$QA_IMAGE" > "$RUNNER_TEMP/reader-sdk.txt"
-          grep -E '^Pkg.Revision=|^SystemImage.TagId=|^SystemImage.Abi=|^AndroidVersion.ApiLevel=' "$ANDROID_HOME/system-images/android-37.0/google_apis_playstore/x86_64/source.properties" | tee "$report/stock-image.txt"
+          grep -E '^Pkg.Revision=|^SystemImage.TagId=|^SystemImage.Abi=|^AndroidVersion.ApiLevel=' "$ANDROID_HOME/system-images/android-37.0/google_apis/x86_64/source.properties" | tee "$report/stock-image.txt"
           qemu="$ANDROID_HOME/emulator/qemu/linux-x86_64/qemu-system-x86_64"
           if ldd "$qemu" | grep -F 'libpulse.so.0 => not found' >/dev/null; then sudo apt-get -qq update; sudo apt-get -qy install --no-install-recommends libpulse0; fi
           test -c /dev/kvm && sudo chmod a+rw /dev/kvm
@@ -78,7 +78,7 @@ jobs:
           test -n "$device_profile"
           echo "Official emulated handset profile $device_profile" | tee "$report/device-profile.txt"
           printf 'no\n' | avdmanager create avd -f -n "$avd" -k "$QA_IMAGE" --device "$device_profile"
-          "$ANDROID_HOME/emulator/emulator" -avd "$avd" -port 5582 -grpc-use-token -accel on -no-window -no-audio -no-snapshot -no-boot-anim -memory 4096 -gpu swiftshader > "$RUNNER_TEMP/stock-reader-emulator.log" 2>&1 &
+          "$ANDROID_HOME/emulator/emulator" -avd "$avd" -port 5582 -accel on -no-window -no-audio -no-snapshot -no-boot-anim -memory 4096 -gpu swiftshader > "$RUNNER_TEMP/stock-reader-emulator.log" 2>&1 &
           qemu_pid=$!
           trap 'kill "$qemu_pid" 2>/dev/null || true' EXIT
           echo "Waiting for private QA guest and its package service"
@@ -104,6 +104,10 @@ jobs:
             test "$avd_property" = "$avd"
           fi
           echo "Fresh API 37 AVD ready"
+          device root
+          timeout 90 adb -s "$serial" wait-for-device
+          for _ in $(seq 1 30); do if test "$(device shell id -u 2>/dev/null | tr -d '\r')" = 0; then break; fi; sleep 1; done
+          test "$(device shell id -u | tr -d '\r')" = 0
           device shell settings put global device_provisioned 1
           device shell settings put secure user_setup_complete 1
           device shell cmd statusbar collapse
@@ -158,22 +162,14 @@ jobs:
           device shell wm dismiss-keyguard
           target=com.yazsras.astravar.v2uidebug
           testclass=com.yazsras.astravar.ui.AscensionStockTalkBackTest
-          echo "Preparing official emulator controller bindings"
-          python -m venv "$RUNNER_TEMP/reader-env"
-          "$RUNNER_TEMP/reader-env/bin/python" -m pip install --quiet --only-binary=:all: --disable-pip-version-check grpcio-tools==1.74.0
-          mkdir -p "$RUNNER_TEMP/reader-proto"
-          proto=$(find "$ANDROID_HOME/emulator" -name emulator_controller.proto -type f | head -1)
-          test -f "$proto"
-          "$RUNNER_TEMP/reader-env/bin/python" -m grpc_tools.protoc -I"$(dirname "$proto")" --python_out="$RUNNER_TEMP/reader-proto" --grpc_python_out="$RUNNER_TEMP/reader-proto" "$proto"
-          export PYTHONPATH="$RUNNER_TEMP/reader-proto"
           echo "Starting actual stock TalkBack gestures"
-          timeout -k 5s 260s "$RUNNER_TEMP/reader-env/bin/python" scripts/ci-stock-reader-hardware.py | tee "$report/native-result.txt"
+          timeout -k 5s 330s python scripts/ci-stock-reader-hardware.py | tee "$report/native-result.txt"
           grep -q '^OK (1 test)' "$report/native-result.txt"
           ! grep -qE 'FAILURES|INSTRUMENTATION_FAILED|Process crashed' "$report/native-result.txt"
           device pull "/sdcard/Android/data/$target/files/talkback-proof.json" "$report/reader-proof.json" >/dev/null
           python3 - "$report" <<'PY'
           import json,sys,pathlib
-          p=pathlib.Path(sys.argv[1]);d=json.loads((p/'reader-proof.json').read_text()); assert d['api']==37 and d['touchExplorationEnabled'] and d['rollsAfterOpeningOptions']==0 and d['rollsAfterDoubleTap']==1 and d['certificateSha256']=='7b5ad55180a48a1f30f35377c0f9e5f911bf942fb4cf83eba255a0ebf580beef'
+          p=pathlib.Path(sys.argv[1]);d=json.loads((p/'reader-proof.json').read_text()); assert d['api']==37 and d['touchExplorationEnabled'] and d['rollsAfterOpeningOptions']==0 and d['rollsAfterReaderActivation']==1 and d['certificateSha256']=='93c9fc6d5af13c4e802dc1caf68f2e00688475b0b28f29487852cc9d550b6f27'
           assert d['service'].startswith('com.google.android.marvin.talkback/') and d['actorId']=='qa-reader-actor' and d['subject']=='STR' and d['owner']=='Player' and 1<=d['face']<=20 and d['total']==d['face']+3
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

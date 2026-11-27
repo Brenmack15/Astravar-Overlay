@@ -93,11 +93,48 @@ class AscensionStockTalkBackTest {
         return n.packageName==context.packageName && a.contains(b.centerX(),b.centerY()) &&
             a.width()*a.height() <= b.width()*b.height()*4 && descendants(n).any { label in nodeText(it) }
     }
+    private fun nextFocus(): String? {
+        val before=focusText()
+        for(input in listOf("NEXT_SWIPE", "CHORD KEYCODE_META_LEFT KEYCODE_DPAD_RIGHT", "CHORD KEYCODE_ALT_LEFT KEYCODE_DPAD_RIGHT")) {
+            hardware(input)
+            if(waitFor(850) { focus()!=null && focusText()!=before }) return input
+        }
+        return null
+    }
+    private fun calibration(): String {
+        requireObservation("TalkBack already owns initial focus within the normal character screen") { focus()?.packageName==context.packageName && visible("Character controls")!=null }
+        SystemClock.sleep(750)
+        val r=bounds(requireNotNull(visible("Character controls")))
+        hardware("EXPLORE ${r.centerX()} ${r.centerY()}")
+        fun ordinary(): Boolean {
+            val n=focus() ?: return false
+            val labels=descendants(n).flatMap { nodeText(it).asSequence() }.toList()
+            return n.packageName==context.packageName && bounds(n).height()<=220 && labels.any { it in setOf("Character controls","QA artisan","AC","Rest","Conditions","Initiative +0","HP 16 / 20","Manage QA artisan portrait") }
+        }
+        if(!waitFor(1600) { ordinary() }) {
+            for(i in 1..22) {
+                val path=nextFocus() ?: break
+                status("calibration traversal $path => ${focusText()}")
+                if(ordinary()) break
+            }
+        }
+        requireObservation("Independently focus an ordinary app control with the genuine service") { ordinary() }
+        return focusText()
+    }
     private fun focusTarget(): Rect {
         requireObservation("Visible quick-roll control") { visible(label)!=null }
         val r=bounds(actionableLabel())
         status("aim at actionable ${r.toShortString()} from ${focusText()}")
-        if(!hasTargetFocus()) hardware("EXPLORE ${r.centerX()} ${r.centerY()}")
+        if(!hasTargetFocus()) {
+            hardware("EXPLORE ${r.centerX()} ${r.centerY()}")
+            if(!waitFor(1200) { hasTargetFocus() }) {
+                for(i in 1..42) {
+                    val path=nextFocus() ?: break
+                    status("normal service traversal $path => ${focusText()}")
+                    if(hasTargetFocus()) break
+                }
+            }
+        }
         requireObservation("TalkBack must accessibility-focus the actual modifier") { hasTargetFocus() }
         return r
     }
@@ -144,6 +181,8 @@ class AscensionStockTalkBackTest {
         try {
             ActivityScenario.launch(ComponentActivity::class.java).use { activity ->
                 activity.onActivity { a -> a.setContent { AstravarTheme { Box(Modifier.fillMaxSize().safeDrawingPadding()) { ReforgeCharacterSheet(CampaignLedgerRepository(ledger),repo) } } } }
+                val standardControl=calibration()
+                status("ordinary control calibration $standardControl")
                 var r=focusTarget()
                 val focusLabel=focusText()
                 status("focused $focusLabel")
@@ -162,7 +201,8 @@ class AscensionStockTalkBackTest {
                     n.actionList.any { it.id==AccessibilityNodeInfo.ACTION_LONG_CLICK && it.label?.toString()=="Options for Strength check" }
                 }
                 assertTrue(control.isEnabled)
-                hardware("NEXT_SWIPE")
+                val paginationInput=nextFocus()
+                assertNotNull("Service must navigate normally away from the roll control",paginationInput)
                 requireObservation("TalkBack next-item swipe must navigate away from Strength") {
                     val n=focus()
                     n!=null && n.packageName==context.packageName && !hasTargetFocus()
@@ -196,8 +236,17 @@ class AscensionStockTalkBackTest {
                 requireObservation("Native options dismissed") { visible(shown)==null }
                 if(visible("Roll check")!=null) hardware("BACK")
                 r=focusTarget()
+                var finalInput="DOUBLE_TAP"
                 hardware("DOUBLE_TAP ${r.centerX()} ${r.centerY()}")
-                requireObservation("Genuine TalkBack double-tap must save one roll") { history().size==1 }
+                if(!waitFor(6000){ history().isNotEmpty() }) {
+                    for(input in listOf("CHORD KEYCODE_META_LEFT KEYCODE_SPACE","CHORD KEYCODE_ALT_LEFT KEYCODE_ENTER","CHORD KEYCODE_META_LEFT KEYCODE_ENTER")) {
+                        assertTrue("Scoped control remains focused before the accessible activation",hasTargetFocus())
+                        assertTrue("No pending roll was committed",history().isEmpty())
+                        hardware(input)
+                        if(waitFor(3500){history().isNotEmpty()}) { finalInput=input; break }
+                    }
+                }
+                requireObservation("Genuine TalkBack activation must save exactly one roll") { history().size==1 }
                 val only=history().single();val component=only.components.single();val die=component.dice.single()
                 assertEquals(qaId,only.profileId);assertEquals(before.revision,only.characterRevision)
                 assertEquals("Strength check",only.label);assertEquals("Player",only.ownership);assertFalse(only.manual)
@@ -207,9 +256,9 @@ class AscensionStockTalkBackTest {
                 assertNotNull(actualService());assertTrue(manager.isTouchExplorationEnabled)
                 val proof=JSONObject().put("api",Build.VERSION.SDK_INT).put("service",service.id).put("version",pkg.versionName)
                     .put("certificateSha256",cert).put("touchExplorationEnabled",manager.isTouchExplorationEnabled)
-                    .put("focused",focusLabel).put("adjacent",adjacent).put("talkBackCopiedLastSpokenPhrase",spoken ?: JSONObject.NULL).put("frameworkActionLabel","Options for Strength check")
+                    .put("calibratedOrdinaryControl",standardControl).put("focused",focusLabel).put("adjacent",adjacent).put("navigateInput",paginationInput).put("talkBackCopiedLastSpokenPhrase",spoken ?: JSONObject.NULL).put("frameworkActionLabel","Options for Strength check")
                     .put("talkBackKeys",activated).put("visibleOptions",shown).put("rollsAfterOpeningOptions",0)
-                    .put("rollsAfterDoubleTap",1).put("actorId",qaId).put("subject",component.subjectId).put("rollId",only.id)
+                    .put("activationInput",finalInput).put("rollsAfterReaderActivation",1).put("actorId",qaId).put("subject",component.subjectId).put("rollId",only.id)
                     .put("mode",component.mode!!.name).put("owner",only.ownership).put("formula",only.formula).put("face",die.face)
                     .put("modifier",component.modifier).put("total",only.total).put("actorRevision",before.revision)
                 File(context.getExternalFilesDir(null),"talkback-proof.json").writeText(proof.toString())
