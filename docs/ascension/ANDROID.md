@@ -1,5 +1,13 @@
 # Android entry points and acceptance
 
+## Integrated Android release evidence · November 27, 2026
+
+The full native acceptance passed for package `com.yazsras.astravar`, version 4.1.0 (59), on release source `9ded49ee06b22f389c4d5f5553f975cb02fa762f`. The Android 16 companion failure came from a test scroll before the saved sheet finished opening. The revised observer waits for the saved name, sheet and status control. The continued edit and adoption workflow passed through the normal UI. Independent cold snapshots retained the source actor at 4/12 HP, one heal to 6/12 and a single equipped charm on the selected actor. [Correction](https://github.com/Brenmack15/Astravar-Overlay/commit/90ea56725f4bd11c2741823f8039c0bc37e28203) · [Ordered Android 16 and 17 release job](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45962475021/job/140386863924) · [Independent companion verification](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45955650454/job/140361386321)
+
+An Android 17 startup failure had obscured both OS Settings and Astravar. The host recognizes the system service’s own dialog only after the service responds. The corrected run changed and restored the system silent-icon setting. Independent measurement of the original verification archive confirmed the four emblem silhouettes, eight navigation screenshots, six native witnesses, unchanged UID and first install time, and matching cold Room data. This installed check used the matched CI certificate. Original-owner signing, the owner-certificate upgrade and physical Galaxy acceptance have separate evidence requirements. [Native archive measurements](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45972327111/job/140415501470) · [External release gates](RELEASE-GAPS.md)
+
+## Earlier Android audit and feature observations
+
 Baseline: PR #41, commit `ae5dfc7622da5d225f97279bcdff837f0b2e893f`, on the code-58 ancestry. The observations below come from source inspection. Existing test names identify relevant regression coverage. No new APK, emulator result or handset acceptance follows from this audit.
 
 ## Storage and authority boundary

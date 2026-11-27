@@ -1,5 +1,15 @@
 # Astravar 4.1 release evidence
 
+## Accepted release input · November 27, 2026
+
+The original release run for `9ded49ee06b22f389c4d5f5553f975cb02fa762f` passed both the Android 16 and Android 17 sequences and all required jobs. The unfiltered results reported 213 passing rules tests, 1,167 passing debug tests with six skips and 1,153 passing release tests with twenty skips. A separate run on the same source passed 280 backend tests, 449 host tests and five isolated provider rehearsals. [Release run](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45962475021) · [Full regression](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45962475021/job/140386864071) · [Fast and provider evidence](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45962475021/job/140383369498)
+
+Android 16 completed 23 ordered stages. The synthetic 49→50→54→56→57→58→59 update and independently repeated cold-database readbacks preserved actor identities, the single healing receipt and the equipped item's assignment. The Android 17 code 58→59 CI-certificate update retained the UID, original installation time and the contents of ten inspected gameplay tables. Pictures from all four destinations in both themes and all four notification emblem measurements were independently checked. [Native gate](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45962475021/job/140386863924) · [Independent Android 16 evidence](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45955650454/job/140361386321) · [Independent Android 17 evidence](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45972327111/job/140415501470)
+
+The [signed-release procedure](../OWNER_RELEASE_PROCEDURE.md) still requires the protected owner workspace. The [open release items](RELEASE-GAPS.md), [full register](verification/release-cross-check.md) and [recovered signing input](https://github.com/Brenmack15/Astravar-Overlay/blob/0d612dc7a06a059cfb6b965b434e904fd55a908b/qa/ascension-signing-input-checkpoint.md) preserve precisely what the completed checks cover.
+
+## Earlier acceptance records
+
 This register distinguishes a verified contract, a verified native interaction, and a release artifact. The feature branch is stacked on PR 41. The native candidate retains package `com.yazsras.astravar` and reserves version code 59. The historical signing and gameplay baseline is code 58.
 
 | Release gate | Measurement and reproducible evidence | Boundary |

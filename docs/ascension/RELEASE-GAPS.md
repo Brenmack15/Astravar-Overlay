@@ -1,5 +1,20 @@
 # Remaining release acceptance
 
+## Current release decision · November 27, 2026
+
+The code 59 release candidate passed the full Android 16 and Android 17 acceptance, functional regressions and aggregate on `9ded49ee06b22f389c4d5f5553f975cb02fa762f`. The original tested archive and all 212 optimized APK payload entries have recorded hashes. The independent recovery job retrieved and verified the archived copy. [Official release run](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45962475021) · [Retained source and payload evidence](https://github.com/Brenmack15/Astravar-Overlay/blob/0d612dc7a06a059cfb6b965b434e904fd55a908b/qa/ascension-signing-input-checkpoint.md)
+
+| Remaining gate | Current evidence and dependency |
+| --- | --- |
+| Owner signing and private APK delivery | The historical code 58 package and certificate were verified. The protected workspace disconnected before signing code 59. Resume there using the [accepted CI input](verification/code59-signing-input.json) and [owner release procedure](../OWNER_RELEASE_PROCEDURE.md). |
+| Original-certificate device acceptance | The retained synthetic code 58 guest has an independent cold-data and stored-portrait baseline. Install the final owner-signed APK over that package, verify the original data, and observe signed-client forms, artwork, training and archive workflows. The signed-package hash and outcomes remain pending. |
+| Physical handset and optional commercial transport | Android 16 independently verified authenticated wake, duplicate suppression, constrained work in Doze, pause/manual behavior and notification actions. Physical Galaxy behavior and commercial Pushy delivery require a separate real-device observation. [Android 16 evidence](https://github.com/Brenmack15/Astravar-Overlay/actions/runs/45966842075/job/140397434597) |
+| Hosting and production data | Isolated cloud, migration and recovery rehearsals passed. Production hosting, real campaign reconciliation and authority cutover require separate authorization. Missing source bytes and bespoke unconfigured outcomes retain their reviewed dispositions. [Operational guide](OPERATIONS.md) · [Source and recovery coverage](RECOVERY.md) |
+
+The [current requirement cross-reference](verification/release-cross-check.md) identifies the original paragraphs with partial acceptance, external dependencies or proposed details. Historical claims below describe their own candidate and verification date.
+
+## Earlier gap assessments by candidate
+
 This register identifies work that can change the 4.1 release decision. The source and per-paragraph outcomes are in [directive requirements](requirements.csv), [backlog cases](requirements-backlog.csv), [fixture verification](requirements-fixtures.csv) and [capabilities](capabilities.csv). Each capability includes its native entry and outstanding observable interaction. The authoritative operation count and replay/readback results are in [protocol parity](protocol-parity.json).
 
 The isolated service registered 119 commands. All 118 gameplay commands passed in both authenticated directions, with 1,227 submissions and 1,957 independently read affected records per direction. The owner-only continuity settings command has its own positive owner and denied client tests. The private campaign was outside these tests. [Wire evidence](protocol-parity.json)
