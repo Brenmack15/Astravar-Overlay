@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
 import androidx.test.core.app.ApplicationProvider
 import com.yazsras.astravar.data.*
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
@@ -122,6 +123,9 @@ class CloudRecordScreensTest {
             put("description","Known physical source");put("handheld",true);put("wearable",false);put("attunement","none")
         })
         val drafts=java.util.concurrent.CopyOnWriteArrayList<Pair<String,JsonObject>>()
+        val readStarted = CompletableDeferred<Unit>()
+        val releaseRead = CompletableDeferred<Unit>()
+        val detailReads = java.util.concurrent.atomic.AtomicInteger()
         val client=CloudCampaignClient(cache,{CloudSession(credential,null)},OwnerConnectionTransport{_,path,_,_,body->
             assertNull("Command editors must open without submitting.",body)
             val data=when{
@@ -131,7 +135,13 @@ class CloudRecordScreensTest {
                     put("view","inventory");put("actorId","bearer");put("items",JsonArray(listOf(JsonObject(holding+("title" to JsonPrimitive("Current catalog name"))))));put("nextAfter",JsonNull)
                 }
                 path.contains("/records/inventory?") && path.contains("id=held-one")->buildJsonObject{
-                    put("view","inventory");put("holding",holding);put("definition",definition);put("nextAfter",JsonNull)
+                    val first = detailReads.incrementAndGet() == 1
+                    if (first) {
+                        readStarted.complete(Unit)
+                        releaseRead.await()
+                    }
+                    put("view","inventory");put("holding",holding);put("nextAfter",JsonNull)
+                    put("definition", if (first) JsonObject(definition + ("id" to JsonPrimitive("unrelated-definition"))) else definition)
                 }
                 path.contains("/records/timeline?")->buildJsonObject{put("view","timeline");put("events",JsonArray(emptyList()));put("nextAfter",JsonNull)}
                 else->error("Unexpected synthetic route")
@@ -147,12 +157,30 @@ class CloudRecordScreensTest {
             }}}
             awaitText("Current catalog name")
             compose.onNodeWithText("Current catalog name").performClick()
+            awaitText("Loading item definition…")
+            compose.waitForIdle()
+            compose.waitUntil(5000) { readStarted.isCompleted }
+            val customize = compose.onNode(hasText("Customize this instance") and hasClickAction())
+            customize.performScrollTo().assertIsNotEnabled().performTouchInput { click() }
+            assertTrue(drafts.isEmpty())
+            compose.onNodeWithText("Earlier catalog name").assertDoesNotExist()
+            releaseRead.complete(Unit)
+            awaitText("Item definition unavailable.")
+            customize.assertIsNotEnabled()
+            compose.onNodeWithText("Known physical source").assertDoesNotExist()
+            compose.onNodeWithText("Retry item definition").performScrollTo().performClick()
             awaitText("Known physical source")
+            customize.performScrollTo().assertIsEnabled().performClick()
+            assertEquals("customize_item", drafts.single().first)
+            assertEquals("held-one", drafts.single().second.cloudText("itemId"))
+            assertEquals("Current catalog name", drafts.single().second.cloudText("name"))
+            assertEquals("Known physical source", drafts.single().second.cloudText("description"))
+            assertEquals(2, detailReads.get())
             compose.onNodeWithText("Manage in Inventory").assertDoesNotExist()
             compose.onNodeWithText("Hold").performScrollTo().assertIsEnabled().performClick()
-            compose.waitUntil(5000){drafts.isNotEmpty()}
-            assertEquals("equip_item",drafts.single().first)
-            assertEquals("held-one",drafts.single().second.cloudText("itemId"))
+            compose.waitUntil(5000){drafts.size==2}
+            assertEquals("equip_item",drafts.last().first)
+            assertEquals("held-one",drafts.last().second.cloudText("itemId"))
             compose.onNodeWithText("Close").performClick()
             compose.runOnIdle{tab.value="Chronicle"}
             compose.onNodeWithText("Lore").performScrollTo().performClick()
@@ -160,13 +188,13 @@ class CloudRecordScreensTest {
             compose.onNodeWithText("Recorded inscription").performClick()
             awaitText("An observed sequence of marks")
             compose.onNodeWithText("Revise known lore").performScrollTo().assertIsEnabled().performClick()
-            compose.waitUntil(5000){drafts.size==2}
+            compose.waitUntil(5000){drafts.size==3}
             assertEquals("revise_known_fact",drafts.last().first)
             assertEquals("known-one",drafts.last().second.cloudText("factId"))
             assertEquals(2,drafts.last().second.getValue("expectedRevision").jsonPrimitive.int)
             assertEquals("Earlier catalog name",runBlocking{client.record("held-one")}?.cloudText("title"))
-            assertEquals(2,drafts.size)
-        } finally {activity.pause().stop().destroy();cache.close()}
+            assertEquals(3,drafts.size)
+        } finally {releaseRead.complete(Unit);activity.pause().stop().destroy();cache.close()}
     }
 
     private fun awaitText(value:String) {
