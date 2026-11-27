@@ -57,6 +57,26 @@ class GenesisJourneyInstrumentationTest {
                 if (left) bounds.left + inset else bounds.right - inset, bounds.centerY(), 25))
         device.waitForIdle(1_000)
     }
+    private fun revealFeatureEditorForCapture() {
+        val label = "Edit identity & features"
+        val minimumVisibleHeight = (16 * instrumentation.targetContext.resources.displayMetrics.density).toInt()
+        repeat(4) {
+            val marker = find(label)
+            if (marker.height() >= minimumVisibleHeight) return
+            val viewport = pageViewport()
+            check(viewport.height() >= minimumVisibleHeight) { "Features viewport is clipped: $viewport" }
+            // A clipped text node can be present in accessibility while its glyphs are offscreen.
+            // Scroll part of the real content viewport so this same label moves away from its edge.
+            val middle = viewport.centerY()
+            val offset = viewport.height() / 3
+            val start = if (marker.centerY() >= middle) middle + offset else middle - offset
+            assertTrue("Scroll the Features page to reveal its editor",
+                device.swipe(viewport.centerX(), start, viewport.centerX(), middle, 30))
+            device.waitForIdle(1_000)
+        }
+        assertTrue("Feature editor must be visible for the landscape screenshot", find(label).height() >= minimumVisibleHeight)
+    }
+
     private fun capture(name: String, primary: String, vararg labels: String) {
         labels.forEach(::find)
         ui.captureStablePage(File(files, "genesis-$name.png"), product, primary, labels.map { By.text(it).pkg(product) })
@@ -315,6 +335,7 @@ class GenesisJourneyInstrumentationTest {
             assertTrue("Compact HP remains a 48dp touch target", hp.width() >= minimumTarget && hp.height() >= minimumTarget)
             val controls = ui.controlBounds(By.desc("Character controls").pkg(product), "Compact character controls")
             assertTrue("Compact controls remain a 48dp touch target", controls.width() >= minimumTarget && controls.height() >= minimumTarget)
+            revealFeatureEditorForCapture()
             capture("landscape-font200", "Character", "Edit identity & features")
             ui.touch(controls, "Open all character controls at 200 percent")
             ui.descriptionBounds("Switch character", product)
