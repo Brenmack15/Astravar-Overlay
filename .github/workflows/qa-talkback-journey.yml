@@ -110,8 +110,32 @@ jobs:
           device shell wm density 300
           for setting in window_animation_scale transition_animation_scale animator_duration_scale; do device shell settings put global "$setting" 0; done
           echo "Installing the synthetic app and instrumentation"
-          device install app/build/outputs/apk/debug/app-debug.apk
-          device install app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          df -h "$RUNNER_TEMP"
+          device shell df -h /data
+          recover_package_service() {
+            for _ in $(seq 1 50); do
+              kill -0 "$qemu_pid" || return 1
+              if test "$(device shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 && device shell pm path android 2>/dev/null | grep -q '^package:'; then return 0; fi
+              sleep 2
+            done
+            return 1
+          }
+          install_qa() {
+            pkg="$1"; artifact="$2"
+            for attempt in 1 2 3 4; do
+              recover_package_service
+              if device shell pm path "$pkg" 2>/dev/null | grep -q '^package:'; then return 0; fi
+              echo "Installing $pkg, attempt $attempt"
+              if timeout 110 adb -s "$serial" install --no-streaming -r -t "$artifact"; then
+                if device shell pm path "$pkg" 2>/dev/null | grep -q '^package:'; then return 0; fi
+              fi
+              sleep 3
+            done
+            return 1
+          }
+          install_qa com.yazsras.astravar.v2uidebug app/build/outputs/apk/debug/app-debug.apk
+          install_qa com.yazsras.astravar.v2uidebug.test app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          recover_package_service
           service=com.google.android.marvin.talkback/.TalkBackService
           device shell cmd package query-services --brief --components --user 0 -a android.accessibilityservice.AccessibilityService | tr -d '\r' | grep -Fx "$service" | tee "$report/reader-service.txt"
           device shell cmd package query-services --brief --components --user 0 -a android.intent.action.TTS_SERVICE | tr -d '\r' | tee "$report/tts-service.txt"
