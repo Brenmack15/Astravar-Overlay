@@ -1,0 +1,37 @@
+name: Check release input verification harness
+on:
+  push:
+    branches: [verification/ascension-release-inputs-20261127]
+    paths: [scripts/qa-release-inputs.py, .github/workflows/check-release-input-harness.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Check the private signer's portable input boundaries with local disposable bytes
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/qa-release-inputs.py
+          python3 scripts/qa-release-inputs.py --help
+          python3 -m unittest discover -s scripts/tests -p 'test_owner_release_sign.py'
+          python3 - <<'PY'
+          import hashlib, json, runpy, tempfile, types, zipfile
+          from pathlib import Path
+          verify = runpy.run_path("scripts/qa-release-inputs.py")
+          policy = types.SimpleNamespace(**runpy.run_path("scripts/owner_release_sign.py"))
+          with tempfile.TemporaryDirectory() as directory:
+              apk = Path(directory)/"synthetic.zip"
+              content = [("classes.dex", b"synthetic bytes"), ("META-INF/example", b"source")]
+              with zipfile.ZipFile(apk, "w") as archive:
+                  for name, value in content:
+                      archive.writestr(name, value)
+              digest = hashlib.sha256()
+              for name, value in sorted(content):
+                  row = [name,len(value),hashlib.sha256(value).hexdigest()]
+                  digest.update((json.dumps(row,separators=(",",":"))+"\n").encode("ascii"))
+              assert verify["payload_digest"](apk, policy) == {"entries": 2, "sortedNameSizeContentManifestSha256": digest.hexdigest()}
+          print("Disposable two-entry transport check passed")
+          PY
