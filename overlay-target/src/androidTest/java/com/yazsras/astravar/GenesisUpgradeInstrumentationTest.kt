@@ -182,7 +182,10 @@ class GenesisUpgradeInstrumentationTest {
         find("Carried · Quantity 3")
         ui.selectSection(product, "Resources")
         find("Genesis Legacy Retention Charges")
-        find("2 / 5")
+        if (candidateVersion >= 59) {
+            find("2/5")
+            ui.bounds(By.desc("2/5 remaining").pkg(product), "Accessible retained resource balance")
+        } else find("2 / 5")
         val companionTab = if (candidateVersion >= 59) "Connections" else "Companions"
         ui.ensurePrimaryTab(product, companionTab)
         if (candidateVersion >= 59) ui.selectSection(product, "Companions")
