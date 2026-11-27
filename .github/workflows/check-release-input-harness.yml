@@ -35,3 +35,40 @@ jobs:
               assert verify["payload_digest"](apk, policy) == {"entries": 2, "sortedNameSizeContentManifestSha256": digest.hexdigest()}
           print("Disposable two-entry transport check passed")
           PY
+  receipt:
+    name: Read the measured QA payload manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Read the preserved receipt by its official repository digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          umask 077
+          artifact=15184464592
+          expected=c5dbfda6fef54062e77bdfa2df043a9a6bbbaf17d834b49b3d8a4e7e5a8ad2ff
+          api="repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact"
+          gh api "$api" > receipt-metadata.json
+          jq -e --arg hash "sha256:$expected" '.name == "ascension-native-input-receipts" and .digest == $hash and .workflow_run.id == 45972156517 and .expired == false' receipt-metadata.json >/dev/null
+          gh api "$api/zip" > receipt.zip
+          echo "$expected  receipt.zip" | sha256sum -c -
+          python3 - <<'PY'
+          import hashlib,json,zipfile
+          with zipfile.ZipFile("receipt.zip") as z:
+              assert sorted(z.namelist()) == ["ci-evidence.json","preservation.json","tested-input.json"]
+              c,p,t = [json.loads(z.read(n)) for n in ("ci-evidence.json","preservation.json","tested-input.json")]
+              assert p["members"]["tested-input.json"] == hashlib.sha256(z.read("tested-input.json")).hexdigest()
+              assert p["members"]["ci-evidence.json"] == hashlib.sha256(z.read("ci-evidence.json")).hexdigest()
+              assert c["run"]["run_id"]==p["officialRun"]==45962475021 and c["artifact"]["artifact_id"]==p["officialArtifactId"]==15185466555
+              assert p["sourceCommit"] == t["sourceCommit"] == "9ded49ee06b22f389c4d5f5553f975cb02fa762f"
+              assert t["archiveSha256"] == p["officialArchiveSha256"] == "f34d8562f6c13fe775bd4ae79ed79f8d837227cfa07091c39332ab622accf309"
+              assert t["testedApkSha256"] == p["testedApkSha256"] == "a45cb267e6a5e906aad7653f2120c29a2970dd6701d6086c93de7f7969afaef7"
+              assert p["wrapperId"]==15185767457 and p["retrievedAndVerified"] and p["requestedRetentionDays"]==90
+              assert t["ownerSigningPerformed"] is False and t["ownerSigningMaterialAccessed"] is False
+              print("QA_PAYLOAD_MEASUREMENT "+json.dumps({k:t[k] for k in ("package","versionName","versionCode","apkPayload","nativeChecks","sdk","sixteenKiBAligned")},sort_keys=True))
+          PY
