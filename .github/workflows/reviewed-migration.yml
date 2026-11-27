@@ -1,0 +1,27 @@
+name: Reviewed migration verification
+on:
+  push:
+    branches: ['migration/reviewed-originals']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Run migration and recovery regression fixtures
+        run: |
+          python3 -m venv --system-site-packages "$RUNNER_TEMP/migration-test"
+          test_python="$RUNNER_TEMP/migration-test/bin/python"
+          "$test_python" -c 'from cryptography.fernet import Fernet' || "$test_python" -m pip install --only-binary=:all: cryptography==50.0.0
+          "$test_python" -m unittest discover -s scripts/tests -p 'test_ascension*' -v
+      - name: Verify the staged gameplay runtime and schema
+        run: |
+          node --test backend/owner-bridge/cloud-structured-effects.test.mjs
+          node scripts/verify-ascension-parity.mjs "$RUNNER_TEMP/protocol-parity.json"
+          cmp docs/ascension/protocol-parity.json "$RUNNER_TEMP/protocol-parity.json"

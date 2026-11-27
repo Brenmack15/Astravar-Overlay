@@ -3,10 +3,14 @@ import base64
 from collections import Counter
 from pathlib import Path
 import subprocess
+from ascension_migrate_range import native_attack_distance
 from ascension_migrate_legacy import (COINS, IDENTITY, encode, inspect_notion_transfer, loads,
                                       sha, source_families, verify)
+from ascension_migrate_funds import validate_fund_target
+from ascension_migrate_documents import FAMILY as DOCUMENT_FAMILY, FORMAT as DOCUMENT_FORMAT, index_documents
 from verify_campaign_archive import inspect_archive
 from ascension_migrate_weapon import archive_rows, working_rows
+from ascension_migrate_authority import consumed_state, archived_by, fixture_memberships, fixture_only, reviewed_grants
 
 FORMAT = "astravar-reviewed-migration"
 STATS = ("STR", "DEX", "CON", "INT", "WIS", "CHA")
@@ -33,6 +37,7 @@ REQUIRED = {
     "campaign_session":"arcId previousSessionId playedOn openingCheckpointId closingCheckpointId summary state worldStart worldEnd eventIds source",
 }
 HISTORICAL = {
+    DOCUMENT_FAMILY,
     "campaign.events", "records.receipts", "records.audit", "records.crafts", "records.consumptions", "records.milestones",
     "archive.receipts", "archive.backups", "archive.sources", "playable.changes", "playable.rolls", "authority.receipts",
     "archive.references", "archive.relations", "reference.records", "reference.attachments", "reference.metadata", "playable.drafts",
@@ -132,6 +137,8 @@ def indexed(raw):
     fmt = v["format"]
     if fmt == "astravar-backup":
         return fmt, working_rows(v)
+    if fmt == DOCUMENT_FORMAT:
+        return index_documents(v)
     if fmt == "astravar-reviewed-source-facts":
         verify(set(v)=={"format","version","owner","continuity","facts"} and type(v["version"]) is int and v["version"]==1 and
                isinstance(v["facts"],list) and 0<len(v["facts"])<=10000,"Invalid reviewed source-facts envelope")
@@ -151,7 +158,8 @@ def indexed(raw):
                     ("reference.metadata", True, [((payload["campaignId"],), {k:x for k,x in payload.items() if k not in ("records","attachments","mapped")})]),
                     ("reference.attachments", True, [((str(i),), r) for i,r in enumerate(payload.get("attachments",[]))])]
         if payload.get("mapped"):
-            families.extend(("reference."+name, declared, rows) for name,declared,rows in source_families(payload["mapped"]))
+            families.extend(("reference."+name, declared, rows) for name,declared,rows
+                            in source_families(payload["mapped"], archive_projection=True))
     elif fmt in ("astravar-notion-character-transfer-v1", "astravar-notion-character-transfer-v2"):
         inspect_notion_transfer(v, raw)
         families = [("notion.character", True, [((v["transferId"],), v["character"])]),
@@ -251,8 +259,8 @@ def check_target(row, entities):
     if kind=="actor":
         verify(aid==row["id"] and isinstance(data["abilities"],dict) and set(data["abilities"])==set(STATS) and
                all(integer(v,0,100) for v in data["abilities"].values()), "Invalid actor or ability shape")
-        verify(all(integer(data[k]) for k in ("currentHp","maxHp","temporaryHp","baseAc","proficiency")) and
-               (data["maxHp"] is None or data["currentHp"] is None or data["currentHp"]<=data["maxHp"]), "HP exceeds recorded capacity")
+        verify(all(integer(data[k]) for k in ("currentHp","maxHp","temporaryHp","baseAc","proficiency")),
+               "Invalid actor statistic")
         verify(isinstance(data["poolIds"],list) and isinstance(data["effectIds"],list) and isinstance(data["skills"],dict),
                "Invalid actor mechanics collections")
     if kind=="actor":
@@ -443,7 +451,7 @@ def actor_source_references(plan, entries, decisions, targets):
 
 def project(raw_by_hash, plan, tenant):
     base_fields={"format","version","owner","continuity","sources","decisions","targets","links","parity"}
-    verify(isinstance(plan,dict) and set(plan) in (base_fields,base_fields|{"media"}) and
+    verify(isinstance(plan,dict) and base_fields <= set(plan) <= base_fields|{"media","reviewAuthority"} and
            plan["format"]==FORMAT and type(plan["version"]) is int and plan["version"] in (1,2) and
            (plan["owner"],plan["continuity"])==tenant and all(isinstance(v,str) and v.strip() for v in tenant),
            "Unsupported or wrongly scoped reviewed mapping")
@@ -455,9 +463,9 @@ def project(raw_by_hash, plan, tenant):
     for digest, raw in raw_by_hash.items():
         verify(digest==sha(raw), "Original export digest mismatch")
         fmt, indexed_rows=indexed(raw)
-        if fmt=="astravar-reviewed-source-facts":
+        if fmt in ("astravar-reviewed-source-facts", DOCUMENT_FORMAT):
             doc=loads(raw)
-            verify((doc["owner"],doc["continuity"])==tenant, "Reviewed source facts belong to another owner or continuity")
+            verify((doc["owner"],doc["continuity"])==tenant, "Reviewed source belongs to another owner or continuity")
         entries.update({(digest,family,identity):r for (family,identity),r in indexed_rows.items()})
     archived_weapon_sources = {}
     for key,row in entries.items():
@@ -469,22 +477,34 @@ def project(raw_by_hash, plan, tenant):
             if row["values"] == {"sourceRole":"original_armor_archive"}:
                 verify(original[1:] == ("weapon.working", ("campaign",)), "Historical archive designation requires the exact weapon working source")
                 archived_weapon_sources[key] = original[0]
+    corrections, exclusions = reviewed_grants(plan.get("reviewAuthority"), tenant, entries, path_value, source_key)
+    scoped_fixtures = fixture_memberships(entries)
     decisions={}
     obligations=Counter()
     for d in plan["decisions"]:
         fields={"source","family","identity","rowSha256","disposition","reason","targets","playerKnown"}
-        verify(isinstance(d,dict) and set(d)==(fields|{"supersededBy"} if d.get("disposition")=="superseded" else fields),
+        extra = {"superseded":{"supersededBy"},"archiveProjection":{"archivedBy"}}
+        verify(isinstance(d,dict) and set(d)==fields|extra.get(d.get("disposition"),set()),
                "Invalid source decision shape")
         key=source_key(d)
         verify(key in entries and key not in decisions and sha(encode(entries[key]))==d["rowSha256"], "Missing, duplicate or changed source row binding")
         disposition=d["disposition"]
-        verify(disposition in ("map","historical","retain","foreign","superseded") and isinstance(d["reason"],str) and 0<len(d["reason"].strip())<=2000 and
+        verify(disposition in ("map","historical","retain","foreign","superseded","archiveProjection","fixture","excluded") and isinstance(d["reason"],str) and 0<len(d["reason"].strip())<=2000 and
                type(d["playerKnown"]) is bool and isinstance(d["targets"],list) and
                all(isinstance(x,str) and IDENTITY.fullmatch(x) for x in d["targets"]) and len(set(d["targets"]))==len(d["targets"]),
                "An explicit source disposition and reason is required")
         native=entries[key]
         membership=native.get("campaignId")
         if key[1]=="authority.campaigns": membership=native["id"]
+        if disposition=="excluded" or key in exclusions:
+            verify(key in exclusions and disposition=="excluded" and not d["targets"] and not d["playerKnown"],
+                   "An exact owner exclusion must be isolated from gameplay")
+        if disposition=="fixture":
+            verify(not d["targets"] and not d["playerKnown"] and fixture_only(key,native,tenant,scoped_fixtures),
+                   "Fixture exclusion lacks independent source provenance or foreign actor membership")
+        if disposition=="archiveProjection":
+            verify(not d["targets"], "Historical projection cannot activate a second target")
+            archived_by(key,native,d["archivedBy"],entries,plan["sources"],source_key)
         if disposition=="foreign":
             verify(membership is not None and membership!=tenant[1] and not d["targets"], "Foreign record has no independent foreign membership")
         if disposition=="superseded":
@@ -507,6 +527,10 @@ def project(raw_by_hash, plan, tenant):
             obligations[key[0]]+=1
         decisions[key]=d
     verify(decisions.keys()==entries.keys(),"Every original source row requires an exact disposition")
+    for d in decisions.values():
+        if d["disposition"]=="archiveProjection":
+            verify(decisions[source_key(d["archivedBy"])]["disposition"] in ("map","retain","historical","excluded","fixture","foreign"),
+                   "Native counterpart lacks an independent disposition")
     for role_key, source_hash in archived_weapon_sources.items():
         verify(decisions[role_key]["disposition"] == "historical" and
                all(d["disposition"] == "historical" for key,d in decisions.items()
@@ -575,6 +599,9 @@ def project(raw_by_hash, plan, tenant):
             original=path_value(entries[key],w["sourcePath"])
             verify(ident==scoped_identity(tenant,key[1],key[2],entities[ident]["kind"],original), "Source-derived alias differs from reviewed identity")
             aliases[ident]=original
+    denied_ids = {key[2][-1] for key in exclusions}
+    verify(not (denied_ids.intersection(entities) or denied_ids.intersection(aliases.values())),
+           "Owner-excluded physical identity entered the typed graph")
     for key, decision in decisions.items():
         family, ids = key[1:]
         if decision["disposition"] != "map" or family not in ("playable.characters.itemDefinitions.effects",
@@ -616,7 +643,7 @@ def project(raw_by_hash, plan, tenant):
     witnesses={}
     for w in plan["parity"]:
         verify(isinstance(w,dict) and set(w)=={"source","family","identity","sourcePath","target","targetPath","transform"} and
-               isinstance(w["target"],str) and w["target"] in entities and w["transform"] in ("exact","omittedUnknown","scopedIdentity","canonicalRef",*SCALAR_RULES,*WIRE_ENUMS),
+               isinstance(w["target"],str) and w["target"] in entities and w["transform"] in ("exact","omittedUnknown","scopedIdentity","canonicalRef","ownerCorrection","ownerConfirmedCapacity","confirmedFunds","consumedLifecycle","nativeSlotLevel","nativeSlotBalance","nativeAttackDistance",*SCALAR_RULES,*WIRE_ENUMS),
                "Invalid mechanical evidence witness")
         key=source_key(w)
         verify(key in decisions and w["target"] in decisions[key]["targets"], "Mechanical evidence belongs to another row or target")
@@ -627,9 +654,40 @@ def project(raw_by_hash, plan, tenant):
         sp=w["sourcePath"]
         expected=path_value(entries[key],sp,w["transform"]=="omittedUnknown")
         actual=path_value(entities[w["target"]],tp)
+        if w["transform"] == "consumedLifecycle":
+            expected = consumed_state(corrections,entities[w["target"]],key,sp,tp)
+        if w["transform"] in ("nativeSlotLevel","nativeSlotBalance"):
+            is_level = w["transform"] == "nativeSlotLevel"
+            verify(key[1]=="playable.characters.spellSlots" and len(key[2])==2 and
+                   entities[w["target"]]["kind"]=="resource_pool" and entities[w["target"]]["data"]["type"]=="spell_slot" and
+                   key[2][0] in (entities[w["target"]]["actorId"],aliases.get(entities[w["target"]]["actorId"])) and
+                   key[2][1] in tuple(map(str, range(1,10))) and
+                   sp == (["sourceKey"] if is_level else ["value"]) and tp == ["data","slotLevel" if is_level else "current"],
+                   "Native spell-slot witness has the wrong actor, source or field")
+            if is_level:
+                verify(expected == key[2][1], "Invalid indexed spell-slot level")
+                expected = int(expected)
+        if w["transform"] == "confirmedFunds":
+            grant = corrections.get(pair)
+            verify(grant is not None and grant["op"] == "confirmedFunds" and source_key(grant) == key and
+                   grant["sourcePath"] == sp and entities[w["target"]]["kind"] == "wallet", "Unbound confirmed holding component")
+            validate_fund_target(grant, entities[w["target"]], scoped_identity(tenant,key[1],key[2],"wallet",expected), entries)
+            expected = grant["after"]
+        elif w["transform"] in ("ownerCorrection","ownerConfirmedCapacity") or pair in corrections:
+            grant = corrections.get(pair)
+            verify(grant is not None and grant["op"] in ("correct","confirmSlotCapacity","consumeRemainder") and w["transform"]==("ownerConfirmedCapacity" if grant["op"]=="confirmSlotCapacity" else "ownerCorrection") and source_key(grant)==key and
+                   grant["sourcePath"]==sp and grant["targetKind"]==entities[w["target"]]["kind"] and
+                   exact(expected,grant["before"]), "Field correction lacks its exact authorized source and target")
+            if grant["op"]=="confirmSlotCapacity":
+                target=entities[w["target"]]
+                verify(target["data"].get("type")=="spell_slot" and str(target["data"].get("slotLevel"))==key[2][1] and
+                       key[2][0] in (target["actorId"],aliases.get(target["actorId"])), "Reviewed capacity belongs to a different slot")
+            expected=grant["after"]
         if w["transform"]=="scopedIdentity":
             verify(tp==["id"] and exact(aliases.get(actual),expected),"Incorrect source-derived identity")
             expected=actual
+        if w["transform"]=="nativeAttackDistance":
+            expected=native_attack_distance(key,sp,tp,entries[key],entities[w["target"]])
         if w["transform"]=="canonicalRef":
             verify(tp[0]=="data" and isinstance(actual,str) and actual in aliases and exact(aliases[actual],expected),
                    "Canonical relationship lacks its original source identity")
@@ -683,14 +741,20 @@ def project(raw_by_hash, plan, tenant):
         if w["transform"]=="omittedUnknown":
             verify(expected is None, "An observed value cannot become unknown")
         verify(exact(expected,actual),"Recorded mechanical parity mismatch for "+str(tp[-1]))
-        if len(tp)>1 and tp[-1] in MECHANICAL_NAMES:
-            verify(sp and sp[-1] in MECHANICAL_NAMES[tp[-1]], "Incorrect source field for recorded mechanical value")
+        if len(tp)>1 and tp[-1] in MECHANICAL_NAMES and w["transform"] not in ("nativeSlotBalance","ownerConfirmedCapacity","confirmedFunds","consumedLifecycle"):
+            component_holder = (tp == ["data","holderId"] and sp == ["actorId"] and key[1] == "authority.actors" and
+                                entities[w["target"]]["kind"] == "wallet" and
+                                any(g["op"] == "confirmedFunds" and g["target"] == w["target"] and source_key(g) == key
+                                    for g in corrections.values()))
+            verify(component_holder or (sp and sp[-1] in MECHANICAL_NAMES[tp[-1]]),
+                   "Incorrect source field for recorded mechanical value")
         if key[1]=="review.facts":
             verify(tp[0]=="data" and tp[-1] not in MECHANICAL_NAMES and sp and sp[0]=="values" and
                    all(type(v) not in (int,float) for _,v in scalar_paths(actual)), "Reviewed classifications cannot supply identities or numeric mechanical parity")
         if tp==["id"]:
             verify(isinstance(expected,str) and w["transform"] in ("scopedIdentity","exact"), "Canonical identity must retain an original native identity")
         witnesses[pair]=key
+    verify(corrections.keys() <= witnesses.keys(), "Approved field correction lacks a typed witness")
     bound_fields={i:set() for i in entities}
     for i,path in witnesses:
         if len(path)>1 and path[0]=="data":

@@ -252,3 +252,30 @@ test('pinned exhaustion changes only its edition-specific rolls, movement, capac
   await custom.run('set_condition',{...update,customExhaustionRule:'legacy_2014',adjudicationSource:'Reviewed custom profile adopts legacy exhaustion'});
   assert.equal((await custom.sheet()).movement.walk,15);
 });
+
+test('an attuned worn ward upgrades only while resistance from an independent source is active',async t=>{
+  const f=await fixture(t,{attunementCapacity:1});
+  await f.run('define_item_definition',{definitionId:'brocade-def',name:'Fictional brocade',description:'Fixture garment',
+    category:'gear',rarity:null,stackable:false,wearable:true,handheld:true,attunement:'required',attunementSeconds:0,source});
+  await f.run('acquire_item',{itemId:'brocade',definitionId:'brocade-def',ownerId:actorId,quantity:1,source});
+  const effect={actorId,name:'Fixture cold defense',source,target:'damage_defense',key:'cold',operation:'resistance'};
+  await f.run('define_effect',{...effect,effectId:'frost-ward',sourceItemId:'brocade',requiresAttunement:true,wornResistanceUpgrade:true});
+  await assert.rejects(f.run('define_effect',{...effect,effectId:'misconfigured',wornResistanceUpgrade:true}),/WORN_RESISTANCE_SOURCE_REQUIRED/);
+  const ward=async()=>(await f.sheet()).defenses.find(r=>r.source==='frost-ward');
+  const equip=equipment=>f.run('equip_item',{itemId:'brocade',equipment,source});
+  const attune=attuned=>f.run('set_item_attunement',{itemId:'brocade',attuned,elapsedSeconds:0,confirmed:true,source});
+  await equip('worn');assert.equal(await ward(),undefined);
+  await attune(true);assert.equal((await ward()).kind,'resistance');
+  await f.run('define_effect',{...effect,effectId:'alias-on-same-item',sourceItemId:'brocade'});
+  await f.run('define_effect',{...effect,effectId:'other-element',key:'fire'});
+  assert.equal((await ward()).kind,'resistance');
+  await f.run('define_effect',{...effect,effectId:'separate-lining',sourceItemId:'focus'});
+  await f.equip('worn');assert.equal((await ward()).kind,'immunity');
+  assert.equal((await ward()).independentResistanceId,'separate-lining');
+  await equip('held');assert.equal(await ward(),undefined);
+  await equip('worn');await f.equip('packed');assert.equal((await ward()).kind,'resistance');
+  await f.run('define_effect',{...effect,effectId:'innate-resistance'});
+  assert.equal((await ward()).independentResistanceId,'innate-resistance');
+  await attune(false);assert.equal(await ward(),undefined);
+  assert.equal((await f.sheet()).defenses.some(r=>r.kind==='immunity'),false);
+});

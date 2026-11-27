@@ -56,10 +56,15 @@ def read_limited(path, maximum=MAX_BYTES):
     return body
 
 
-def source_families(value):
+def source_families(value, *, archive_projection=False):
     """Return every format-declared row type, including omitted older optional collections."""
     fmt = value.get("format")
     version = value.get("schema")
+    if archive_projection and "format" not in value:
+        verify(set(value) == {"schema", "exportedAt", "items", "events", "records"} and
+               type(version) is int and version == 5,
+               "Unsupported formatless archived ledger projection")
+        fmt = "astravar-campaign-items"
     verify(type(version) is int, "Native input requires an integer schema")
     families = []
 

@@ -57,8 +57,8 @@ export const effectSchema = fields({
   actorId:identifier, effectId:identifier, name:named(160), source:named(300),
   target:option('ability_score','ability_check','skill','save','passive','initiative','ac','max_hp','attack','damage','spell_attack','spell_dc','speed','sense','damage_defense','condition_immunity','spell_damage_immunity','save_mitigation','roll_edge'),
   key:identifier, operation:option('add','set','minimum','maximum','resistance','immunity','vulnerability','advantage','disadvantage','keep_highest_three','evade'),
-  amount:whole(-1000,1000), priority:whole(-100,100), stackingKey:identifier,
-  sourceItemId:identifier, transfersWithItem:boolean, requiresAttunement:boolean, requiresOperating:boolean, formId:identifier, contextTag:identifier,
+  amount:whole(-1000,1000), priority:whole(-100,100), stackingKey:identifier, wornResistanceUpgrade:{const:true},
+  sourceItemId:identifier, transfersWithItem:boolean, requiresAttunement:boolean, requiresOperating:boolean, requiresWorn:{const:true}, formId:identifier, contextTag:identifier,
   damageRoute:option('attack','spell','both'),damageComponentId:identifier,damageType:option(...damageTypes),eachMatchingComponent:boolean,
   charge:fields({poolId:identifier,amount:whole(1),trigger:option('attempt','confirmed_hit')},['poolId','amount','trigger']),
   expiresAt:nullable(whole(0,100000000000)), enabled:boolean
@@ -137,14 +137,14 @@ export async function transferableSource(ctx,config){
     must(pool.data.type==='charge','TRANSFERABLE_RULE_REQUIRES_ITEM_CHARGES');
   }
 }
-export async function gearEligible(ctx,itemId,actorId,attunement=false,requiresOperating=false,formOverride=undefined) {
+export async function gearEligible(ctx,itemId,actorId,attunement=false,requiresOperating=false,formOverride=undefined,wornOnly=false) {
   if (!itemId) return !attunement && !requiresOperating;
   const item=await ctx.current(itemId);
   if(item?.kind!=='item_instance' || item.data.custodianId!==actorId)return false;
   ctx.require('inventory',actorId,false);
   const data=item.data;
   const equipped=!!data && item.life==='active' && data.custodianId===actorId && data.partyAccess===true &&
-    data.holding==='carried' && ['held','worn'].includes(data.equipment) && (!requiresOperating || data.operating===true) &&
+    data.holding==='carried' && (data.equipment==='worn'||!wornOnly && data.equipment==='held') && (!requiresOperating || data.operating===true) &&
     data.quantity===1 && (!attunement || data.attuned===true);
   if(!equipped)return false;
   const form=formOverride===undefined?await activeForm(ctx,await actor(ctx,actorId)):formOverride;
@@ -191,7 +191,7 @@ export async function activeEffects(ctx,a,form,contextTags=[],chargedEffectIds=[
     const eligible=d.enabled && matchesForm(d,ruleFormIds(form)) &&
       (!d.contextTag || contextTags.includes(d.contextTag)) &&
       (d.expiresAt==null || (a.data.gameSeconds!=null && a.data.gameSeconds<d.expiresAt)) &&
-      await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating,form);
+      await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating,form,d.requiresWorn||d.wornResistanceUpgrade);
     if (!eligible) {suppressed.push(id); continue;}
     if(d.charge){
       const canInspect=ctx.grant.scopes.includes('resources.read') && (ctx.grant.actors.includes('*')||ctx.grant.actors.includes(a.id));
@@ -342,16 +342,22 @@ export async function sheet(ctx,id,contextTags=[],previewFormId=undefined,charge
     if(d.lipReading)communications.push({featureId,kind:'lip_reading',requiresVisibleMouth:true,requiresUnderstoodLanguage:true});
     if(d.mobility)mobilityRules.push({featureId,kind:d.mobility,eligible:movement.fly>0,requiresMovement:'fly'});
   }
+  const defenses=active.filter(row=>row.data.target==='damage_defense');
+  const defenseEntries=defenses.map(({id,title,data})=>{
+    const independent=data.wornResistanceUpgrade && defenses.find(other=>other.data.key===data.key &&
+      other.data.operation==='resistance' && other.data.sourceItemId!==data.sourceItemId && !other.data.wornResistanceUpgrade);
+    return {type:data.key,kind:independent?'immunity':data.operation,source:id,title,provenance:data.source??null,
+      sourceItemId:data.sourceItemId??null,formId:data.formId??null,requiresAttunement:data.requiresAttunement===true,
+      requiresOperating:data.requiresOperating===true,contextTag:data.contextTag??null,
+      ...(independent?{independentResistanceId:independent.id}:{})};
+  });
   return {rollAids:await activeCastAids(ctx,a),actorId:id,level:a.data.level,rulesProfile:a.data.rulesProfile,classTracks:a.data.classTracks??null,activeDeploymentId:a.data.activeDeploymentId??null,communications,mobilityRules,exhaustion,activityState:a.data.activityState??null,formId:form?.id??null,ruleFormIds:ruleFormIds(form),size:form?.data.size??a.data.size??null,creatureType:form?.data.creatureType??a.data.creatureType??null,
     senses,abilities,checks,saves,skills,passives,skillDefinitions,ac,movement,
     initiative:numeric(abilities.DEX.modifier,active,'initiative','all'),proficiency:a.data.proficiency,
     currentHp:a.data.currentHp,maxHp:hpMaximum.value,temporaryHp:a.data.temporaryHp,
     hpMaximum:{...hpMaximum,baseMaxHp:a.data.maxHp,baselineConstitutionModifier:baselineCon,constitutionAdjustment:conDelta},
     activeEffects:active.map(r=>r.id),suppressedEffects:suppressed,optionalChargedEffects:optional,conditions:a.data.conditions,rollModes,rollRestrictions,contextTags:a.data.contextTags??[],
-    defenses:active.filter(r=>r.data.target==='damage_defense').map(r=>({type:r.data.key,kind:r.data.operation,source:r.id,
-      title:r.title,provenance:r.data.source??null,sourceItemId:r.data.sourceItemId??null,formId:r.data.formId??null,
-      requiresAttunement:r.data.requiresAttunement===true,requiresOperating:r.data.requiresOperating===true,
-      contextTag:r.data.contextTag??null})),
+    defenses:defenseEntries,
     effects:active};
 }
 export function availableUses(pool){

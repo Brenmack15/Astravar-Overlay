@@ -189,6 +189,8 @@ async function effect(ctx,x,edit=false){
     if(x.target==='spell_attack' && x.key!=='all')await owned(ctx,'spell_grant',x.key,a.id);
   }
   if(x.target!=='damage')must([x.damageRoute,x.damageComponentId,x.damageType,x.eachMatchingComponent].every(v=>v===undefined),'DAMAGE_SELECTOR_ON_OTHER_EFFECT');
+  if(x.wornResistanceUpgrade)must(x.target==='damage_defense' && x.operation==='resistance' &&
+    x.sourceItemId && x.requiresAttunement,'WORN_RESISTANCE_SOURCE_REQUIRED');
   if(numeric.includes(x.target)){
     must(['add','set','minimum','maximum'].includes(x.operation)&&x.amount!=null,'NUMERIC_EFFECT_INVALID');
     if(['ability_score','ability_check','save'].includes(x.target))must(x.key==='all'||stats.includes(x.key),'INVALID_ABILITY');
@@ -225,7 +227,7 @@ async function effect(ctx,x,edit=false){
   if(x.formId)await owned(ctx,'form',x.formId,a.id);
   if(x.sourceItemId)must(await ctx.get('item_instance',x.sourceItemId),'EFFECT_SOURCE_MISSING');
   await transferableSource(ctx,x);
-  must((!x.requiresAttunement&&!x.requiresOperating)||x.sourceItemId,'EFFECT_SOURCE_REQUIRED');
+  must((!x.requiresAttunement&&!x.requiresOperating&&!x.requiresWorn)||x.sourceItemId,'EFFECT_SOURCE_REQUIRED');
   const {actorId,effectId,name,...config}=x;
   const data={...config,enabled:x.enabled??old?.data.enabled??true,priority:x.priority??0};
   if(old){

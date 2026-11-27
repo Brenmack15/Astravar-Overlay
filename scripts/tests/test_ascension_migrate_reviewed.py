@@ -633,6 +633,94 @@ class ReviewedGraphTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"export digest"):
             self.package()
 
+    def test_independent_correction_requires_exact_source_and_scoped_authority(self):
+        from unittest.mock import patch
+        from ascension_migrate_authority import BINDING, PIN
+        binding = {key:self.by_family["records.wallets"][key] for key in BINDING}
+        decision = {"decision_id":"review-one","verbatim":"Confirm twelve gold pieces.",
+                    "authority":"Owner fixture","wallet":binding,"accepted":12}
+        grant = {**binding,"decision":"review-one","bindingPath":["wallet"],"op":"correct",
+                 "sourcePath":["gold"],"target":WALLET,"targetKind":"wallet","targetPath":["data","coins","gp"],
+                 "before":14,"after":12,"acceptedPath":["accepted"]}
+        authority = {"version":1,"owner":TENANT[0],"continuity":TENANT[1],
+                     "decisions":{"review-one":decision},"grants":[grant]}
+        self.plan["reviewAuthority"] = authority
+        target = next(t for t in self.plan["targets"] if t["id"] == WALLET)
+        target["data"]["coins"]["gp"] = 12
+        witness = next(w for w in self.plan["parity"] if w["target"]==WALLET and w["targetPath"]==grant["targetPath"])
+        witness["transform"] = "ownerCorrection"
+        with patch.dict("os.environ",{PIN:mig.sha(encode(authority))}):
+            self.assertEqual(0,self.package()["counts"]["cloud_receipts"])
+            parity=mig.mechanical_parity(self.files[0],mig.read_bundle(self.dst))
+            self.assertEqual(1,parity["counts"]["approvedCorrection"])
+            self.assertEqual(0,parity["counts"]["different"])
+            target["data"]["coins"]["gp"] = 13
+            with self.assertRaisesRegex(ValueError,"mismatch"):
+                self.package()
+            target["data"]["coins"]["gp"] = 12
+            grant["after"] = 13
+            with self.assertRaisesRegex(ValueError,"digest"):
+                self.package()
+        with patch.dict("os.environ",{PIN:mig.sha(encode(authority))}):
+            with self.assertRaisesRegex(ValueError,"accepted values"):
+                self.package()
+        grant["after"] = 12
+        authority["owner"] = "different"
+        with patch.dict("os.environ",{PIN:mig.sha(encode(authority))}):
+            with self.assertRaisesRegex(ValueError,"owner"):
+                self.package()
+
+    def test_archive_embedded_ledger_retains_bytes_and_native_revision(self):
+        from ascension_migrate_reviewed import indexed
+        from ascension_migrate_authority import BINDING
+        rec={"externalId":"page","category":"reference","visibility":"player","body":"Fixture",
+             "contentSha256":mig.sha(b"Fixture"),"propertiesJson":"{}","relationIds":[],"sourceUrl":"https://example.test/page"}
+        projection={"schema":5,"exportedAt":0,"items":[],"events":[],"records":{"wallets":[dict(self.wallet)]}}
+        payload={"campaignId":TENANT[1],"title":"Review","sourceRootUrl":"https://example.test/root",
+                 "sourceRootRevision":"1","records":[rec],"mapped":projection}
+        def archive():
+            body=json.dumps(payload)
+            return encode({"format":"astravar-campaign-archive","schema":1,"payload":body,"payloadSha256":mig.sha(body.encode())})
+        raw=archive()
+        source=self.root/"archive.json"
+        source.write_bytes(raw)
+        self.files.append(source)
+        archived=template([raw],*TENANT)
+        self.plan["sources"].update(archived["sources"])
+        for d in archived["decisions"]:
+            if d["family"]=="reference.records.wallets":
+                d.update(disposition="archiveProjection",reason="Matching native counterpart",
+                         archivedBy={k:self.by_family["records.wallets"][k] for k in BINDING})
+            else:
+                d.update(disposition="historical",reason="Immutable archive")
+        self.plan["decisions"].extend(archived["decisions"])
+        self.package()
+        b=mig.read_bundle(self.dst)
+        self.assertEqual(raw,b["sources"][mig.sha(raw)][0])
+        self.assertEqual(1,sum(r["kind"]=="wallet" for r in b["rows"]["cloud_entities"]))
+        with self.assertRaises((KeyError,ValueError)):
+            indexed(encode(projection))
+        for key,value in (("format","other"),("extra",[]),("schema",4)):
+            altered=projection.copy()
+            altered[key]=value
+            payload["mapped"]=altered
+            with self.subTest(key=key),self.assertRaises(ValueError):
+                indexed(archive())
+
+    def test_reserved_fixture_scope_needs_provenance_or_foreign_parent(self):
+        from ascension_migrate_authority import fixture_memberships, fixture_only
+        k=("source","playable.characters.features",("actor","feature"))
+        rows={("source","records.partySheets",("actor",)):{"campaignId":"another"}}
+        self.assertTrue(fixture_only(k,{},TENANT,fixture_memberships(rows)))
+        rows[("source","authority.actors",("actor",))]={"campaignId":TENANT[1]}
+        self.assertFalse(fixture_only(k,{},TENANT,fixture_memberships(rows)))
+        k=("source","records.projects",("project",))
+        tagged={"source":"SYNTHETIC_QA_ONLY: isolated fixture"}
+        self.assertTrue(fixture_only(k,tagged,TENANT,fixture_memberships(rows)))
+        self.assertFalse(fixture_only(k,{"description":tagged["source"]},TENANT,fixture_memberships(rows)))
+        rows[("source","records.externalReferences",("ref",))]={"recordId":"project","campaignId":TENANT[1]}
+        self.assertFalse(fixture_only(k,tagged,TENANT,fixture_memberships(rows)))
+
 
 if __name__=="__main__":
     unittest.main()

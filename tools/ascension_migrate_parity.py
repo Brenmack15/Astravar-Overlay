@@ -59,11 +59,16 @@ def mechanical_parity(source_path, bundle):
     source_digest=sha(raw)
     aliases={}
     reviewed_actors=set()
+    approved={}
     evidence=bundle["sources"].get(source_digest)
     if evidence and "reviewedMapping" in evidence[1]:
         plan=evidence[1]["reviewedMapping"]
         from ascension_migrate_reviewed import indexed as all_native_rows, path_value
         _, indexed = all_native_rows(raw)
+        # check_database has already verified the independent pin and every grant.
+        for grant in plan.get("reviewAuthority", {}).get("grants", []):
+            if grant["op"]=="correct" and grant["source"]==source_digest:
+                approved[(grant["target"],grant["targetPath"][-1])] = grant
         for decision in plan["decisions"]:
             if decision["source"] == source_digest and decision["family"] == "playable.characters" and decision["disposition"] == "map" and decision["playerKnown"]:
                 reviewed_actors.update(t for t in decision["targets"] if entities.get(t, ({},))[0].get("kind") == "actor")
@@ -76,7 +81,16 @@ def mechanical_parity(source_path, bundle):
     checks, holds = [], []
     def check(kind, identity, field, expected, actual, available=True):
         state = "absent" if not available else "different" if expected != actual else "bothUnknown" if expected is None else "equal"
-        checks.append({"kind":kind, "id":identity, "field":field, "native":expected, "cloud":actual, "status":state})
+        row = {"kind":kind, "id":identity, "field":field, "native":expected, "cloud":actual, "status":state}
+        candidates = {identity, *aliases.get(("resource_pool" if kind=="item_resource" else kind,identity),set())}
+        for target_id in candidates:
+            grant = approved.get((target_id,field))
+            if (state=="different" and grant and grant["targetKind"]==("resource_pool" if kind=="item_resource" else kind)
+                    and encode(expected)==encode(grant["before"]) and encode(actual)==encode(grant["after"])):
+                row.update(status="approvedCorrection", decision=grant["decision"], rowSha256=grant["rowSha256"],
+                           sourcePath=grant["sourcePath"], acceptedPath=grant["acceptedPath"])
+                break
+        checks.append(row)
     def target(kind, identity, actor_id=None):
         proposed=aliases.get((kind,identity),set())
         canonical=next(iter(proposed)) if len(proposed)==1 else identity
@@ -166,7 +180,7 @@ def mechanical_parity(source_path, bundle):
         expected={"ownerId":owner}
         expected.update({k:instance[k] for k in ("quantity","definitionId","attuned") if k in instance})
         compare_fields("item_instance",identity,expected,data,present)
-    counts={status:sum(c["status"]==status for c in checks) for status in ("equal","bothUnknown","different","absent")}
+    counts={status:sum(c["status"]==status for c in checks) for status in ("equal","bothUnknown","different","absent","approvedCorrection")}
     return {"sourceSha256":sha(raw), "manifestSha256":bundle["digest"],"continuity":continuity,
             "counts":counts,"checks":checks,"holds":holds,"coverage":"recorded values in selected native families",
             "comparisonSha256":sha(encode([checks,holds]))}

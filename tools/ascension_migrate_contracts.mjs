@@ -5,6 +5,7 @@ import {RECORD_KINDS, RECORD_OPERATIONS} from '../backend/owner-bridge/cloud-rec
 import {CONTINUITY_KINDS} from '../backend/owner-bridge/cloud-continuity.mjs';
 import {cloudMatches} from '../backend/owner-bridge/cloud-validation.mjs';
 import {checkedClassTracks} from '../backend/owner-bridge/cloud-class-progression.mjs';
+import {sheet} from '../backend/owner-bridge/cloud-mechanics-core.mjs';
 
 const kinds = {...MECHANIC_KINDS, ...RECORD_KINDS, ...CONTINUITY_KINDS};
 const operations = {...MECHANIC_OPERATIONS, ...RECORD_OPERATIONS};
@@ -42,6 +43,11 @@ function validate(row) {
     }
   }
   if (!cloudMatches(fields,schema)) invalid(row.kind,'stored definition fails the shared service contract');
+  if (row.kind === 'effect' && fields.requiresWorn && !fields.sourceItemId) invalid(row.kind,'worn effect requires an item source');
+  if (row.kind === 'effect' && row.data.wornResistanceUpgrade &&
+      !(fields.target==='damage_defense' && fields.operation==='resistance' && fields.sourceItemId && fields.requiresAttunement)) {
+    invalid(row.kind,'worn resistance upgrade requires an attuned resistance source');
+  }
   if (row.kind === 'actor' && row.data.classTracks != null) checkedClassTracks(row.data.level,row.data.classTracks);
 }
 /** Check relationships on the imported point-in-time graph without replaying declarations or casts. */
@@ -99,10 +105,27 @@ function validateCompanionSources(rows) {
     }
   }
 }
+/** Above-base current HP requires support from the same effective sheet used during play. */
+async function validateEquippedCapacity(rows) {
+  const records=new Map(rows.map(row=>[row.id,row]));
+  const context={
+    get(kind,id){const row=records.get(id);return row?.kind===kind?row:null;},
+    current(id){return records.get(id);},
+    grant:{scopes:['resources.read'],actors:['*']},
+    require(){/* The preceding graph validation bounds reads to the reviewed tenant. */},
+  };
+  for(const row of rows){
+    const {currentHp,maxHp}=row.data;
+    if(row.kind!=='actor' || currentHp==null || maxHp==null || currentHp<=maxHp)continue;
+    const projected=await sheet(context,row.id);
+    if(projected.maxHp==null || currentHp>projected.maxHp)invalid(row.kind,'HP exceeds recorded effective capacity');
+  }
+}
 try {
   const rows = JSON.parse(readFileSync(0, 'utf8'));
   for (const row of rows) validate(row);
   validateCompanionSources(rows);
+  await validateEquippedCapacity(rows);
 } catch (error) {
   process.stderr.write(error.message+'\n');
   process.exitCode=2;
