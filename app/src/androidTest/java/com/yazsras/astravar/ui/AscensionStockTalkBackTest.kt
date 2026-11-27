@@ -186,6 +186,31 @@ class AscensionStockTalkBackTest {
                 var r=focusTarget()
                 val focusLabel=focusText()
                 status("focused $focusLabel")
+                assertTrue(history().isEmpty())
+                val control=generateSequence(requireNotNull(visible(label))) { it.parent }.take(5).first { n ->
+                    n.actionList.any { it.id==AccessibilityNodeInfo.ACTION_LONG_CLICK && it.label?.toString()=="Options for Strength check" }
+                }
+                assertTrue(control.isEnabled)
+                var paginationInput=nextFocus()
+                if(paginationInput==null) {
+                    val adjacentLabel="Dexterity check +0"
+                    val neighbor=bounds(requireNotNull(visible(adjacentLabel)))
+                    hardware("EXPLORE ${neighbor.centerX()} ${neighbor.centerY()}")
+                    requireObservation("Touch exploration must navigate to the distinct Dexterity modifier") {
+                        val current=focus()
+                        current!=null && current.packageName==context.packageName &&
+                            bounds(current).contains(neighbor.centerX(),neighbor.centerY()) && bounds(current).height()<=neighbor.height()*3 &&
+                            descendants(current).any { adjacentLabel in nodeText(it) }
+                    }
+                    paginationInput="EXPLORE actual Dexterity quick-roll control"
+                }
+                requireObservation("TalkBack next-item swipe must navigate away from Strength") {
+                    val n=focus()
+                    n!=null && n.packageName==context.packageName && !hasTargetFocus()
+                }
+                val adjacent=focusText()
+                status("TalkBack $paginationInput navigated to $adjacent")
+                r=focusTarget()
                 hardware("COPY_LAST")
                 var spoken: String? = null
                 waitFor(2200) {
@@ -196,20 +221,6 @@ class AscensionStockTalkBackTest {
                     }
                     spoken!=null
                 }
-                assertTrue(history().isEmpty())
-                val control=generateSequence(requireNotNull(visible(label))) { it.parent }.take(5).first { n ->
-                    n.actionList.any { it.id==AccessibilityNodeInfo.ACTION_LONG_CLICK && it.label?.toString()=="Options for Strength check" }
-                }
-                assertTrue(control.isEnabled)
-                val paginationInput=nextFocus()
-                assertNotNull("Service must navigate normally away from the roll control",paginationInput)
-                requireObservation("TalkBack next-item swipe must navigate away from Strength") {
-                    val n=focus()
-                    n!=null && n.packageName==context.packageName && !hasTargetFocus()
-                }
-                val adjacent=focusText()
-                status("TalkBack $paginationInput navigated to $adjacent")
-                r=focusTarget()
                 val shown="Enter physical dice faces"
                 val shortcuts=listOf(
                     "KEYCODE_META_LEFT KEYCODE_SHIFT_LEFT KEYCODE_SPACE",
