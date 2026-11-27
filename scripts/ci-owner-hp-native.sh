@@ -279,7 +279,28 @@ if [[ "$astravar_bootstrap_gate" == true ]]; then
   run_test 'com.yazsras.astravar.data.CampaignNativeHttpsTest#authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts' native-campaign-https.txt 360
   (source scripts/ci-ascension-cloud-native.sh)
   astravar_notification_result=0
-  run_test 'com.yazsras.astravar.data.AscensionNotificationNativeTest#actualSmallEmblemInStatusBarAndShadeAcrossLightAndDarkThemes' notification-emblem.txt 360 || astravar_notification_result=$?
+  (
+    # The default AOSP 37 user preference hides every silent status icon. Exercise the
+    # real quiet channel with icons visible, then restore that user's original value.
+    icon_policy() { python3 scripts/ci-android17-silent-icons.py "$astravar_serial" AstravarHpCI "$1"; }
+    original_policy=$(icon_policy read) || exit 1
+    case "$original_policy" in
+      true) restore_policy=hide ;;
+      false) restore_policy=show ;;
+      *) exit 1 ;;
+    esac
+    restore_icon_policy() {
+      local result=$?
+      trap - EXIT
+      icon_policy "$restore_policy" || result=1
+      exit "$result"
+    }
+    trap restore_icon_policy EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    icon_policy show || exit 1
+    run_test 'com.yazsras.astravar.data.AscensionNotificationNativeTest#actualSmallEmblemInStatusBarAndShadeAcrossLightAndDarkThemes' notification-emblem.txt 360 || exit 1
+  ) || astravar_notification_result=$?
   git rev-parse HEAD >"$astravar_output/SOURCE_COMMIT.txt"
   # An independent package/Room upgrade can still produce its own evidence after a visual failure.
   bash scripts/ci-ascension-api37.sh
