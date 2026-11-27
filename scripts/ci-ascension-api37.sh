@@ -40,6 +40,17 @@ astravar_copy() {
   done
   test -s "$dst/astravar-campaign-ledger.db"
   adb -s "$astravar_serial" shell dumpsys package "$astravar_package" > "$dst/package.txt"
+  local apk_path apk_expected apk_installed
+  apk_path=$(adb -s "$astravar_serial" shell pm path "$astravar_package" | tr -d '\r' | awk 'NR == 1 { sub(/^package:/, ""); print }')
+  [[ "$apk_path" == /data/app/*/base.apk ]]
+  if [[ "$stage" == before ]]; then
+    apk_expected=validation/upgrade-baseline/code58-ci.apk
+  else
+    apk_expected=app/build/outputs/apk/release/app-release.apk
+  fi
+  apk_installed=$(adb -s "$astravar_serial" shell sha256sum "$apk_path" | awk 'NR == 1 { print $1 }')
+  test "$apk_installed" = "$(sha256sum "$apk_expected" | awk '{print $1}')"
+  printf '%s\n' "$apk_installed" > "$dst/installed-apk.sha256"
 }
 adb -s "$astravar_serial" shell cmd uimode night no
 astravar_test seedAscensionCode58 58 light
@@ -61,6 +72,10 @@ for astravar_theme in light dark; do
     test -s "$astravar_dir/screenshots/api37-$astravar_theme-$astravar_tab.png"
   done
 done
+# The isolated package rehearsal ends after all eight application screenshots and both cold database reads.
+if [[ "${1:-}" == --package-only ]]; then
+  exit 0
+fi
 astravar_icons="$astravar_dir/notification"
 mkdir -p "$astravar_icons"
 adb -s "$astravar_serial" pull /sdcard/Android/data/com.yazsras.astravar.v2uidebug/files/ascension-notification/. "$astravar_icons" >/dev/null
