@@ -43,7 +43,10 @@ profile = json.loads(snapshot)["profile"]
 assert (profile["id"],profile["name"],profile["currentHp"],profile["maximumHp"]) == (ally["id"],"CI Native Ally",4,12)
 heal = one(db.execute("SELECT * FROM reforge_changes WHERE profileId=? AND operation='Apply healing'", (ally["id"],)),"one healing event")
 before, after = map(json.loads, (heal["beforeJson"],heal["afterJson"]))
-assert (before["currentHp"],after["currentHp"]) == (4,6)
+assert heal["outcomeType"] == "CHARACTER"
+assert before["character"]["id"] == after["character"]["id"] == ally["id"]
+assert (before["character"]["currentHp"],after["character"]["currentHp"]) == (4,6)
+assert before["revision"] == heal["priorRevision"] and after["revision"] == heal["resultingRevision"]
 assert heal["resultingRevision"] == heal["priorRevision"] + 1
 receipt = one(db.execute("SELECT * FROM genesis_authority_receipts WHERE commandId=?", (authority["activationCommandId"],)), "explicit playable activation")
 assert receipt["kind"] in ("register-actor","create-actor","accept-actor")
