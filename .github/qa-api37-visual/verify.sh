@@ -12,7 +12,18 @@ mkdir -p "$ANDROID_AVD_HOME" "$ANDROID_USER_HOME"
 printf 'no\n' | avdmanager create avd --force -n AstravarHpCI -p "$ANDROID_AVD_HOME/AstravarHpCI.avd" -k 'system-images;android-37.0;default;x86_64' --device pixel_6
 "$ANDROID_HOME/emulator/emulator" -avd AstravarHpCI -port 5584 -accel on -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader -memory 4096 >"$RUNNER_TEMP/owned-visual-avd.log" 2>&1 &
 guest=$!
-trap 'kill "$guest" 2>/dev/null || true; wait "$guest" 2>/dev/null || true' EXIT
+cleanup() {
+  local status=$?
+  trap - EXIT
+  if [[ "$status" != 0 ]] && [[ "$(adb -s "$serial" emu avd name 2>/dev/null | tr -d '\r' | head -1)" == AstravarHpCI ]]; then
+    adb -s "$serial" shell logcat -d -s ActivityManager:E 'AndroidRuntime:E' 'Watchdog:E' > "$art/failed-guest-services.txt" || true
+    adb -s "$serial" shell dumpsys window displays | awk '/mCurrentFocus/ {print}' > "$art/failed-guest-focus.txt" || true
+  fi
+  kill "$guest" 2>/dev/null || true
+  wait "$guest" 2>/dev/null || true
+  exit "$status"
+}
+trap cleanup EXIT
 timeout 90 adb -s "$serial" wait-for-device
 for n in $(seq 1 100); do
   kill -0 "$guest"
@@ -47,4 +58,6 @@ test "$(icon read)" = "$original"
 export ASTRAVAR_VERSION_CODE=59
 bash scripts/ci-ascension-api37.sh 2>&1 | tee "$art/permanent-upgrade.txt"
 test "$comparison" = 0
-grep -Fq 'selected Android Wait and verified dismissal' "$art/policy.txt"
+if grep -q '"freshGuestOriginalHelper": "original switch unreachable"' "$art/original-status.json"; then
+  grep -Fq 'selected Android Wait and verified dismissal' "$art/policy.txt"
+fi

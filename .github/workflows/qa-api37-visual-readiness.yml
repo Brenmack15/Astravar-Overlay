@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 3
+          fetch-depth: 8
       - name: Install verification tools
         run: bash scripts/ci-android-sdk.sh
       - name: Install Android 17 default image
