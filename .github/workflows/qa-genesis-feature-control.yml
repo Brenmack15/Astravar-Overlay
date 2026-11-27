@@ -1,0 +1,268 @@
+name: Android 16 ordinary enlarged Features editor interaction
+on:
+  push:
+    branches: [verification/ascension-genesis-landscape]
+    paths:
+      - '.github/workflows/qa-genesis-feature-control.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  journey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          cache-read-only: true
+      - name: Prepare the stock Android 16 image and tools
+        run: |
+          bash scripts/ci-android-sdk.sh native
+          sudo apt-get -qq update
+          sudo apt-get -qy install libpulse0
+      - name: Verify original CI package pair and source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code 6e3ea597ecab1e42fad481898be83f0e7677408d HEAD -- app/src/main app/build.gradle.kts rules build.gradle.kts settings.gradle.kts
+          endpoint="repos/$GITHUB_REPOSITORY/actions/artifacts/15171828691"
+          gh api "$endpoint" > "$RUNNER_TEMP/pair.json"
+          gh api "$endpoint/zip" > "$RUNNER_TEMP/pair.zip"
+          cat > "$RUNNER_TEMP/proof.py" <<'PY'
+          """Validate the one disposable APK pair selected for the API 37 upgrade rehearsal."""
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import re
+          import shutil
+          import subprocess
+          import sys
+          import zipfile
+          
+          SOURCE = "6e3ea597ecab1e42fad481898be83f0e7677408d"
+          HISTORICAL = "883198a3140ae2b707b31f81829c94cd821189b9"
+          ARCHIVE = "06d1f54782a2e94e9ee7b887bf4487fe3c966f064ae5c9537269c9d56fcb2596"
+          CERTIFICATE = "f05ea205bd3b1affe07c54836223408fc696f046ffc0339612c6c442ec7b6359"
+          PACKAGE = "com.yazsras.astravar"
+          PAIRS = (
+              ("validation/upgrade-baseline/code58-ci.apk", 58, "4.0.0-convergence5", "dd2d881701093c608abf649a4c5c48f77a15a1dc3acf0e30a2f069959c772f3e"),
+              ("app/build/outputs/apk/release/app-release.apk", 59, "4.1.0", "185670962addccc592fac674ffe205d55803b84dc41af95063c44e2ab45bf387"),
+          )
+          
+          def sha256(path):
+              with path.open("rb") as stream:
+                  return hashlib.file_digest(stream, "sha256").hexdigest()
+          
+          def main(archive_path, metadata_path):
+              metadata = json.loads(metadata_path.read_text())
+              run = metadata["workflow_run"]
+              assert metadata["id"] == 15171828691 and metadata["name"] == "android-verification"
+              assert not metadata["expired"] and metadata["digest"] == "sha256:" + ARCHIVE
+              assert run["id"] == 45933831235 and run["head_sha"] == SOURCE
+              assert run["repository_id"] == 1391583014 and run["head_repository_id"] == 1391583014
+              assert sha256(archive_path) == ARCHIVE
+              tools = pathlib.Path(os.environ["ANDROID_HOME"]) / "build-tools/35.0.0"
+              evidence = pathlib.Path("validation/genesis-focus")
+              evidence.mkdir(parents=True, exist_ok=True)
+              verified = []
+              with zipfile.ZipFile(archive_path) as archive:
+                  names = archive.namelist()
+                  previous = json.loads(archive.read("validation/upgrade-baseline/code58-provenance.json"))
+                  candidate = json.loads(archive.read("validation/ci-release-package.json"))
+                  sources = [m for m in names if m in ("validation/SOURCE_COMMIT.txt","validation/owner-hp-native/SOURCE_COMMIT.txt")]
+                  assert sources and all(archive.read(m).decode().strip() == SOURCE for m in sources)
+                  assert previous["inputs"]["source_sha"] == HISTORICAL and previous["inputs"]["version_code"] == 58
+                  assert previous["payload_entries_verified"] == 210 and previous["owner_compatible"] is False
+                  assert previous["output_apk_sha256"] == PAIRS[0][3] and previous["certificate_sha256"] == CERTIFICATE
+                  assert candidate["apk_sha256"] == PAIRS[1][3] and candidate["certificate_sha256"] == CERTIFICATE
+                  assert candidate["owner_signature_verified"] is False and candidate["debuggable"] is False
+                  for member, number, name, digest in PAIRS:
+                      assert names.count(member) == 1
+                      path = pathlib.Path(member)
+                      path.parent.mkdir(parents=True, exist_ok=True)
+                      with archive.open(member) as src, path.open("xb") as dst:
+                          shutil.copyfileobj(src, dst)
+                      assert sha256(path) == digest
+                      signature = subprocess.check_output([tools / "apksigner", "verify", "--verbose", "--print-certs", path], text=True)
+                      assert re.findall(r"Signer #\d+ certificate SHA-256 digest: ([0-9a-f]{64})", signature) == [CERTIFICATE]
+                      identity = subprocess.check_output([tools / "aapt2", "dump", "badging", path], text=True).splitlines()[0]
+                      assert f"name='{PACKAGE}' versionCode='{number}' versionName='{name}'" in identity
+                      verified.append({"versionCode": number, "versionName": name, "sha256": digest})
+              result = {"sourceCommit": SOURCE, "historicalSource": HISTORICAL, "artifactId": 15171828691,
+                        "archiveSha256": ARCHIVE, "package": PACKAGE, "disposableCertificateSha256": CERTIFICATE,
+                        "packages": verified, "ownerSigned": False}
+              (evidence / "provenance.json").write_text(json.dumps(result, indent=2) + "\n")
+              print(json.dumps(result, indent=2))
+          
+          if __name__ == "__main__":
+              main(*map(pathlib.Path, sys.argv[1:]))
+          PY
+          python3 "$RUNNER_TEMP/proof.py" "$RUNNER_TEMP/pair.zip" "$RUNNER_TEMP/pair.json"
+      - name: Build matching QA runner with independent before and after observations
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          """Build focused methods from the unchanged native UI setup and skill journey on this QA branch."""
+          from pathlib import Path
+          
+          ui = Path("overlay-target/src/androidTest/java/com/yazsras/astravar")
+          setup_file = ui / "PlayerFirstJourneyInstrumentationTest.kt"
+          setup = setup_file.read_text()
+          original = "    @Test fun characterAdvancementReviewedEquipmentCompanionAndRestart() {"
+          boundary = '        tap(if (ascension) "Campaign membership" else "Campaign connections")'
+          assert setup.count(original) == setup.count(boundary) == 1
+          initial = setup.split(original, 1)[1].split(boundary, 1)[0]
+          boundary_control = '        if (ascension) ui.openCharacterControls(product)\n'
+          assert initial.endswith(boundary_control)
+          initial = initial[:-len(boundary_control)]
+          assert 'tap("Confirm level 5")' in initial and initial.count('stat("HP 31 / 37")') == 2
+          setup_file.write_text(setup.replace(original, "    @Test fun prepareFocusedSkillActor() {" + initial + "    }\n\n" + original))
+          
+          
+          journey_file = ui / "GenesisJourneyInstrumentationTest.kt"
+          journey = journey_file.read_text()
+          mark='            revealFeatureEditorForCapture()\n'
+          assert journey.count(mark) == 1
+          probe='''            fun observeLargeLandscape(stage: String) {
+                          try {
+                              val rect = pageViewport()
+                              val label = find("Edit identity & features")
+                              val dimensions = "display " + device.displayWidth + "x" + device.displayHeight
+                              instrumentation.sendStatus(0, Bundle().apply {
+                                  putString("stream", "\\nFEATURE_LANDSCAPE " + stage + " " + dimensions + " viewport=" + rect + " label=" + label + "\\n")
+                              })
+                              device.takeScreenshot(File(files, "genesis-landscape-200-observed-" + stage + ".png"))
+                              device.dumpWindowHierarchy(File(files, "genesis-landscape-200-observed-" + stage + ".xml"))
+                          } catch (exception: Exception) {
+                              android.util.Log.w("GenesisLandscapeProbe","Unable to record intermediate view",exception)
+                          }
+                      }
+                      observeLargeLandscape("before")
+          '''
+          journey_file.write_text(journey.replace(mark,probe+mark+'            observeLargeLandscape("after")\n'))
+          base = journey_file.read_text()
+          original = "    @Test fun guidedCreationSwipesQuickActionsAndConnectedInventory() {"
+          create_begin = '        ui.openCharacterPicker(product)\n        tap("Create character or companion")\n'
+          create_end = '        assertSection("Sheet")\n'
+          assert base.count(create_begin)==1
+          creation = create_begin + base.split(create_begin,1)[1].split(create_end,1)[0] + create_end
+          control_begin = '        val originalFontScale = device.executeShellCommand("settings get system font_scale").trim()\n'
+          control_end = '        // Actual SAF creation'
+          assert base.count(original)==base.count(control_begin)==base.count(control_end)==1
+          control = control_begin + base.split(control_begin,1)[1].split(control_end,1)[0]
+          read_after = '            ui.touch(controls, "Open all character controls at 200 percent")'
+          assert control.count(read_after)==1
+          proof = '''            val viewportAfterScroll = pageViewport()
+                      val editButton = ui.controlBounds(By.text("Edit identity & features").pkg(product),
+                          "The real visible editor button after scrolling", refreshCache = true)
+                      instrumentation.sendStatus(0, Bundle().apply {
+                          putString("stream", "\\nFEATURE_TARGET viewport=" + viewportAfterScroll + " editorButton=" + editButton +
+                              " minimumTarget=" + minimumTarget + "\\n")
+                      })
+                      assertTrue("The retained sheet has a 48dp content viewport", viewportAfterScroll.height() >= minimumTarget)
+                      assertTrue("The full 48dp editor button can be reached", editButton.height() >= minimumTarget && editButton.width() >= minimumTarget)
+                      ui.touch(editButton, "Open the actual retained feature editor")
+                      find("Identity & features")
+                      tap("Close")
+                      assertSection("Features")
+                      val observedControls = ui.controlBounds(By.desc("Character controls").pkg(product), "Character controls after dismissing the editor", refreshCache = true)
+                      ui.touch(observedControls, "Open all character controls at 200 percent")'''
+          control=control.replace(read_after,proof)
+          scope = "    @Test fun retainedFeaturesEditorReachesNativeDialogAtTwoHundredPercent() {\n"+'        assertEquals("1", device.executeShellCommand("getprop ro.kernel.qemu").trim())\n        restart()\n        ui.ensurePrimaryTab(product,"Character")\n'+creation+'        ui.selectSection(product,"Features")\n'+control+'    }\n\n'
+          journey_file.write_text(base.replace(original,scope+original))
+          PY
+          project="$RUNNER_TEMP/genesis-overlay"
+          mkdir -p "$project/overlay-target"
+          cp -r overlay-target/src overlay-target/build.gradle.kts "$project/overlay-target/"
+          cp gradle.properties "$project/"
+          python3 - "$project" <<'PY'
+          from pathlib import Path
+          import sys
+          dest = Path(sys.argv[1])
+          lines = Path("build.gradle.kts").read_text().splitlines()
+          plugins = [l for l in lines if 'id("com.android.application")' in l or 'kotlin("android")' in l]
+          assert len(plugins) == 2 and all("version" in l for l in plugins)
+          (dest/"build.gradle.kts").write_text("plugins {\n" + "\n".join(plugins) + "\n}\n")
+          text = Path("settings.gradle.kts").read_text()
+          modules = 'include(":rules", ":app", ":overlay-target")'
+          assert text.count(modules) == 1
+          (dest/"settings.gradle.kts").write_text(text.replace(modules,'include(":overlay-target")'))
+          PY
+          bash gradlew --console=plain --build-cache --project-dir "$project" :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
+          mkdir -p overlay-target/build/outputs
+          cp -r "$project/overlay-target/build/outputs/apk" overlay-target/build/outputs/
+      - name: Open the actual editor and validate the scroll and touch targets at 200 percent
+        env:
+          ASTRAVAR_BASELINE_APK: validation/upgrade-baseline/code58-ci.apk
+          ASTRAVAR_TEST_PACKAGE: com.yazsras.astravar
+          ASTRAVAR_TEST_APK: app/build/outputs/apk/release/app-release.apk
+          EXPECTED_VERSION_CODE: '59'
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          src = Path("scripts/ci-emulator.sh").read_text()
+          mark = 'if [ -n "$' + '{ASTRAVAR_BASELINE_APK:-}" ]; then'
+          assert src.count(mark) == 1
+          (Path(os.environ["RUNNER_TEMP"])/"genesis-device.sh").write_text(src.split(mark)[0])
+          PY
+          cat >> "$RUNNER_TEMP/genesis-device.sh" <<'SH'
+          test "$(adb -s "$astravar_serial" shell getprop ro.build.version.sdk | tr -d '\r')" = 36
+          adb -s "$astravar_serial" shell wm size | tee validation/genesis-focus/wm.txt
+          adb -s "$astravar_serial" shell wm density | tee -a validation/genesis-focus/wm.txt
+          run_stage GenesisUpgradeInstrumentationTest#seedAscensionCode58 1 480 genesis-focus-source58.txt 58
+          stop_product
+          adb -s "$astravar_serial" install -r "$astravar_apk"
+          run_stage GenesisJourneyInstrumentationTest#retainedFeaturesEditorReachesNativeDialogAtTwoHundredPercent 1 550 genesis-focus-ordinary-editor.txt
+          SH
+          bash "$RUNNER_TEMP/genesis-device.sh"
+      - name: Inspect original-size bitmaps and accessible geometry
+        if: always()
+        run: |
+          test ! -f validation/native-stages.tsv || cat validation/native-stages.tsv
+          python3 - <<'PY'
+          import hashlib, json, re, struct
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          result = {}
+          for p in sorted(Path("validation/emulator-evidence").glob("*.xml")):
+              if not p.name.startswith(("failure-","genesis-landscape")):
+                  continue
+              nodes=list(ET.parse(p).getroot().iter("node"))
+              h=lambda n:n.get("text") or n.get("content-desc") or ""
+              interesting = [ (h(n) or n.get("class"),n.get("bounds")) for n in nodes if h(n) in ("Edit identity & features","Features","HP 14 / 20","Character controls","Identity & background") or n.get("class")=="android.widget.ScrollView" ]
+              if p.name.startswith("failure-"):
+                  print(p.name,[h(n) for n in nodes if n.get("package")=="com.yazsras.astravar" and h(n)])
+              raw=p.with_suffix(".png").read_bytes()
+              result[p.stem]={"pngSha256":hashlib.sha256(raw).hexdigest(),"dimensions":struct.unpack(">II",raw[16:24]),"controls":interesting}
+          print(json.dumps(result,indent=2))
+          if result:
+              Path("validation/genesis-focus/observations.json").write_text(json.dumps(result,indent=2)+"\n")
+          if Path("validation/genesis-focus/room-and-backup.json").is_file():
+              required=("genesis-landscape-features","genesis-landscape-200-observed-before","genesis-landscape-200-observed-after","genesis-landscape-font200")
+              assert all(result[k]["dimensions"]==(2400,1080) for k in required)
+              assert all(any(c[0]=="Edit identity & features" for c in result[k]["controls"]) for k in required)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: retained-feature-ordinary-action-and-geometry
+          path: |
+            validation/genesis-focus/
+            validation/native-stages.tsv
+            validation/genesis-focus-*.txt
+            validation/emulator-evidence/genesis-*.*
+            validation/emulator-evidence/failure-*.*
+          if-no-files-found: warn
+          retention-days: 5
