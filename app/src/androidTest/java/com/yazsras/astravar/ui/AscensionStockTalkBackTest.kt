@@ -211,35 +211,18 @@ class AscensionStockTalkBackTest {
                 val adjacent=focusText()
                 status("TalkBack $paginationInput navigated to $adjacent")
                 r=focusTarget()
-                hardware("COPY_LAST")
-                var spoken: String? = null
-                waitFor(2200) {
-                    activity.onActivity { a ->
-                        val clip=a.getSystemService(android.content.ClipboardManager::class.java).primaryClip
-                        val value=clip?.takeIf { it.itemCount>0 }?.getItemAt(0)?.text?.toString()
-                        if(value?.contains("Strength",ignoreCase=true)==true) spoken=value.take(160)
-                    }
-                    spoken!=null
-                }
                 val shown="Enter physical dice faces"
-                val shortcuts=listOf(
-                    "KEYCODE_META_LEFT KEYCODE_SHIFT_LEFT KEYCODE_SPACE",
-                    "KEYCODE_ALT_LEFT KEYCODE_SHIFT_LEFT KEYCODE_ENTER",
-                    "KEYCODE_META_LEFT KEYCODE_SHIFT_LEFT KEYCODE_ENTER"
-                )
-                var activated: String?=null
-                for (keys in shortcuts) {
-                    assertTrue("The same roll control remains focused",hasTargetFocus())
-                    hardware("CHORD $keys")
-                    if(waitFor(2200){visible(shown)!=null}) {activated=keys;break}
-                    assertTrue("Shortcut exploration must not roll",history().isEmpty())
-                }
-                if(activated==null) {
-                    // The outer title has its own action, separate from the two nested quick rolls.
+                // Speech-to-clipboard triggers Android's own overlay. Collect its optional evidence only after gameplay.
+                val keys="KEYCODE_META_LEFT KEYCODE_SHIFT_LEFT KEYCODE_SPACE"
+                assertTrue("Returned to actual roll control before opening options",hasTargetFocus())
+                hardware("CHORD $keys")
+                val activated=if(waitFor(5000) { visible(shown)!=null }) keys else {
+                    assertTrue("Shortcut did not execute an optional player roll",history().isEmpty())
+                    status("using the ordinary inspector path, focus ${focusText()}")
                     activateVisible("STRENGTH")
                     activateVisible("Roll check")
                     requireObservation("Physical dice entry after normal inspector Roll check button") { visible(shown)!=null }
-                    activated="TalkBack double-tap Strength ability inspector, then Roll check"
+                    "TalkBack double-tap Strength ability inspector, then Roll check"
                 }
                 assertTrue("Opening options must not record a roll", history().isEmpty())
                 status("real reader shortcut $activated opened $shown; 0 rolls")
@@ -265,6 +248,18 @@ class AscensionStockTalkBackTest {
                 assertEquals(DiceMode.NORMAL,component.mode);assertEquals(3,component.modifier);assertEquals(20,die.sides);assertTrue(die.kept);assertTrue(die.face in 1..20)
                 assertEquals(die.face+3,only.total);assertEquals(before,runBlocking { repo.get(qaId) });assertEquals(listOf(only),history())
                 assertNotNull(actualService());assertTrue(manager.isTouchExplorationEnabled)
+                focusTarget()
+                hardware("COPY_LAST")
+                var spoken: String? = null
+                waitFor(2200) {
+                    activity.onActivity { a ->
+                        val clip=a.getSystemService(android.content.ClipboardManager::class.java).primaryClip
+                        val value=clip?.takeIf { it.itemCount>0 }?.getItemAt(0)?.text?.toString()
+                        if(value?.contains("Strength",ignoreCase=true)==true) spoken=value.take(160)
+                    }
+                    spoken!=null
+                }
+                assertEquals(listOf(only),history())
                 val proof=JSONObject().put("api",Build.VERSION.SDK_INT).put("service",service.id).put("version",pkg.versionName)
                     .put("certificateSha256",cert).put("touchExplorationEnabled",manager.isTouchExplorationEnabled)
                     .put("calibratedOrdinaryControl",standardControl).put("focused",focusLabel).put("adjacent",adjacent).put("navigateInput",paginationInput).put("talkBackCopiedLastSpokenPhrase",spoken ?: JSONObject.NULL).put("frameworkActionLabel","Options for Strength check")
