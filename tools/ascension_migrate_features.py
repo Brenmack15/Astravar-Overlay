@@ -40,9 +40,16 @@ def native_feature_value(rule, key, row, source_path, value, target, target_path
                "Unsupported form activation duration")
         return 0
     if rule == "nativeSkillRank":
-        verify(key[1] == "playable.characters" and len(source_path) == 4 and
-               source_path[:3] == ["characterJson", "$json", "skills"] and target["kind"] == "actor" and
-               target_path == ["data", "skills", source_path[3].lower(), "rank"] and isinstance(value, dict) and
+        if key[1] == "playable.characters.customSkills":
+            skill_id = row.get("id")
+            verify(len(key[2]) == 2 and skill_id == key[2][1] and source_path == ["training"] and
+                   row.get("baselineOverride") is None and type(row.get("bonus", 0)) is int and row.get("bonus", 0) == 0,
+                   "Custom skill requires its own unadjusted native training record")
+        else:
+            verify(key[1] == "playable.characters" and len(source_path) == 4 and
+                   source_path[:3] == ["characterJson", "$json", "skills"], "Expected a native actor skill")
+            skill_id = source_path[3].lower()
+        verify(target["kind"] == "actor" and target_path == ["data", "skills", skill_id, "rank"] and isinstance(value, dict) and
                isinstance(value.get("proficient"), bool) and isinstance(value.get("expertise"), bool) and
                value.get("halfProficiency", False) is False and (not value["expertise"] or value["proficient"]),
                "Legacy skill rank requires exact non-fractional proficiency flags")

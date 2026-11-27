@@ -53,3 +53,33 @@ class AttestationTest(unittest.TestCase):
         self.row['accepted']['quantity']=2
         with self.assertRaisesRegex(ValueError,'accepted decision'):
             self.check()
+
+
+class InstalledFormSourceTest(unittest.TestCase):
+    def test_other_actor_or_unaccepted_feature_cannot_acquire_the_form(self):
+        from ascension_migrate_attestations import verify_installed_form
+        from ascension_migrate_reviewed import source_key
+        hold={"source":"archived","family":"review.attested_holdings","identity":["hardware"]}
+        rule={"source":"physical","family":"playable.characters.features","identity":["operator","form-rule"]}
+        source=source_key(rule)
+        item={"id":"hardware","title":"Utility frame chassis","data":{"installedOnActorId":"operator","ownerId":"operator","custodianId":"operator","holding":"installed"}}
+        form={"id":"frame","actorId":"operator","title":"Utility frame","data":{"requiresOperating":True,"sourceItemId":"hardware"}}
+        native={"name":"Utility frame","source":{"acceptance":"ACCEPTED_HOMEBREW","name":"Chassis notes"}}
+        ws=[{**hold,"sourcePath":["id"],"targetPath":["data","sourceItemId"],"transform":"canonicalRef","target":"frame"},
+            {**rule,"sourcePath":["id"],"targetPath":["id"],"transform":"scopedIdentity","target":"frame"},
+            {**rule,"sourcePath":["source","name"],"targetPath":["data","source"],"transform":"exact","target":"frame"}]
+        plan={"parity":ws,"links":[{**hold,"from":"frame","relation":"requires_item","to":"hardware","targetPath":["id"]}]}
+        def check():
+            verify_installed_form(form,item,source_key(hold),{source:native},{source:{"disposition":"map"}},plan,source_key)
+        check()
+        form["actorId"]="another"
+        with self.assertRaisesRegex(ValueError,"own actor"):
+            check()
+        form["actorId"]="operator"
+        native["source"]["acceptance"]="PROPOSED"
+        with self.assertRaisesRegex(ValueError,"accepted native form"):
+            check()
+        native["source"]["acceptance"]="OFFICIAL"
+        ws.append({**ws[0],"targetPath":["data","baseAc"]})
+        with self.assertRaisesRegex(ValueError,"only witness"):
+            check()

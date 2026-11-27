@@ -7,6 +7,7 @@ from ascension_migrate_range import native_attack_distance, native_conditional_d
 from ascension_migrate_provenance import historical_transfer
 from ascension_migrate_legacy import (COINS, IDENTITY, encode, inspect_notion_transfer, loads,
                                       sha, source_families, verify)
+from ascension_migrate_printed_actions import printed_action_terms, validate_printed_witness
 from ascension_migrate_attestations import FORMAT as ATTESTED_FORMAT, index_attestations, verify_attestations, verify_attested_targets
 from ascension_migrate_funds import validate_fund_target
 from ascension_migrate_features import FEATURE_NORMALIZERS, native_feature_value
@@ -89,7 +90,7 @@ EDGE_TARGET = {
     "assigned_actor": "actor", "linked_project": "invention_project", "milestone": "timeline_event",
     "scene_location": "world_entity", "last_event": "timeline_event item_event coin_transaction party_exchange component_event rest_report", "pending_roll": "roll", "active_encounter": "encounter",
     "objective": "objective", "party_actor": "actor", "participant": "actor", "initiative_roll": "roll", "adjudicated_roll": "roll",
-    "includes_roll": "roll", "used_preset": "roll_preset", "used_attack": "attack", "source_attack": "attack",
+    "includes_attack": "attack", "includes_roll": "roll", "used_preset": "roll_preset", "used_attack": "attack", "source_attack": "attack",
     "item_subject": "item_instance", "payment": "coin_transaction", "wallet_leg": "wallet", "external_recipient": "world_entity",
     "historical_previous_owner": "world_entity actor", "historical_new_owner": "world_entity actor", "corrects_history": "item_event",
     "research_basis": "research_note", "research_roll": "roll", "item_studied": "item_instance",
@@ -117,8 +118,11 @@ def exact(a, b):
 
 def path_value(value, path, missing=False):
     verify(isinstance(path, list) and len(path) <= 40, "Invalid evidence path")
-    for step in path:
-        if step == "$json":
+    for index, step in enumerate(path):
+        if step == "$printedAction":
+            verify(index == 0, "Printed action must begin at an original feature")
+            value = printed_action_terms(value)
+        elif step == "$json":
             verify(isinstance(value, str), "Expected native encoded JSON at evidence path")
             value = loads(value)
         elif isinstance(value, dict) and isinstance(step, str):
@@ -591,7 +595,7 @@ def project(raw_by_hash, plan, tenant):
                isinstance(target["title"],str) and 0<len(target["title"].strip())<=180, "Invalid or duplicate typed canonical target")
         verify(target["kind"]!="continuity_profile" or target["id"]==tenant[1], "Wrong continuity metadata target")
         entities[target["id"]]=target
-    verify_attested_targets(decisions, entries, entities, tenant, scoped_identity)
+    verify_attested_targets(decisions, entries, entities, tenant, scoped_identity, plan, source_key)
     declared={i for d in decisions.values() for i in d["targets"]}
     verify(entities.keys()==declared, "Unbound target or missing declared canonical target")
     for key, d in decisions.items():
@@ -692,6 +696,11 @@ def project(raw_by_hash, plan, tenant):
         pair=w["target"],tuple(tp)
         verify(pair not in witnesses, "Duplicate target parity witness")
         sp=w["sourcePath"]
+        if isinstance(sp,list) and "$printedAction" in sp:
+            verify(sp[:1]==["$printedAction"] and sp.count("$printedAction")==1 and key[1]=="playable.characters.features" and len(key[2])==2 and
+                   entities[w["target"]]["actorId"]==key[2][0] and entities[w["target"]]["kind"] in ("attack","action_definition"),
+                   "Printed attack belongs to another actor or gameplay family")
+            validate_printed_witness(sp,tp,entities[w["target"]],w["transform"])
         expected=path_value(entries[key],sp,w["transform"]=="omittedUnknown")
         actual=path_value(entities[w["target"]],tp)
         if w["transform"] == "nativeAbilityColumn":
@@ -806,11 +815,13 @@ def project(raw_by_hash, plan, tenant):
             verify(expected is None, "An observed value cannot become unknown")
         verify(exact(expected,actual),"Recorded mechanical parity mismatch for "+str(tp[-1]))
         if len(tp)>1 and tp[-1] in MECHANICAL_NAMES and w["transform"] not in ("nativeSlotBalance","ownerConfirmedCapacity","confirmedFunds","consumedLifecycle","nativeAbilityColumn"):
+            parsed_form_value = (w["transform"]=="nativeTimedFormValue" and sp==["description"] and
+                                 (tp==["data","baseAc"] or len(tp)==3 and tp[:2]==["data","abilityOverrides"] and tp[2] in STATS))
             component_holder = (tp == ["data","holderId"] and sp == ["actorId"] and key[1] == "authority.actors" and
                                 entities[w["target"]]["kind"] == "wallet" and
                                 any(g["op"] == "confirmedFunds" and g["target"] == w["target"] and source_key(g) == key
                                     for g in corrections.values()))
-            verify(component_holder or (sp and sp[-1] in MECHANICAL_NAMES[tp[-1]]),
+            verify(parsed_form_value or component_holder or (sp and sp[-1] in MECHANICAL_NAMES[tp[-1]]),
                    "Incorrect source field for recorded mechanical value")
         if key[1]=="review.facts":
             verify(tp[0]=="data" and tp[-1] not in MECHANICAL_NAMES and sp and sp[0]=="values" and
@@ -857,6 +868,11 @@ def project(raw_by_hash, plan, tenant):
                (link["from"],link["relation"],link["to"]) not in seen and link["from"]!=link["to"] and link["from"] in entities and
                link["to"] in entities and link["relation"] in EDGE_TARGET, "Orphan, duplicate or unsupported typed edge")
         key=source_key(link)
+        if isinstance(link["targetPath"],list) and "$printedAction" in link["targetPath"]:
+            verify(link["targetPath"][:1]==["$printedAction"] and link["targetPath"].count("$printedAction")==1 and
+                   key[1]=="playable.characters.features" and len(key[2])==2 and
+                   entities[link["from"]]["kind"] in ("attack","action_definition") and entities[link["from"]]["actorId"]==key[2][0],
+                   "Printed action link belongs to another actor or gameplay family")
         verify(key in decisions and link["from"] in decisions[key]["targets"] and
                (exact(path_value(entries[key],link["targetPath"]),link["to"]) or
                 link["to"] in aliases and exact(path_value(entries[key],link["targetPath"]),aliases[link["to"]])), "Relationship lacks source-bound target identity")
