@@ -122,7 +122,10 @@ def payload_digest(apk, policy):
         manifest = hashlib.sha256()
         for name in sorted(files):
             with archive.open(files[name]) as stream:
-                digest = hashlib.file_digest(stream, "sha256").hexdigest()
+                file_hash = hashlib.sha256()
+                for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    file_hash.update(block)
+                digest = file_hash.hexdigest()
             row = [name, files[name].file_size, digest]
             manifest.update((json.dumps(row, ensure_ascii=True, separators=(",", ":")) + "\n").encode("ascii"))
         return {"entries": len(files), "sortedNameSizeContentManifestSha256": manifest.hexdigest()}
@@ -135,6 +138,7 @@ def main():
     p.add_argument("--run", type=int, required=True)
     p.add_argument("--artifact", type=int, required=True)
     p.add_argument("--archive-sha256", required=True)
+    p.add_argument("--archive-file", type=Path, help="Use an existing original GitHub ZIP verbatim")
     p.add_argument("--output", type=Path, required=True)
     a = p.parse_args()
     check(re.fullmatch("[0-9a-f]{40}", a.source) and re.fullmatch("[0-9a-f]{64}", a.archive_sha256) and
@@ -156,8 +160,12 @@ def main():
     with tempfile.TemporaryDirectory() as work:
         work = Path(work)
         archive, apk = work / "original-native-qa.zip", work / "tested-ci.apk"
-        with archive.open("xb") as out:
-            run_gh(f"repos/{policy.REPOSITORY}/actions/artifacts/{a.artifact}/zip", out)
+        if a.archive_file is None:
+            with archive.open("xb") as out:
+                run_gh(f"repos/{policy.REPOSITORY}/actions/artifacts/{a.artifact}/zip", out)
+        else:
+            check(a.archive_file.is_file() and not a.archive_file.is_symlink(), "Expected a regular original QA ZIP")
+            archive = a.archive_file.resolve(strict=True)
         entry = "app/build/outputs/apk/release/app-release.apk"
         checksum = policy.extract_tested_apk(archive, a.archive_sha256, entry, "validation/SOURCE_COMMIT.txt", a.source, apk)
         scope = verify_native_coverage(archive, a.source, policy)
