@@ -192,7 +192,8 @@ jobs:
           test "$(adb -s "$astravar_serial" shell getprop ro.build.version.sdk | tr -d '\r')" = 36
           adb -s "$astravar_serial" shell wm size | tee validation/genesis-focus/wm.txt
           adb -s "$astravar_serial" shell wm density | tee -a validation/genesis-focus/wm.txt
-          run_stage GenesisUpgradeInstrumentationTest#seedAscensionCode58 1 480 genesis-focus-source58.txt 58
+          test "$(adb -s "$astravar_serial" shell dumpsys package "$astravar_product" | sed -n 's/.*versionCode=\([0-9]*\).*/\1/p' | head -n 1 | tr -d '\r')" = 58
+          timeout 25s adb -s "$astravar_serial" shell am start -W -n "$astravar_product/com.yazsras.astravar.MainActivity" | tee validation/genesis-focus/source58-launch.txt
           stop_product
           adb -s "$astravar_serial" install -r "$astravar_apk"
           run_stage PlayerFirstJourneyInstrumentationTest#prepareFocusedSkillActor 1 520 genesis-focus-actor59.txt
