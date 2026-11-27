@@ -194,6 +194,7 @@ jobs:
           chmod +x gradlew
           timeout -k 10s 210s ./gradlew --console=plain --build-cache --profile :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
       - name: Android 17 authorization, force-stopped cloud gameplay, code 58 upgrade and visual verification
+        id: android17_acceptance
         if: env.GENESIS_GATE == 'true'
         timeout-minutes: 50
         env:
@@ -201,7 +202,9 @@ jobs:
           ASTRAVAR_VERSION_CODE: ${{ env.EXPECTED_VERSION_CODE }}
         run: timeout -k 10s 2880s bash scripts/ci-owner-hp-native.sh
       - name: Ordered release UI, import, recovery and in-place update on Android 16
-        if: env.INVENTORY_BETA != 'true'
+        # The two emulators have distinct packages, data and devices. A failed Android 17
+        # run remains a failed job while the independent historical journey still runs.
+        if: (success() || (failure() && steps.android17_acceptance.outcome == 'failure')) && env.INVENTORY_BETA != 'true'
         timeout-minutes: 90
         env:
           ASTRAVAR_TEST_APK: app/build/outputs/apk/release/app-release.apk

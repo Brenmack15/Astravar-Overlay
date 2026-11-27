@@ -3,14 +3,17 @@ package com.yazsras.astravar.data
 import android.Manifest
 import android.app.NotificationManager
 import android.content.Context
-import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Rect
 import android.os.Build
 import android.os.SystemClock
-import android.provider.Settings
+import android.view.View
+import android.view.WindowInsets
+import android.view.WindowInsetsController
+import androidx.activity.ComponentActivity
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
@@ -53,45 +56,51 @@ class AscensionNotificationNativeTest {
             for((theme,night,expected) in listOf(Triple("light","no",Configuration.UI_MODE_NIGHT_NO),Triple("dark","yes",Configuration.UI_MODE_NIGHT_YES))){
                 device.executeShellCommand("cmd statusbar collapse")
                 device.executeShellCommand("cmd uimode night $night")
-                context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                assertTrue("Wait for Settings to expose the system theme",device.wait(Until.hasObject(By.pkg("com.android.settings").depth(0)),10000))
-                waitUntil { (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK)==expected }
-                manager.cancel(CampaignSyncNotifications.ID)
-                CampaignSyncNotifications.refresh(context)
-                waitUntil {
-                    manager.activeNotifications.singleOrNull { it.id==CampaignSyncNotifications.ID }?.notification?.smallIcon?.resId==R.drawable.ic_astravar_notification
-                }
-                device.waitForIdle()
-                val title=manager.activeNotifications.single { it.id==CampaignSyncNotifications.ID }.notification.extras.getCharSequence("android.title").toString()
-                // The bar may animate a new icon after the posting API returns.
-                var statusFound=false
-                val deadline=SystemClock.uptimeMillis()+8000
-                do {
+                onSystemBarsSurface(device,theme,expected) {
+                    waitUntil {
+                        val frame=screenshot()
+                        try {
+                            val pixel=frame.getPixel(frame.width/2,frame.height/4)
+                            if (theme=="light") Color.red(pixel)>210 else Color.red(pixel)<45
+                        } finally { frame.recycle() }
+                    }
+                    manager.cancel(CampaignSyncNotifications.ID)
+                    CampaignSyncNotifications.refresh(context)
+                    waitUntil {
+                        manager.activeNotifications.singleOrNull { it.id==CampaignSyncNotifications.ID }?.notification?.smallIcon?.resId==R.drawable.ic_astravar_notification
+                    }
+                    device.waitForIdle()
+                    val title=manager.activeNotifications.single { it.id==CampaignSyncNotifications.ID }.notification.extras.getCharSequence("android.title").toString()
+                    // The bar may animate a new icon after the posting API returns.
+                    var statusFound=false
+                    val deadline=SystemClock.uptimeMillis()+8000
+                    do {
+                        val shot=screenshot()
+                        try {
+                            write(shot,File(output,"api37-$theme-status.png"))
+                            val hId=context.resources.getIdentifier("status_bar_height","dimen","android")
+                            val h=if(hId!=0)context.resources.getDimensionPixelSize(hId) else (32*context.resources.displayMetrics.density).toInt()
+                            statusFound=verifyShape(context,shot,Rect(0,0,shot.width*3/4,h.coerceAtMost(shot.height)),
+                                File(output,"api37-$theme-status-icon.png"))
+                        }finally {shot.recycle()}
+                        if(!statusFound)SystemClock.sleep(200)
+                    }while(!statusFound && SystemClock.uptimeMillis()<deadline)
+                    assertTrue("SystemUI status bar must display the faceted notification silhouette in $theme",statusFound)
+                    device.openNotification()
+                    val selector=By.pkg("com.android.systemui").text(title)
+                    if(!device.wait(Until.hasObject(selector),5000))device.executeShellCommand("cmd statusbar expand-notifications")
+                    assertTrue("SystemUI must show the actual posted notification title",device.wait(Until.hasObject(selector),8000))
+                    device.waitForIdle()
+                    val bounds=device.findObject(selector).visibleBounds
                     val shot=screenshot()
-                    try {
-                        write(shot,File(output,"api37-$theme-status.png"))
-                        val hId=context.resources.getIdentifier("status_bar_height","dimen","android")
-                        val h=if(hId!=0)context.resources.getDimensionPixelSize(hId) else (32*context.resources.displayMetrics.density).toInt()
-                        statusFound=verifyShape(context,shot,Rect(0,0,shot.width*3/4,h.coerceAtMost(shot.height)),
-                            File(output,"api37-$theme-status-icon.png"))
-                    }finally {shot.recycle()}
-                    if(!statusFound)SystemClock.sleep(200)
-                }while(!statusFound && SystemClock.uptimeMillis()<deadline)
-                assertTrue("SystemUI status bar must display the faceted notification silhouette in $theme",statusFound)
-                device.openNotification()
-                val selector=By.pkg("com.android.systemui").text(title)
-                if(!device.wait(Until.hasObject(selector),5000))device.executeShellCommand("cmd statusbar expand-notifications")
-                assertTrue("SystemUI must show the actual posted notification title",device.wait(Until.hasObject(selector),8000))
-                device.waitForIdle()
-                val bounds=device.findObject(selector).visibleBounds
-                val shot=screenshot()
-                try{
-                    write(shot,File(output,"api37-$theme-shade.png"))
-                    val dp=context.resources.displayMetrics.density
-                    val area=Rect((bounds.left-94*dp).toInt().coerceAtLeast(0),(bounds.top-75*dp).toInt().coerceAtLeast(0),
-                        (bounds.left+110*dp).toInt().coerceAtMost(shot.width),(bounds.bottom+22*dp).toInt().coerceAtMost(shot.height))
-                    assertTrue("The expanded card must display the same emblem in $theme",verifyShape(context,shot,area,File(output,"api37-$theme-shade-icon.png")))
-                }finally{shot.recycle()}
+                    try{
+                        write(shot,File(output,"api37-$theme-shade.png"))
+                        val dp=context.resources.displayMetrics.density
+                        val area=Rect((bounds.left-94*dp).toInt().coerceAtLeast(0),(bounds.top-75*dp).toInt().coerceAtLeast(0),
+                            (bounds.left+110*dp).toInt().coerceAtMost(shot.width),(bounds.bottom+22*dp).toInt().coerceAtMost(shot.height))
+                        assertTrue("The expanded card must display the same emblem in $theme",verifyShape(context,shot,area,File(output,"api37-$theme-shade-icon.png")))
+                    }finally{shot.recycle()}
+                }
             }
         }finally{
             device.executeShellCommand("cmd statusbar collapse")
@@ -99,7 +108,50 @@ class AscensionNotificationNativeTest {
             control.savedStatus=oldStatus;control.notificationsEnabled=oldNotification
             if(oldNotification)CampaignSyncNotifications.refresh(context)
             if(oldNight in setOf("yes","no","auto","custom"))device.executeShellCommand("cmd uimode night $oldNight")
-            device.pressBack()
+        }
+    }
+
+    /** SystemUI owns both notification images. The foreground supplies a measured, contrasting window. */
+    @android.annotation.TargetApi(30)
+    private fun onSystemBarsSurface(device:UiDevice,theme:String,expected:Int,observe:()->Unit) {
+        val light=theme=="light"
+        val marker="System notification backdrop $theme"
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            waitUntil {
+                var mode=Configuration.UI_MODE_NIGHT_UNDEFINED
+                scenario.onActivity { mode=it.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK }
+                mode==expected
+            }
+            scenario.onActivity { activity ->
+                val window=activity.window
+                window.setDecorFitsSystemWindows(false)
+                window.statusBarColor=Color.TRANSPARENT
+                window.isStatusBarContrastEnforced=false
+                window.setContentView(View(activity).apply {
+                    setBackgroundColor(if (light) Color.WHITE else Color.BLACK)
+                    contentDescription=marker
+                    importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_YES
+                })
+                requireNotNull(window.insetsController).apply {
+                    show(WindowInsets.Type.statusBars())
+                    val flag=WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                    setSystemBarsAppearance(if (light) flag else 0,flag)
+                }
+            }
+            assertTrue("The themed fixture window must be visible",device.wait(Until.hasObject(By.desc(marker)),15000))
+            waitUntil {
+                var ready=false
+                scenario.onActivity { activity ->
+                    val decor=activity.window.decorView
+                    val mode=activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+                    val appearance=activity.window.insetsController?.systemBarsAppearance ?: return@onActivity
+                    val darkGlyphs=(appearance and WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS)!=0
+                    ready=activity.hasWindowFocus() && mode==expected && darkGlyphs==light &&
+                        decor.rootWindowInsets?.isVisible(WindowInsets.Type.statusBars())==true
+                }
+                ready
+            }
+            try { observe() } finally { device.executeShellCommand("cmd statusbar collapse") }
         }
     }
 

@@ -12,15 +12,6 @@ adb -s "$astravar_serial" shell getprop ro.build.version.sdk | tr -d '\r' > "$as
 adb -s "$astravar_serial" shell getprop ro.build.version.release | tr -d '\r' > "$astravar_dir/release.txt"
 test "$(cat "$astravar_dir/sdk.txt")" = 37 && test "$(cat "$astravar_dir/release.txt")" = 17
 adb -s "$astravar_serial" shell getprop ro.build.fingerprint | tr -d '\r' > "$astravar_dir/guest-fingerprint.txt"
-astravar_icons="$astravar_dir/notification"
-mkdir -p "$astravar_icons"
-adb -s "$astravar_serial" pull /sdcard/Android/data/com.yazsras.astravar.v2uidebug/files/ascension-notification/. "$astravar_icons" >/dev/null
-for astravar_theme in light dark; do
-  for astravar_surface in status shade; do
-    test -s "$astravar_icons/api37-$astravar_theme-$astravar_surface.png"
-    test -s "$astravar_icons/api37-$astravar_theme-$astravar_surface-icon.png"
-  done
-done
 test -z "$(adb -s "$astravar_serial" shell pm path "$astravar_package" | tr -d '\r')"
 adb -s "$astravar_serial" install validation/upgrade-baseline/code58-ci.apk
 adb -s "$astravar_serial" install overlay-target/build/outputs/apk/debug/overlay-target-debug.apk
@@ -68,5 +59,14 @@ adb -s "$astravar_serial" pull /sdcard/Android/data/com.yazsras.astravar.target/
 for astravar_theme in light dark; do
   for astravar_tab in Character Inventory Connections Chronicle; do
     test -s "$astravar_dir/screenshots/api37-$astravar_theme-$astravar_tab.png"
+  done
+done
+astravar_icons="$astravar_dir/notification"
+mkdir -p "$astravar_icons"
+adb -s "$astravar_serial" pull /sdcard/Android/data/com.yazsras.astravar.v2uidebug/files/ascension-notification/. "$astravar_icons" >/dev/null
+for astravar_theme in light dark; do
+  for astravar_surface in status shade; do
+    test -s "$astravar_icons/api37-$astravar_theme-$astravar_surface.png"
+    test -s "$astravar_icons/api37-$astravar_theme-$astravar_surface-icon.png"
   done
 done

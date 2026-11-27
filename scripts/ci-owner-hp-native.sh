@@ -278,9 +278,15 @@ if [[ "$astravar_bootstrap_gate" == true ]]; then
   run_test 'com.yazsras.astravar.data.NotionNativeImportTest#publicContextApplyBackupReimportAndRollbackPreserveIdentity' notion-public-import.txt 360
   run_test 'com.yazsras.astravar.data.CampaignNativeHttpsTest#authenticatedAutoSyncCommitsAllRecordCategoriesAndVerifiesReceipts' native-campaign-https.txt 360
   (source scripts/ci-ascension-cloud-native.sh)
-  run_test 'com.yazsras.astravar.data.AscensionNotificationNativeTest#actualSmallEmblemInStatusBarAndShadeAcrossLightAndDarkThemes' notification-emblem.txt 360
+  astravar_notification_result=0
+  run_test 'com.yazsras.astravar.data.AscensionNotificationNativeTest#actualSmallEmblemInStatusBarAndShadeAcrossLightAndDarkThemes' notification-emblem.txt 360 || astravar_notification_result=$?
   git rev-parse HEAD >"$astravar_output/SOURCE_COMMIT.txt"
+  # An independent package/Room upgrade can still produce its own evidence after a visual failure.
   bash scripts/ci-ascension-api37.sh
+  if (( astravar_notification_result != 0 )); then
+    echo "Android 17 notification acceptance failed; see notification-emblem.txt." >&2
+    exit "$astravar_notification_result"
+  fi
   python3 - "$astravar_output/SCOPE.json" <<'PY_SCOPE'
 import json,os,pathlib,sys
 pathlib.Path(sys.argv[1]).write_text(json.dumps({
