@@ -33,7 +33,7 @@ class CloudWorldChronicleInteropTest {
         try {
             compose.waitUntil(12_000) { compose.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
         } catch (error: ComposeTimeoutException) {
-            throw AssertionError("Missing $matcher\n"+compose.onAllNodes(isRoot()).printToString(maxDepth=5), error)
+            throw AssertionError("Missing ${matcher.description}\n"+compose.onAllNodes(isRoot()).printToString(maxDepth=5), error)
         }
         return compose.onAllNodes(matcher).onLast()
     }
@@ -148,7 +148,10 @@ class CloudWorldChronicleInteropTest {
                 assertEquals(JsonNull,data(f,document)["originalWorldTime"])
                 assertEdge(f,document,"known_about","keeper")
                 tab("Chronicle","Lore")
-                type("Search lore","Harbor keeper letter");click("Harbor keeper letter")
+                type("Search lore","Harbor keeper letter")
+                // The editable query already contains the title while matching records load.
+                val letterRow = hasText("Harbor keeper letter") and hasText("Known fact") and hasClickAction() and isEnabled()
+                await(letterRow).performScrollTo().assertIsDisplayed().performClick()
                 see("The signed letter names the west jetty.")
                 click("Linked records")
                 await(hasText("Map keeper",substring=true) and hasClickAction()).assertExists()
