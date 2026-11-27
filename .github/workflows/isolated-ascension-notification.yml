@@ -21,6 +21,11 @@ jobs:
           persist-credentials: false
       - name: Prepare the Android 17 emulator
         run: |
+          sdkbin=$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)
+          test -n "$sdkbin"
+          sdkbin=$(dirname "$sdkbin")
+          for dir in "$sdkbin" "$ANDROID_HOME/platform-tools" "$ANDROID_HOME/emulator"; do echo "$dir" >> "$GITHUB_PATH"; done
+          export PATH="$sdkbin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
           sudo chmod a+rw /dev/kvm
           bash scripts/ci-android17-sdk.sh
       - name: Retrieve the exact synthetic debug pair
