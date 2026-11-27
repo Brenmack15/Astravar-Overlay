@@ -1,0 +1,48 @@
+name: Isolated Ascension evidence register verification
+on:
+  push:
+    branches: ['verification/ascension-register-check-20261127']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 03c58dba4dbf1183912a7ed4e052ab046490a155
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Check source, evidence register and documentation scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '03c58dba4dbf1183912a7ed4e052ab046490a155'
+          test "$(git rev-parse HEAD^)" = '5e65a4c7052fe1697cbcbd03f415b85249d09b7a'
+          git diff --check HEAD^ HEAD
+          python3 tools/ascension_trace_check.py
+          python3 - <<'PY'
+          import csv
+          import json
+          import pathlib
+          import subprocess
+          current = pathlib.Path("docs/ascension")
+          files = {"docs/ascension/" + name for name in ("RELEASE-GAPS.md", "requirements.csv", "requirements-backlog.csv", "requirements-fixtures.csv", "requirements-candidate-evidence.csv")}
+          assert set(subprocess.check_output(["git","diff","--name-only","HEAD^","HEAD"],text=True).splitlines()) == files
+          for name in ("requirements.csv", "requirements-backlog.csv", "requirements-fixtures.csv"):
+              before = list(csv.DictReader(subprocess.check_output(["git","show","HEAD^:docs/ascension/"+name], text=True).splitlines()))
+              with (current/name).open(newline="") as f:
+                  after = list(csv.DictReader(f))
+              assert [(x["id"], x["source"], x["planned_acceptance_id"]) for x in before] == [(x["id"], x["source"], x["planned_acceptance_id"]) for x in after]
+          with (current/"requirements.csv").open(newline="") as f:
+              rows = {x["id"]: x for x in csv.DictReader(f)}
+          assert rows["D41-22-6"]["status"] == "INDEPENDENTLY_VERIFIED"
+          assert all(rows[k]["status"] == "PARTIAL" for k in ("D41-25-3", "D41-28-10", "D41-31", "D41-32-8", "D41-34"))
+          source = pathlib.Path("app/src/main")
+          occurrences = [(str(p), line.strip()) for p in sorted(source.rglob("*")) if p.suffix in {".kt", ".java"} for line in p.read_text().splitlines() if "setSmallIcon(" in line]
+          assert occurrences, "No native posting path found"
+          assert all("R.drawable.ic_astravar_notification" in line for _, line in occurrences), occurrences
+          for rel, line in occurrences: print(f"Native small icon: {rel} {line}")
+          print("All stable source references and test identities survived. The five documentation paths and bounded release conclusions match the published evidence.")
+          PY
