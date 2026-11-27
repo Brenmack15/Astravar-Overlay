@@ -1,0 +1,168 @@
+name: Retained companion creation and reviewed adoption on Android 16
+on:
+  push:
+    branches: [verification/ascension-await-saved-companion]
+    paths: ['.github/workflows/qa-retained-companion-acceptance.yml','scripts/qa-retained-companion-proof.py','overlay-target/src/androidTest/java/com/yazsras/astravar/PlayerFirstJourneyInstrumentationTest.kt']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          cache-read-only: true
+      - name: Prepare the stock Android 16 image and tools
+        run: |
+          bash scripts/ci-android-sdk.sh native
+          sudo apt-get -qq update
+          sudo apt-get -qy install libpulse0
+      - name: Verify seven original public CI packages and unchanged product inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code 2fb644414e8e57c135ab61ec78ba557f6b30b65e HEAD -- app rules build.gradle.kts settings.gradle.kts gradle.properties gradle
+          endpoint="repos/$GITHUB_REPOSITORY/actions/artifacts/15176732893"
+          gh api "$endpoint" > "$RUNNER_TEMP/meta.json"
+          gh api "$endpoint/zip" > "$RUNNER_TEMP/source.apk.zip"
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,re,shutil,subprocess,sys,zipfile
+          root = pathlib.Path(os.environ["RUNNER_TEMP"])
+          digest = "f9ed05d8cd1638d541b949cfd1dda73978672551680f26d7d18145b7ac0162a6"
+          cert = "bbb216308c1c8acb5579cdcdcb7669df2027aeb414448ceb0bbdf110c601fd2d"
+          packages = {"49":["3.2.0-rc1","42a0d7dcc156d77ef7f5c604b27c65a812b6646d72084e6b21a7e431815d7872","3543e83bfca5e589f1bbedb09964431ce94a2319"],"50":["4.0.0-genesis1","47d9bc4b641edfef98dba8b1401a21e68112fca700b65c06994897feb77bf9f0","a86ab0fa87ce47a4f99550dcfa8fe01ed0e22928"],"54":["4.0.0-convergence1","1a02872541bff63abad9b26a3f727156133ba20ba797812834a54de23fdf4ae7","613360f61121390ec925d8229587a7dd95a354b2"],"56":["4.0.0-convergence3","c76b203711c15183f6a27263f59173e3d11e965d6b1fee245d8d8b68efb9c8a7","d4240a2c90bec04e1395e7f8b3a3a12d1ba94794"],"57":["4.0.0-convergence4","2d7eb7530b47247efa71510ce0edf2f95aa11ee5ab54159860a396325170631e","689dadcc050d26f686b93ca4357c8c5e907c58e2"],"58":["4.0.0-convergence5","e311d55991e16164bea0a0da4fdc2a7aaddffcb5209371c8dec36467bab60605","883198a3140ae2b707b31f81829c94cd821189b9"],"59":["4.1.0","bb5404dff6a52a487037c40bdb2539478b9e02dde582e87d7e6f0abee76df040","2fb644414e8e57c135ab61ec78ba557f6b30b65e"]}
+          meta = json.loads((root / "meta.json").read_text())
+          assert meta["id"] == 15176732893 and meta["name"]=="android-verification" and not meta["expired"]
+          assert meta["workflow_run"]["head_sha"]=="2fb644414e8e57c135ab61ec78ba557f6b30b65e" and meta["digest"]=="sha256:"+digest
+          with (root / "source.apk.zip").open("rb") as f:
+              assert hashlib.file_digest(f,"sha256").hexdigest()==digest
+          tools=pathlib.Path(os.environ["ANDROID_HOME"])/"build-tools/35.0.0"
+          with zipfile.ZipFile(root / "source.apk.zip") as archive:
+              assert archive.read("validation/SOURCE_COMMIT.txt").decode().strip()=="2fb644414e8e57c135ab61ec78ba557f6b30b65e"
+              for code,(version,expected,source) in packages.items():
+                  if int(code)<59:
+                      name="validation/upgrade-baseline/code"+code+"-ci.apk"
+                      evidence=json.loads(archive.read("validation/upgrade-baseline/code"+code+"-provenance.json"))
+                      assert evidence["inputs"]["source_sha"]==source and evidence["owner_compatible"] is False
+                      assert evidence["output_apk_sha256"]==expected
+                  else:
+                      name="app/build/outputs/apk/release/app-release.apk"
+                      evidence=json.loads(archive.read("validation/ci-release-package.json"))
+                      assert evidence["owner_signature_verified"] is False and evidence["apk_sha256"]==expected
+                  path=pathlib.Path(name)
+                  assert archive.namelist().count(name)==1 and evidence["certificate_sha256"]==cert
+                  path.parent.mkdir(parents=True,exist_ok=True)
+                  with archive.open(name) as src,path.open("xb") as dest:
+                      shutil.copyfileobj(src,dest)
+                  with path.open("rb") as dest:
+                      assert hashlib.file_digest(dest,"sha256").hexdigest()==expected
+                  output=subprocess.check_output([tools/"apksigner","verify","--print-certs",path],text=True)
+                  assert re.findall(r"Signer #\d+ certificate SHA-256 digest: ([0-9a-f]{64})",output)==[cert]
+                  badging=subprocess.check_output([tools/"aapt2","dump","badging",path],text=True).splitlines()[0]
+                  assert f"name='com.yazsras.astravar' versionCode='{code}' versionName='{version}'" in badging
+                  print("Verified disposable payload",code,expected)
+          evidence=pathlib.Path("validation/retained-companion")
+          evidence.mkdir(parents=True,exist_ok=True)
+          (evidence/"input.json").write_text(json.dumps({"source":"2fb644414e8e57c135ab61ec78ba557f6b30b65e","testCommit":"90ea56725f4bd11c2741823f8039c0bc37e28203","sourceArtifact":15176732893,"archive":digest,"disposableCertificate":cert,"verifiedPackages":packages},indent=2)+"\n")
+          PY
+      - name: Build matching QA overlay and instrumentation
+        run: |
+          set -euo pipefail
+          project="$RUNNER_TEMP/genesis-overlay"
+          mkdir -p "$project/overlay-target"
+          cp -r overlay-target/src overlay-target/build.gradle.kts "$project/overlay-target/"
+          cp gradle.properties "$project/"
+          python3 - "$project" <<'PY'
+          from pathlib import Path
+          import sys
+          dest = Path(sys.argv[1])
+          lines = Path("build.gradle.kts").read_text().splitlines()
+          plugins = [l for l in lines if 'id("com.android.application")' in l or 'kotlin("android")' in l]
+          assert len(plugins) == 2 and all("version" in l for l in plugins)
+          (dest/"build.gradle.kts").write_text("plugins {\n" + "\n".join(plugins) + "\n}\n")
+          text = Path("settings.gradle.kts").read_text()
+          modules = 'include(":rules", ":app", ":overlay-target")'
+          assert text.count(modules) == 1
+          (dest/"settings.gradle.kts").write_text(text.replace(modules,'include(":overlay-target")'))
+          PY
+          bash gradlew --console=plain --build-cache --project-dir "$project" :overlay-target:assembleDebug :overlay-target:assembleDebugAndroidTest
+          mkdir -p overlay-target/build/outputs
+          cp -r "$project/overlay-target/build/outputs/apk" overlay-target/build/outputs/
+      - name: Repeat the original native upgrade and companion journeys on a new API 36 guest
+        env:
+          ASTRAVAR_BASELINE_APK: validation/upgrade-baseline/code49-ci.apk
+          ASTRAVAR_GENESIS_BASELINE_APK: validation/upgrade-baseline/code50-ci.apk
+          ASTRAVAR_CONVERGENCE_BASELINE_APK: validation/upgrade-baseline/code54-ci.apk
+          ASTRAVAR_TEST_PACKAGE: com.yazsras.astravar
+          ASTRAVAR_TEST_APK: app/build/outputs/apk/release/app-release.apk
+          EXPECTED_VERSION_CODE: '59'
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          script=Path("scripts/ci-emulator.sh").read_text()
+          marker="# Collect independent roll, SQLite and player journeys once before dependent"
+          assert script.count(marker)==1
+          (Path(os.environ["RUNNER_TEMP"])/"companion-device.sh").write_text(script.split(marker)[0])
+          PY
+          cat >> "$RUNNER_TEMP/companion-device.sh" <<'SH'
+          test "$(adb -s "$astravar_serial" shell getprop ro.build.version.sdk | tr -d '\r')" = 36
+          run_stage PlayerFirstJourneyInstrumentationTest 1 1050 native-player-first.txt
+          stop_product
+          copy_campaign_database "$RUNNER_TEMP/companion-after-adoption"
+          python3 scripts/qa-retained-companion-proof.py "$RUNNER_TEMP/companion-after-adoption/astravar-campaign-ledger.db" adopted validation/retained-companion/adopted.json
+          run_stage GenesisConsolidationInstrumentationTest 1 900 native-genesis-consolidation.txt
+          run_stage VisualRebirthJourneyInstrumentationTest 1 900 native-visual-rebirth.txt
+          stop_product
+          copy_campaign_database "$RUNNER_TEMP/companion-after-equipping"
+          python3 scripts/qa-retained-companion-proof.py "$RUNNER_TEMP/companion-after-equipping/astravar-campaign-ledger.db" equipped validation/retained-companion/equipped.json
+          SH
+          bash "$RUNNER_TEMP/companion-device.sh"
+      - name: Summarize real screenshots and stage results
+        if: always()
+        run: |
+          test ! -f validation/native-stages.tsv || cat validation/native-stages.tsv
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          import hashlib,json
+          p=Path("validation/emulator-evidence")
+          rows={}
+          for f in sorted(p.glob("*.xml")):
+              if all(k not in f.name for k in ("companion","health-dialog","failure-")): continue
+              tree=ET.parse(f)
+              names=[n.get("text") or n.get("content-desc") for n in tree.getroot().iter("node") if n.get("package")=="com.yazsras.astravar"]
+              rows[f.stem]={"bitmapSha256":hashlib.sha256(f.with_suffix(".png").read_bytes()).hexdigest(),"labels":[k for k in names if k]}
+              if "failure-" in f.name: print(f.stem, rows[f.stem]["labels"])
+          evidence=Path("validation/retained-companion")
+          if evidence.is_dir(): (evidence/"frames.json").write_text(json.dumps(rows,indent=2)+"\n")
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: retained-companion-native-proof
+          path: |
+            validation/retained-companion/
+            validation/native-stages.tsv
+            validation/native-player-first.txt
+            validation/native-genesis-consolidation.txt
+            validation/native-visual-rebirth.txt
+            validation/convergence-code58-candidate-package.json
+            validation/genesis-upgrade-canonical-write-result.json
+            validation/emulator-evidence/*companion*.*
+            validation/emulator-evidence/*health-dialog*.*
+            validation/emulator-evidence/failure-*.*
+          if-no-files-found: warn
+          retention-days: 5
