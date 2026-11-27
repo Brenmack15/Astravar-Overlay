@@ -24,15 +24,33 @@ METHODS = [
 
 
 class NativeBootstrapGateTest(unittest.TestCase):
-    def run_gate(self, failure='', enabled=True):
+    def run_gate(self, failure='', enabled=True, initially_hidden=True):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         root = Path(directory.name)
+        (root/'silent-policy.txt').write_text('true' if initially_hidden else 'false')
         env = dict(os.environ, ASTRAVAR_VERSION_CODE='54', TEST_OUTPUT=str(root), TEST_FAILURE=failure,
                    TEST_ENABLED='true' if enabled else 'false')
         shell = '''set -euo pipefail
 astravar_output=$TEST_OUTPUT
+astravar_serial=emulator-5584
 astravar_bootstrap_gate=$TEST_ENABLED
+python3() {
+  if [[ "$1" != scripts/ci-android17-silent-icons.py ]]; then command python3 "$@"; return; fi
+  [[ "$2" == emulator-5584 && "$3" == AstravarHpCI ]] || return 1
+  printf '%s\\n' "$4" >>"$astravar_output/icon-policy-actions.txt"
+  case "$4" in
+    read) [[ "$TEST_FAILURE" != icon-read ]] && cat "$astravar_output/silent-policy.txt" ;;
+    show)
+      # A Settings click can commit before its following readback times out.
+      printf false >"$astravar_output/silent-policy.txt"
+      [[ "$TEST_FAILURE" != icon-show ]] ;;
+    hide)
+      [[ "$TEST_FAILURE" != icon-restore ]] || return 1
+      printf true >"$astravar_output/silent-policy.txt" ;;
+    *) return 1 ;;
+  esac
+}
 run_test() {
   printf '%s\\n' "$1" >>"$astravar_output/executed.txt"
   [[ -z "$TEST_FAILURE" || "$1" != *"$TEST_FAILURE" ]]
@@ -60,6 +78,8 @@ git() { printf '%s\\n' 0123456789012345678901234567890123456789; }
         result, root, methods = self.run_gate()
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(METHODS, methods)
+        self.assertEqual(['read', 'show', 'hide'], (root/'icon-policy-actions.txt').read_text().splitlines())
+        self.assertEqual('true', (root/'silent-policy.txt').read_text())
         scope = json.loads((root/'SCOPE.json').read_text())
         self.assertEqual(37, scope['emulatorApi'])
         self.assertTrue(scope['android17'])
@@ -78,6 +98,31 @@ git() { printf '%s\\n' 0123456789012345678901234567890123456789; }
         self.assertTrue((root/'validation/ascension-api37/sdk.txt').is_file())
         self.assertFalse((root/'SCOPE.json').exists())
         self.assertFalse((root/'legacy-path.txt').exists())
+
+        self.assertEqual(['read', 'show', 'hide'], (root/'icon-policy-actions.txt').read_text().splitlines())
+        self.assertEqual('true', (root/'silent-policy.txt').read_text())
+
+    def test_owner_visible_silent_icons_stay_visible(self):
+        result, root, methods = self.run_gate(initially_hidden=False)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(METHODS, methods)
+        self.assertEqual(['read', 'show', 'show'], (root/'icon-policy-actions.txt').read_text().splitlines())
+        self.assertEqual('false', (root/'silent-policy.txt').read_text())
+
+    def test_visibility_failure_preserves_upgrade_evidence_and_blocks_success(self):
+        method = 'actualSmallEmblemInStatusBarAndShadeAcrossLightAndDarkThemes'
+        for failure, actions, checked, final in [
+                ('icon-read', ['read'], False, 'true'),
+                ('icon-show', ['read', 'show', 'hide'], False, 'true'),
+                ('icon-restore', ['read', 'show', 'hide'], True, 'false')]:
+            with self.subTest(failure=failure):
+                result, root, methods = self.run_gate(failure)
+                self.assertNotEqual(0, result.returncode)
+                self.assertEqual(METHODS if checked else [m for m in METHODS if m != method], methods)
+                self.assertEqual(actions, (root/'icon-policy-actions.txt').read_text().splitlines())
+                self.assertEqual(final, (root/'silent-policy.txt').read_text())
+                self.assertTrue((root/'validation/ascension-api37/sdk.txt').is_file())
+                self.assertFalse((root/'SCOPE.json').exists())
 
     def test_other_failures_stop_dependents_and_cannot_write_success_evidence(self):
         for index, method in enumerate(METHODS):
