@@ -98,7 +98,9 @@ class InstalledPreservationGate {
         try { runBlocking {
             val repo=CampaignLedgerRepository(db)
             assertEquals(source,archiveWitness(repo.export()))
-            assertEquals(listOf(activeName),repo.items.first().filter { it.id.startsWith("qa-pres-") }.map { it.title })
+            val active = repo.items.first().map { it.id }
+            assertTrue("qa-pres-active" in active)
+            assertFalse(archivedId in active)
         } } finally { db.close() }
         ActivityScenario.launch(MainActivity::class.java).use {
             tap("Find")
@@ -108,6 +110,15 @@ class InstalledPreservationGate {
             compose.onAllNodesWithText(archivedName).assertCountEquals(0)
             await(hasText("1 matches")).assertExists()
             proof("upgraded-find")
+            tap("Close")
+            click(hasTestTag("navigation-Inventory"))
+            await(hasTestTag("genesis-inventory-item-qa-pres-active")).assertExists()
+            compose.onAllNodesWithTag("genesis-inventory-item-"+archivedId).assertCountEquals(0)
+            tap("Campaign items")
+            await(hasText("Equipment, treasures & discoveries")).assertExists()
+            await(hasText(activeName) and hasClickAction()).assertExists()
+            compose.onAllNodesWithText(archivedName).assertCountEquals(0)
+            proof("upgraded-active-inventory")
             tap("Close");tap("Tools");tap("Records, backups & connection");tap("Owner connection");tap("Backups and recovery");tap("Campaign backup")
             tap("Export campaign backup")
             val filename=guest.wait(Until.findObject(By.clazz("android.widget.EditText")),10_000)

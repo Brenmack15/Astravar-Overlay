@@ -31,8 +31,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
         with:
           cache-read-only: true
-      - run: |
-          bash scripts/ci-android-sdk.sh
+      - name: Locate Android command-line tools
+        run: bash scripts/ci-android-sdk.sh
+      - name: Install the Android 17 emulator and workerd runtime
+        run: |
           bash scripts/ci-android17-sdk.sh
           npm install --prefix "$RUNNER_TEMP/preservation-runtime" --no-audit --no-fund --no-save miniflare@5.20261123.1-beta
           echo "ASTRAVAR_MINIFLARE_PATH=$RUNNER_TEMP/preservation-runtime/node_modules/miniflare" >> "$GITHUB_ENV"

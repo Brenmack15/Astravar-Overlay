@@ -61,7 +61,10 @@ qa install -r app/build/outputs/apk/debug/app-debug.apk | tee "$evidence/upgrade
 grep -qx 'Success' "$evidence/upgrade.txt"
 test "$prior_uid" = "$(uid)"
 printf 'Version 58 to 59; retained Android UID %s\n' "$prior_uid" > "$evidence/uid.txt"
-method 'InstalledPreservationGate#upgradedArchiveIsAbsentFromFindButStillInOwnerBackupAndHistory' upgraded-archive
+archive_result=0
+method 'InstalledPreservationGate#upgradedArchiveIsAbsentFromFindButStillInOwnerBackupAndHistory' upgraded-archive || archive_result=$?
 for i in $(seq 1 120); do grep -q RESTORED_PROVIDER_READY "$RUNNER_TEMP/preservation-gateway.log" && break; kill -0 "$provider_pid"; sleep 1; done
 grep -q RESTORED_PROVIDER_READY "$RUNNER_TEMP/preservation-gateway.log"
-method 'InstalledPreservationGate#restoredActorAndFormPortraitsAndUnknownPoolSurviveInstalledReadback' restored-forms
+forms_result=0
+method 'InstalledPreservationGate#restoredActorAndFormPortraitsAndUnknownPoolSurviveInstalledReadback' restored-forms || forms_result=$?
+test "$archive_result" -eq 0 && test "$forms_result" -eq 0
