@@ -1,5 +1,7 @@
 package com.yazsras.astravar
 
+import android.graphics.Rect
+import android.view.accessibility.AccessibilityWindowInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
@@ -38,9 +40,19 @@ class GenesisUpgradeInstrumentationTest {
         val field = By.clazz("android.widget.EditText").pkg(product).hasDescendant(By.text(label))
         find(label)
         ui.tap(field, "Focus $label")
-        ui.snapshot(field, "$label has focus", refreshCache = true) { box -> true.takeIf { box.isFocused } }
-        ui.setFocusedField(value, product, label)
-        device.pressBack()
+        val editor = ui.snapshot(field, "$label has focus", refreshCache = true) { box ->
+            box.takeIf { it.isFocused && it.isEnabled && !it.visibleBounds.isEmpty }
+        }
+        // Edit this named accessibility node once. A hardware keyboard can leave the IME hidden.
+        editor.text = value
+        ui.snapshot(field, "Exact input for $label", refreshCache = true) { box ->
+            box.text?.takeIf { box.isFocused && it == value }
+        }
+        val imeVisible = instrumentation.uiAutomation.windows.any { window ->
+            window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD &&
+                !Rect().also { window.getBoundsInScreen(it) }.isEmpty
+        }
+        if (imeVisible) device.pressBack()
         ui.assertFocusedField(value, product, label)
         ui.snapshot(field, "Saved input for $label", refreshCache = true) { box ->
             box.text?.takeIf { it == value && box.isFocused }
