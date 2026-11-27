@@ -271,6 +271,11 @@ class VisualRebirthJourneyInstrumentationTest {
                 }
                 // Read-only primary-destination captures retain their upper
                 // headings and actions for the same enlarged-text review.
+                if (ascension) {
+                    ui.ensurePrimaryTab(product, "Inventory")
+                    find("CI Native Hero Revised's equipment and campaign records")
+                    capture("party-inventory-font-$scale", "Inventory", "Add item", interactiveMarker = true)
+                }
                 ui.campaignItems(product)
                 capture("inventory-font-$scale", "Inventory", "Equipment, treasures & discoveries")
                 campaignHome()
