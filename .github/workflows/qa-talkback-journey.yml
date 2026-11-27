@@ -67,7 +67,14 @@ jobs:
           serial=emulator-5582
           device() { adb -s "$serial" "$@"; }
           if adb devices | awk -v s="$serial" '$1==s{found=1}END{exit !found}'; then exit 1; fi
-          printf 'no\n' | avdmanager create avd -f -n "$avd" -k "$QA_IMAGE" --device pixel_8
+          avdmanager list device > "$RUNNER_TEMP/reader-profiles.txt"
+          device_profile=""
+          for candidate in pixel_8 pixel_7 pixel_6 pixel_5 pixel_2 pixel Nexus_5; do
+            if grep -Fq "or \"$candidate\"" "$RUNNER_TEMP/reader-profiles.txt"; then device_profile="$candidate"; break; fi
+          done
+          test -n "$device_profile"
+          echo "Official emulated handset profile $device_profile" | tee "$report/device-profile.txt"
+          printf 'no\n' | avdmanager create avd -f -n "$avd" -k "$QA_IMAGE" --device "$device_profile"
           "$ANDROID_HOME/emulator/emulator" -avd "$avd" -port 5582 -grpc-use-token -accel on -no-window -no-audio -no-snapshot -no-boot-anim -memory 4096 -gpu swiftshader > "$RUNNER_TEMP/stock-reader-emulator.log" 2>&1 &
           qemu_pid=$!
           trap 'kill "$qemu_pid" 2>/dev/null || true' EXIT
