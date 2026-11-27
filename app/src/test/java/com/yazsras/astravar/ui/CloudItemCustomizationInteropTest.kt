@@ -38,12 +38,12 @@ class CloudItemCustomizationInteropTest {
 
     private fun node(matcher: SemanticsMatcher): SemanticsNodeInteraction {
         try { compose.waitUntil(8_000) { compose.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() } }
-        catch (error: ComposeTimeoutException) { throw AssertionError("Missing $matcher\n" + compose.onAllNodes(isRoot()).printToString(maxDepth=8), error) }
+        catch (error: ComposeTimeoutException) { throw AssertionError("Missing ${matcher.description}\n" + compose.onAllNodes(isRoot()).printToString(maxDepth=8), error) }
         val scrollable = compose.onAllNodes(matcher and hasAnyAncestor(hasScrollAction()))
         if (scrollable.fetchSemanticsNodes().isNotEmpty()) return scrollable.onFirst().performScrollTo()
         return compose.onAllNodes(matcher).onFirst()
     }
-    private fun press(label: String) = node(hasText(label) and hasClickAction()).performClick()
+    private fun press(label: String) = node(hasText(label) and hasClickAction() and isEnabled() and !hasSetTextAction()).performClick()
     private fun field(label: String) = node(hasText(label) and hasSetTextAction())
 
     private fun AscensionWorkerFixture.seed(operation: String, raw: String) {
@@ -62,21 +62,26 @@ class CloudItemCustomizationInteropTest {
         val operations = runBlocking { worker.client.capabilities() }.rows("operations")
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         activity.get().setContent {
-            var editor by remember { mutableStateOf<Pair<String, JsonObject>?>(null) }
-            val open: RecordOperation = { op, args -> editor = op to args }
+            var editor by remember { mutableStateOf<Triple<String, JsonObject, CloudSnapshot>?>(null) }
+            var error by remember { mutableStateOf<String?>(null) }
+            val open: RecordOperation = { op, args -> editor = Triple(op, args, snapshot.value); error = null }
             AstravarTheme {
                 if (tab.value == "Archive") {
                     CloudArchiveManager(worker.client, snapshot.value, true, open) { tab.value = "Inventory" }
                 } else Column(Modifier.verticalScroll(rememberScrollState())) {
                     CloudRecordScreen(tab.value, actor.value, worker.client, snapshot.value, true, open, {})
                 }
-                editor?.let { (op, initial) ->
+                editor?.let { (op, initial, reviewed) ->
                     CloudCommandForm(operations.single { it.cloudText("name") == op }, false, { editor = null }, { values, id ->
-                        val response = runBlocking { worker.client.submit(op, values, snapshot.value, id) }
-                        saved += op to response
-                        snapshot.value = runBlocking { requireNotNull(worker.client.workspace()) }
-                        editor = null
-                    }, null, initial)
+                        try {
+                            val response = runBlocking { worker.client.submit(op, values, reviewed, id) }
+                            saved += op to response
+                            snapshot.value = runBlocking { requireNotNull(worker.client.workspace()) }
+                            editor = null
+                        } catch (failure: OwnerSyncFailure) {
+                            error = cloudError(failure)
+                        }
+                    }, error, initial)
                 }
             }
         }
@@ -319,7 +324,8 @@ class CloudItemCustomizationInteropTest {
             val start = runBlocking { worker.refresh() }
             val tab = mutableStateOf("Inventory")
             val actor = mutableStateOf("lead")
-            val activity = mount(worker, tab, actor, mutableStateOf(start), recorded)
+            val snapshot = mutableStateOf(start)
+            val activity = mount(worker, tab, actor, snapshot, recorded)
             try {
                 node(hasText("Party quantity · 10")).assertExists()
                 press("Survey marker")
@@ -397,6 +403,20 @@ class CloudItemCustomizationInteropTest {
                 compose.runOnIdle { actor.value = "scout" }
                 node(hasText("Calibrated marker") and hasClickAction()).assertExists()
                 compose.onAllNodesWithText("Inscribed marker").assertCountEquals(0)
+
+                compose.runOnIdle { actor.value = "lead" }
+                press("Inscribed marker"); press("Customize this instance")
+                field("Name").performTextReplacement("Unsaved new inscription")
+                worker.seed("edit_item_definition", """{"definitionId":"marker","name":"Surveyor's marker","description":"Subsequent catalog revision","category":"gear","rarity":null,"source":"Independent DM review"}""")
+                val latest = runBlocking { worker.refresh() }
+                compose.runOnIdle { snapshot.value = latest }
+                field("Name").assertTextContains("Unsaved new inscription")
+                press("Submit")
+                node(hasText("The campaign changed. Refresh and review the current values.")).assertExists()
+                field("Name").assertTextContains("Unsaved new inscription")
+                assertEquals(customized, worker.record("stock-lead"))
+                assertEquals(3, saved().size)
+                assertEquals(latest.version.revision, worker.dm("get_cloud_state", json("""{"limit":1}""")).getValue("revision").jsonPrimitive.long)
             } finally {
                 activity.pause().stop().destroy()
             }

@@ -190,8 +190,17 @@ internal class CloudCampaignClient(
         }
     }
 
-    suspend fun record(id: String): JsonObject? = withContext(Dispatchers.IO) {
-        lock.withLock { cache.record(current().binding, now(), id) }
+    suspend fun record(id: String, reviewed: CloudSnapshot? = null): JsonObject? = withContext(Dispatchers.IO) {
+        lock.withLock {
+            val session = current()
+            if (reviewed != null) {
+                val saved = cache.workspace()
+                if (!reviewed.visible || saved?.visible != true || saved.binding != reviewed.binding ||
+                    session.binding != reviewed.binding || saved.version != reviewed.version || saved.version.grantExpiresAt <= now())
+                    throw OwnerSyncFailure("CLOUD_REVIEW_STALE")
+            }
+            cache.record(session.binding, now(), id)
+        }
     }
 
     suspend fun records(after: String = "", kinds: Set<String> = emptySet(), actorId: String? = null, query: String = ""): List<JsonObject> = withContext(Dispatchers.IO) {

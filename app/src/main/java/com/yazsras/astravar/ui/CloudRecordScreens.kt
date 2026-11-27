@@ -242,10 +242,10 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
 }
 
 @Composable private fun SelectedRecord(client:CloudCampaignClient,snapshot:CloudSnapshot,id:String,render:@Composable (JsonObject)->Unit) {
-    var row by remember(snapshot.binding,snapshot.version,id) { mutableStateOf<JsonObject?>(null) }
-    var loaded by remember(snapshot.binding,snapshot.version,id) { mutableStateOf(false) }
-    LaunchedEffect(snapshot.binding,snapshot.version,id) {
-        try {row=client.record(id)}
+    var row by remember(client,snapshot.binding,snapshot.version,id) { mutableStateOf<JsonObject?>(null) }
+    var loaded by remember(client,snapshot.binding,snapshot.version,id) { mutableStateOf(false) }
+    LaunchedEffect(client,snapshot.binding,snapshot.version,id) {
+        try {row=client.record(id,snapshot)}
         catch(e:CancellationException){throw e} catch(_:Exception){row=null}
         finally { loaded=true }
     }
@@ -322,24 +322,54 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
     }
 }
 
+private sealed interface HoldingDefinition {
+    data object Loading : HoldingDefinition
+    data object Unavailable : HoldingDefinition
+    data class Ready(val record: JsonObject, val canManageCatalog: Boolean) : HoldingDefinition
+}
+
+@Composable private fun holdingDefinition(
+    client: CloudCampaignClient, snapshot: CloudSnapshot, item: JsonObject, online: Boolean, attempt: Int
+): HoldingDefinition = key(client, snapshot.binding, snapshot.version, item, online, attempt) {
+    val state by produceState<HoldingDefinition>(HoldingDefinition.Loading) {
+        value = try {
+            val definitionId = item.data().cloudText("definitionId")
+            val catalog = client.record(definitionId, snapshot)
+            val definition = catalog ?: if (online) {
+                val view = client.projection(snapshot, recordViewSuffix("inventory", snapshot.version, item.cloudText("id")))
+                require(view.s("view") == "inventory" && view.s("authority") == "cloud" &&
+                    view.s("subject") == snapshot.binding.subject && view.s("continuityId") == snapshot.binding.continuity &&
+                    view["grantRevision"]?.jsonPrimitive?.longOrNull == snapshot.version.grantRevision && view["holding"] == item)
+                view["definition"] as? JsonObject
+            } else null
+            if (definition != null && definition.s("id") == definitionId && definition.s("kind") == "item_definition" &&
+                definition.s("life") == "active" && !definition.s("title").isNullOrBlank() && definition["data"] is JsonObject)
+                HoldingDefinition.Ready(definition, catalog != null)
+            else HoldingDefinition.Unavailable
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            HoldingDefinition.Unavailable
+        }
+    }
+    state
+}
+
 @Composable private fun HoldingSheet(client:CloudCampaignClient,snapshot:CloudSnapshot,itemId:String,online:Boolean,
     dismiss:()->Unit,open:RecordOperation,inspect:(String)->Unit,manage:(String)->Unit) {
     var pane by rememberSaveable(itemId){mutableStateOf("Details")}
     PlayerSheet("Item inspection",dismiss) {
         SelectedRecord(client,snapshot,itemId){ item->
             val d=item.data()
-            val def=d.s("definitionId")
-            var catalogVisible by remember(snapshot.version,itemId){mutableStateOf(false)}
-            val definition by produceState<JsonObject?>(null,snapshot.binding,snapshot.version,itemId,online){
-                if(def!=null)try{
-                    val catalog=client.record(def)
-                    catalogVisible=catalog!=null
-                    value=catalog?:if(online)client.projection(snapshot,recordViewSuffix("inventory",snapshot.version,itemId))["definition"] as? JsonObject else null
-                }catch(e:CancellationException){throw e}catch(_:Exception){value=null}
-            }
-            val name=if(d.s("customized")=="true") item.cloudText("title") else definition?.s("title")?:item.cloudText("title")
-            CloudEntityImage(client,snapshot,online,itemId,"item_instance",name)
-            Text(name,style=MaterialTheme.typography.titleLarge)
+            var attempt by remember(itemId, snapshot.binding, snapshot.version) { mutableIntStateOf(0) }
+            val source = holdingDefinition(client, snapshot, item, online, attempt)
+            val ready = source as? HoldingDefinition.Ready
+            val definition = ready?.record
+            val name = if (d.s("customized") == "true") item.cloudText("title") else definition?.s("title")
+            CloudEntityImage(client,snapshot,online,itemId,"item_instance",name ?: "Item")
+            if (name != null) Text(name,style=MaterialTheme.typography.titleLarge)
+            else if (source == HoldingDefinition.Unavailable)
+                Text("Recorded holding · "+item.cloudText("title"),style=MaterialTheme.typography.titleMedium)
             Text("${amount(d.s("quantity"))} · ${cloudLabel(d.s("holding")?:"Unknown")} · ${cloudLabel(d.s("equipment")?:"Unknown")}",color=RebuildPalette.Gold)
             PlayerTabs(listOf("Details","Transfer","History","Components"),pane,{pane=it})
             when(pane) {
@@ -399,16 +429,25 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
                     d.s("custodianId")?.let{Text("Carried by · "+recordName(client,snapshot,it,"Unknown"))}
                     d.s("locationId")?.let{Text("Stored at · "+recordName(client,snapshot,it,"Unknown"))}
                     Text(if(d.s("attuned")=="true") "Attuned" else "Unattuned")
-                    if(def!=null && catalogVisible)PlayerOutlinedButton({manage(def)}){Text("Manage in Inventory")}
-                    PlayerTextButton({
-                        open("customize_item", buildJsonObject {
-                            put("itemId", itemId)
-                            put("name", name)
-                            description?.let { put("description", it) }
-                            d.s("condition")?.let { put("condition", it) }
-                            put("source", manual)
-                        })
-                    }, enabled = online && d.s("quantity") == "1") { Text("Customize this instance") }
+                    when (source) {
+                        HoldingDefinition.Loading -> Text("Loading item definition…")
+                        HoldingDefinition.Unavailable -> {
+                            Text("Item definition unavailable.")
+                            if (online) PlayerTextButton({ attempt++ }) { Text("Retry item definition") }
+                        }
+                        is HoldingDefinition.Ready -> if (source.canManageCatalog)
+                            PlayerOutlinedButton({ manage(source.record.cloudText("id")) }) { Text("Manage in Inventory") }
+                    }
+                    val customization = if (ready != null && online && d.s("quantity") == "1" && name != null) buildJsonObject {
+                        put("itemId", itemId)
+                        put("name", name)
+                        description?.let { put("description", it) }
+                        d.s("condition")?.let { put("condition", it) }
+                        put("source", manual)
+                    } else null
+                    PlayerTextButton({ customization?.let { open("customize_item", it) } }, enabled = customization != null) {
+                        Text("Customize this instance")
+                    }
                     if(d.s("holding")=="carried" && d.s("quantity")=="1"){
                         definition?.let{ linked->
                             val spec=linked.data()
@@ -455,11 +494,13 @@ internal fun cloudCoinsCaption(balance: JsonObject): String {
 }
 @Composable private fun recordName(client:CloudCampaignClient,snapshot:CloudSnapshot,id:String?,fallback:String):String {
     if(id==null)return fallback
-    val label by produceState(fallback,snapshot.binding,snapshot.version,id) {
-        value=try { client.record(id)?.s("title")?:fallback }
-        catch(e:CancellationException){throw e} catch(_:Exception){fallback}
+    return key(client,snapshot.binding,snapshot.version,id,fallback) {
+        val label by produceState(fallback) {
+            value=try { client.record(id,snapshot)?.s("title")?:fallback }
+            catch(e:CancellationException){throw e} catch(_:Exception){fallback}
+        }
+        label
     }
-    return label
 }
 @Composable private fun ownerCaption(client:CloudCampaignClient,snapshot:CloudSnapshot,data:JsonObject):String =
     if(data.s("ownerType")=="party")"Party" else recordName(client,snapshot,data.s("ownerId")?:data.s("externalRecipientId"),data.s("externalRecipientName")?:"Unknown")
