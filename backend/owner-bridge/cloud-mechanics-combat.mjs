@@ -1,3 +1,8 @@
+import {criticalProtection} from './cloud-armor-traits.mjs';
+import {checkPointArea,pointAreaInput} from './cloud-equipment-sensing.mjs';
+import {verifyReprisal} from './cloud-damage-reprisal.mjs';
+import {directPhysicalStrike} from './cloud-equipment-reactions.mjs';
+import {applicableTargetLock,releaseTargetLock} from './cloud-target-lock.mjs';
 import { applyCastAid } from './cloud-cast-aid.mjs';
 import { d20Evidence } from './cloud-mechanics-core.mjs';
 import {matchesForm} from './cloud-mechanics-core.mjs';
@@ -6,7 +11,7 @@ import { armedComponents, shotChoice } from './cloud-mechanics-arsenal.mjs';
 import { attackModeFor } from './cloud-mechanics-linked.mjs';
 import { chargedEffectSelection, reserveEffectCosts, settleEffectCosts } from './cloud-effect-costs.mjs';
 import { availableUses, requirePlayableExhaustion } from './cloud-mechanics-core.mjs';
-import { checkDiceOwner, stats, identifier, boolean, named, whole, arrayOf, option, fields, mode, evidence, attackSchema, must, op, actor, owned, insert, save, sheet, transferableSource, gearEligible, numeric, preferredEffect, rollPolicy, spend, useTiming } from './cloud-mechanics-core.mjs';
+import { checkDiceOwner, stats, identifier, boolean, named, whole, arrayOf, option, fields, mode, evidence, attackSchema, reactionRollWindow, must, op, actor, owned, insert, save, sheet, transferableSource, gearEligible, numeric, preferredEffect, rollPolicy, spend, useTiming } from './cloud-mechanics-core.mjs';
 import { observed } from './cloud-mechanics-rolls.mjs';
 
 export const damageEvidence=arrayOf(fields({id:identifier,evidence},['id','evidence']),24);
@@ -20,6 +25,14 @@ export function componentRules(list,allowScaling=false){
   }
 }
 export function snapshotComponents(components,p,chosen={},levels=0,route='attack',sourceId=null){
+  if(route==='attack'&&sourceId){
+    const extras=(p.effects??[]).filter(r=>r.data.target==='attack_component'&&r.data.key===sourceId).map(({data})=>
+      data.inheritAttackMagic&&typeof components[0]?.magical==='boolean'?{...data.extraComponent,magical:components[0].magical}:data.extraComponent);
+    if(extras.length){
+      components=[...components,...extras];
+      must(new Set(components.map(c=>c.id)).size===components.length,'ATTACK_RIDER_COMPONENT_ID_COLLISION');
+    }
+  }
   const types=components.map(c=>chosen[c.id]??c.type);
   const bonuses=components.map(()=>new Map());
   for(const row of p.effects??[]){
@@ -37,7 +50,7 @@ export function snapshotComponents(components,p,chosen={},levels=0,route='attack
     const bonus=c.abilityBonus?p.abilities[c.abilityBonus].modifier:0;
     must(bonus!=null,'DAMAGE_ABILITY_UNKNOWN');
     const adjusted=numeric(0,[...bonuses[i].values()],'damage',sourceId);
-    return {id:c.id,name:c.name,type:types[i],dice:c.dice+(c.extraDicePerLevel??0)*levels,sides:c.sides,
+    return {...(typeof c.magical==='boolean'?{magical:c.magical}:{}),id:c.id,name:c.name,type:types[i],dice:c.dice+(c.extraDicePerLevel??0)*levels,sides:c.sides,
       flat:c.flat+bonus+adjusted.value,critical:c.critical!==false,...(adjusted.sources.length?{
         baseFlat:c.flat,abilityModifier:bonus,damageModifier:adjusted.value,damageSources:adjusted.sources}:{})};
   });
@@ -48,13 +61,14 @@ export function rollComponents(components,recorded,critical){
   return components.map(c=>{
     const e=entries.get(c.id);must(e,'COMPONENT_MISSING');
     const dice=c.dice*(critical&&c.critical?2:1);
-    return {...observed(c.name,dice,c.sides,c.flat,'sum',e),id:c.id,type:c.type,
+    return {...observed(c.name,dice,c.sides,c.flat,'sum',e),id:c.id,type:c.type,...(typeof c.magical==='boolean'?{magical:c.magical}:{}),
       ...(c.damageSources?{baseFlat:c.baseFlat,abilityModifier:c.abilityModifier,damageModifier:c.damageModifier,damageSources:c.damageSources}:{})};
   });
 }
 async function validateAttack(ctx,x){
   const a=await actor(ctx,x.actorId);
   componentRules(x.components);
+  must(x.naturalMagicItemId||x.naturalMagicRequiresAttunement===undefined&&!x.naturalMagicEffectId,'NATURAL_MAGIC_SOURCE_REQUIRED');
   must((!x.requiresAttunement&&!x.requiresOperating) || x.sourceItemId,'ATTACK_ITEM_REQUIRED');
   must(x.resolution!=='attack'||x.fixedHit!=null||x.ability,'HIT_FORMULA_REQUIRED');
   must(x.resolution!=='save'||x.saveAbility && ((x.saveDc!=null)!==!!x.dcAbility),'SAVE_FORMULA_REQUIRED');
@@ -62,6 +76,18 @@ async function validateAttack(ctx,x){
   must(x.resolution==='save' || (x.dcAbility==null && x.saveDc==null),'DC_ON_NON_SAVE');
   must(x.resolution==='attack'||(x.fixedHit==null&&x.hitBonus==null),'HIT_ON_NON_ATTACK');
   must(x.longRange==null||x.range!=null&&x.longRange>=x.range,'INVALID_LONG_RANGE');
+  if(x.requiresWorn)must(x.sourceItemId,'ATTACK_ITEM_REQUIRED');
+  if(x.enforceReach)must(x.delivery==='melee' && Number.isSafeInteger(x.reach),'REACH_CONFIGURATION_REQUIRED');
+  if(x.longstrikeLimit!=null)must(x.delivery==='ranged' && x.resolution==='attack' && Number.isSafeInteger(x.range) &&
+    Number.isSafeInteger(x.longRange) && x.longstrikeLimit>=x.longRange,'LONGSTRIKE_RANGE_CONFIGURATION_REQUIRED');
+  if(x.pointArea)must(x.delivery==='area' && x.resolution==='save','POINT_AREA_SHAPE_INVALID');
+  if(x.naturalMagicItemId){
+    await owned(ctx,'item_instance',x.naturalMagicItemId,a.id);
+    if(x.naturalMagicEffectId){
+      const effect=await owned(ctx,'effect',x.naturalMagicEffectId,a.id);
+      must(effect.data.target==='natural_attack_magic'&&effect.data.operation==='grant'&&effect.data.sourceItemId===x.naturalMagicItemId,'NATURAL_MAGIC_GRANT_INVALID');
+    }
+  }
   if(x.sourceItemId)must((await ctx.get('item_instance',x.sourceItemId))?.life==='active','ATTACK_SOURCE_MISSING');
   must(!x.formId || !x.excludedForms?.includes(x.formId),'INVALID_FORM_REQUIREMENT');
   must(new Set(x.excludedForms??[]).size===(x.excludedForms?.length??0),'DUPLICATE_EXCLUDED_FORM');
@@ -96,8 +122,20 @@ function attackLinks(config) {
 async function writeAttack(ctx,x,editing=false){
   const {actorId,attackId,name,expectedAttackRevision,discardUnavailableSelections,sourceReview,...config}=x;
   const old=editing?await owned(ctx,'attack',attackId,actorId):null;
-  if(old)must(old.revision===expectedAttackRevision,'ATTACK_REVISION_CHANGED');
-  await validateAttack(ctx,x);
+  if(old){
+    must(old.revision===expectedAttackRevision,'ATTACK_REVISION_CHANGED');
+    // Older native editors submit a complete draft containing only fields they know.
+    for(const key of ['pointArea','enforceReach','requiresWorn','longstrikeLimit','naturalMagicItemId','naturalMagicEffectId','naturalMagicRequiresAttunement']){
+      if(config[key]===undefined && old.data[key]!==undefined)config[key]=old.data[key];
+    }
+    const prior=new Map(old.data.components.map(part=>[part.id,part]));
+    config.components=config.components.map(part=>{
+      const magical=prior.get(part.id)?.magical;
+      return part.magical===undefined && typeof magical==='boolean' ? {...part,magical} : part;
+    });
+    if(old.data.nativeRange!==undefined)config.nativeRange=old.data.nativeRange;
+  }
+  await validateAttack(ctx,{...x,...config});
   if(sourceReview){
     must(x.sourceItemId,'ATTACK_SOURCE_MISSING');
     const holding=await ctx.get('item_instance',x.sourceItemId);
@@ -121,6 +159,13 @@ async function writeAttack(ctx,x,editing=false){
   for(const [relation,id] of next)if(!has(prior,relation,id))await ctx.link(attackId,relation,id);
   return {attackId,attackRevision:record.revision,removedSelections:oldSelections.filter(s=>!selections.includes(s))};
 }
+export async function attackBaseComponents(ctx,d,actorId){
+  if(!d.naturalMagicItemId)return d.components;
+  const sourceEffect=d.naturalMagicEffectId?await owned(ctx,'effect',d.naturalMagicEffectId,actorId):null;
+  const enabled=!sourceEffect||sourceEffect.data.enabled===true&&sourceEffect.data.target==='natural_attack_magic'&&sourceEffect.data.key==='natural'&&sourceEffect.data.operation==='grant'&&sourceEffect.data.sourceItemId===d.naturalMagicItemId;
+  const magic=enabled&&await gearEligible(ctx,d.naturalMagicItemId,actorId,d.naturalMagicRequiresAttunement!==false,false,undefined,true);
+  return d.components.map(part=>({...part,magical:magic}));
+}
 async function loadAttack(ctx,x){
   const a=await actor(ctx,x.actorId),attack=await owned(ctx,'attack',x.attackId,a.id),p=await sheet(ctx,a.id,[],undefined,x.chargedEffectIds);
   const d=attack.data;
@@ -128,10 +173,11 @@ async function loadAttack(ctx,x){
   must(!['disabled','dormant'].includes(a.data.activityState),'ACTOR_INACTIVE');
   must(!p.conditions.some(c=>['incapacitated','unconscious','stunned','petrified','paralyzed'].includes(c)),'ACTOR_CANNOT_ATTACK');
   must(matchesForm(d,p.ruleFormIds),'ATTACK_FORM_INELIGIBLE');
-  must(await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating),'ATTACK_SOURCE_INELIGIBLE');
+  must(await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating,undefined,d.requiresWorn),'ATTACK_SOURCE_INELIGIBLE');
   const chosen=Object.fromEntries((d.selections??[]).filter(s=>(s.actorId??attack.actorId)===a.id&&s.formId===p.formId).map(s=>[s.componentId,s.type]));
   const mode=await attackModeFor(ctx,a,attack);
-  return {a,attack,p,components:snapshotComponents([...d.components,...mode.components],d.payloadRule||d.chargeActionId?{...p,effects:[]}:p,chosen,0,'attack',attack.id),attackMode:mode};
+  const baseComponents=await attackBaseComponents(ctx,d,a.id);
+  return {a,attack,p,components:snapshotComponents([...baseComponents,...mode.components],d.payloadRule||d.chargeActionId?{...p,effects:[]}:p,chosen,0,'attack',attack.id),attackMode:mode};
 }
 async function chooseVariant(ctx,x){
   const {attack,p}=await loadAttack(ctx,x);
@@ -181,6 +227,20 @@ async function standaloneDamage(ctx,x) {
 
 async function resolveAttack(ctx,x){
   const {a,attack,p,components:initial,attackMode}=await loadAttack(ctx,x),d=attack.data;
+  const reprisal=await verifyReprisal(ctx,a,x,attack,attackMode.reach);
+  checkPointArea(d.pointArea,x.pointArea,x.targets);
+  const lock=await applicableTargetLock(ctx,a,attack,x.targets);
+  if(d.longstrikeLimit){
+    must(Number.isSafeInteger(x.targetDistanceFeet)&&x.targetDistanceFeet>=0,'ATTACK_DISTANCE_REQUIRED');
+    must(x.targetDistanceFeet<=d.longstrikeLimit,'SHOT_OUT_OF_RANGE');
+    if(x.targetDistanceFeet>d.longRange)must(x.longstrike?.targetResolved&&x.longstrike.viablePath&&!x.longstrike.totalCover,'LONGSTRIKE_TARGET_UNCONFIRMED');
+    if(x.longstrike?.totalCover)must(false,'SHOT_BLOCKED_BY_TOTAL_COVER');
+    if(x.targetDistanceFeet>d.range&&!lock)must(x.mode==='disadvantage','LONG_RANGE_DISADVANTAGE_REQUIRED');
+  }
+  if(d.enforceReach){
+    must(Number.isSafeInteger(x.targetDistanceFeet) && x.targetDistanceFeet>=0,'ATTACK_DISTANCE_REQUIRED');
+    must(d.delivery==='melee' && Number.isFinite(d.reach) && x.targetDistanceFeet<=attackMode.reach,'ATTACK_OUT_OF_REACH');
+  }
   const prepared=await armedComponents(ctx,a,attack,x.attemptId,initial,p,x.payload,snapshotComponents,true),components=prepared.components;
   must(d.resolution!=='manual','MANUAL_ADJUDICATION_REQUIRED');
   const targets=x.targets??[];
@@ -188,7 +248,7 @@ async function resolveAttack(ctx,x){
   for(const id of targets)await actor(ctx,id);
   if(x.hit)checkDiceOwner(ctx,a,'attack',x.hit.origin);
   for(const part of x.damage??[])checkDiceOwner(ctx,a,'damage',part.evidence.origin);
-  let hit=null,critical=false,substitution=null;
+  let hit=null,critical=false,substitution=null,criticalWards=[];
   if(d.resolution==='attack'){
     const total=attackModifier(attack,p);
     if(x.substitutionId){
@@ -202,9 +262,11 @@ async function resolveAttack(ctx,x){
       substitution={ruleId:rule.id,sourceItemId:f.sourceItemId,cost};
     }else{
       must(x.hit,'ATTACK_DICE_REQUIRED');
-      const policy=rollPolicy(p.effects,'attack:'+attack.id,x.mode);
+      const edges=lock?[...p.effects,{data:{target:'roll_edge',key:'attack:'+attack.id,operation:'advantage'}}]:p.effects;
+      const policy=rollPolicy(edges,'attack:'+attack.id,x.mode);
       hit=observed(attack.title,policy.count,20,total,policy.mode==='normal'?'sum':policy.mode==='advantage'?'highest':'lowest',x.hit,true);
-      critical=hit.natural===20;
+      if(hit.natural===20)criticalWards=await criticalProtection(ctx,targets);
+      critical=hit.natural===20&&!criticalWards.length;
     }
     hit=applyCastAid(hit,p.rollAids,'attack',x.hit);
   }else must(!x.hit && !x.substitutionId && x.mode==='normal','UNEXPECTED_ATTACK_ROLL');
@@ -227,7 +289,7 @@ async function resolveAttack(ctx,x){
     must(index>=0,'MULTIATTACK_ATTACK_UNAVAILABLE');remaining.splice(index,1);
     await save(ctx,use,{...u,remainingAttacks:remaining,substitutions,attemptIds:[...u.attemptIds,x.attemptId]});
     if(remaining.length===0)await save(ctx,a,{...a.data,activeMultiattackId:null});
-  }else await useTiming(ctx,a,d.timing);
+  }else await useTiming(ctx,a,reprisal?'reaction':d.timing);
   const costs=d.cost?[await spend(ctx,a.id,d.cost.poolId,d.cost.amount)]:[];
   if(substitution)costs.push(substitution.cost);costs.push(...prepared.costs);
   const accuracy=d.resolution==='attack'?attackCalculation(attack,p):null;
@@ -235,12 +297,14 @@ async function resolveAttack(ctx,x){
   const attempted=await settleEffectCosts(ctx,a.id,x.attemptId,held,'attempt');
   const charges=hit?.natural===1?(await settleEffectCosts(ctx,a.id,x.attemptId,attempted.charges,'miss')).charges:attempted.charges;
   costs.push(...attempted.costs);
-  const result={actorId:a.id,formId:p.formId,attackId:attack.id,substitution,sourceItemId:d.sourceItemId??null,resolution:d.resolution,
-    sourceRevision:attack.revision,payload:prepared.payload,preparedUseId:prepared.preparedUseId,preparedPush:d.preparedPush??null,reach:attackMode.reach,modeUseIds:attackMode.useIds,hit,critical,components,damage,costs,timing:x.actionUseId?'part_of_multiattack':d.timing,actionUseId:x.actionUseId??null,appliedDamage:null,targets,targetResults:[],
+  const result={actorId:a.id,formId:p.formId,attackId:attack.id,
+    ...(directPhysicalStrike(d)?{physicalStrike:true,strikeWindow:await reactionRollWindow(ctx,a),strikeClock:a.data.gameSeconds??null}:{}),substitution,sourceItemId:d.sourceItemId??null,resolution:d.resolution,
+    sourceRevision:attack.revision,...(lock?{weaponTargetLock:{useId:lock.useId,targetActorId:lock.targetActorId,ignoresPartialCover:true}}:{}),payload:prepared.payload,preparedUseId:prepared.preparedUseId,preparedPush:d.preparedPush??null,reach:attackMode.reach,modeUseIds:attackMode.useIds,hit,critical,...(criticalWards.length?{criticalWards}:{}),components,damage,costs,...(reprisal?{reprisal}:{}),timing:reprisal?'reaction':(x.actionUseId?'part_of_multiattack':d.timing),actionUseId:x.actionUseId??null,appliedDamage:null,targets,targetResults:[],
     save:d.resolution==='save'?{ability:d.saveAbility,dc:attackSaveDc(d,p),success:d.saveSuccess??null}:null,outcome:hit?.natural===1?'miss':'pending',
     ...(charges.length?{effectCharges:charges}:{}),commandId:ctx.commandId,recordedAt:ctx.now};
   await insert(ctx,'attack_attempt',x.attemptId,a.id,attack.title,result);
   await ctx.link(x.attemptId,'used_attack',attack.id);
+  if(reprisal)await ctx.link(x.attemptId,reprisal.triggerKind==='cast_instance'?'triggered_by_cast':'triggered_by_attack',reprisal.triggerAttemptId);
   if(prepared.payload)await ctx.link(x.attemptId,'uses_spell_variant',prepared.payload.spellId);
   if(prepared.payload?.storedUseId)await ctx.link(x.attemptId,'releases_payload',prepared.payload.storedUseId);
   if(prepared.preparedUseId)await ctx.link(x.attemptId,'spends_preparation',prepared.preparedUseId);
@@ -249,7 +313,7 @@ async function resolveAttack(ctx,x){
   for(const id of targets)await ctx.link(x.attemptId,'declared_target',id);
   return {attemptId:x.attemptId,...result};
 }
-function freshTurn(a){return {action:true,bonus_action:true,reaction:true,attacks:a.data.attacksPerAction};}
+function freshTurn(a){return {action:true,bonus_action:true,reaction:true,attacks:a.data.attacksPerAction??1};}
 async function startEncounter(ctx,x){
   must(x.participants.length>0 && new Set(x.participants.map(p=>p.actorId)).size===x.participants.length,'INVALID_PARTICIPANTS');
   const rolling=[],attached=[];
@@ -301,12 +365,13 @@ async function progress(ctx,x,end){
   return {encounterId:e.id,round,currentActorId:a.id};
 }
 export const combatOperations=Object.freeze({
+  release_weapon_target_lock:releaseTargetLock,
   define_attack:op('combat',fields({...attackSchema.properties,sourceReview:fields({definitionId:identifier,itemRevision:whole(1,Number.MAX_SAFE_INTEGER),
     definitionRevision:whole(1,Number.MAX_SAFE_INTEGER)},['definitionId','itemRevision','definitionRevision'])},attackSchema.required),(ctx,x)=>writeAttack(ctx,x)),
   update_attack:op('combat',fields({...attackSchema.properties,expectedAttackRevision:whole(1,Number.MAX_SAFE_INTEGER),
     discardUnavailableSelections:boolean},[...attackSchema.required,'expectedAttackRevision']),(ctx,x)=>writeAttack(ctx,x,true)),
   select_damage_variant:op('combat',fields({actorId:identifier,attackId:identifier,componentId:identifier,type:identifier},['actorId','attackId','componentId','type']),chooseVariant),
-  resolve_attack:op('combat',fields({actorId:identifier,attemptId:identifier,attackId:identifier,actionUseId:identifier,replacesAttackId:identifier,substitutionId:identifier,payload:shotChoice,mode,hit:d20Evidence,includeDamage:boolean,chargedEffectIds:chargedEffectSelection,damage:damageEvidence,targets:arrayOf(identifier,16)},['actorId','attemptId','attackId','mode','includeDamage']),resolveAttack),
+  resolve_attack:op('combat',fields({actorId:identifier,attemptId:identifier,attackId:identifier,reactionRuleId:identifier,triggerAttemptId:identifier,pointArea:pointAreaInput,targetDistanceFeet:whole(0,100000),longstrike:fields({targetResolved:boolean,viablePath:boolean,totalCover:boolean},['targetResolved','viablePath','totalCover']),actionUseId:identifier,replacesAttackId:identifier,substitutionId:identifier,payload:shotChoice,mode,hit:d20Evidence,includeDamage:boolean,chargedEffectIds:chargedEffectSelection,damage:damageEvidence,targets:arrayOf(identifier,16)},['actorId','attemptId','attackId','mode','includeDamage']),resolveAttack),
   roll_damage_only:op('combat',fields({actorId:identifier,attackId:identifier,rollId:identifier,payload:shotChoice,damage:damageEvidence},['actorId','attackId','rollId','damage']),standaloneDamage),
   roll_attack_damage:op('combat',fields({actorId:identifier,attemptId:identifier,damage:damageEvidence},['actorId','attemptId','damage']),async(ctx,x)=>{
     const r=await owned(ctx,'attack_attempt',x.attemptId,x.actorId);

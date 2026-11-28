@@ -1,6 +1,7 @@
 import { recordsFail, recordObject, recordId, recordText, recordSource, recordTitle, recordChoice, recordMaybe, recordInt, recordArray, recordsOperation, recordRead, recordNew, recordEdit, partyActor, uniqueRecordIds } from './cloud-records-contract.mjs';
 
 import { payForProject, projectPaymentCoins } from './cloud-holdings.mjs';
+import { requireEmptyIntegratedStorage } from './cloud-integrated-storage.mjs';
 
 const maybeId = recordMaybe(recordId);
 const maybeText = recordMaybe(recordText);
@@ -14,10 +15,10 @@ const incorporationMethod=recordChoice('installed','incorporated','material_cons
 const materialRequirement=recordObject({definitionId:recordId,quantity:recordInt(1,1_000_000),method:incorporationMethod});
 const stageFields={ stageId: recordId, projectId: recordId, blueprintId: maybeId, title: recordTitle,
   prerequisites: recordArray(recordId,16), requiredWork: maybeText, checkRequired: { type: 'boolean' }, source: recordSource };
-const stage=recordObject({...stageFields,materials:recordArray(materialRequirement,24),minimumPayment:projectPaymentCoins},Object.keys(stageFields));
+const stage=recordObject({...stageFields,materials:recordArray(materialRequirement,24),minimumPayment:projectPaymentCoins,craftingAllowanceUseId:recordId},Object.keys(stageFields));
 const expectedRevision=recordInt(1,Number.MAX_SAFE_INTEGER);
 const progress = recordObject({ stageId: recordId, outcome: recordChoice('active','completed','failed','partial'),
-  rollId: maybeId, worldTimeSpent: maybeText, evidence: recordText, source: recordSource });
+  rollId: maybeId, worldTimeSpent: maybeText, evidence: recordText, source: recordSource,workSeconds:recordInt(0,100000000)},['stageId','outcome','rollId','worldTimeSpent','evidence','source']);
 const component = recordObject({ eventId: recordId, projectId: recordId, stageId: recordId, donorItemId: recordId, outputItemId: recordId,
   method: incorporationMethod, quantity: recordInt(1,1_000_000), evidence: recordText, source: recordSource });
 const finish = recordObject({ projectId: recordId, outputItemId: recordId, stageIds: recordArray(recordId,30,1), source: recordSource });
@@ -77,6 +78,7 @@ async function integrate(ctx,args) {
   const donor=await recordRead(ctx,'item_instance',args.donorItemId);
   const output=await recordRead(ctx,'item_instance',args.outputItemId);
   for(const row of [donor,output]) {
+    if(row.data.containerItemId) recordsFail('WITHDRAW_STORED_ITEM_FIRST',409);
     if(!row.data.partyAccess || !['carried','storage','unassigned'].includes(row.data.holding) ||
        row.data.equipment!=='packed' || row.data.attuned || row.data.operating) recordsFail('COMPONENT_DEPENDENCY_REVIEW_REQUIRED',409);
   }
@@ -101,6 +103,7 @@ async function integrate(ctx,args) {
   }
   const quantity=args.method==='material_consumed'?donor.data.quantity-args.quantity:donor.data.quantity;
   const unavailable=args.method!=='material_consumed'||quantity===0;
+  await requireEmptyIntegratedStorage(ctx,donor);
   const holding=args.method==='material_consumed'?'consumed':args.method;
   const next=recordEdit(donor,unavailable?{...donor.data,partyAccess:false,holding,quantity,custodianId:null,locationId:null,
     equipment:'packed',attuned:false,operating:false}:{...donor.data,quantity});
@@ -187,8 +190,17 @@ export const CRAFT_OPERATIONS=Object.freeze({
     const materials=args.materials??[];
     uniqueRecordIds(materials.map(m=>JSON.stringify([m.definitionId,m.method])));
     for(const m of materials)await recordRead(ctx,'item_definition',m.definitionId);
+    let allowance=null,minimumPayment=args.minimumPayment??null;
+    if(args.craftingAllowanceUseId){
+      const receipt=await recordRead(ctx,'action_use',args.craftingAllowanceUseId);
+      allowance=receipt.data.craftingAllowance;
+      if(receipt.actorId!==proj.actorId||!allowance||minimumPayment)recordsFail('CRAFT_ALLOWANCE_MISMATCH',409);
+      const required=allowance.costCopper.numerator/allowance.costCopper.denominator;
+      if(!Number.isSafeInteger(required))recordsFail('FRACTIONAL_COPPER_REQUIRES_ADJUDICATION',409);
+      minimumPayment={cp:required,sp:0,ep:0,gp:0,pp:0};
+    }
     await ctx.put({id:args.stageId,kind:'project_stage',actorId:proj.actorId,title:args.title,data:{projectId:proj.id,prerequisites:args.prerequisites,
-      requiredWork:args.requiredWork,checkRequired:args.checkRequired,materials,minimumPayment:args.minimumPayment??null,status:'planned',source:args.source}});
+      requiredWork:args.requiredWork,checkRequired:args.checkRequired,materials,minimumPayment,...(allowance?{allowanceUseId:args.craftingAllowanceUseId,workSecondsDue:allowance.workSeconds}:{}),status:'planned',source:args.source}});
     await ctx.link(args.stageId,'stage_of',proj.id);
     if(args.blueprintId) await ctx.link(args.stageId,'blueprint',args.blueprintId);
     for(const id of args.prerequisites) await ctx.link(args.stageId,'requires_stage',id);
@@ -198,6 +210,10 @@ export const CRAFT_OPERATIONS=Object.freeze({
   resolve_construction_stage:recordsOperation('crafting',progress,async(ctx,args)=>{
     const current=await recordRead(ctx,'project_stage',args.stageId);
     const proj=await openProject(ctx,current.data.projectId);
+    if(current.data.workSecondsDue && args.outcome==='completed'){
+      const due=current.data.workSecondsDue;
+      if(args.workSeconds===undefined||args.workSeconds*due.denominator<due.numerator)recordsFail('INSUFFICIENT_CRAFTING_WORK',409);
+    }
     if(current.data.status==='completed') recordsFail('STAGE_ALREADY_COMPLETED',409);
     for(const id of current.data.prerequisites) {
       if((await sameProject(ctx,'project_stage',id,proj.id)).data.status!=='completed') recordsFail('UNFINISHED_PREREQUISITE',409);

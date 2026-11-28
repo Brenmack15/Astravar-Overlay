@@ -20,8 +20,16 @@ jobs:
           test_python="$RUNNER_TEMP/migration-test/bin/python"
           "$test_python" -c 'from cryptography.fernet import Fernet' || "$test_python" -m pip install --only-binary=:all: cryptography==50.0.0
           "$test_python" -m unittest discover -s scripts/tests -p 'test_ascension*' -v
+      - name: Build and load the private worker bundle
+        run: |
+          node backend/owner-bridge/build-worker.mjs "$RUNNER_TEMP/reviewed-worker"
+          node --input-type=module -e 'const m = await import(process.argv[1]); if (typeof m.default.fetch !== "function") process.exit(1)' "$RUNNER_TEMP/reviewed-worker/server/index.js"
       - name: Verify the staged gameplay runtime and schema
         run: |
-          node --test backend/owner-bridge/cloud-structured-effects.test.mjs backend/owner-bridge/cloud-records.test.mjs
+          node --test backend/owner-bridge/cloud-structured-effects.test.mjs backend/owner-bridge/cloud-records.test.mjs backend/owner-bridge/cloud-migration-*.test.mjs
           node scripts/verify-ascension-parity.mjs "$RUNNER_TEMP/protocol-parity.json"
           cmp docs/ascension/protocol-parity.json "$RUNNER_TEMP/protocol-parity.json"
+      - name: Verify offline generation on fresh independent D1 and R2 bindings
+        run: |
+          npm install --prefix "$RUNNER_TEMP/provider-deps" --no-audit --no-fund --no-save miniflare@5.20261123.1-beta
+          node scripts/verify-ascension-provider-recovery.cjs "$RUNNER_TEMP/provider-deps/node_modules/miniflare"

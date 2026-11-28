@@ -5,7 +5,7 @@ import { sheet, gearEligible, rollPolicy, checkTiming, availableUses, matchesFor
 import { checkArsenal } from './cloud-mechanics-arsenal.mjs';
 import { attackModeFor } from './cloud-mechanics-linked.mjs';
 import { offeredCharges } from './cloud-effect-costs.mjs';
-import { attackModifier, attackSaveDc, snapshotComponents } from './cloud-mechanics-combat.mjs';
+import { attackBaseComponents, attackModifier, attackSaveDc, snapshotComponents } from './cloud-mechanics-combat.mjs';
 
 export async function cloudActions(service,principal,id,actorId,options={}) {
   if(!validCloudId(actorId))cloudFail(400,'INVALID_ACTOR_ID');
@@ -24,7 +24,7 @@ export async function cloudActions(service,principal,id,actorId,options={}) {
     const entity=await ctx.get(candidate.kind,candidate.id);
     if(!entity)cloudFail(409,'SNAPSHOT_CHANGED');
     const d=entity.data;
-    if(!matchesForm(d,p.ruleFormIds) || !await gearEligible(ctx,d.sourceItemId,actorId,d.requiresAttunement,d.requiresOperating))continue;
+    if(!matchesForm(d,p.ruleFormIds) || !await gearEligible(ctx,d.sourceItemId,actorId,d.requiresAttunement,d.requiresOperating,undefined,d.requiresWorn))continue;
     const reasons=[];
     if(['disabled','dormant'].includes(a.data.activityState))reasons.push('ACTOR_INACTIVE');
     if(p.exhaustion.status==='fatal')reasons.push('FATAL_EXHAUSTION_REQUIRES_RESOLUTION');
@@ -39,7 +39,7 @@ export async function cloudActions(service,principal,id,actorId,options={}) {
     if(entity.kind==='attack'){
       const chosen=Object.fromEntries((d.selections??[]).filter(s=>(s.actorId??entity.actorId)===a.id && s.formId===p.formId).map(s=>[s.componentId,s.type]));
       try { const charge=await checkArsenal(ctx,a,d),mode=await attackModeFor(ctx,a,entity);
-        const base=d.components.filter(c=>c.id!==d.payloadRule?.componentId);
+        const base=(await attackBaseComponents(ctx,d,actorId)).filter(c=>c.id!==d.payloadRule?.componentId);
         const chargeComponent=charge?[{id:'prepared-bonus',name:'Prepared strike',type:charge.type,dice:0,sides:4,flat:charge.flat,critical:false}]:[];
         components=snapshotComponents([...base,...mode.components,...chargeComponent],p,chosen,0,'attack',entity.id);
         configuration={...d,reach:mode.reach,modeUseIds:mode.useIds};if(d.resolution==='attack')hit=attackModifier(entity,p);

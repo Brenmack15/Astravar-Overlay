@@ -26,7 +26,7 @@ def allowed_field(kind, family, source, target):
 def reviewed_grants(authority, tenant, entries, path_value, source_key):
     if authority is None:
         return {}, {}
-    verify(isinstance(authority, dict) and set(authority) in ({"version", "owner", "continuity", "decisions", "grants"},
+    verify(isinstance(authority, dict) and set(authority)-{"supplements","historicalProjections"} in ({"version", "owner", "continuity", "decisions", "grants"},
                    {"version", "owner", "continuity", "decisions", "grants", "attestedSources"})
            and type(authority["version"]) is int and authority["version"] == 1
            and (authority["owner"], authority["continuity"]) == tenant, "Wrong owner, continuity or review authority version")

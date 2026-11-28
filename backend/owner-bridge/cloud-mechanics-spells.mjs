@@ -1,3 +1,5 @@
+import {criticalProtection} from './cloud-armor-traits.mjs';
+import {adjudicatedSpellEvidence,reviewedSpellEvidence} from './cloud-reviewed-spell.mjs';
 import { registerCastAid,applyCastAid,activeCastAids } from './cloud-cast-aid.mjs';
 import { d20Evidence,checkDiceOwner, stats, identifier, boolean, named, whole, nullable, arrayOf, option, fields, evidence, mode, spellSchema, must, op, actor, owned, insert, save, gearEligible, numeric, sheet, rollPolicy, spend, useTiming } from './cloud-mechanics-core.mjs';
 import { damageEvidence, componentRules, snapshotComponents, rollComponents } from './cloud-mechanics-combat.mjs';
@@ -29,7 +31,8 @@ const grantSchema=fields({
   actorId:identifier,spellId:identifier,grantId:identifier,source:named(300),route:option('at_will','slot','ritual','limited','item'),
   levels:arrayOf(whole(0,9),10),preparation:option('known','prepared','always_prepared','not_required'),
   ability:option(...stats),fixedHit:whole(-100,100),fixedDc:whole(1,100),resourceId:identifier,cost:whole(1),
-  sourceItemId:identifier,requiresAttunement:boolean,requiresOperating:boolean,prerequisites:named(500)
+  sourceItemId:identifier,requiresAttunement:boolean,requiresOperating:boolean,requiresWorn:{const:true},
+  reviewedAdjudication:{const:true},reactionTriggerSpellId:identifier,prerequisites:named(500)
 },['actorId','spellId','grantId','source','route','levels','preparation']);
 async function grantSpell(ctx,x,edit=false){
   const prior=edit?await owned(ctx,'spell_grant',x.grantId,x.actorId):null;
@@ -43,7 +46,12 @@ async function grantSpell(ctx,x,edit=false){
   if(x.route==='item')must(x.sourceItemId,'SPELL_SOURCE_ITEM_REQUIRED');
   if(x.route==='limited'||x.cost||x.resourceId)must(x.resourceId && x.cost,'SPELL_COST_REQUIRED');
   if(x.sourceItemId)must(await ctx.get('item_instance',x.sourceItemId),'SPELL_SOURCE_ITEM_UNAVAILABLE');
-  must((!x.requiresAttunement&&!x.requiresOperating)||x.sourceItemId,'SPELL_SOURCE_ITEM_REQUIRED');
+  if(x.reviewedAdjudication)must(d.resolution==='manual','MANUAL_SPELL_GRANT_REQUIRES_MANUAL_DEFINITION');
+  if(x.reactionTriggerSpellId){
+    must(x.reviewedAdjudication && d.timing==='reaction','INVALID_REACTION_SPELL_GRANT');
+    await owned(ctx,'spell',x.reactionTriggerSpellId,x.actorId);
+  }
+  must((!x.requiresAttunement&&!x.requiresOperating&&!x.requiresWorn)||x.sourceItemId,'SPELL_SOURCE_ITEM_REQUIRED');
   if(x.resourceId)await owned(ctx,'resource_pool',x.resourceId,x.actorId);
   if(d.resolution==='attack')must(x.fixedHit!=null||x.ability,'SPELL_ACCURACY_REQUIRED');
   if(d.resolution==='save')must(x.fixedDc!=null||x.ability,'SPELL_DC_REQUIRED');
@@ -66,8 +74,10 @@ async function cast(ctx,x){
   must(grant.levels.includes(x.level) && grant.preparation!=='known','CASTING_ROUTE_UNAVAILABLE');
   must(!['disabled','dormant'].includes(a.data.activityState),'ACTOR_INACTIVE');
   must(!p.conditions.some(c=>['incapacitated','unconscious','stunned','paralyzed','petrified'].includes(c)),'CASTER_INCAPACITATED');
-  must(d.resolution!=='manual'&&!grant.prerequisites,'MANUAL_ADJUDICATION_REQUIRED');
-  must(await gearEligible(ctx,grant.sourceItemId,a.id,grant.requiresAttunement,grant.requiresOperating),'SPELL_SOURCE_ITEM_UNAVAILABLE');
+  must(!grant.prerequisites,'MANUAL_ADJUDICATION_REQUIRED');
+  reviewedSpellEvidence(d,grant,x.adjudication);
+  if(x.adjudication)must(!x.chargedEffectIds?.length,'MANUAL_SPELL_CHARGES_UNAVAILABLE');
+  must(await gearEligible(ctx,grant.sourceItemId,a.id,grant.requiresAttunement,grant.requiresOperating,undefined,grant.requiresWorn),'SPELL_SOURCE_ITEM_UNAVAILABLE');
   must(!d.concentration||!a.data.concentrationCastId||x.replaceConcentration===true,'CONCENTRATION_DECISION_REQUIRED');
   const costs=[];
   if(grant.route==='slot'){
@@ -99,7 +109,8 @@ async function cast(ctx,x){
   const data={actorId:a.id,rangeKind:d.rangeKind??null,deliveryActorId:x.deliveryActorId??null,formId:p.formId,spellId:spell.id,grantId:g.id,baseLevel:d.baseLevel,level:x.level,
     route:grant.route,source:grant.source,sourceItemId:grant.sourceItemId??null,costs,timing:grant.route==='ritual'?'ritual':d.timing,
     resolution:d.resolution,hitModifier:hit,save:d.resolution==='save'?{ability:d.saveAbility,dc,success:d.saveSuccess??null}:null,components:snapshotComponents(d.components,p,{},x.level-d.baseLevel,'spell',spell.id),
-    concentration:d.concentration,duration:d.duration??null,scaling,targets,targetResults:[],outcome:'pending',hit:null,damage:null,
+    concentration:d.concentration,duration:d.duration??null,scaling,targets,targetResults:[],outcome:x.adjudication?'adjudicated':'pending',hit:null,damage:null,
+    ...(x.adjudication?{adjudication:x.adjudication}:{}),
     effectivePolicy:{normal:rollPolicy(p.effects,'spell_attack:'+g.id),advantage:rollPolicy(p.effects,'spell_attack:'+g.id,'advantage'),disadvantage:rollPolicy(p.effects,'spell_attack:'+g.id,'disadvantage')},
     ...(d.rollAid?{rollAid:d.rollAid}:{}),recordedAt:ctx.now,commandId:ctx.commandId};
   for(const id of data.targets)await actor(ctx,id);
@@ -122,25 +133,26 @@ async function castRoll(ctx,x){
   const a=await actor(ctx,x.actorId);
   if(x.hit)checkDiceOwner(ctx,a,'spell',x.hit.origin);
   for(const part of x.damage??[])checkDiceOwner(ctx,a,'spell',part.evidence.origin);
-  let hit=d.hit,damage=d.damage;
+  let hit=d.hit,damage=d.damage,criticalWards=d.criticalWards??[];
   must(x.hit||x.damage,'CAST_ROLL_EVIDENCE_REQUIRED');
   if(x.hit){
     must(d.resolution==='attack'&&hit===null,'CAST_HIT_UNAVAILABLE');
     const p=d.effectivePolicy[x.mode??'normal'];
     hit=observed(c.title+' attack',p.count,20,d.hitModifier,p.mode==='normal'?'sum':p.mode==='advantage'?'highest':'lowest',x.hit,true);
+    if(hit.natural===20)criticalWards=await criticalProtection(ctx,d.targets??[]);
     hit=applyCastAid(hit,await activeCastAids(ctx,a),'attack',x.hit);
   }else must(!x.mode,'UNEXPECTED_ROLL_MODE');
   if(x.damage){
     must(damage===null&&d.components.length>0,'CAST_DAMAGE_UNAVAILABLE');
     must(d.resolution!=='attack'||hit,'RESOLVE_ATTACK_FIRST');
-    damage=rollComponents(d.components,x.damage,hit?.natural===20);
+    damage=rollComponents(d.components,x.damage,hit?.natural===20&&!criticalWards.length);
   }
   const outcome=hit?.natural===1?'miss':d.outcome;
   const attempted=x.hit?await settleEffectCosts(ctx,a.id,c.id,d.effectCharges,'attempt'):{charges:d.effectCharges,costs:[]};
   const charges=hit?.natural===1?(await settleEffectCosts(ctx,a.id,c.id,attempted.charges,'miss')).charges:attempted.charges;
   const costs=[...d.costs,...attempted.costs];
-  await save(ctx,c,{...d,hit,damage,outcome,costs,...(charges?.length?{effectCharges:charges}:{})});
-  return {castId:c.id,hit,damage,outcome,costs,...(charges?.length?{effectCharges:charges}:{})};
+  await save(ctx,c,{...d,hit,damage,outcome,costs,...(criticalWards.length?{criticalWards}:{}),...(charges?.length?{effectCharges:charges}:{})});
+  return {castId:c.id,hit,damage,outcome,costs,...(criticalWards.length?{criticalWards}:{}),...(charges?.length?{effectCharges:charges}:{})};
 }
 export const spellOperations=Object.freeze({
   define_spell:op('spells',spellSchema,(ctx,x)=>defineSpell(ctx,x,false)),
@@ -153,6 +165,6 @@ export const spellOperations=Object.freeze({
     const preparation=x.prepared?'prepared':'known';
     await save(ctx,g,{...g.data,preparation});return {grantId:g.id,preparation};
   }),
-  cast_spell:op('spells',fields({actorId:identifier,grantId:identifier,castId:identifier,level:whole(0,9),slotPoolId:identifier,replaceConcentration:boolean,confirmedRitualTime:boolean,deliveryActorId:identifier,chargedEffectIds:chargedEffectSelection,targets:arrayOf(identifier,12)},['actorId','grantId','castId','level']),cast),
+  cast_spell:op('spells',fields({actorId:identifier,grantId:identifier,castId:identifier,adjudication:adjudicatedSpellEvidence,level:whole(0,9),slotPoolId:identifier,replaceConcentration:boolean,confirmedRitualTime:boolean,deliveryActorId:identifier,chargedEffectIds:chargedEffectSelection,targets:arrayOf(identifier,12)},['actorId','grantId','castId','level']),cast),
   link_cast_roll:op('spells',fields({actorId:identifier,castId:identifier,hit:d20Evidence,mode,damage:damageEvidence},['actorId','castId']),castRoll)
 });

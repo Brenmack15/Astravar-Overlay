@@ -1,24 +1,43 @@
+import {assessHandling,handlingLimits,handlingRequest} from './cloud-object-handling.mjs';
+import {acquireTargetLock,lockTarget} from './cloud-target-lock.mjs';
 import { translateMessage } from './cloud-companion-traits.mjs';
 import { identifier, whole, named, option, boolean, arrayOf, fields, evidence, component, actor, owned, must, save, gearEligible, sheet, checkDiceOwner } from './cloud-mechanics-core.mjs';
 import { observed } from './cloud-mechanics-rolls.mjs';
 
-export const linkedTypes=['translate','thermal_scan','gate','touch_delivery','deflection','timed_attack_mode'];
-export const linkedDefinitions={communicationFeatureId:identifier,bondedActorId:identifier,thermal:fields({normal:whole(1,10000),faint:whole(1,10000),skillId:identifier,tag:identifier},['normal','faint','skillId','tag']),
-  reduction:fields({dice:whole(1,20),sides:whole(2,100)},['dice','sides']),modeAttacks:arrayOf(identifier,16),modeReach:whole(1,200),modeComponent:component};
-export const linkedArguments={translation:fields({inputLanguage:named(80),outputLanguage:named(80),recipientId:identifier,modality:option('speech','writing'),sourcePerceived:boolean,outputHeard:boolean},['inputLanguage','outputLanguage','recipientId','modality','sourcePerceived','outputHeard']),thermalReading:fields({distanceFeet:whole(0,10000),faint:boolean,obstacle:option('none','solid','deep_snow','magical_interference','unverified')},['distanceFeet','faint','obstacle']),
+export const linkedTypes=['assess_handling','translate','thermal_scan','gate','touch_delivery','deflection','timed_attack_mode','weapon_target_lock','damage_reprisal'];
+export const linkedDefinitions={handlingLimits,reactionAttacks:arrayOf(identifier,24),lockRangeFeet:whole(1,10000),communicationFeatureId:identifier,bondedActorId:identifier,thermal:fields({normal:whole(1,10000),faint:whole(1,10000),skillId:identifier,tag:identifier},['normal','faint','skillId','tag']),
+  recognizedAllyInterception:{const:true},reduction:fields({dice:whole(1,20),sides:whole(2,100),flat:whole(0,100)},['dice','sides']),modeAttacks:arrayOf(identifier,16),modeReach:whole(1,200),modeComponent:component};
+export const linkedArguments={handling:handlingRequest,lockTarget,translation:fields({inputLanguage:named(80),outputLanguage:named(80),recipientId:identifier,modality:option('speech','writing'),sourcePerceived:boolean,outputHeard:boolean},['inputLanguage','outputLanguage','recipientId','modality','sourcePerceived','outputHeard']),thermalReading:fields({distanceFeet:whole(0,10000),faint:boolean,obstacle:option('none','solid','deep_snow','magical_interference','unverified')},['distanceFeet','faint','obstacle']),
   gate:fields({open:boolean,location:named(160),permittedHere:boolean,teleportAllowed:boolean},['open','location','permittedHere','teleportAllowed']),
   delivery:fields({castId:identifier,targetActorId:identifier,distanceToCaster:whole(0,10000),targetWithinReach:{const:true}},['castId','targetActorId','distanceToCaster','targetWithinReach']),
-  deflection:fields({attemptId:identifier,targetActorId:identifier,distanceFeet:whole(0,10000),visible:{const:true},dice:evidence,
+  deflection:fields({attemptId:identifier,targetActorId:identifier,distanceFeet:whole(0,10000),visible:{const:true},dice:evidence,interception:fields({recognized:boolean,possible:boolean,source:named(300)},['recognized','possible','source']),
     allocation:arrayOf(fields({type:identifier,amount:whole()},['type','amount']),16)},['attemptId','targetActorId','distanceFeet','visible','dice'])};
 export async function validateLinkedAction(ctx,x){
+  must((x.type==='damage_reprisal')===(x.reactionAttacks!==undefined),'UNEXPECTED_REACTION_ATTACKS');
+  if(x.type==='damage_reprisal'){
+    must(x.timing==='reaction'&&x.range&&x.reactionAttacks.length&&new Set(x.reactionAttacks).size===x.reactionAttacks.length,'REACTION_ATTACK_LIST_REQUIRED');
+    for(const id of x.reactionAttacks){
+      const attack=await owned(ctx,'attack',id,x.actorId);
+      must(attack.data.delivery==='melee'&&attack.data.resolution==='attack','REACTION_ATTACK_INELIGIBLE');
+    }
+  }
+  must((x.type==='weapon_target_lock')===(x.lockRangeFeet!==undefined),'UNEXPECTED_LOCK_RANGE');
+  if(x.type==='weapon_target_lock'){
+    must(x.timing==='bonus_action'&&x.sourceItemId&&x.requiresOperating&&x.cost?.amount===1,'TARGET_LOCK_CONFIGURATION_REQUIRED');
+    const pool=await owned(ctx,'resource_pool',x.cost.poolId,x.actorId);
+    must(pool.data.recovery==='short_rest'&&pool.data.maximum===1,'TARGET_LOCK_POOL_REQUIRED');
+  }
   must((x.type==='translate')===Boolean(x.communicationFeatureId),'TRANSLATOR_SOURCE_REQUIRED');
   if(x.communicationFeatureId){
     const f=await owned(ctx,'feature',x.communicationFeatureId,x.actorId);
     must(f.data.speech?.translation===true && x.timing==='other' && f.data.sourceItemId===x.sourceItemId,'TRANSLATOR_CONFIGURATION_REQUIRED');
   }
   if(x.bondedActorId){must(x.bondedActorId!==x.actorId,'BONDED_ACTOR_INVALID');await actor(ctx,x.bondedActorId);}
+  must((x.type==='assess_handling')===Boolean(x.handlingLimits),'HANDLING_CONFIGURATION_INVALID');
+  if(x.handlingLimits)must(x.timing==='other'&&x.handlingLimits.pushDragLiftPounds>=x.handlingLimits.carryPounds,'HANDLING_CONFIGURATION_INVALID');
   if(x.type==='thermal_scan')must(x.thermal && x.thermal.faint<=x.thermal.normal && x.sourceItemId,'SENSOR_CONFIGURATION_REQUIRED');
-  if(x.type==='deflection')must(x.timing==='reaction'&&x.bondedActorId&&x.reduction&&x.range!=null,'DEFLECTION_CONFIGURATION_REQUIRED');
+  must(!x.recognizedAllyInterception||x.type==='deflection','UNEXPECTED_INTERCEPTION_RULE');
+  if(x.type==='deflection')must(x.timing==='reaction'&&Boolean(x.bondedActorId)!==Boolean(x.recognizedAllyInterception)&&x.reduction&&x.range!=null,'DEFLECTION_CONFIGURATION_REQUIRED');
   if(x.type==='touch_delivery')must(x.timing==='reaction'&&x.bondedActorId&&x.range!=null,'DELIVERY_CONFIGURATION_REQUIRED');
   if(x.type==='gate')must(x.timing==='action','GATE_ACTION_REQUIRED');
   if(x.type==='timed_attack_mode'){
@@ -31,6 +50,11 @@ export async function validateLinkedAction(ctx,x){
 }
 export async function executeLinkedAction(ctx,a,action,x,data){
   const d=action.data;
+  must((d.type==='assess_handling')===Boolean(x.handling),'HANDLING_ARGUMENT_MISMATCH');
+  if(x.handling)data.handling=assessHandling(d.handlingLimits,x.handling);
+  must(d.type!=='damage_reprisal','RESOLVE_TRIGGERED_ATTACK_REQUIRED');
+  must((d.type==='weapon_target_lock')===Boolean(x.lockTarget),'LOCK_ARGUMENT_MISMATCH');
+  if(d.type==='weapon_target_lock')await acquireTargetLock(ctx,a,action,x,data);
   if(d.type==='translate') {must(x.translation,'TRANSLATION_REQUIRED');data.translation=await translateMessage(ctx,a,x,await sheet(ctx,a.id),d.communicationFeatureId);}
   for(const [key,type] of [['translation','translate'],['thermalReading','thermal_scan'],['gate','gate'],['delivery','touch_delivery'],['deflection','deflection']])must((x[key]!==undefined)===(d.type===type),'ACTION_ARGUMENT_MISMATCH');
   if(d.type==='thermal_scan'){
@@ -48,16 +72,17 @@ export async function executeLinkedAction(ctx,a,action,x,data){
     await actor(ctx,r.targetActorId);await save(ctx,cast,{...c,deliveryUseId:x.useId});data.castId=cast.id;data.delivery=r;
   }else if(d.type==='deflection'){
     const r=x.deflection,attempt=await ctx.get('attack_attempt',r.attemptId),t=await sheet(ctx,r.targetActorId),hit=attempt?.data.hit;
-    must(r.targetActorId===d.bondedActorId && r.distanceFeet<=d.range && hit && hit.natural!==1 && (hit.natural===20||t.ac.value!=null&&hit.total>=t.ac.value) &&
+    const eligible=d.recognizedAllyInterception?r.targetActorId!==a.id&&r.interception?.recognized===true&&r.interception.possible===true:r.targetActorId===d.bondedActorId&&!r.interception;
+    must(eligible && r.distanceFeet<=d.range && hit && hit.natural!==1 && (hit.natural===20||t.ac.value!=null&&hit.total>=t.ac.value) &&
       attempt.data.targets.includes(r.targetActorId) && Array.isArray(attempt.data.damage) && !attempt.data.targetResults?.some(k=>k.targetActorId===r.targetActorId) &&
       !attempt.data.deflections?.some(k=>k.targetActorId===r.targetActorId),'DEFLECTION_WINDOW_UNAVAILABLE');
     checkDiceOwner(ctx,a,'damage',r.dice.origin);
-    const roll=observed(action.title,d.reduction.dice,d.reduction.sides,0,'sum',r.dice),amounts=new Map();
+    const roll=observed(action.title,d.reduction.dice,d.reduction.sides,d.reduction.flat??0,'sum',r.dice),amounts=new Map();
     for(const part of attempt.data.damage)amounts.set(part.type,(amounts.get(part.type)??0)+Math.max(0,part.total));
     const maximum=Math.min(roll.total,[...amounts.values()].reduce((n,v)=>n+v,0));
     const allocation=r.allocation??(amounts.size===1?[{type:[...amounts.keys()][0],amount:maximum}]:null);
     must(allocation && new Set(allocation.map(k=>k.type)).size===allocation.length && allocation.every(k=>amounts.has(k.type)&&k.amount<=amounts.get(k.type)) && allocation.reduce((n,k)=>n+k.amount,0)===maximum,'DAMAGE_ALLOCATION_REQUIRED');
-    data.deflection={attemptId:attempt.id,targetActorId:r.targetActorId,roll,allocation};
+    data.deflection={attemptId:attempt.id,targetActorId:r.targetActorId,roll,allocation,...(r.interception?{interception:r.interception}:{})};
     await save(ctx,attempt,{...attempt.data,deflections:[...(attempt.data.deflections??[]),{useId:x.useId,...data.deflection}]});
   }else if(d.type==='timed_attack_mode'){
     must(a.data.gameSeconds!=null,'GAME_CLOCK_UNKNOWN');

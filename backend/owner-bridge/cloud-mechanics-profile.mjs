@@ -1,3 +1,5 @@
+import {infusionRule,checkInfusionRule} from './cloud-infusion-assignments.mjs';
+import {preparedItemRule,validatePreparedItem} from './cloud-prepared-item.mjs';
 import {checkCompanionTrait,preserveDedicatedCapacity} from './cloud-companion-traits.mjs';
 import {applyClassGain,checkedClassTracks} from './cloud-class-progression.mjs';
 import { classIdentityFields,classTracksSchema,subclassPin,stats, identifier, whole, named, option, nullable, boolean, arrayOf, fields, must, op, actor, owned, insert, save } from './cloud-mechanics-core.mjs';
@@ -8,10 +10,11 @@ const profileSchema=fields({actorId:identifier,source:named(300),name:named(160)
 const trainSchema=fields({actorId:identifier,category:option('save','tool','weapon','armor','language'),key:named(120),
   trained:boolean,source:named(300)},['actorId','category','key','trained','source']);
 const featureKinds=['effect','action_definition','attack','resource_pool','spell_grant'];
-const featureSchema=fields({actorId:identifier,featureId:identifier,name:named(160),kind:option('class','subclass','species','feat','homebrew','companion','form'),
+const featureSchema=fields({infusionRule,preparedItemRule,actorId:identifier,featureId:identifier,name:named(160),kind:option('class','subclass','species','feat','homebrew','companion','form'),
   description:named(3000),source:named(300),formId:identifier,sourceItemId:identifier,requiresOperating:boolean,requiresAttunement:boolean,
   infusionBond:fields({operatorId:identifier,knownFeatureId:identifier,dedicatedPoolId:identifier},['operatorId','knownFeatureId','dedicatedPoolId']),
   includedScore:fields({ability:option(...stats),before:whole(0,100),after:whole(0,100)},['ability','before','after']),
+  acceptedCastAid:fields({casterId:identifier,family:identifier,sides:whole(2,100),applies:arrayOf(option('attack','save'),2)},['casterId','family','sides','applies']),
   socialCheck:option('nonhostile_goodwill_or_entertainment'),
   speech:fields({translation:boolean,languages:arrayOf(named(80),24),capacity:whole(0,24),fullSentences:boolean},['languages','capacity','fullSentences']),
   telepathy:fields({partnerActorId:identifier,twoWay:boolean,sharedSenses:boolean,limitFeet:whole(1,1000000)},['partnerActorId','twoWay','sharedSenses']),
@@ -56,10 +59,26 @@ async function training(ctx,x){
 async function feature(ctx,x,edit){
   const a=await actor(ctx,x.actorId),old=edit?await owned(ctx,'feature',x.featureId,a.id):null;
   await checkCompanionTrait(ctx,a,x,old);
+  if(x.infusionRule){
+    must(x.kind==='class','INFUSION_REQUIRES_CLASS_FEATURE');
+    await checkInfusionRule(ctx,a.id,x.infusionRule);
+  }
+  if(old?.data.activeInfusions?.length && x.infusionRule)
+    must(JSON.stringify(old.data.infusionRule)===JSON.stringify(x.infusionRule),'ACTIVE_INFUSIONS_REQUIRE_REVIEW');
+  if(x.preparedItemRule){
+    must(x.kind==='class','STORAGE_REQUIRES_CLASS_FEATURE');
+    await validatePreparedItem(ctx,a.id,x.preparedItemRule);
+  }
+  if(old?.data.loadedSpellItem)must(JSON.stringify(old.data.preparedItemRule)===JSON.stringify(x.preparedItemRule??old.data.preparedItemRule),'STORAGE_NOT_EMPTY');
   if(x.formId)await owned(ctx,'form',x.formId,a.id);
   must(x.kind!=='form'||x.formId,'FEATURE_FORM_REQUIRED');
   must((!x.requiresOperating&&!x.requiresAttunement)||x.sourceItemId,'FEATURE_ITEM_REQUIRED');
   if(x.sourceItemId)must((await ctx.get('item_instance',x.sourceItemId))?.life==='active','FEATURE_ITEM_REQUIRED');
+  if(x.acceptedCastAid){
+    const v=x.acceptedCastAid;
+    must(!x.sourceItemId&&!x.formId&&v.casterId!==a.id&&v.applies.length>0&&new Set(v.applies).size===v.applies.length,'RECIPIENT_AID_CONFIGURATION_INVALID');
+    await actor(ctx,v.casterId);
+  }
   if(x.speech)must(x.speech.languages.length<=x.speech.capacity && new Set(x.speech.languages.map(l=>l.toLowerCase())).size===x.speech.languages.length,'INVALID_LANGUAGE_PACKAGES');
   if(x.telepathy){must(x.telepathy.partnerActorId!==a.id,'FEATURE_PARTNER_INVALID');await actor(ctx,x.telepathy.partnerActorId);}
   if(old?.data.feat)must(x.feat?.familyId===old.data.feat.familyId,'FEATURE_FAMILY_IDENTITY_REQUIRED');
@@ -76,15 +95,18 @@ async function feature(ctx,x,edit){
     must(new Set(expertise).size===expertise.length && expertise.every(id=>Object.hasOwn(a.data.skills,id) && a.data.skills[id].rank===2),
       'INCLUDED_EXPERTISE_NOT_ESTABLISHED');
   }
-  const sensory=Boolean(x.speech||x.telepathy||x.mobility||x.lipReading);
+  const sensory=Boolean(x.speech||x.telepathy||x.mobility||x.lipReading||x.acceptedCastAid);
   const indexed=(a.data.sensoryFeatureIds??[]).filter(id=>id!==x.featureId);
   if(sensory)indexed.push(x.featureId);
   must(indexed.length<=64,'SENSORY_FEATURE_LIMIT');
   must(new Set(x.references.map(r=>r.id)).size===x.references.length,'DUPLICATE_FEATURE_REFERENCE');
   for(const r of x.references)await owned(ctx,r.kind,r.id,a.id);
-  const data={category:x.kind,description:x.description,source:x.source,formId:x.formId??null,references:x.references,
+  const storage=x.preparedItemRule??old?.data.preparedItemRule;
+  const infusion=x.infusionRule??old?.data.infusionRule;
+  const data={...(infusion?{infusionRule:infusion,activeInfusions:old?.data.activeInfusions??[]}:{}),...(storage?{preparedItemRule:storage}:{}),...(old?.data.loadedSpellItem?{loadedSpellItem:old.data.loadedSpellItem}:{}),
+    ...(old?.data.lastLoadRestId?{lastLoadRestId:old.data.lastLoadRestId}:{}),category:x.kind,description:x.description,source:x.source,formId:x.formId??null,references:x.references,
     ...(x.sourceItemId?{sourceItemId:x.sourceItemId,requiresAttunement:x.requiresAttunement??false,requiresOperating:x.requiresOperating??false}:{}),
-    ...(x.infusionBond?{infusionBond:x.infusionBond}:{}),...(x.includedScore?{includedScore:x.includedScore}:{}),...(x.socialCheck?{socialCheck:x.socialCheck}:{}),
+    ...(x.infusionBond?{infusionBond:x.infusionBond}:{}),...(x.includedScore?{includedScore:x.includedScore}:{}),...(x.socialCheck?{socialCheck:x.socialCheck}:{}),...(x.acceptedCastAid?{acceptedCastAid:x.acceptedCastAid}:{}),
     ...(x.feat?{feat:x.feat}:{}),...(x.lipReading?{lipReading:x.lipReading}:{}),
     ...(x.speech?{speech:x.speech}:{}),...(x.telepathy?{telepathy:x.telepathy}:{}),...(x.mobility?{mobility:x.mobility}:{})};
   if(old){

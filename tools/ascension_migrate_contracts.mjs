@@ -1,3 +1,4 @@
+import {validateArmorTrait} from '../backend/owner-bridge/cloud-armor-traits.mjs';
 /** Validate staged definition fields against the actual service's typed contracts; never call an operation. */
 import {readFileSync} from 'node:fs';
 import {MECHANIC_KINDS, MECHANIC_OPERATIONS} from '../backend/owner-bridge/cloud-mechanics.mjs';
@@ -43,6 +44,7 @@ function validate(row) {
     }
   }
   if (!cloudMatches(fields,schema)) invalid(row.kind,'stored definition fails the shared service contract');
+  if (row.kind === 'effect') validateArmorTrait(fields);
   if (row.kind === 'effect' && fields.requiresWorn && !fields.sourceItemId) invalid(row.kind,'worn effect requires an item source');
   if (row.kind === 'effect' && row.data.wornResistanceUpgrade &&
       !(fields.target==='damage_defense' && fields.operation==='resistance' && fields.sourceItemId && fields.requiresAttunement)) {
@@ -71,6 +73,14 @@ function validateCompanionSources(rows) {
       }
       if (companions.has(row.actorId) || operators.has(operatorId) || occupied.has(slot.id)) invalid(row.kind,'duplicate original companion bond');
       companions.add(row.actorId); operators.add(operatorId); occupied.add(slot.id);
+    }
+    if (row.kind === 'feature' && d.acceptedCastAid != null) {
+      const recipient=records.get(row.actorId), caster=records.get(d.acceptedCastAid.casterId);
+      if (recipient?.kind!=='actor' || caster?.kind!=='actor' || caster.id===recipient.id || d.formId || d.sourceItemId ||
+          !recipient.data.sensoryFeatureIds?.includes(row.id) || !d.acceptedCastAid.applies.length ||
+          new Set(d.acceptedCastAid.applies).size!==d.acceptedCastAid.applies.length) {
+        invalid(row.kind,'recipient spell aid requires its feature index, canonical caster and eligible roll kinds');
+      }
     }
     if (row.kind === 'feature' && d.includedScore != null && d.includedScore.before >= d.includedScore.after) {
       invalid(row.kind,'invalid historical included ability increase');

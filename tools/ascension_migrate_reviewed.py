@@ -71,17 +71,22 @@ REF = {
     "project_stage": {"projectId": "invention_project"}, "blueprint_version": {"projectId": "invention_project"},
 }
 EDGE_TARGET = {
+    "care_operator":"actor","requires_spell":"spell","requires_tool":"item_definition",
+    "feature_source":"item_instance","communicates_with":"actor",
     "infusion_operator":"actor","known_infusion":"feature","dedicated_slot":"resource_pool",
     "deployment_form":"form","deploying":"form_deployment","inherits_form_rules":"form",
     "includes_event":"timeline_event","part_of_arc":"story_arc","follows_session":"campaign_session","session_in_arc":"story_arc",
     "opens_at_checkpoint":"checkpoint","closes_at_checkpoint":"checkpoint",
-    "actor": "actor", "represents_actor": "actor", "owned_by": "actor", "held_by": "actor", "installed_on":"actor", "located_at": "world_entity",
+    "actor": "actor", "represents_actor": "actor", "owned_by": "actor", "held_by": "actor", "installed_on":"actor", "stored_in":"item_instance","located_at": "world_entity",
     "definition": "item_definition", "charge_pool": "resource_pool", "uses_pool": "resource_pool", "excludes_form": "form", "feature_mechanic": "*",
+    "triggered_by_attack":"attack_attempt","triggered_by_cast":"cast_instance",
     "applies_to_spell":"spell", "for_cast":"cast_instance","for_attempt":"attack_attempt","for_use":"action_use",
     "for_concentration":"concentration_check","used_cast":"cast_instance","used_substitution":"action_definition",
     "part_of_multiattack":"action_use","declared_target":"actor","target":"actor","split_from":"item_instance",
     "from_stack":"item_instance","into_stack":"item_instance","merged_into":"item_instance","seller":"world_entity",
     "previous_owner":"actor","new_owner":"actor","previous_custodian":"actor","new_custodian":"actor",
+    "modifies_damage":"attack spell",
+    "permits_payload":"spell", "uses_payload_library":"action_definition", "uses_preparation":"action_definition",
     "construction_project":"invention_project",
     "affected_pool": "resource_pool", "recovers_on_actor_rest": "actor", "requires_item": "item_instance",
     "suppresses_item": "item_instance", "active_form": "form", "requires_form": "form", "feature_form": "form",
@@ -100,12 +105,17 @@ EDGE_TARGET = {
     "part_of_trade": "party_exchange", "trade_party": "actor", "trade_wallet": "wallet", "trade_holding": "item_instance",
 }
 EDGE_FROM = {
+    "care_operator":{"care_protocol"},"requires_spell":{"care_protocol"},"requires_tool":{"care_protocol"},
+    "feature_source":{"feature"},"communicates_with":{"feature"},
+    "triggered_by_attack":{"attack_attempt"},"triggered_by_cast":{"attack_attempt"},
+    "modifies_damage":{"effect"},
+    "permits_payload":{"action_definition"},"uses_payload_library":{"attack"},"uses_preparation":{"attack"},
     "infusion_operator":{"feature"},"known_infusion":{"feature"},"dedicated_slot":{"feature"},
     "deployment_form":{"form_deployment"},"deploying":{"actor"},"inherits_form_rules":{"form"},
     "part_of_arc":{"story_arc"},"follows_session":{"campaign_session"},"session_in_arc":{"campaign_session"},
     "opens_at_checkpoint":{"campaign_session"},"closes_at_checkpoint":{"campaign_session"},"includes_event":{"story_arc","campaign_session"},
     "definition": {"item_instance"}, "owned_by": {"item_instance"}, "held_by": {"item_instance", "wallet"}, "installed_on":{"item_instance"},
-    "located_at": {"item_instance"}, "known_about": {"known_fact"}, "represents_actor": {"world_entity"},
+    "stored_in":{"item_instance"}, "located_at": {"item_instance"}, "known_about": {"known_fact"}, "represents_actor": {"world_entity"},
     "from_subject": {"relationship"}, "to_subject": {"relationship"}, "design_for": {"blueprint_version"},
     "stage_of": {"project_stage"}, "active_form": {"actor"}, "concentrates_on": {"actor"},
     **dict.fromkeys(("last_event", "scene_location", "pending_roll", "active_encounter", "objective", "party_actor"), {"checkpoint"}),
@@ -137,6 +147,8 @@ def path_value(value, path, missing=False):
     return value
 
 
+from ascension_migrate_supplement import FORMAT as SUP_FORMAT, FAMILY as SUP_FAMILY, index_supplement, verify_supplements, supplemental_witness, historical_projections
+
 def indexed(raw):
     if raw.startswith(b"PK\x03\x04"):
         return archive_rows(raw)
@@ -146,6 +158,8 @@ def indexed(raw):
         return fmt, working_rows(v)
     if fmt == ATTESTED_FORMAT:
         return index_attestations(v)
+    if fmt == SUP_FORMAT:
+        return index_supplement(v)
     if fmt == DOCUMENT_FORMAT:
         return index_documents(v)
     if fmt == "astravar-reviewed-source-facts":
@@ -483,7 +497,7 @@ def project(raw_by_hash, plan, tenant):
     for digest, raw in raw_by_hash.items():
         verify(digest==sha(raw), "Original export digest mismatch")
         fmt, indexed_rows=indexed(raw)
-        if fmt in ("astravar-reviewed-source-facts", DOCUMENT_FORMAT, ATTESTED_FORMAT):
+        if fmt in ("astravar-reviewed-source-facts", DOCUMENT_FORMAT, ATTESTED_FORMAT, SUP_FORMAT):
             doc=loads(raw)
             verify((doc["owner"],doc["continuity"])==tenant, "Reviewed source belongs to another owner or continuity")
         entries.update({(digest,family,identity):r for (family,identity),r in indexed_rows.items()})
@@ -507,6 +521,7 @@ def project(raw_by_hash, plan, tenant):
                 prior_transfers[key]=original[0]
     verify_attestations(raw_by_hash, plan["sources"], plan.get("reviewAuthority"), entries, tenant, source_key, path_value)
     corrections, exclusions = reviewed_grants(plan.get("reviewAuthority"), tenant, entries, path_value, source_key)
+    retired_projections=historical_projections(plan.get("reviewAuthority"), entries, source_key)
     scoped_fixtures = fixture_memberships(entries)
     decisions={}
     obligations=Counter()
@@ -547,7 +562,7 @@ def project(raw_by_hash, plan, tenant):
         if disposition=="historical":
             historical_weapon = key[1].startswith("weapon.working") and key[0] in archived_weapon_sources.values()
             historical_transfer_row = key[1].startswith("notion.") and key[0] in prior_transfers.values()
-            verify((key[1] in HISTORICAL or key in archived_weapon_sources or historical_weapon or key in prior_transfers or historical_transfer_row) and not d["targets"],
+            verify((key[1] in HISTORICAL or key in archived_weapon_sources or historical_weapon or key in prior_transfers or historical_transfer_row or key in retired_projections) and not d["targets"],
                    "Active data cannot be retired as an historical event")
         if disposition=="map":
             verify(d["playerKnown"] and d["targets"] and membership in (None,tenant[1]) and native.get("visibility") not in ("private","dm","hidden"),
@@ -595,6 +610,7 @@ def project(raw_by_hash, plan, tenant):
                isinstance(target["title"],str) and 0<len(target["title"].strip())<=180, "Invalid or duplicate typed canonical target")
         verify(target["kind"]!="continuity_profile" or target["id"]==tenant[1], "Wrong continuity metadata target")
         entities[target["id"]]=target
+    verify_supplements(plan, entries, entities, decisions, source_key)
     verify_attested_targets(decisions, entries, entities, tenant, scoped_identity, plan, source_key)
     declared={i for d in decisions.values() for i in d["targets"]}
     verify(entities.keys()==declared, "Unbound target or missing declared canonical target")
@@ -696,6 +712,7 @@ def project(raw_by_hash, plan, tenant):
         pair=w["target"],tuple(tp)
         verify(pair not in witnesses, "Duplicate target parity witness")
         sp=w["sourcePath"]
+        supplemental_witness(key,entries[key],w)
         if isinstance(sp,list) and "$printedAction" in sp:
             verify(sp[:1]==["$printedAction"] and sp.count("$printedAction")==1 and key[1]=="playable.characters.features" and len(key[2])==2 and
                    entities[w["target"]]["actorId"]==key[2][0] and entities[w["target"]]["kind"] in ("attack","action_definition"),
@@ -884,6 +901,14 @@ def project(raw_by_hash, plan, tenant):
             cast=source_entity["data"]
             permitted={"target":cast["targets"],"cast_spell":[cast["spellId"]],"used_grant":[cast["grantId"]]}
             verify(link["relation"] not in permitted or link["to"] in permitted[link["relation"]],"Concentrated roll aid edge disagrees with its cast")
+        if link["relation"] in ("permits_payload","uses_payload_library","uses_preparation"):
+            other=entities[link["to"]]
+            verify(source_entity["actorId"]==other["actorId"], "Payload or preparation belongs to another actor")
+            if link["relation"]=="permits_payload":
+                verify(any(v["spellId"]==other["id"] for v in source_entity["data"].get("payloadVariants",[])), "Payload spell not permitted")
+            else:
+                target_action=(source_entity["data"].get("payloadRule") or {}).get("storeActionId") if link["relation"]=="uses_payload_library" else source_entity["data"].get("chargeActionId")
+                verify(other["id"]==target_action and other["data"].get("sourceItemId")==source_entity["data"].get("sourceItemId"), "Payload or preparation has wrong physical source")
         expected=EDGE_TARGET[link["relation"]]
         verify((expected=="*" or entities[link["to"]]["kind"] in expected.split()) and
                entities[link["from"]]["kind"] in EDGE_FROM.get(link["relation"],REQUIRED), "Wrong typed edge endpoint")
@@ -893,8 +918,11 @@ def project(raw_by_hash, plan, tenant):
     must_link={"wallet":{"holderId":"held_by"},"item_instance":{"definitionId":"definition","ownerId":"owned_by","custodianId":"held_by","locationId":"located_at","resourcePoolId":"charge_pool","additionalResourcePoolIds":"charge_pool"},
                "spell_grant":{"spellId":"grants_spell","sourceItemId":"requires_item","resourceId":"uses_pool"},
                "actor":{"activeFormId":"active_form","concentrationCastId":"concentrates_on"}}
+    must_link["item_instance"]["containerItemId"]="stored_in"
     must_link["item_instance"]["installedOnActorId"]="installed_on"
     must_link["actor"]["activeDeploymentId"]="deploying"
+    must_link["care_protocol"]={"operatorId":"care_operator","spellId":"requires_spell","toolDefinitionId":"requires_tool",
+                                "repairPoolId":"uses_pool","reconstructionPoolId":"uses_pool"}
     must_link["form_deployment"]={"formId":"deployment_form"}
     must_link["form"]={"inheritedRuleFormIds":"inherits_form_rules"}
     must_link["effect"]={"sourceItemId":"requires_item","formId":"requires_form"}

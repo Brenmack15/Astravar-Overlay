@@ -1,20 +1,30 @@
+import {strideOperations} from './cloud-equipment-stride.mjs';
+import {anchorOperations} from './cloud-equipment-anchor.mjs';
+import {artisanTypes,artisanDefinition,artisanInput,validateArtisan,useArtisan} from './cloud-artisan-objects.mjs';
+import {workshopTypes,workshopDefinition,workshopArguments,validateWorkshop,useWorkshop} from './cloud-workshop-equipment.mjs';
+import {sensingDefinition,sensingArgs,useSensing} from './cloud-equipment-sensing.mjs';
+import {equipmentReactionDefinition,equipmentReactionArguments,validateEquipmentReaction,useEquipmentReaction} from './cloud-equipment-reactions.mjs';
+import {modeDefinition,modeInput,validateEquipmentMode,useEquipmentMode} from './cloud-equipment-modes.mjs';
 import {matchesForm,reactionRollWindow} from './cloud-mechanics-core.mjs';
 import { interruptIfPending } from './cloud-form-deployment.mjs';
-import { arsenalDefinitions, loadChoice, useArsenal, validateArsenal } from './cloud-mechanics-arsenal.mjs';
+import { arsenalDefinitions, damageAdjudication, loadChoice, useArsenal, validateArsenal } from './cloud-mechanics-arsenal.mjs';
+import { bandsDefinitions,bandsArguments,validateBands,useBands,bandOperations } from './cloud-mechanics-bands.mjs';
 import { snapshotComponents } from './cloud-mechanics-combat.mjs';
 import { linkedTypes, linkedDefinitions, linkedArguments, validateLinkedAction, executeLinkedAction } from './cloud-mechanics-linked.mjs';
 import { stats, identifier, named, whole, nullable, arrayOf, option, boolean, fields, actionCost, costSchema, must, op, actor, owned, insert, save, transferableSource, gearEligible, sheet, spend, useTiming } from './cloud-mechanics-core.mjs';
 
 const sizeOrder=['tiny','small','medium','large','huge','gargantuan'];
 const actionSchema=fields({
-  ...linkedDefinitions,...arsenalDefinitions,actorId:identifier,actionId:identifier,name:named(120),source:named(300),
-  type:option('use','teleport','frighten','roll_bonus','multiattack','fixed_attack_die','store_payload','prepare_strike',...linkedTypes),fixedDieValue:whole(1,20),attackSequence:arrayOf(identifier,12),substitutions:arrayOf(fields({attackId:identifier,replaces:arrayOf(identifier,12),maximum:whole(1,12)},['attackId','replaces','maximum']),12),timing:actionCost,formId:identifier,excludedForms:arrayOf(identifier,16),sourceItemId:identifier,transfersWithItem:boolean,
+  ...equipmentReactionDefinition,...artisanDefinition,...workshopDefinition,...sensingDefinition,...linkedDefinitions,...modeDefinition,...arsenalDefinitions,...bandsDefinitions,actorId:identifier,actionId:identifier,name:named(120),source:named(300),
+  type:option(...artisanTypes,...workshopTypes,'creature_locator','direct_spell_ward','equipment_reaction','equipment_mode','use','teleport','frighten','roll_bonus','multiattack','fixed_attack_die','store_payload','purge_payload','prepare_strike','bands_control','gravity_move',...linkedTypes),fixedDieValue:whole(1,20),attackSequence:arrayOf(identifier,12),substitutions:arrayOf(fields({attackId:identifier,replaces:arrayOf(identifier,12),maximum:whole(1,12)},['attackId','replaces','maximum']),12),timing:actionCost,formId:identifier,excludedForms:arrayOf(identifier,16),sourceItemId:identifier,transfersWithItem:boolean,
   requiresOperating:boolean,requiresAttunement:boolean,cost:costSchema,range:whole(0,1200),saveDc:whole(1,100),
   saveAbility:option(...stats),durationSeconds:whole(1,86400),bonusAbility:option(...stats),fixedBonus:whole(-100,100)
 },['actorId','actionId','name','source','type','timing']);
 async function define(ctx,x){
   const a=await actor(ctx,x.actorId);
-  await validateLinkedAction(ctx,x);await validateArsenal(ctx,x);
+  validateEquipmentReaction(x);must((x.type==='creature_locator')===(x.lineage!==undefined) && (x.type==='creature_locator')===(x.radiusMiles!==undefined) && (x.type==='direct_spell_ward')===(x.maximumSpellLevel!==undefined),'EQUIPMENT_SENSING_RULE_INVALID');
+  if(['creature_locator','direct_spell_ward'].includes(x.type))must(x.cost && x.sourceItemId && x.timing===(x.type==='creature_locator'?'action':'other'),'EQUIPMENT_SENSING_SOURCE_REQUIRED');
+  await validateArtisan(ctx,x);await validateWorkshop(ctx,x);await validateEquipmentMode(ctx,x);await validateLinkedAction(ctx,x);await validateArsenal(ctx,x);await validateBands(ctx,x);
   must((!x.requiresOperating&&!x.requiresAttunement)||x.sourceItemId,'ACTION_SOURCE_REQUIRED');
   if(x.sourceItemId)must(await ctx.get('item_instance',x.sourceItemId),'ACTION_SOURCE_MISSING');
   await transferableSource(ctx,x);
@@ -45,7 +55,9 @@ async function define(ctx,x){
   if(x.formId)await ctx.link(actionId,'requires_form',x.formId);
   for(const id of new Set(x.excludedForms??[]))await ctx.link(actionId,'excludes_form',id);
   if(x.sourceItemId)await ctx.link(actionId,'requires_item',x.sourceItemId);
-  if(x.cost)await ctx.link(actionId,'uses_pool',x.cost.poolId);
+  if(x.anchorRule)await ctx.link(actionId,'requires_item',x.anchorRule.itemId);
+  for(const id of x.secondaryPools??[])await ctx.link(actionId,'uses_pool',id);
+  if(x.cost||x.bandsPoolId)await ctx.link(actionId,'uses_pool',x.cost?.poolId??x.bandsPoolId);
   must(!x.substitutions||x.type==='multiattack','SUBSTITUTIONS_REQUIRE_MULTIATTACK');
   for(const id of new Set([...(x.attackSequence??[]),...(x.substitutions??[]).map(s=>s.attackId)]))await ctx.link(actionId,'includes_attack',id);
   return {actionId};
@@ -59,12 +71,12 @@ export async function applyCondition(ctx,actorId,key,enabled,sourceId,expiresAt=
     if(prior)must((prior.expiresAt??null)===expiresAt,'CONDITION_SOURCE_DURATION_CHANGED');
     else sources.push({key,sourceId,expiresAt});
   }else sources=sources.filter(s=>!(s.key===key&&s.sourceId===sourceId));
-  const preexisting=a.data.conditions.filter(c=>!(a.data.conditionSources??[]).some(s=>s.key===c));
+  const preexisting=(a.data.conditions??[]).filter(c=>!(a.data.conditionSources??[]).some(s=>s.key===c));
   const conditions=[...new Set([...preexisting,...sources.map(s=>s.key)])];
   const ends=conditions.some(c=>['incapacitated','unconscious','stunned','paralyzed','petrified'].includes(c));
   if(ends&&a.data.concentrationCastId)await ctx.unlink(a.id,'concentrates_on',a.data.concentrationCastId);
   const next=enabled && ['incapacitated','unconscious','stunned','paralyzed','petrified'].includes(key)?await interruptIfPending(ctx,a,'actor_incapacitated'):a.data;
-  await save(ctx,a,{...next,conditionSources:sources,conditions,concentrationCastId:ends?null:next.concentrationCastId});
+  await save(ctx,a,{...next,conditionSources:sources,conditions,...(ends?{concentrationCastId:null}:{})});
   return {actorId,key,sourceId,enabled,expiresAt,conditions};
 }
 async function setExhaustion(ctx,x){
@@ -74,7 +86,7 @@ async function setExhaustion(ctx,x){
   must(level!==null && x.enabled===(level>0),'EXHAUSTION_LEVEL_REQUIRED');
   must(!x.customExhaustionRule || a.data.rulesProfile==='custom'&&x.adjudicationSource,'PINNED_EXHAUSTION_RULE_REQUIRED');
   must(!x.adjudicationSource || x.customExhaustionRule,'CUSTOM_EXHAUSTION_RULE_REQUIRED');
-  const source='manual:'+x.sourceId,conditions=a.data.conditions.filter(k=>k!=='exhaustion');
+  const source='manual:'+x.sourceId,conditions=(a.data.conditions??[]).filter(k=>k!=='exhaustion');
   const conditionSources=(a.data.conditionSources??[]).filter(s=>s.key!=='exhaustion');
   if(level>0){conditions.push('exhaustion');conditionSources.push({key:'exhaustion',sourceId:source,expiresAt:null});}
   await save(ctx,a,{...a.data,conditions,conditionSources,exhaustionLevel:level,exhaustionSource:source,
@@ -92,7 +104,7 @@ async function execute(ctx,x){
   must(!p.conditions.some(c=>['incapacitated','unconscious','stunned','paralyzed','petrified'].includes(c)),'ACTOR_CANNOT_ACT');
   must(d.type!=='fixed_attack_die','DECLARE_SUBSTITUTION_WITH_ATTACK');
   must(matchesForm(d,p.ruleFormIds),'ACTION_FORM_INELIGIBLE');
-  must(await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating),'ACTION_ITEM_INELIGIBLE');
+  must((d.type==='fitted_armor' && x.fittedArmor==='don') || await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating),'ACTION_ITEM_INELIGIBLE');
   must((x.destination!=null)===(d.type==='teleport') && (x.targets!=null)===(d.type==='frighten') && (x.reaction!=null)===(d.type==='roll_bonus'),'ACTION_ARGUMENT_MISMATCH');
   const data={actionId:action.id,actorId:a.id,formId:p.formId,type:d.type,timing:d.timing,sourceItemId:d.sourceItemId??null,
     recordedAt:ctx.now,commandId:ctx.commandId,costs:[]};
@@ -134,14 +146,21 @@ async function execute(ctx,x){
       text:roll.data.text+'; '+action.title+' '+(bonus>=0?'+':'')+bonus+' = '+after});
     data.rollId=roll.id;data.targetActorId=r.targetActorId;data.modifier=bonus;data.originalTotal=before;data.finalTotal=after;
   }
+  await useArtisan(ctx,a,action,x,data);
+  await useWorkshop(ctx,a,action,x,data);
+  await useSensing(ctx,a,action,x,data);
+  await useEquipmentMode(ctx,a,action,x,data);
+  await useEquipmentReaction(ctx,a,action,x,data);
   await executeLinkedAction(ctx,a,action,x,data);
   await useArsenal(ctx,a,action,x,data,p,snapshotComponents);
-  await useTiming(ctx,a,d.timing);
+  const timing=await useBands(ctx,a,action,x,data,applyCondition)??d.timing;
+  await useTiming(ctx,a,timing);data.timing=timing;
   if(d.cost)data.costs.push(await spend(ctx,a.id,d.cost.poolId,d.cost.amount));
   await insert(ctx,'action_use',x.useId,a.id,action.title,data);
   await ctx.link(x.useId,'used_action',action.id);
   if(data.translation)await ctx.link(x.useId,'audience',data.translation.recipientId);
   if(data.castId)await ctx.link(x.useId,'delivered_cast',data.castId);
+  if(data.equipmentGuard)await ctx.link(x.useId,'guarded_attempt',data.equipmentGuard.attemptId);
   if(data.deflection)await ctx.link(x.useId,'deflected_attempt',data.deflection.attemptId);
   if(data.rollId)await ctx.link(x.useId,'adjusted_roll',data.rollId);
   for(const t of data.targets??[])await ctx.link(x.useId,'target',t.actorId);
@@ -174,8 +193,10 @@ async function saveAgainst(ctx,x){
   return {useId:use.id,targetActorId:target.id,status,rollId:roll.id,total:roll.data.total,dc:use.data.save.dc};
 }
 export const actionOperations=Object.freeze({
+  ...anchorOperations,...strideOperations,
+  ...bandOperations(applyCondition),
   define_action:op('combat',actionSchema,define),
-  use_action:op('combat',fields({...linkedArguments,load:loadChoice,actorId:identifier,actionId:identifier,useId:identifier,declared:{const:true},destination,targets,reaction},['actorId','actionId','useId','declared']),execute),
+  use_action:op('combat',fields({...equipmentReactionArguments,...artisanInput,...workshopArguments,...sensingArgs,...modeInput,...linkedArguments,...bandsArguments,load:loadChoice,chargeAdjudication:damageAdjudication,actorId:identifier,actionId:identifier,useId:identifier,declared:{const:true},destination,targets,reaction},['actorId','actionId','useId','declared']),execute),
   resolve_action_save:op('combat',fields({actorId:identifier,useId:identifier,targetActorId:identifier,rollId:identifier,endOfTurnConfirmed:boolean},['actorId','useId','targetActorId','rollId']),saveAgainst),
   resolve_attack_rider:op('combat',fields({actorId:identifier,attemptId:identifier,targetActorId:identifier,rollId:identifier,feet:whole(0,200),destination:named(160),source:named(300)},['actorId','attemptId','targetActorId','rollId','feet','source']),async(ctx,x)=>{
     const attempt=await owned(ctx,'attack_attempt',x.attemptId,x.actorId),d=attempt.data,push=d.preparedPush;

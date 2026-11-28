@@ -372,7 +372,15 @@ async function inspect(root,mod){
     return {status:m.intent?'CUTOVER_IN_PROGRESS':m.pending?'STAGED':current?'READY':'EMPTY',current,stage,previous,production:false};
   });
 }
-module.exports={create,backup,backupBindings,prepare,cutover,rollbackStage,withGameplay,inspect};
+// Open maintenance-only bindings for one private local QA generation. No gameplay is routed.
+async function withOfflineBindings(root,fn,mod){
+  return withLock(root,m=>{
+    check(!m.intent && !m.pending && !m.last,'A fresh unpublished local generation is required');
+    return resource(root,m.active,null,r=>fn(r,{generation:m.active,d1DatabaseId:'00000000-0000-4000-8000-000000000042',
+      privateBucket:'private-ascension-recovery',routed:false,private:true}),mod);
+  });
+}
+module.exports={create,backup,backupBindings,prepare,cutover,rollbackStage,withGameplay,withOfflineBindings,inspect};
 if(require.main===module){
   process.umask(0o077);
   const argv=process.argv.slice(2),[op,target,...args]=argv;

@@ -98,6 +98,9 @@ async function verify(){
       const all=await r.bucket.list(),key=all.objects.find(o=>o.key.endsWith('/thumbnail.png')).key.replace('/thumbnail.png','/original.png');
       await r.bucket.put(key,bytes,{sha256:imageHash,httpMetadata:{contentType:'image/png'}});
     },mod);
+    const offline=await require('./verify-ascension-generation.cjs').rehearse(tmp,zip,mod);
+    assert.ok(offline.rows>0 && offline.objects>=2 && offline.authority==='staged');
+    console.log(JSON.stringify({offlineUnroutedGeneration:offline.status,rows:offline.rows,objects:offline.objects}));
     let inspected=await recovery.prepare(root,zip,null,mod);
     await assert.rejects(recovery.prepare(root,zip,'f'.repeat(64),mod),/reviewed stage/);
     await recovery.prepare(root,zip,inspected.approvalSha256,mod);

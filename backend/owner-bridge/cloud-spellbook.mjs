@@ -30,7 +30,7 @@ export async function cloudSpellbook(service,principal,id,actorId,options={}) {
     const spell=await ctx.get('spell',d.spellId);
     if(!spell||spell.life!=='active'||spell.actorId!==actorId)continue;
     const def=spell.data;
-    const allowedGear=await gearEligible(ctx,d.sourceItemId,actorId,d.requiresAttunement,d.requiresOperating);
+    const allowedGear=await gearEligible(ctx,d.sourceItemId,actorId,d.requiresAttunement,d.requiresOperating,undefined,d.requiresWorn);
     const base=d.ability?stats.abilities[d.ability]?.modifier:null;
     const sourceBonus=base!=null&&stats.proficiency!=null?base+stats.proficiency:null;
     const hitBase=d.fixedHit??sourceBonus, dcBase=d.fixedDc??(sourceBonus==null?null:8+sourceBonus);
@@ -42,7 +42,7 @@ export async function cloudSpellbook(service,principal,id,actorId,options={}) {
       if(stats.exhaustion.status==='adjudication_required')reasons.push('EXHAUSTION_ADJUDICATION_REQUIRED');
       if(d.preparation==='known')reasons.push('PREPARATION_REQUIRED');
       if(!allowedGear)reasons.push('SOURCE_ITEM_UNAVAILABLE');
-      if(d.prerequisites||def.resolution==='manual')reasons.push('MANUAL_ADJUDICATION_REQUIRED');
+      if(d.prerequisites||def.resolution==='manual'&&!d.reviewedAdjudication)reasons.push('MANUAL_ADJUDICATION_REQUIRED');
       if(d.route==='slot'&&!eligibleSlots.length)reasons.push('MATCHING_SLOT_UNAVAILABLE');
       const shared=d.resourceId?pools.get(d.resourceId)?.data:null;
       if(d.resourceId&&(!shared||availableUses(shared)==null||availableUses(shared)<d.cost))reasons.push('GRANT_RESOURCE_UNAVAILABLE');
@@ -54,7 +54,7 @@ export async function cloudSpellbook(service,principal,id,actorId,options={}) {
       catch(e){if(!(e instanceof BridgeError))throw e;reasons.push(e.code);}
       rows.push({scaling:scaledSpellEffects(def,level),grantId,spellId:spell.id,name:spell.title,baseLevel:def.baseLevel,level,route:d.route,source:d.source,preparation:d.preparation,
         concentration:def.concentration,requiresConcentrationDecision:Boolean(def.concentration&&a.data.concentrationCastId),
-        timing:def.timing,range:def.range??null,duration:def.duration??null,description:def.description??null,
+        timing:def.timing,...(d.reviewedAdjudication?{requiresAdjudication:true,reactionTriggerSpellId:d.reactionTriggerSpellId??null}:{}),range:def.range??null,duration:def.duration??null,description:def.description??null,
         resolution:def.resolution,hit,dc,saveAbility:def.saveAbility??null,components,eligibleSlotIds:eligibleSlots.map(s=>s.id),
         optionalCharges:offeredCharges(stats,'spell',spell.id,grantId,components,def.resolution),
         resource:d.resourceId?{id:d.resourceId,current:shared?.current??null,cost:d.cost}:null,unavailable:reasons});

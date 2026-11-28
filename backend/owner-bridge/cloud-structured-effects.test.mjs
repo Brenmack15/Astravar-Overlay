@@ -266,6 +266,8 @@ test('an attuned worn ward upgrades only while resistance from an independent so
   const attune=attuned=>f.run('set_item_attunement',{itemId:'brocade',attuned,elapsedSeconds:0,confirmed:true,source});
   await equip('worn');assert.equal(await ward(),undefined);
   await attune(true);assert.equal((await ward()).kind,'resistance');
+  await f.run('define_effect',{...effect,effectId:'conditional-lining',nonmagicalOnly:true});
+  assert.equal((await ward()).kind,'resistance');
   await f.run('define_effect',{...effect,effectId:'alias-on-same-item',sourceItemId:'brocade'});
   await f.run('define_effect',{...effect,effectId:'other-element',key:'fire'});
   assert.equal((await ward()).kind,'resistance');
@@ -303,4 +305,249 @@ test('hover depends on the active source and eligible flight',async t=>{
   assert.deepEqual((await f.sheet()).mobilityRules.map(r=>[r.kind,r.eligible]),[['hover',true]]);
   await f.equip('packed');
   assert.deepEqual((await f.sheet()).mobilityRules,[]);
+});
+
+test('qualified defense separates same-type damage by provenance and preserves unresolved attempts', async t => {
+  const f = await fixture(t);
+  await assert.rejects(f.effect('invalid-provenance','max_hp','all',1,{nonmagicalOnly:true}),
+    /QUALIFIED_DEFENSE_INVALID/);
+  const targetActorId = 'synthetic-ward-target';
+  await f.run('define_actor', {actorId:targetActorId,name:'Ward target',role:'npc',rulesProfile:'revised_2024',
+    level:1,baseAc:12,maxHp:40,currentHp:40,temporaryHp:0});
+  await f.run('define_effect', {actorId:targetActorId,effectId:'mundane-pierce-ward',name:'Piercing ward',source,
+    target:'damage_defense',key:'piercing',operation:'resistance',nonmagicalOnly:true});
+  async function strike(attackId, components) {
+    await f.run('define_attack', {actorId,attackId,name:attackId,source,timing:'other',
+      resolution:'automatic',delivery:'other',components});
+    const attemptId = attackId + '-attempt';
+    await f.run('resolve_attack', {actorId,attackId,attemptId,mode:'normal',targets:[targetActorId],
+      includeDamage:true,damage:components.map(c => ({id:c.id,evidence:dice(6)}))});
+    return attemptId;
+  }
+  const resolve = attemptId => f.run('resolve_attack_target', {actorId,attemptId,targetActorId,source});
+  const hp = async () => (await f.record(targetActorId)).data.currentHp;
+
+  const mixed = await strike('split', [
+    component('plain','piercing',1,6,0,{magical:false}),
+    component('enchanted','piercing',1,6,0,{magical:true})
+  ]);
+  const receipt = await resolve(mixed);
+  assert.deepEqual(receipt.components.map(c => [c.magical,c.rolled,c.applied,c.defenses.map(d => d.source)]),
+    [[false,6,3,['mundane-pierce-ward']], [true,6,6,[]]]);
+  assert.deepEqual([receipt.amount,await hp()], [9,31]);
+
+  const unspecified = await strike('unclassified',[component('unknown-origin','piercing',1,6,0)]);
+  await assert.rejects(resolve(unspecified), /DAMAGE_PROVENANCE_REQUIRED/);
+  const pending = (await f.record(unspecified)).data;
+  assert.deepEqual(pending.targetResults ?? [], []);
+  assert.equal(await hp(),31);
+
+  const unrelated = await strike('unaffected',[component('other-type','cold',1,6,0)]);
+  assert.equal((await resolve(unrelated)).amount,6);
+  assert.equal(await hp(),25);
+});
+
+test('an older attack editor preserves exact qualifiers on the same component IDs', async t => {
+  const f=await fixture(t);
+  const attackId='legacy-draft';
+  const input={actorId,attackId,name:'Draft',source,sourceItemId:'focus',timing:'other',delivery:'melee',
+    resolution:'attack',fixedHit:3,reach:7};
+  const plain=component('spine','piercing',1,6,0), infused=component('spark','cold',1,4,0);
+  await f.run('define_attack',{...input,enforceReach:true,requiresWorn:true,naturalMagicItemId:'focus',
+    components:[{...plain,magical:false},{...infused,magical:true}]});
+  const edit=async fields=>f.run('update_attack',{...input,expectedAttackRevision:(await f.record(attackId)).revision,
+    components:[infused,plain],...fields});
+  await edit({name:'Renamed'});
+  const config=async()=>(await f.record(attackId)).data;
+  const read=await config();
+  assert.deepEqual([read.enforceReach,read.requiresWorn,read.naturalMagicItemId],[true,true,'focus']);
+  assert.deepEqual(read.components.map(c=>[c.id,c.magical]),[['spark',true],['spine',false]]);
+  await edit({components:[{...infused,magical:false},component('replacement','cold',1,4,0)]});
+  assert.deepEqual((await config()).components.map(c=>[c.id,c.magical]),[['spark',false],['replacement',undefined]]);
+  await assert.rejects(edit({delivery:'ranged'}),/REACH_CONFIGURATION_REQUIRED/);
+  await assert.rejects(edit({naturalMagicItemId:'unknown-source'}));
+  assert.deepEqual([(await config()).delivery,(await config()).naturalMagicItemId],['melee','focus']);
+});
+
+test('an exceptional ranged attack validates the submitted distance and targeting evidence', async t => {
+  const f=await fixture(t);
+  await f.equip('worn');
+  const attackId='beam', fields={actorId,attackId,name:'Fixture beam',source,sourceItemId:'focus',timing:'other',delivery:'ranged',
+    resolution:'attack',fixedHit:1,range:12,longRange:24,components:[component('flash','cold',1,4,0)]};
+  await f.run('define_attack',{...fields,longstrikeLimit:45});
+  const edit=async changes=>f.run('update_attack',{...fields,expectedAttackRevision:(await f.record(attackId)).revision,...changes});
+  await edit({name:'Edited by old client'});
+  assert.equal((await f.record(attackId)).data.longstrikeLimit,45);
+  await assert.rejects(edit({longstrikeLimit:23}),/LONGSTRIKE_RANGE_CONFIGURATION_REQUIRED/);
+  await edit({longstrikeLimit:48});
+  const shot=(attemptId,extra)=>f.run('resolve_attack',{actorId,attackId,attemptId,includeDamage:false,
+    mode:'normal',hit:dice(12),...extra});
+  await assert.rejects(shot('missing-distance',{}),/ATTACK_DISTANCE_REQUIRED/);
+  await shot('short',{targetDistanceFeet:12});
+  await assert.rejects(shot('ignored-long-range',{targetDistanceFeet:20}),/LONG_RANGE_DISADVANTAGE_REQUIRED/);
+  await shot('distant',{targetDistanceFeet:24,mode:'disadvantage',hit:dice(12,10)});
+  await assert.rejects(shot('unconfirmed',{targetDistanceFeet:47}),/LONGSTRIKE_TARGET_UNCONFIRMED/);
+  const clear={targetResolved:true,viablePath:true,totalCover:false};
+  await assert.rejects(shot('covered',{targetDistanceFeet:47,longstrike:{...clear,totalCover:true}}),/LONGSTRIKE_TARGET_UNCONFIRMED/);
+  await assert.rejects(shot('exceptional-normal',{targetDistanceFeet:48,longstrike:clear}),/LONG_RANGE_DISADVANTAGE_REQUIRED/);
+  await shot('exceptional',{targetDistanceFeet:48,longstrike:clear,mode:'disadvantage',hit:dice(13,11)});
+  await assert.rejects(shot('out-of-range',{targetDistanceFeet:49,longstrike:clear}),/SHOT_OUT_OF_RANGE/);
+  const targetActorId='beam-target', actionId='aiming-aid', poolId='aiming-cell';
+  await f.run('define_actor',{actorId:targetActorId,name:'Calibration target',role:'npc',rulesProfile:'custom',level:1});
+  await f.run('define_resource',{actorId,poolId,name:'Focusing cell',type:'charge',maximum:1,current:1,recovery:'short_rest',source});
+  await f.run('define_action',{actorId,actionId,name:'Focus on target',type:'weapon_target_lock',source,
+    timing:'bonus_action',sourceItemId:'focus',requiresOperating:true,cost:{poolId,amount:1},lockRangeFeet:40});
+  const lockTarget={targetActorId,distanceFeet:18,seenOrResolved:true,totalCover:false};
+  await assert.rejects(f.run('use_action',{actorId,actionId,useId:'bad-lock',declared:true,lockTarget:{...lockTarget,totalCover:true}}),/LOCK_TARGET_UNAVAILABLE/);
+  await f.run('use_action',{actorId,actionId,useId:'aimed',declared:true,lockTarget});
+  assert.equal((await f.record(poolId)).data.current,0);
+  await shot('with-lock',{targetDistanceFeet:22,targets:[targetActorId],hit:dice(11,15)});
+  const aimed=(await f.record('with-lock')).data;
+  assert.deepEqual([aimed.hit.natural,aimed.weaponTargetLock?.targetActorId],[15,targetActorId]);
+  await f.run('release_weapon_target_lock',{actorId,targetActorId,reason:'released',confirmed:true});
+  await assert.rejects(shot('after-release',{targetDistanceFeet:22,targets:[targetActorId]}),/LONG_RANGE_DISADVANTAGE_REQUIRED/);
+});
+
+test('temporary HP and source-linked equipment modes require a choice, consume a finite pool and expire', async t => {
+  const f=await fixture(t,{speeds:{walk:13}});
+  await f.equip('worn');
+  const poolId='module-charge', actionId='activate-mode';
+  await f.run('define_resource',{actorId,poolId,name:'Module charge',source,type:'charge',current:2,maximum:2,recovery:'none'});
+  await f.run('define_action',{actorId,actionId,name:'Pulse',source,sourceItemId:'focus',timing:'other',type:'equipment_mode',
+    activateModes:[{id:'pulse',seconds:11}],secondaryPools:[poolId],tempHpRule:{dice:1,sides:6,flat:2}});
+  await f.effect('mode-speed','speed','walk',5,{requiredItemMode:'pulse'});
+  const modeEffect=async()=>(await f.sheet()).movement.walk===18;
+  const use=(useId,extra)=>f.run('use_action',{actorId,actionId,useId,declared:true,...extra});
+  assert.equal(await modeEffect(),false);
+  await assert.rejects(use('no-choice',{tempHpDice:dice(2)}),/TEMP_HP_CHOICE_REQUIRED/);
+  assert.equal((await f.record(poolId)).data.current,2);
+  await use('keep',{tempHpChoice:'keep',tempHpDice:dice(3)});
+  assert.equal((await f.record(actorId)).data.temporaryHp,4);
+  assert.equal(await modeEffect(),true);
+  await f.equip('packed'); assert.equal(await modeEffect(),false);
+  await f.equip('worn'); assert.equal(await modeEffect(),true);
+  await f.run('advance_actor_time',{actorId,elapsedSeconds:11,confirmed:true});
+  assert.equal(await modeEffect(),false);
+  await use('replace',{tempHpChoice:'replace',tempHpDice:dice(6)});
+  assert.equal((await f.record(actorId)).data.temporaryHp,8);
+  assert.equal((await f.record(poolId)).data.current,0);
+  await assert.rejects(use('unfunded',{tempHpChoice:'replace',tempHpDice:dice(1)}),/RESOURCE_EMPTY_OR_UNKNOWN/);
+  assert.equal((await f.record(actorId)).data.temporaryHp,8);
+});
+
+test('natural damage provenance follows only the worn and attuned qualifying item', async t => {
+  const f=await fixture(t,{attunementCapacity:1});
+  await f.run('define_item_definition',{definitionId:'natural-focus-def',name:'Synthetic circlet',category:'gear',
+    description:'Qualifying test item',rarity:null,stackable:false,wearable:true,handheld:true,
+    attunement:'required',attunementSeconds:0,source});
+  await f.run('acquire_item',{itemId:'circlet',definitionId:'natural-focus-def',ownerId:actorId,quantity:1,source});
+  await f.run('define_attack',{actorId,attackId:'natural-strike',name:'Spine',source,timing:'other',delivery:'melee',
+    resolution:'automatic',naturalMagicItemId:'circlet',components:[component('tip','piercing',1,4,0)]});
+  const magic=async attemptId=>(await f.run('resolve_attack',{actorId,attemptId,attackId:'natural-strike',
+    mode:'normal',includeDamage:true,damage:[{id:'tip',evidence:dice(3)}]})).damage[0].magical;
+  const equip=equipment=>f.run('equip_item',{itemId:'circlet',equipment,source});
+  const attune=attuned=>f.run('set_item_attunement',{itemId:'circlet',attuned,elapsedSeconds:0,confirmed:true,source});
+  await equip('worn');
+  assert.equal(await magic('not-attuned'),false);
+  await attune(true);
+  assert.equal(await magic('worn-attuned'),true);
+  await equip('held');
+  assert.equal(await magic('only-held'),false);
+  await equip('worn');await attune(false);
+  assert.equal(await magic('ended-attunement'),false);
+  assert.equal((await f.record('worn-attuned')).data.damage[0].magical,true);
+});
+
+test('reviewed manual spell grants charge the actual selected route and preserve explicit adjudication',async t=>{
+  const f=await fixture(t), spellId='protect', limited='free-protect', slot='prepared-protect';
+  const make=(id,timing)=>f.run('define_spell',{actorId,spellId:id,name:id,source,baseLevel:1,
+    concentration:false,ritual:false,timing,resolution:'manual',components:[]});
+  await make(spellId,'reaction'); await make('incoming-spark','action');
+  await f.run('define_resource',{actorId,poolId:'daily',name:'Daily use',source,type:'ordinary',current:1,maximum:1,recovery:'long_rest'});
+  await f.run('define_resource',{actorId,poolId:'one-slot',name:'Slot',source,type:'spell_slot',slotLevel:1,current:2,maximum:2,recovery:'long_rest'});
+  const base={actorId,spellId,levels:[1],source,preparation:'always_prepared',ability:'INT',
+    reviewedAdjudication:true,reactionTriggerSpellId:'incoming-spark'};
+  await f.run('grant_spell',{...base,grantId:limited,route:'limited',resourceId:'daily',cost:1});
+  await f.run('grant_spell',{...base,grantId:slot,route:'slot',sourceItemId:'focus',requiresWorn:true});
+  const cast=(castId,grantId,opts)=>f.run('cast_spell',{actorId,castId,grantId,level:1,...opts});
+  const adjudication={confirmed:true,componentsAccounted:true,summary:'Table resolved the reaction',trigger:'incoming_hit'};
+  await assert.rejects(cast('unconfirmed',limited,{}),/MANUAL_ADJUDICATION_REQUIRED/);
+  await assert.rejects(cast('wrong-spell',limited,{adjudication:{...adjudication,trigger:'targeted_by_spell',triggeringSpellId:'other'}}),/SPELL_REACTION_TRIGGER_UNVERIFIED/);
+  await assert.rejects(cast('double-charged',limited,{adjudication,slotPoolId:'one-slot'}),/CAST_DOES_NOT_USE_SLOT/);
+  const free=await cast('free',limited,{adjudication});
+  assert.deepEqual([free.outcome,free.adjudication.summary,free.costs[0].poolId],['adjudicated',adjudication.summary,'daily']);
+  assert.equal((await f.record('one-slot')).data.current,2);
+  await assert.rejects(cast('empty',limited,{adjudication}),/RESOURCE_EMPTY_OR_UNKNOWN/);
+  await assert.rejects(cast('unworn',slot,{adjudication,slotPoolId:'one-slot'}),/SPELL_SOURCE_ITEM_UNAVAILABLE/);
+  await f.equip('worn');
+  const paid=await cast('slot',slot,{slotPoolId:'one-slot',adjudication:{...adjudication,trigger:'targeted_by_spell',triggeringSpellId:'incoming-spark'}});
+  assert.equal(paid.costs[0].poolId,'one-slot');
+  assert.deepEqual([(await f.record('one-slot')).data.current,(await f.record('daily')).data.current],[1,0]);
+  assert.equal((await f.spells()).filter(r=>r.spellId===spellId).every(r=>r.requiresAdjudication),true);
+});
+
+test('empty spell storage loads only after a real long rest and the current holder spends its independent pool', async t=>{
+  const f=await fixture(t,{gameSeconds:100}), featureId='storage-method',itemId='focus',poolId='cell',spellId='lamp';
+  await f.run('define_resource',{actorId,poolId,name:'Independent cell',source,type:'ordinary',current:0,maximum:2,recovery:'none'});
+  await f.run('define_spell',{actorId,spellId,name:'Lamp',source,baseLevel:1,concentration:true,timing:'action',ritual:false,resolution:'manual',components:[]});
+  await f.run('define_feature',{actorId,featureId,name:'Storage method',kind:'class',source,description:'Reviewed synthetic item storage',
+    references:[{id:poolId,kind:'resource_pool'}],preparedItemRule:{poolId,ability:'INT',capacity:2,eligibleSpellIds:[spellId],eligibleItemIds:[itemId]}});
+  await f.equip('worn');
+  const load=restReportId=>f.run('load_prepared_spell_item',{actorId,featureId,itemId,spellId,restReportId,confirmed:true});
+  const activate=castId=>f.run('use_prepared_spell_item',{actorId,creatorId:actorId,featureId,itemId,castId,
+    replaceConcentration:true,adjudication:'Synthetic source effect resolved'});
+  await assert.rejects(activate('empty-effect'),/NO_STORED_SPELL_EFFECT/);
+  await assert.rejects(load('missing-rest'));
+  const rest=await f.run('complete_rest',{actorId,kind:'long_rest',elapsedSeconds:28800,hitDice:[],confirmed:true});
+  assert.equal((await f.record(poolId)).data.current,0);
+  await load(rest.reportId);
+  assert.equal((await f.record(poolId)).data.current,2);
+  await assert.rejects(load(rest.reportId),/FRESH_LONG_REST/);
+  const first=await activate('actual-effect');
+  assert.deepEqual([first.sourceCasterId,first.holderId,first.sourceModifier,first.remaining],[actorId,actorId,0,1]);
+  assert.equal((await f.record(actorId)).data.concentrationCastId,'actual-effect');
+  const ally='storage-user';
+  await f.run('define_actor',{actorId:ally,name:'Second holder',role:'player',rulesProfile:'revised_2024',level:1,
+    gameSeconds:20,abilities:{STR:10,DEX:10,CON:10,INT:18,WIS:10,CHA:10}});
+  await f.equip('packed');
+  await f.run('transfer_item',{itemId,quantity:1,splitId:null,source,reason:'Fixture custody',
+    destination:{type:'party_actor',actorId:ally,recipientName:null,recipientId:null,locationId:null}});
+  await f.equip('worn');
+  await assert.rejects(activate('wrong-holder'),/STORAGE_HOST_NOT_HELD/);
+  const transferred=await f.run('use_prepared_spell_item',{actorId:ally,creatorId:actorId,featureId,itemId,
+    castId:'second-effect',adjudication:'The current holder activated the reviewed effect.'});
+  assert.deepEqual([transferred.holderId,transferred.sourceModifier,transferred.remaining],[ally,0,0]);
+  assert.equal((await f.record(ally)).data.concentrationCastId,'second-effect');
+  assert.equal((await f.record(poolId)).data.current,0);
+  assert.equal((await f.record(itemId)).data.preparedSpellFeatureId,undefined);
+  await assert.rejects(load(rest.reportId),/FRESH_LONG_REST/);
+  await assert.rejects(activate('no-third-effect'),/NO_STORED_SPELL_EFFECT/);
+});
+
+test('reviewed formulas bind one physical target and honor separate ordinary and armor-only capacities',async t=>{
+  const f=await fixture(t,{gameSeconds:5}), featureId='formula-set';
+  for(const itemId of ['frame','unreviewed','spare'])
+    await f.run('acquire_item',{itemId,definitionId:'fixture-definition',ownerId:actorId,quantity:1,source});
+  const formulas=['Lens','Prism','Spindle','Dormant coil'];
+  const target=(itemId,part)=>({itemId,part,formulas,source,nonmagicalConfirmed:true});
+  await f.run('define_feature',{actorId,featureId,name:'Reviewed formulas',kind:'class',description:'Test allocation ledger',source,references:[],
+    infusionRule:{knownFormulas:formulas,ordinaryLimit:1,armorOnlyLimit:1,armorItemIds:['frame'],
+      eligibleTargets:[target('focus','whole'),target('frame','helmet'),target('frame','boots'),target('spare','whole')]}});
+  const rest=await f.run('complete_rest',{actorId,kind:'long_rest',elapsedSeconds:28800,hitDice:[],confirmed:true});
+  const assign=(itemId,part,formula,allocation,operation='assign')=>f.run('record_reviewed_infusion',{actorId,featureId,itemId,part,formula,allocation,operation,
+    restReportId:rest.reportId,touchConfirmed:true,existingAssignmentsConfirmed:true,effectAdjudication:'Recorded the reviewed fixture effect.'});
+  await assert.rejects(assign('unreviewed','whole','Lens','ordinary'),/INFUSION_TARGET_INELIGIBLE/);
+  await assert.rejects(assign('focus','whole','Unknown design','ordinary'),/INFUSION_FORMULA_UNKNOWN/);
+  await assign('focus','whole','Lens','ordinary');
+  await assert.rejects(assign('spare','whole','Prism','ordinary'),/INFUSION_CAPACITY_EXCEEDED/);
+  await assert.rejects(assign('spare','whole','Prism','armor_only'),/INFUSION_TARGET_INELIGIBLE/);
+  await assert.rejects(assign('frame','helmet','Lens','armor_only'),/INFUSION_ALREADY_ASSIGNED/);
+  await assign('frame','helmet','Prism','armor_only');
+  await assert.rejects(assign('frame','helmet','Spindle','armor_only'),/INFUSION_ALREADY_ASSIGNED/);
+  await assert.rejects(assign('frame','boots','Spindle','armor_only'),/INFUSION_CAPACITY_EXCEEDED/);
+  await assign('frame','helmet','Prism','armor_only','end');
+  const last=await assign('frame','boots','Spindle','armor_only');
+  assert.deepEqual(last.active.map(r=>r.part),['whole','boots']);
+  assert.deepEqual([(await f.record('focus')).data.quantity,(await f.record('frame')).data.quantity],[1,1]);
+  assert.equal((await f.record('frame')).data.attuned,false);
 });

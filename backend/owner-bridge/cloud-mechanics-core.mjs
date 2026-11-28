@@ -25,7 +25,7 @@ export const mode = option('normal','advantage','disadvantage');
 export const origin = option('player_digital','player_physical','dm','delegated','app');
 export const component = fields({
   id:identifier, name:named(120), type:option(...damageTypes,'healing'), dice:whole(0,100), sides:whole(2,1000),
-  flat:whole(-1000,1000), critical:boolean, abilityBonus:option(...stats),
+  flat:whole(-1000,1000), magical:boolean, critical:boolean, abilityBonus:option(...stats),
   variants:arrayOf(option(...damageTypes),13), extraDicePerLevel:whole(0,20)
 }, ['id','name','type','dice','sides','flat']);
 const classText = limit=>({...named(limit),pattern:'\\S'});
@@ -48,7 +48,7 @@ export const resourceSchema = fields({
   recoveryActorId:identifier,recoveryAmount:nullable(whole(1)), dieSides:nullable(whole(2,1000)), slotLevel:nullable(whole(1,9)), source:named(300)
 }, ['actorId','poolId','name','type','maximum','current','recovery','source']);
 export const formSchema = fields({
-  actorId:identifier, formId:identifier, name:named(160), source:named(300), description:named(2000),
+  actorId:identifier, formId:identifier, fittedModel:fields({model:identifier,compatibilitySource:named(300)},['model','compatibilitySource']), name:named(160), source:named(300), description:named(2000),
   size:option('tiny','small','medium','large','huge','gargantuan'), creatureType:named(60),
   sourceItemId:identifier, requiresAttunement:boolean, requiresOperating:boolean, abilityOverrides:abilityMap, speeds:movementMap,
   suppressedItemIds:arrayOf(identifier,24),requiresWilling:boolean,revertOnSourceLoss:boolean,senses:sensesMap,grounded:boolean, baseAc:nullable(whole(0,100)), activationSeconds:whole(0,86400), durationSeconds:nullable(whole(1,31536000)),
@@ -56,11 +56,11 @@ export const formSchema = fields({
 }, ['actorId','formId','name','source','timing','activationSeconds']);
 export const effectSchema = fields({
   actorId:identifier, effectId:identifier, name:named(160), source:named(300),
-  target:option('ability_score','ability_check','skill','save','passive','initiative','ac','max_hp','attack','damage','spell_attack','spell_dc','speed','sense','damage_defense','condition_immunity','spell_damage_immunity','save_mitigation','roll_edge'),
-  key:identifier, operation:option('add','set','minimum','maximum','resistance','immunity','vulnerability','advantage','disadvantage','keep_highest_three','evade'),
+  target:option('equipment_property','critical_defense','natural_attack_magic','ability_score','ability_check','skill','save','passive','initiative','ac','max_hp','attack','damage','spell_attack','spell_dc','speed','sense','damage_defense','attack_component','condition_immunity','spell_damage_immunity','save_mitigation','roll_edge'),
+  key:identifier, operation:option('grant','add','set','minimum','maximum','resistance','immunity','vulnerability','advantage','disadvantage','keep_highest_three','evade'),
   amount:whole(-1000,1000), priority:whole(-100,100), stackingKey:identifier, wornResistanceUpgrade:{const:true},
-  sourceItemId:identifier, transfersWithItem:boolean, requiresAttunement:boolean, requiresOperating:boolean, requiresWorn:{const:true}, formId:identifier, contextTag:identifier,
-  damageRoute:option('attack','spell','both'),damageComponentId:identifier,damageType:option(...damageTypes),eachMatchingComponent:boolean,
+  sourceItemId:identifier, transfersWithItem:boolean, requiresAttunement:boolean, requiresOperating:boolean, requiresWorn:{const:true}, requiresHeld:{const:true}, nonmagicalOnly:{const:true}, requiredItemMode:identifier, formId:identifier, contextTag:identifier,
+  strideRule:fields({minimumWalkFeet:whole(1,120),jumpMultiplier:whole(1,10),ignoreEncumbrance:{const:true},ignoreHeavyArmor:{const:true}},['minimumWalkFeet','jumpMultiplier','ignoreEncumbrance','ignoreHeavyArmor']),bareAbilityOnly:{const:true},warningRadiusFeet:whole(1,1000),extraComponent:component,inheritAttackMagic:{const:true},damageRoute:option('attack','spell','both'),damageComponentId:identifier,damageType:option(...damageTypes),eachMatchingComponent:boolean,
   charge:fields({poolId:identifier,amount:whole(1),trigger:option('attempt','confirmed_hit')},['poolId','amount','trigger']),
   expiresAt:nullable(whole(0,100000000000)), enabled:boolean
 }, ['actorId','effectId','name','source','target','key','operation']);
@@ -73,6 +73,7 @@ export const restSchema = fields({
 }, ['actorId','kind','elapsedSeconds','confirmed','hitDice']);
 export const checkSpec = fields({
   kind:option('ability','save','skill','initiative','custom'), key:identifier, name:named(120), mode,
+  onsetWarning:fields({wearerId:identifier,effectId:identifier,distanceFeet:whole(0,100000)},['wearerId','effectId','distanceFeet']),
   social:fields({featureId:identifier,targetActorId:identifier,attitude:option('friendly','indifferent','hostile','unknown'),perceives:boolean,purpose:option('entertain','goodwill','other'),harmlessEndearing:boolean},['featureId','targetActorId','attitude','perceives','purpose','harmlessEndearing']),
   contextTags:arrayOf(identifier,12), dice:whole(1,200), sides:whole(2,1000), flat:whole(-1000000,1000000),
   terms:arrayOf(fields({count:whole(1,200),sides:whole(2,1000),sign:option('add','subtract')},['count','sides','sign']),100)
@@ -86,7 +87,7 @@ export const attackSchema = fields({
   timing:actionCost, ability:option(...stats), proficient:boolean, hitBonus:whole(-200,200),
   fixedHit:whole(-200,200), saveAbility:option(...stats), saveDc:whole(1,100), dcAbility:option(...stats),
   dcBase:whole(0,100), dcProficient:boolean, dcBonus:whole(-100,100),saveSuccess:option('none','half','full'),
-  reach:whole(0,10000), range:whole(0,10000), longRange:whole(0,10000), area:named(160),
+  pointArea:fields({range:whole(1,10000),radius:whole(1,1200)},['range','radius']),longstrikeLimit:whole(1,10000),requiresWorn:{const:true},naturalMagicItemId:identifier,naturalMagicEffectId:identifier,naturalMagicRequiresAttunement:boolean, enforceReach:{const:true}, reach:whole(0,10000), range:whole(0,10000), longRange:whole(0,10000), area:named(160),
   components:arrayOf(component,24), cost:costSchema, description:named(2000),
   weaponBus:fields({cooldownSeconds:whole(1,86400)}),chargeActionId:identifier,
   payloadRule:fields({componentId:identifier,storeActionId:identifier},['componentId','storeActionId']),
@@ -186,13 +187,20 @@ function ruleFormIds(form) {
 export function matchesForm(rule,ids) {
   return (!rule.formId||ids.includes(rule.formId)) && !rule.excludedForms?.some(id=>ids.includes(id));
 }
+export async function readyAnchor(ctx,actorId,itemId,revision=null) {
+  const item=await ctx.get('item_instance',itemId),d=item?.data;
+  return item?.life==='active' && item.actorId===actorId && d.custodianId===actorId && d.holding==='carried' &&
+    !d.containerItemId && !d.locationId && d.equipment==='held' && d.quantity===1 && (revision==null||item.revision===revision)?item:null;
+}
+
 export async function activeEffects(ctx,a,form,contextTags=[],chargedEffectIds=[]) {
   const winners=new Map(), suppressed=[],optional=[];
   for (const id of a.data.effectIds) {
     const row=await ctx.get('effect',id);
     if (!row || row.actorId!==a.id || row.life!=='active') continue;
     const d=row.data;
-    const eligible=d.enabled && matchesForm(d,ruleFormIds(form)) &&
+    const itemMode=d.requiredItemMode && a.data.gameSeconds!=null ? (a.data.equipmentModes??[]).find(m=>m.id===d.requiredItemMode && m.itemId===d.sourceItemId && a.data.gameSeconds<m.expiresAt) : null;
+    const eligible=d.enabled && (!d.requiresHeld || (await ctx.get('item_instance',d.sourceItemId))?.data.equipment==='held') && (!d.requiredItemMode || itemMode && (!itemMode.anchor || await readyAnchor(ctx,a.id,itemMode.anchor.itemId,itemMode.anchor.itemRevision))) && matchesForm(d,ruleFormIds(form)) &&
       (!d.contextTag || contextTags.includes(d.contextTag)) &&
       (d.expiresAt==null || (a.data.gameSeconds!=null && a.data.gameSeconds<d.expiresAt)) &&
       await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating,form,d.requiresWorn||d.wornResistanceUpgrade);
@@ -279,13 +287,15 @@ export function healedHp(current,maximum,amount){
 export async function sheet(ctx,id,contextTags=[],previewFormId=undefined,chargedEffectIds=[]) {
   const a=await actor(ctx,id), form=previewFormId===undefined?await activeForm(ctx,a):previewFormId?await owned(ctx,'form',previewFormId,id):null;
   const {active,suppressed,optional,exhaustion}=await activeEffects(ctx,a,form,contextTags,chargedEffectIds);
-  const abilities={},checks={},saves={},skills={},passives={},skillDefinitions={};
+  const abilities={},checks={},skillCheckBases={},saves={},skills={},passives={},skillDefinitions={};
+  const skillEffects=active.filter(e=>!e.data.bareAbilityOnly);
   for(const stat of stats){
     const base=a.data.abilities[stat]??null;
     const effective=numeric(form && Object.hasOwn(form.data.abilityOverrides,stat)?form.data.abilityOverrides[stat]:base,active,'ability_score',stat);
     const mod=effective.value==null?null:Math.floor((effective.value-10)/2);
     abilities[stat]={base,effective:effective.value,modifier:mod,sources:effective.sources};
     checks[stat]=numeric(mod,active,'ability_check',stat);
+    skillCheckBases[stat]=skillEffects.length===active.length?checks[stat]:numeric(mod,skillEffects,'ability_check',stat);
     const trained=(a.data.saveProficiencies??[]).includes(stat);
     const pb=a.data.proficiency;
     saves[stat]=numeric(mod==null || (trained && pb==null)?null:mod+(trained?pb:0),active,'save',stat);
@@ -293,7 +303,7 @@ export async function sheet(ctx,id,contextTags=[],previewFormId=undefined,charge
   const keys=new Set([...Object.keys(standardSkills),...Object.keys(a.data.skills)]);
   for(const key of keys){
     const configured=Object.hasOwn(a.data.skills,key)?a.data.skills[key]:{};
-    const stat=configured.ability??standardSkills[key], base=checks[stat].value, pb=a.data.proficiency;
+    const stat=configured.ability??standardSkills[key], base=skillCheckBases[stat].value, pb=a.data.proficiency;
     const rank=configured.rank??0;
     skillDefinitions[key]={name:configured.name??key,ability:stat,rank,standard:Object.hasOwn(standardSkills,key),pinned:(a.data.pinnedSkillIds??[]).includes(key)};
     const trained=base==null || (rank && pb==null)?null:base+(rank?rank*pb:0);
@@ -303,6 +313,8 @@ export async function sheet(ctx,id,contextTags=[],previewFormId=undefined,charge
     passives[key]={...numeric(skills[key].value==null?null:10+skills[key].value+adjustment,active,'passive',key),mode,adjustment};
   }
   const movement={...a.data.speeds,...form?.data.speeds};
+  const stride=active.find(e=>e.data.target==='equipment_property'&&e.data.key==='striding'&&e.data.strideRule);
+  if(stride&&movement.walk>0)movement.walk=Math.max(movement.walk,stride.data.strideRule.minimumWalkFeet);
   const senses={...a.data.senses,...form?.data.senses};
   for(const [target,output] of [['speed',movement],['sense',senses]]){
     const modes=new Set([...Object.keys(output),...active.filter(r=>r.data.target===target&&r.data.key!=='all').map(r=>r.data.key)]);
@@ -336,7 +348,8 @@ export async function sheet(ctx,id,contextTags=[],previewFormId=undefined,charge
     for(const key of subjects)rollRestrictions[key]=reason;
   }
   const rollModes=Object.fromEntries(subjects.map(key=>[key,Object.fromEntries(['normal','advantage','disadvantage'].map(mode=>[mode,rollPolicy(active,key,mode)]))]));
-  const communications=[],mobilityRules=[];
+  const equipmentProperties=active.filter(e=>e.data.target==='equipment_property').map(e=>({effectId:e.id,sourceItemId:e.data.sourceItemId,key:e.data.key}));
+  const communications=equipmentProperties.filter(e=>e.key.startsWith('language:')).map(e=>({kind:'equipment_language',language:e.key.slice(9),effectId:e.effectId})),mobilityRules=stride?[{effectId:stride.id,kind:'striding',...stride.data.strideRule}]:[];
   for(const featureId of a.data.sensoryFeatureIds??[]){
     const feature=await ctx.get('feature',featureId),d=feature?.data;
     if(feature?.life!=='active'||feature.actorId!==id||!matchesForm(d,ruleFormIds(form))||
@@ -349,18 +362,18 @@ export async function sheet(ctx,id,contextTags=[],previewFormId=undefined,charge
   const defenses=active.filter(row=>row.data.target==='damage_defense');
   const defenseEntries=defenses.map(({id,title,data})=>{
     const independent=data.wornResistanceUpgrade && defenses.find(other=>other.data.key===data.key &&
-      other.data.operation==='resistance' && other.data.sourceItemId!==data.sourceItemId && !other.data.wornResistanceUpgrade);
-    return {type:data.key,kind:independent?'immunity':data.operation,source:id,title,provenance:data.source??null,
+      other.data.operation==='resistance' && !other.data.nonmagicalOnly && other.data.sourceItemId!==data.sourceItemId && !other.data.wornResistanceUpgrade);
+    return {...(data.nonmagicalOnly?{nonmagicalOnly:true}:{}),type:data.key,kind:independent?'immunity':data.operation,source:id,title,provenance:data.source??null,
       sourceItemId:data.sourceItemId??null,formId:data.formId??null,requiresAttunement:data.requiresAttunement===true,
       requiresOperating:data.requiresOperating===true,contextTag:data.contextTag??null,
       ...(independent?{independentResistanceId:independent.id}:{})};
   });
   return {rollAids:await activeCastAids(ctx,a),actorId:id,level:a.data.level,rulesProfile:a.data.rulesProfile,classTracks:a.data.classTracks??null,activeDeploymentId:a.data.activeDeploymentId??null,communications,mobilityRules,exhaustion,activityState:a.data.activityState??null,formId:form?.id??null,ruleFormIds:ruleFormIds(form),size:form?.data.size??a.data.size??null,creatureType:form?.data.creatureType??a.data.creatureType??null,
-    senses,abilities,checks,saves,skills,passives,skillDefinitions,ac,movement,
+    senses,abilities,checks,saves,skills,passives,skillDefinitions,ac,movement,equipmentProperties,
     initiative:numeric(abilities.DEX.modifier,active,'initiative','all'),proficiency:a.data.proficiency,
     currentHp:a.data.currentHp,maxHp:hpMaximum.value,temporaryHp:a.data.temporaryHp,
     hpMaximum:{...hpMaximum,baseMaxHp:a.data.maxHp,baselineConstitutionModifier:baselineCon,constitutionAdjustment:conDelta},
-    activeEffects:active.map(r=>r.id),suppressedEffects:suppressed,optionalChargedEffects:optional,conditions:a.data.conditions,rollModes,rollRestrictions,contextTags:a.data.contextTags??[],
+    activeEffects:active.map(r=>r.id),suppressedEffects:suppressed,optionalChargedEffects:optional,conditions:a.data.conditions??[],rollModes,rollRestrictions,contextTags:a.data.contextTags??[],
     defenses:defenseEntries,
     effects:active};
 }
@@ -414,6 +427,6 @@ export async function addClock(ctx,a,seconds) {
   if(concentrationExpired)await ctx.unlink(a.id,'concentrates_on',a.data.concentrationCastId);
   const sources=(a.data.conditionSources??[]).filter(s=>s.expiresAt==null || next==null || s.expiresAt>next);
   const expiredKeys=new Set((a.data.conditionSources??[]).filter(s=>!sources.includes(s)).map(s=>s.key));
-  const conditions=a.data.conditions.filter(key=>!expiredKeys.has(key) || sources.some(s=>s.key===key));
+  const conditions=(a.data.conditions??[]).filter(key=>!expiredKeys.has(key) || sources.some(s=>s.key===key));
   return {...a.data,gameSeconds:next,conditions,conditionSources:sources,...(concentrationExpired?{concentrationCastId:null,concentrationExpiresAt:null}:{}),...(expired?{activeFormId:null,formExpiresAt:null}:{})};
 }

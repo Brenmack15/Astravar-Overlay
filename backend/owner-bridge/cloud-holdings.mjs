@@ -1,3 +1,4 @@
+import { clearStorageReturn, integratedStorageOperations, requireEmptyIntegratedStorage } from './cloud-integrated-storage.mjs';
 import { physicalChargePools } from './cloud-item-pools.mjs';
 import { currentDeployment, closeDeployment } from './cloud-form-deployment.mjs';
 import { recordsFail, recordObject, recordId, recordText, recordSource, recordTitle, recordChoice, recordMaybe, recordInt, recordArray, recordBool, recordsOperation, recordRead, recordNew, recordEdit, partyActor, validateRecordValue, historyRecordId } from './cloud-records-contract.mjs';
@@ -19,7 +20,7 @@ const adjustCoins = recordObject({ walletId: recordId, change: deltaCoins, reaso
 const exchangeCoins = recordObject({ walletId: recordId, give: coins, receive: coins, reason: recordTitle, source: recordSource });
 const definitionFields = { definitionId: recordId, name: recordTitle, category: recordTitle, description: recordText,
   rarity: recordMaybe(recordTitle), stackable: recordBool, wearable: recordBool, handheld: recordBool, attunement: attunementRule, source: recordSource };
-const definition = recordObject({ ...definitionFields, activation: recordChoice('passive','manual','review'), attunementSeconds: recordMaybe(recordInt(0,604800)) },Object.keys(definitionFields));
+const definition = recordObject({ ...definitionFields, scrollSpellId:recordId, scrollLevel:recordInt(1,9), activation: recordChoice('passive','manual','review'), attunementSeconds: recordMaybe(recordInt(0,604800)) },Object.keys(definitionFields));
 const acquisitionFields = { itemId: recordId, definitionId: recordId, ownerId: nullableId, quantity: count, source: recordSource };
 const acquireItem = recordObject({...acquisitionFields,storageId:recordId},Object.keys(acquisitionFields));
 const buyFields={ ...acquisitionFields, walletId: recordId, price: coins, sellerId: nullableId };
@@ -72,7 +73,8 @@ function changedCoins(before, change) {
   return next;
 }
 function debit(payment) { return Object.fromEntries(denominations.map(key => [key, -payment[key]])); }
-function usable(item) {
+function usable(item, allowContained = false) {
+  if (item.data.containerItemId && !allowContained) recordsFail('WITHDRAW_STORED_ITEM_FIRST',409);
   if (item.data.installedOnActorId) recordsFail('INSTALLED_COMPONENT_IMMOVABLE',409);
   if (item.life !== 'active' || !item.data.partyAccess || !['carried','storage','unassigned'].includes(item.data.holding)) recordsFail('ITEM_UNAVAILABLE', 409);
 }
@@ -167,6 +169,7 @@ async function itemEvent(ctx, type, before, after, reason, source, relatedIds = 
   const owners = [before?.actorId, after.actorId].filter(value => value !== undefined);
   const summarize = row => row ? { ownerId: row.data.ownerId, ownerType:row.data.ownerType??(row.data.ownerId?'actor':'unknown'),custodianId: row.data.custodianId, locationId: row.data.locationId,
     holding: row.data.holding, quantity: row.data.quantity, equipment: row.data.equipment,
+    ...(row.data.containerItemId?{containerItemId:row.data.containerItemId}:{}),
     externalRecipientId:row.data.externalRecipientId??null,externalRecipientName:row.data.externalRecipientName??null } : null;
   const definition=await definitionForHolding(ctx,after);
   await ctx.put({ id, kind: 'item_event', title: reason, actorId: owners.every(actor => actor === after.actorId) ? after.actorId : null,
@@ -235,7 +238,7 @@ async function divide(ctx, original, quantity, newId) {
   const def = await definitionForHolding(ctx,original);
   portable(original,def);
   await ctx.put(recordEdit(original,{...original.data,quantity:original.data.quantity-quantity}));
-  const child = { ...recordEdit(original,{...original.data,quantity}), id:newId };
+  const child = { ...recordEdit(original,{...clearStorageReturn(original.data),quantity}), id:newId };
   await ctx.put(child);
   await ctx.link(child.id,'split_from',original.id);
   await ctx.linkInheritedItemDefinition(child.id,original.id);
@@ -320,6 +323,7 @@ async function moveItem(ctx,args,eventType = 'transfer',leg = null) {
   validateDestination(args.destination);
   const item = await recordRead(ctx,'item_instance',args.itemId);
   usable(item);
+  await requireEmptyIntegratedStorage(ctx,item);
   if(item.data.ownerId!==item.data.custodianId)ctx.require('inventory',item.data.ownerId,true);
   if (item.data.quantity === null || item.data.quantity < args.quantity) recordsFail('INSUFFICIENT_KNOWN_QUANTITY',409);
   const partial = args.quantity < item.data.quantity;
@@ -341,7 +345,7 @@ async function moveItem(ctx,args,eventType = 'transfer',leg = null) {
   if (d.actorId !== null) await ctx.require('inventory',d.actorId,true);
   const ownerType=d.partyOwned?'party':conveysOutside?'external':d.type==='party_actor'?'actor':sourceItem.data.ownerType??(ownerId?'actor':'unknown');
   const definition=await definitionForHolding(ctx,sourceItem);
-  const data = { ...sourceItem.data, ownerId, ownerType, custodianId, locationId:d.locationId, holding,
+  const data = { ...clearStorageReturn(sourceItem.data), ownerId, ownerType, custodianId, locationId:d.locationId, holding,
     partyAccess:!external, equipment:'packed', attuned:false, ...equipmentOperation(sourceItem.data,definition,'packed'), source:args.source,
     externalRecipientId:d.recipientId, externalRecipientName:d.recipientName,
     lastPossessorId:sourceItem.data.custodianId, disposition:d.type };
@@ -430,6 +434,7 @@ async function exchangePartyAssets(ctx,args){
   return {tradeId,holdings:moved,paymentId:payment?.transactionRecordId??null};
 }
 export const HOLDING_OPERATIONS = Object.freeze({
+  ...integratedStorageOperations(itemEvent),
   record_historical_item_event:recordsOperation('inventory',historicalItemEvent,recordHistoricalItemEvent),
   exchange_party_assets:recordsOperation('economy',partyTrade,exchangePartyAssets),
   define_wallet: recordsOperation('economy',defineWallet,createWallet),
@@ -465,6 +470,11 @@ export const HOLDING_OPERATIONS = Object.freeze({
   }),
   define_item_definition: recordsOperation('inventory',definition,async (ctx,args) => {
     const {definitionId,name,...data} = args;
+    if (data.scrollSpellId!==undefined||data.scrollLevel!==undefined){
+      if (!data.scrollSpellId||data.scrollLevel===undefined||data.wearable||data.attunement!=='none')recordsFail('SCROLL_BINDING_INVALID');
+      const spell=await recordRead(ctx,'spell',data.scrollSpellId);
+      if (!(spell.data.baseLevel>0&&data.scrollLevel>=spell.data.baseLevel))recordsFail('SCROLL_BINDING_INVALID');
+    }
     if (data.stackable && data.attunement !== 'none') recordsFail('STACK_ATTUNEMENT_INCOMPATIBLE');
     await recordNew(ctx,'item_definition',definitionId);
     await ctx.put({ id:definitionId,kind:'item_definition',actorId:null,title:name,data:{...data,activation:data.activation??'passive',attunementSeconds:data.attunementSeconds??null} });
@@ -498,7 +508,7 @@ export const HOLDING_OPERATIONS = Object.freeze({
   }),
   set_item_favorite: recordsOperation('inventory',recordObject({itemId:recordId,favorite:recordBool}),async(ctx,args)=>{
     const item=await recordRead(ctx,'item_instance',args.itemId);
-    usable(item);
+    usable(item,true);
     if(item.data.favorite===args.favorite) recordsFail('FAVORITE_ALREADY_SET',409);
     await ctx.put(recordEdit(item,{...item.data,favorite:args.favorite}));
     return {itemId:item.id,favorite:args.favorite};
@@ -628,6 +638,7 @@ export const projectPaymentCoins = coins;
 export async function consumeItemUnit(ctx,itemId,definitionId,actorId,reason,source){
   const item=await recordRead(ctx,'item_instance',itemId),d=item.data;
   usable(item);
+  await requireEmptyIntegratedStorage(ctx,item);
   if(d.definitionId!==definitionId || d.custodianId!==actorId || d.holding!=='carried' || d.equipment!=='packed' ||
       d.attuned || d.operating || d.resourcePoolId || d.customized || !Number.isSafeInteger(d.quantity) || d.quantity<1)
     recordsFail('MATCHING_UNUSED_CONSUMABLE_REQUIRED',409);

@@ -1,3 +1,4 @@
+import {onsetWarning} from './cloud-armor-traits.mjs';
 import { applyCastAid } from './cloud-cast-aid.mjs';
 import { socialCheckEdge } from './cloud-companion-traits.mjs';
 import { d20Evidence,checkDiceOwner, stats, identifier, named, whole, arrayOf, fields, option, boolean, checkSpec, evidence, must, op, owned, actor, insert, save, sheet, rollPolicy, reactionRollWindow } from './cloud-mechanics-core.mjs';
@@ -46,7 +47,8 @@ async function calculate(ctx,actorId,s,e,verifiedTags=[]){
   checkDiceOwner(ctx,a,s.kind,e.origin);
   const restriction=projection.rollRestrictions[s.kind+':'+s.key];must(!restriction,restriction);
   const social=s.social?await socialCheckEdge(ctx,a,s,projection):null;
-  const effects=social?.edge?[...projection.effects,social.edge]:projection.effects;
+  const warning=s.onsetWarning?await onsetWarning(ctx,a,s):null;
+  const effects=[...projection.effects,...(social?.edge?[social.edge]:[]),...(warning?[warning.edge]:[])];
   const policy=rollPolicy(effects,s.kind+':'+s.key,s.mode);
   if(s.kind!=='save')must(!e.aidDice?.length,'CAST_AID_INELIGIBLE');
   const custom=s.kind==='custom';
@@ -73,7 +75,7 @@ async function calculate(ctx,actorId,s,e,verifiedTags=[]){
   const keeps=effective.mode==='normal'?'sum':effective.mode==='advantage'?'highest':'lowest';
   let result=observed(custom?s.name:checkName(s.kind,s.key,a),isCheck?effective.count:s.dice,custom?s.sides:20,signed,keeps,e,isCheck);
   if(s.kind==='save')result=applyCastAid(result,projection.rollAids,'save',e);
-  return {...result,...(social?{social:{...s.social,applied:social.applied}}:{}),mode:effective.mode,actorId,formId:projection.formId,kind:s.kind,key:s.key,requestedMode:s.mode,
+  return {...result,...(warning?{onsetWarning:warning.receipt}:{}),...(social?{social:{...s.social,applied:social.applied}}:{}),mode:effective.mode,actorId,formId:projection.formId,kind:s.kind,key:s.key,requestedMode:s.mode,
     sourceRevision:a.revision,recordedAt:ctx.now,commandId:ctx.commandId,
     ...(['ability','save','skill'].includes(s.kind)?{reactionWindow:await reactionRollWindow(ctx,a)}:{})};
 }

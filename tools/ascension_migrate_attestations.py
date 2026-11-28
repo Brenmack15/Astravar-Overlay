@@ -141,6 +141,12 @@ def verify_attested_targets(decisions, entries, targets, tenant, scoped_identity
                "A historical holding duplicates or changes its physical identity")
         assigned.add(instance["id"])
         for name in ("ownerId","custodianId","locationId","holding","equipment","attuned","operating","covenantLocked","installedOnActorId","containerSourceId","parentArmorId"):
+            if name=="holding" and instance["data"].get(name)=="storage" and instance["data"].get("containerItemId"):
+                rulings=(plan.get("reviewAuthority") or {}).get("decisions",{}).values()
+                matches=[c for rule in rulings if rule.get("storageAnchor",{}).get("existingArmorId")==instance["data"]["containerItemId"]
+                         for c in rule.get("defaultStorageCandidates",[]) if c.get("id")==instance["id"] and
+                         c.get("previous",{}).get("holding")==row["fields"].get(name)]
+                if len(matches)==1:continue
             verify(encode(instance["data"].get(name)) == encode(row["fields"].get(name)), "Historical holding state differs from review")
         if not native:
             verify(instance["data"]["definitionId"] == scoped_identity(tenant,key[1],key[2],"item_definition",row["id"]),

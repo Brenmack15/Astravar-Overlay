@@ -1,3 +1,10 @@
+import {validateFittedModel,checkFittedModelChange} from './cloud-fitted-armor.mjs';
+import {infusionAssignmentOperation} from './cloud-infusion-assignments.mjs';
+import {preparedItemOperations} from './cloud-prepared-item.mjs';
+import {validateArmorTrait} from './cloud-armor-traits.mjs';
+import {reactionRollWindow} from './cloud-mechanics-core.mjs';
+import {settleEquipmentReflection} from './cloud-equipment-reactions.mjs';
+import {groupDamage} from './cloud-damage-provenance.mjs';
 import { preserveDedicatedCapacity } from './cloud-companion-traits.mjs';
 import {checkedClassTracks} from './cloud-class-progression.mjs';
 import {formCollectionOperations} from './cloud-form-collection.mjs';
@@ -125,6 +132,8 @@ async function defineForm(ctx,x,edit=false){
   const a=await actor(ctx,x.actorId);
   const previous=edit?await owned(ctx,'form',x.formId,a.id):null;
   if(previous)must(a.data.activeFormId!==previous.id,'ACTIVE_FORM_EDIT_REQUIRES_REVERSION');
+  if(previous?.data.fittedModel && !x.fittedModel)x={...x,fittedModel:previous.data.fittedModel};
+  await validateFittedModel(ctx,x);
   const suppress=x.suppressedItemIds??[];
   must(new Set(suppress).size===suppress.length && !suppress.includes(x.sourceItemId),'FORM_SUPPRESSION_INVALID');
   for(const id of suppress)must((await ctx.get('item_instance',id))?.life==='active','SUPPRESSED_ITEM_UNAVAILABLE');
@@ -156,6 +165,7 @@ async function changeForm(ctx,x){
   const a=await actor(ctx,x.actorId), old=a.data.activeFormId;
   must(x.formId!==old,'FORM_ALREADY_SELECTED');
   const form=x.formId?await owned(ctx,'form',x.formId,a.id):null;
+  const modelRest=await checkFittedModelChange(ctx,a,old,form,x.modelChange);
   const elapsed=x.elapsedSeconds, config=form?.data;
   const tracked=await planCompletion(ctx,a,form,x);
   if(config && !tracked){
@@ -165,6 +175,7 @@ async function changeForm(ctx,x){
   if(a.data.encounterId && !tracked)must(elapsed<=6,'TRACKED_ENCOUNTER_CLOCK_REQUIRED');
   const next=tracked?.next??await addClock(ctx,a,elapsed);
   must(!config?.durationSeconds||next.gameSeconds!=null,'GAME_CLOCK_UNKNOWN');
+  if(modelRest)next.lastArmorRestId=modelRest;
   const costs=[];
   if(config?.deploymentPoolId)costs.push(await spend(ctx,a.id,config.deploymentPoolId,1));
   if(config?.resetPoolId){
@@ -179,6 +190,7 @@ async function changeForm(ctx,x){
   return {actorId:a.id,previousFormId:old,formId:x.formId,expires,costs,...(tracked?{deploymentId:x.deploymentId,elapsedSeconds:tracked.elapsedSeconds}:{})};
 }
 async function effect(ctx,x,edit=false){
+  validateArmorTrait(x);
   const a=await actor(ctx,x.actorId), old=edit?await owned(ctx,'effect',x.effectId,a.id):null;
   must(old||a.data.effectIds.length<128,'ACTOR_EFFECT_LIMIT');
   const numeric=['ability_score','ability_check','skill','save','passive','initiative','ac','max_hp','attack','damage','spell_attack','spell_dc','speed','sense'];
@@ -188,10 +200,17 @@ async function effect(ctx,x,edit=false){
     must(['charge','ordinary','lifetime'].includes(pool.data.type),'EFFECT_CHARGE_POOL_INVALID');
     if(x.target==='spell_attack' && x.key!=='all')await owned(ctx,'spell_grant',x.key,a.id);
   }
+  if(x.target!=='attack_component')must(!x.extraComponent&&!x.inheritAttackMagic,'UNEXPECTED_ATTACK_COMPONENT');
   if(x.target!=='damage')must([x.damageRoute,x.damageComponentId,x.damageType,x.eachMatchingComponent].every(v=>v===undefined),'DAMAGE_SELECTOR_ON_OTHER_EFFECT');
+  if(x.requiredItemMode || x.requiresHeld)must(x.sourceItemId && !(x.requiresHeld&&x.requiresWorn),'EFFECT_GEAR_PREDICATE_INVALID');
+  if(x.nonmagicalOnly)must(x.target==='damage_defense'&&!x.wornResistanceUpgrade,'QUALIFIED_DEFENSE_INVALID');
   if(x.wornResistanceUpgrade)must(x.target==='damage_defense' && x.operation==='resistance' &&
     x.sourceItemId && x.requiresAttunement,'WORN_RESISTANCE_SOURCE_REQUIRED');
-  if(numeric.includes(x.target)){
+  if(['critical_defense','equipment_property'].includes(x.target)){
+    // Validated with the same contract as imported armor traits.
+  }else if(x.target==='natural_attack_magic'){
+    must(x.operation==='grant'&&x.key==='natural'&&x.sourceItemId&&x.requiresWorn&&x.amount===undefined,'NATURAL_MAGIC_GRANT_INVALID');
+  }else if(numeric.includes(x.target)){
     must(['add','set','minimum','maximum'].includes(x.operation)&&x.amount!=null,'NUMERIC_EFFECT_INVALID');
     if(['ability_score','ability_check','save'].includes(x.target))must(x.key==='all'||stats.includes(x.key),'INVALID_ABILITY');
     if(x.target==='speed')must(['all','walk','fly','hover','swim','climb','burrow'].includes(x.key),'INVALID_MOVEMENT');
@@ -213,6 +232,10 @@ async function effect(ctx,x,edit=false){
           (!x.damageType||c.type===x.damageType||c.variants?.includes(x.damageType))),'DAMAGE_COMPONENT_TARGET_UNAVAILABLE');
       }
     }
+  }else if(x.target==='attack_component'){
+    const attack=await owned(ctx,'attack',x.key,a.id),c=x.extraComponent;
+    must(x.operation==='add'&&x.sourceItemId&&!x.charge&&x.amount===undefined&&c&&c.dice>0&&c.type!=='healing'&&!c.variants&&!c.extraDicePerLevel&&
+      !attack.data.components.some(v=>v.id===c.id),'ATTACK_RIDER_CONFIGURATION_INVALID');
   }else if(x.target==='damage_defense'){
     must(damageTypes.includes(x.key)&&['immunity','resistance','vulnerability'].includes(x.operation)&&x.amount===undefined,'DEFENSE_INVALID');
   }else if(x.target==='save_mitigation'){
@@ -233,7 +256,7 @@ async function effect(ctx,x,edit=false){
   if(old){
     if(old.data.charge && old.data.charge.poolId!==x.charge?.poolId)await ctx.unlink(effectId,'uses_pool',old.data.charge.poolId);
     if(old.data.target==='attack' && old.data.key!=='all' && (x.target!=='attack'||old.data.key!==x.key))await ctx.unlink(effectId,'modifies_attack',old.data.key);
-    if(old.data.target==='damage' && old.data.key!=='all' && (x.target!=='damage'||old.data.key!==x.key))await ctx.unlink(effectId,'modifies_damage',old.data.key);
+    if(['damage','attack_component'].includes(old.data.target) && old.data.key!=='all' && (!['damage','attack_component'].includes(x.target)||old.data.key!==x.key))await ctx.unlink(effectId,'modifies_damage',old.data.key);
     if(old.data.sourceItemId&&old.data.sourceItemId!==x.sourceItemId)await ctx.unlink(effectId,'requires_item',old.data.sourceItemId);
     if(old.data.formId&&old.data.formId!==x.formId)await ctx.unlink(effectId,'requires_form',old.data.formId);
     if(old.data.target==='spell_damage_immunity' && (x.target!=='spell_damage_immunity'||old.data.key!==x.key))await ctx.unlink(effectId,'applies_to_spell',old.data.key);
@@ -245,7 +268,7 @@ async function effect(ctx,x,edit=false){
   if(x.charge)await ctx.link(effectId,'uses_pool',x.charge.poolId);
   if(x.target==='spell_damage_immunity')await ctx.link(effectId,'applies_to_spell',x.key);
   if(x.target==='attack' && x.key!=='all')await ctx.link(effectId,'modifies_attack',x.key);
-  if(x.target==='damage' && x.key!=='all')await ctx.link(effectId,'modifies_damage',x.key);
+  if(['damage','attack_component'].includes(x.target) && x.key!=='all')await ctx.link(effectId,'modifies_damage',x.key);
   if(x.formId)await ctx.link(effectId,'requires_form',x.formId);
   if(x.sourceItemId)await ctx.link(effectId,'requires_item',x.sourceItemId);
   return {effectId};
@@ -297,7 +320,7 @@ async function hp(ctx,x){
       castId:cast.id,dc,damage:qualifyingDamage,status:'pending',source:ctx.commandId});
     await ctx.link(concentrationCheckId,'for_cast',cast.id);
   }
-  return {actorId:a.id,kind:x.kind,concentrationCheckId,beforeHp:before.currentHp,afterHp:after.currentHp,temporaryHp:after.temporaryHp,absorbedByTemporaryHp:absorbed,absorbedByIntegrity:shell,activeFormId:after.activeFormId};
+  return {actorId:a.id,kind:x.kind,concentrationCheckId,beforeHp:before.currentHp,afterHp:after.currentHp,temporaryHp:after.temporaryHp,absorbedByTemporaryHp:absorbed,absorbedByIntegrity:shell,activeFormId:after.activeFormId??null};
 }
 async function applyAttemptTarget(ctx,x,isCast=false){
   const attempt=await owned(ctx,isCast?'cast_instance':'attack_attempt',isCast?x.castId:x.attemptId,x.actorId), d=attempt.data;
@@ -334,26 +357,29 @@ async function applyAttemptTarget(ctx,x,isCast=false){
     must(d.resolution==='automatic'&&!x.saveRollId,'UNSUPPORTED_TARGET_RESOLUTION');decision='automatic';
   }
   must(!applies||!d.components.length||Array.isArray(d.damage),'ATTEMPT_DAMAGE_REQUIRED');
-  const byType=new Map();
-  for(const c of d.damage??[])byType.set(c.type,(byType.get(c.type)??0)+Math.max(0,c.total));
-  if(half && [...byType.values()].filter(value=>value%2!==0).length>1)must(false,'MIXED_DAMAGE_ROUNDING_REQUIRES_ADJUDICATION');
+  const groups=groupDamage(d.damage??[],p.defenses,applies,must);
+  if(half && groups.filter(g=>g.rolled%2!==0).length>1)must(false,'MIXED_DAMAGE_ROUNDING_REQUIRES_ADJUDICATION');
+  const guard=!isCast&&d.equipmentGuard?.protectedActorId===target.id?d.equipmentGuard:null;
   const components=[];
-  for(const [type,rolled] of byType){
-    const defenses=p.defenses.filter(r=>r.type===type);
+  for(const {type,rolled,magical} of groups){
+    const defenses=p.defenses.filter(r=>r.type===type && (!r.nonmagicalOnly || magical===false));
     if(isCast && type!=='healing')for(const r of p.effects)if(r.data.target==='spell_damage_immunity' && r.data.key===d.spellId)defenses.push({type,kind:'immunity',source:r.id});
     const keys=new Set(defenses.map(r=>r.kind));
     const reduction=(d.deflections??[]).filter(r=>r.targetActorId===target.id).flatMap(r=>r.allocation).filter(r=>r.type===type).reduce((n,r)=>n+r.amount,0);
+    if(reduction && groups.filter(g=>g.type===type).length>1)must(false,'MIXED_PROVENANCE_REDUCTION_REQUIRES_ADJUDICATION');
     const reduced=Math.max(0,rolled-reduction);let amount=applies?(half?Math.floor(reduced/2):reduced):0;
-    if(keys.has('immunity'))amount=0;
+    if(guard?.negated||keys.has('immunity'))amount=0;
     else { if(keys.has('resistance'))amount=Math.floor(amount/2);if(keys.has('vulnerability'))amount*=2; }
-    components.push({type,rolled,reduction,applied:amount,defenses});
+    components.push({type,rolled,reduction,applied:amount,defenses,...(typeof magical==='boolean'?{magical}:{})});
   }
   const total=components.filter(c=>c.type!=='healing').reduce((n,c)=>n+c.applied,0);
   const healing=components.filter(c=>c.type==='healing').reduce((n,c)=>n+c.applied,0);
   must(!total || !healing,'MIXED_HEALING_AND_DAMAGE_REQUIRES_ADJUDICATION');
   const applied=total||healing?await hp(ctx,{actorId:target.id,kind:healing?'heal':'damage',amount:healing||total}):null;
-  const result={targetActorId:target.id,decision,evasion,ac:d.resolution==='attack'?p.ac.value:null,saveRollId:x.saveRollId??null,
-    amount:total,healing,actualHealing:healing?applied.afterHp-applied.beforeHp:0,components,hp:applied,source:x.source,commandId:ctx.commandId,
+  const reflection=await settleEquipmentReflection(ctx,guard,hp);
+  const result={...(guard?{guardUseId:guard.useId,reflection}:{}),targetActorId:target.id,decision,evasion,ac:d.resolution==='attack'?p.ac.value:null,saveRollId:x.saveRollId??null,
+    amount:total,healing,actualHealing:healing?applied.afterHp-applied.beforeHp:0,...(d.resolution==='attack'&&decision==='hit'&&!healing&&total>0?
+      {reprisalWindow:await reactionRollWindow(ctx,target),reprisalGameSeconds:target.data.gameSeconds??null}:{}),components,hp:applied,source:x.source,commandId:ctx.commandId,
     ...(d.preparedPush?{riderStatus:decision==='hit'?'pending':'not_triggered',riderSave:{ability:d.preparedPush.ability,dc:d.preparedPush.dc}}:{})};
   const targetResults=[...prior,result], complete=targetResults.length===d.targets.length;
   const settled=await settleEffectCosts(ctx,attempt.actorId,attempt.id,d.effectCharges,decision==='hit'?'confirmed_hit':complete?'miss':'pending');
@@ -452,9 +478,9 @@ async function completeRest(ctx,x){
   if(long && hp!=null && max!=null)hp=Math.max(hp,max);
   if(long && (hp==null||max==null))unresolved.push({reason:'unknown_hit_points'});
   if(long && a.data.concentrationCastId)await ctx.unlink(a.id,'concentrates_on',a.data.concentrationCastId);
-  await save(ctx,a,{...next,currentHp:hp,temporaryHp:long&&next.temporaryHp!=null?0:next.temporaryHp,concentrationCastId:long?null:next.concentrationCastId});
+  await save(ctx,a,{...next,...(next.weaponTargetLock?{weaponTargetLock:null}:{}),currentHp:hp,temporaryHp:long&&next.temporaryHp!=null?0:next.temporaryHp,concentrationCastId:long?null:(next.concentrationCastId??null)});
   const reportId=ctx.commandId;
-  const report={actorId:a.id,kind:x.kind,status:'completed',elapsedSeconds:x.elapsedSeconds,beforeHp:startHp,afterHp:hp,maxHp:max,
+  const report={actorId:a.id,kind:x.kind,status:'completed',endGameSeconds:next.gameSeconds??null,elapsedSeconds:x.elapsedSeconds,beforeHp:startHp,afterHp:hp,maxHp:max,
     ...(exhaustion.level>0?{exhaustion:{before:exhaustion.level,after:next.exhaustionLevel,recovered:Boolean(recovery),eligible:x.exhaustionRecoveryEligible??null}}:{}),
     actualHealing:hp==null||startHp==null?null:hp-startHp,hitDice:dice,deltas,unresolved,
     remainingHitDice:await Promise.all([...pools.values()].filter(p=>p.data.type==='hit_die').map(async p=>({poolId:p.id,remaining:(await owned(ctx,'resource_pool',p.id,a.id)).data.current}))),
@@ -464,6 +490,8 @@ async function completeRest(ctx,x){
   return {reportId,...report};
 }
 export const MECHANIC_OPERATIONS=Object.freeze({
+  ...preparedItemOperations,
+  record_reviewed_infusion:infusionAssignmentOperation,
   retire_unresolved_effect_charges:{...op('resources',fields({actorId:identifier,useId:identifier,kind:option('attack_attempt','cast_instance'),source:named(300)},
     ['actorId','useId','kind','source']),async(ctx,x)=>{
     const use=await owned(ctx,x.kind,x.useId,x.actorId);
@@ -550,11 +578,11 @@ export const MECHANIC_OPERATIONS=Object.freeze({
   ...formCollectionOperations(defineForm),
   define_form:op('character',formSchema,(ctx,x)=>defineForm(ctx,x,false)),
   revise_form:op('character',formSchema,(ctx,x)=>defineForm(ctx,x,true)),
-  change_form:op('character',fields({actorId:identifier,formId:nullable(identifier),deploymentId:identifier,elapsedSeconds:whole(0,86400),uninterrupted:boolean,willing:boolean},['actorId','formId','elapsedSeconds']),changeForm),
+  change_form:op('character',fields({actorId:identifier,formId:nullable(identifier),modelChange:fields({restReportId:identifier,toolItemId:identifier},['restReportId','toolItemId']),deploymentId:identifier,elapsedSeconds:whole(0,86400),uninterrupted:boolean,willing:boolean},['actorId','formId','elapsedSeconds']),changeForm),
   advance_actor_time:op('character',fields({actorId:identifier,elapsedSeconds:whole(1,31536000),confirmed:{const:true}},['actorId','elapsedSeconds','confirmed']),async(ctx,x)=>{
     const a=await actor(ctx,x.actorId);const next=await addClock(ctx,a,x.elapsedSeconds);
     if(a.data.activeFormId && !next.activeFormId)await ctx.unlink(a.id,'active_form',a.data.activeFormId);
-    await save(ctx,a,next);return {actorId:a.id,gameSeconds:next.gameSeconds,formId:next.activeFormId};
+    await save(ctx,a,next);return {actorId:a.id,gameSeconds:next.gameSeconds,formId:next.activeFormId??null};
   }),
   define_effect:op('character',effectSchema,(ctx,x)=>effect(ctx,x,false)),
   revise_effect:op('character',effectSchema,(ctx,x)=>effect(ctx,x,true)),

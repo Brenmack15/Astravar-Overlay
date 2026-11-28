@@ -8,7 +8,7 @@ const records={type:'array',items:selection,minItems:1,maxItems:24};
 const batch=cloudObject({records});
 const permanent=cloudObject({records,confirmation:{const:'PERMANENT_DELETE'},acknowledgeExternalBackups:{const:true},
   acknowledgeLegacyReceipts:{type:'boolean'}},['records','confirmation','acknowledgeExternalBackups']);
-const mechanicalRelations=new Set(['active_form','deploying','concentrates_on','concentration','current_turn','equipped','attuned','active_encounter']);
+const mechanicalRelations=new Set(['active_form','deploying','concentrates_on','concentration','current_turn','equipped','attuned','active_encounter','stored_in']);
 function isInUse(row) {
   const d=row.data;
   if(row.kind==='actor')return Boolean(d.activeFormId||d.activeDeploymentId||d.concentrationCastId||d.encounterId);
@@ -38,7 +38,7 @@ async function dependencies(ctx,ids) {
     if(!end)cloudFail(409,'INCOMPLETE_DEPENDENCY');
     ctx.require(ctx.service.kinds[end.kind],end.actorId,false);names.set(id,end.title);
   }
-  const protectedFields=['activeFormId','activeDeploymentId','concentrationCastId','encounterId','resourcePoolId','chargePoolId'];
+  const protectedFields=['activeFormId','activeDeploymentId','concentrationCastId','encounterId','resourcePoolId','chargePoolId','containerItemId','integratedStorageProjectId'];
   const selectedIds=new Set(ids);
   return {links:links.map(l=>({...l,fromTitle:names.get(l.from_id),toTitle:names.get(l.to_id)})),references:references.map(r=>{
     const d=JSON.parse(r.data_json);
