@@ -6,9 +6,9 @@ const incapacitating=new Set(['incapacitated','unconscious','stunned','petrified
 
 export async function eligibleForm(ctx,a,form,willing){
   const d=form.data;
-  must(!['disabled','dormant'].includes(a.data.activityState) && !a.data.conditions.some(k=>incapacitating.has(k)) &&
+  must(!['disabled','dormant'].includes(a.data.activityState) && !(a.data.conditions??[]).some(k=>incapacitating.has(k)) &&
     (!d.requiresWilling||willing===true),'FORM_TRANSFORMATION_INELIGIBLE');
-  must(await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating),'FORM_SOURCE_INELIGIBLE');
+  must(await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating,undefined,d.requiresWorn),'FORM_SOURCE_INELIGIBLE');
   if(d.integrityPoolId){
     const p=await owned(ctx,'resource_pool',d.integrityPoolId,a.id);
     must(p.data.current!=null&&p.data.current>0,'FORM_INTEGRITY_UNAVAILABLE');
@@ -98,7 +98,7 @@ async function begin(ctx,x){
   await useTiming(ctx,a,d.timing);
   const data={status:'deploying',formId:form.id,formRevision:form.data.configurationRevision??form.revision,previousFormId:a.data.activeFormId,
     requiredSeconds:d.activationSeconds,startedAt:ctx.now,startedByCommand:ctx.commandId,sourceItemId:d.sourceItemId??null,
-    requiresOperating:d.requiresOperating??false,requiresAttunement:d.requiresAttunement??false,startedTiming:d.timing,
+    ...(d.requiresWorn?{requiresWorn:true}:{}),requiresOperating:d.requiresOperating??false,requiresAttunement:d.requiresAttunement??false,startedTiming:d.timing,
     elapsedBeforeSegment:0,segment:segment(a,enc),willing:x.willing??null};
   await insert(ctx,'form_deployment',x.deploymentId,a.id,form.title,data);
   await ctx.link(x.deploymentId,'deployment_form',form.id);await ctx.link(a.id,'deploying',x.deploymentId);

@@ -62,7 +62,7 @@ REF = {
     "story_arc":{"parentArcId":"story_arc","eventIds":"timeline_event"},
     "campaign_session":{"arcId":"story_arc","previousSessionId":"campaign_session","openingCheckpointId":"checkpoint",
                         "closingCheckpointId":"checkpoint","eventIds":"timeline_event"},
-    "form": {"inheritedRuleFormIds":"form", "sourceItemId": "item_instance", "integrityPoolId": "resource_pool", "deploymentPoolId": "resource_pool",
+    "form": {"blockedAttackPoolId":"resource_pool", "inheritedRuleFormIds":"form", "sourceItemId": "item_instance", "integrityPoolId": "resource_pool", "deploymentPoolId": "resource_pool",
              "resetPoolId": "resource_pool", "suppressedItemIds": "item_instance"},
     "effect": {"formId": "form", "sourceItemId": "item_instance"}, "feature": {"formId": "form"},
     "spell_grant": {"spellId": "spell", "resourceId": "resource_pool", "sourceItemId": "item_instance"},
@@ -72,7 +72,7 @@ REF = {
 }
 EDGE_TARGET = {
     "care_operator":"actor","requires_spell":"spell","requires_tool":"item_definition",
-    "feature_source":"item_instance","communicates_with":"actor",
+    "blocks_attack_pool":"resource_pool", "feature_source":"item_instance","communicates_with":"actor",
     "infusion_operator":"actor","known_infusion":"feature","dedicated_slot":"resource_pool",
     "deployment_form":"form","deploying":"form_deployment","inherits_form_rules":"form",
     "includes_event":"timeline_event","part_of_arc":"story_arc","follows_session":"campaign_session","session_in_arc":"story_arc",
@@ -288,6 +288,11 @@ def check_target(row, entities):
                "Invalid actor mechanics collections")
     if kind=="actor":
         verify(not data.get("diceDelegations"), "Roll delegation requires fresh owner authorization")
+    if kind=="form":
+        for flag in ("requiresWorn", "suppressesNaturalAttacks"):
+            verify(flag not in data or data[flag] is True, "Invalid form predicate "+flag)
+        if data.get("requiresWorn"):
+            verify(bool(data.get("sourceItemId")), "Worn form requires a physical source")
     if kind=="form_deployment":
         verify(data["status"] in ("deploying","completed","cancelled","interrupted") and type(data["requiredSeconds"]) is int and
                data["requiredSeconds"]>=0 and isinstance(data["segment"],dict),"Invalid form deployment history")
@@ -394,6 +399,8 @@ def check_target(row, entities):
         ids = value if isinstance(value,list) else [] if value is None else [value]
         verify(all(isinstance(v,str) and entities.get(v,{}).get("kind")==expected_kind for v in ids), "Orphan or wrong typed relationship "+field)
         verify(len(ids)==len(set(ids)), "Duplicate canonical relationship")
+        if kind=="form" and field=="blockedAttackPoolId":
+            verify(all(entities[v]["actorId"]==aid for v in ids), "Form restricts another actor's attack pool")
         if kind=="form" and field=="inheritedRuleFormIds":
             verify(row["id"] not in ids and all(entities[v]["actorId"]==aid for v in ids), "Form inherits another actor's rules")
         if kind=="actor" and field in ("poolIds","effectIds","activeFormId","activeDeploymentId","concentrationCastId"):
@@ -924,7 +931,7 @@ def project(raw_by_hash, plan, tenant):
     must_link["care_protocol"]={"operatorId":"care_operator","spellId":"requires_spell","toolDefinitionId":"requires_tool",
                                 "repairPoolId":"uses_pool","reconstructionPoolId":"uses_pool"}
     must_link["form_deployment"]={"formId":"deployment_form"}
-    must_link["form"]={"inheritedRuleFormIds":"inherits_form_rules"}
+    must_link["form"]={"inheritedRuleFormIds":"inherits_form_rules","blockedAttackPoolId":"blocks_attack_pool"}
     must_link["effect"]={"sourceItemId":"requires_item","formId":"requires_form"}
     must_link["attack"]={"sourceItemId":"requires_item","formId":"requires_form","excludedForms":"excludes_form"}
     must_link["story_arc"]={"parentArcId":"part_of_arc","eventIds":"includes_event"}

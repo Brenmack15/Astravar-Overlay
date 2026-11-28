@@ -50,7 +50,8 @@ export const resourceSchema = fields({
 export const formSchema = fields({
   actorId:identifier, formId:identifier, fittedModel:fields({model:identifier,compatibilitySource:named(300)},['model','compatibilitySource']), name:named(160), source:named(300), description:named(2000),
   size:option('tiny','small','medium','large','huge','gargantuan'), creatureType:named(60),
-  sourceItemId:identifier, requiresAttunement:boolean, requiresOperating:boolean, abilityOverrides:abilityMap, speeds:movementMap,
+  sourceItemId:identifier, requiresAttunement:boolean, requiresOperating:boolean, requiresWorn:{const:true},
+  suppressesNaturalAttacks:{const:true}, blockedAttackPoolId:identifier, abilityOverrides:abilityMap, speeds:movementMap,
   suppressedItemIds:arrayOf(identifier,24),requiresWilling:boolean,revertOnSourceLoss:boolean,senses:sensesMap,grounded:boolean, baseAc:nullable(whole(0,100)), activationSeconds:whole(0,86400), durationSeconds:nullable(whole(1,31536000)),
   timing:actionCost, deploymentPoolId:identifier, integrityPoolId:identifier, resetPoolId:identifier
 }, ['actorId','formId','name','source','timing','activationSeconds']);
@@ -161,7 +162,7 @@ export async function activeForm(ctx,a) {
   const f=await ctx.get('form',d.activeFormId);
   if (!f || f.actorId!==a.id || f.life!=='active') return null;
   if (d.formExpiresAt!=null && (d.gameSeconds==null || d.gameSeconds>=d.formExpiresAt)) return null;
-  return await gearEligible(ctx,f.data.sourceItemId,a.id,f.data.requiresAttunement,f.data.requiresOperating,null) ? f:null;
+  return await gearEligible(ctx,f.data.sourceItemId,a.id,f.data.requiresAttunement,f.data.requiresOperating,null,f.data.requiresWorn) ? f:null;
 }
 export function preferredEffect(candidate,prior) {
   const priority=candidate.data.priority??0,previous=prior?.data.priority??0;
@@ -186,6 +187,11 @@ function ruleFormIds(form) {
 }
 export function matchesForm(rule,ids) {
   return (!rule.formId||ids.includes(rule.formId)) && !rule.excludedForms?.some(id=>ids.includes(id));
+}
+export function formPermitsAttack(attack,projection) {
+  return matchesForm(attack,projection.ruleFormIds) &&
+    !(projection.suppressesNaturalAttacks && attack.classification==='natural') &&
+    !(projection.blockedAttackPoolId && attack.cost?.poolId===projection.blockedAttackPoolId);
 }
 export async function readyAnchor(ctx,actorId,itemId,revision=null) {
   const item=await ctx.get('item_instance',itemId),d=item?.data;
@@ -368,7 +374,9 @@ export async function sheet(ctx,id,contextTags=[],previewFormId=undefined,charge
       requiresOperating:data.requiresOperating===true,contextTag:data.contextTag??null,
       ...(independent?{independentResistanceId:independent.id}:{})};
   });
-  return {rollAids:await activeCastAids(ctx,a),actorId:id,level:a.data.level,rulesProfile:a.data.rulesProfile,classTracks:a.data.classTracks??null,activeDeploymentId:a.data.activeDeploymentId??null,communications,mobilityRules,exhaustion,activityState:a.data.activityState??null,formId:form?.id??null,ruleFormIds:ruleFormIds(form),size:form?.data.size??a.data.size??null,creatureType:form?.data.creatureType??a.data.creatureType??null,
+  return {...(form?.data.suppressesNaturalAttacks?{suppressesNaturalAttacks:true}:{}),
+    ...(form?.data.blockedAttackPoolId?{blockedAttackPoolId:form.data.blockedAttackPoolId}:{}),
+    rollAids:await activeCastAids(ctx,a),actorId:id,level:a.data.level,rulesProfile:a.data.rulesProfile,classTracks:a.data.classTracks??null,activeDeploymentId:a.data.activeDeploymentId??null,communications,mobilityRules,exhaustion,activityState:a.data.activityState??null,formId:form?.id??null,ruleFormIds:ruleFormIds(form),size:form?.data.size??a.data.size??null,creatureType:form?.data.creatureType??a.data.creatureType??null,
     senses,abilities,checks,saves,skills,passives,skillDefinitions,ac,movement,equipmentProperties,
     initiative:numeric(abilities.DEX.modifier,active,'initiative','all'),proficiency:a.data.proficiency,
     currentHp:a.data.currentHp,maxHp:hpMaximum.value,temporaryHp:a.data.temporaryHp,
@@ -406,7 +414,7 @@ export async function checkTiming(ctx,a,timing) {
   const turn=encounter.data.economy[a.id];
   must(turn && (timing==='reaction'||encounter.data.participants[encounter.data.index]===a.id),'TURN_UNAVAILABLE');
   if(timing==='attack')must(turn.action && turn.attacks>0,'ACTION_UNAVAILABLE');
-  else must(turn[timing]===true && (timing!=='action'||turn.attacks===a.data.attacksPerAction),'ACTION_UNAVAILABLE');
+  else must(turn[timing]===true && (timing!=='action'||turn.attacks===(a.data.attacksPerAction??1)),'ACTION_UNAVAILABLE');
   return {encounter,turn};
 }
 export async function useTiming(ctx,a,timing) {

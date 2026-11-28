@@ -5,7 +5,7 @@ import {directPhysicalStrike} from './cloud-equipment-reactions.mjs';
 import {applicableTargetLock,releaseTargetLock} from './cloud-target-lock.mjs';
 import { applyCastAid } from './cloud-cast-aid.mjs';
 import { d20Evidence } from './cloud-mechanics-core.mjs';
-import {matchesForm} from './cloud-mechanics-core.mjs';
+import {formPermitsAttack,matchesForm} from './cloud-mechanics-core.mjs';
 import { changeDeploymentClock } from './cloud-form-deployment.mjs';
 import { armedComponents, shotChoice } from './cloud-mechanics-arsenal.mjs';
 import { attackModeFor } from './cloud-mechanics-linked.mjs';
@@ -172,7 +172,7 @@ async function loadAttack(ctx,x){
   requirePlayableExhaustion(p.exhaustion);
   must(!['disabled','dormant'].includes(a.data.activityState),'ACTOR_INACTIVE');
   must(!p.conditions.some(c=>['incapacitated','unconscious','stunned','petrified','paralyzed'].includes(c)),'ACTOR_CANNOT_ATTACK');
-  must(matchesForm(d,p.ruleFormIds),'ATTACK_FORM_INELIGIBLE');
+  must(formPermitsAttack(d,p),'ATTACK_FORM_INELIGIBLE');
   must(await gearEligible(ctx,d.sourceItemId,a.id,d.requiresAttunement,d.requiresOperating,undefined,d.requiresWorn),'ATTACK_SOURCE_INELIGIBLE');
   const chosen=Object.fromEntries((d.selections??[]).filter(s=>(s.actorId??attack.actorId)===a.id&&s.formId===p.formId).map(s=>[s.componentId,s.type]));
   const mode=await attackModeFor(ctx,a,attack);

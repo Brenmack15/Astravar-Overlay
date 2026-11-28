@@ -1,4 +1,5 @@
 """Verify independently pinned supplemental projections against original source identities."""
+from ascension_migrate_worn_form import verify_worn_form
 from ascension_migrate_care import validate_care_projection
 from ascension_migrate_spells import verify_grant_origin, verify_item_feature
 from ascension_migrate_legacy import encode, sha, verify, IDENTITY
@@ -37,7 +38,8 @@ def verify_supplements(plan, entries, targets, decisions, source_key):
         original = source_key(origin)
         verify(original in entries and original[0] not in supplied and origin.get("rowSha256")==sha(encode(entries[original])),
                "Missing original for supplemental ruling")
-        validate_care_projection(row, original, entries, targets)
+        if not verify_worn_form(row, authority.get("decisions", {}).get(row["ruling"]), entries, targets, decisions, source_key):
+            validate_care_projection(row, original, entries, targets)
         if row["ruling"]:
             rule=authority["decisions"].get(row["ruling"])
             verify(isinstance(rule,dict) and rule.get("decisionId")==row["ruling"] and rule.get("ownerConfirmation")

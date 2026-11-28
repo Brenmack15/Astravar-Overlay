@@ -1,7 +1,7 @@
 import { CloudPlan } from './cloud-plan.mjs';
 import { BridgeError } from './core.mjs';
 import { cloudFail, validCloudId } from './cloud-validation.mjs';
-import { sheet, gearEligible, rollPolicy, checkTiming, availableUses, matchesForm, reactionRollWindow } from './cloud-mechanics-core.mjs';
+import { sheet, gearEligible, rollPolicy, checkTiming, availableUses, formPermitsAttack, matchesForm, reactionRollWindow } from './cloud-mechanics-core.mjs';
 import { checkArsenal } from './cloud-mechanics-arsenal.mjs';
 import { attackModeFor } from './cloud-mechanics-linked.mjs';
 import { offeredCharges } from './cloud-effect-costs.mjs';
@@ -24,7 +24,8 @@ export async function cloudActions(service,principal,id,actorId,options={}) {
     const entity=await ctx.get(candidate.kind,candidate.id);
     if(!entity)cloudFail(409,'SNAPSHOT_CHANGED');
     const d=entity.data;
-    if(!matchesForm(d,p.ruleFormIds) || !await gearEligible(ctx,d.sourceItemId,actorId,d.requiresAttunement,d.requiresOperating,undefined,d.requiresWorn))continue;
+    const eligibleForm=entity.kind==='attack'?formPermitsAttack(d,p):matchesForm(d,p.ruleFormIds);
+    if(!eligibleForm || !await gearEligible(ctx,d.sourceItemId,actorId,d.requiresAttunement,d.requiresOperating,undefined,d.requiresWorn))continue;
     const reasons=[];
     if(['disabled','dormant'].includes(a.data.activityState))reasons.push('ACTOR_INACTIVE');
     if(p.exhaustion.status==='fatal')reasons.push('FATAL_EXHAUSTION_REQUIRES_RESOLUTION');

@@ -363,7 +363,7 @@ async function guardForm(ctx, item, next) {
   let actor = await partyActor(ctx,item.data.custodianId);
   const deployment=await currentDeployment(ctx,actor);
   if(deployment?.data.sourceItemId===item.id && (item.data.custodianId!==next.data.custodianId || next.data.equipment==='packed' ||
-    !next.data.partyAccess || deployment.data.requiresOperating && !next.data.operating || deployment.data.requiresAttunement && !next.data.attuned)){
+    (deployment.data.requiresWorn && next.data.equipment!=='worn') || !next.data.partyAccess || deployment.data.requiresOperating && !next.data.operating || deployment.data.requiresAttunement && !next.data.attuned)){
     const data=await closeDeployment(ctx,actor,deployment,'interrupted','source_item_unavailable');
     actor=await ctx.put(recordEdit(actor,data));
   }
@@ -371,7 +371,7 @@ async function guardForm(ctx, item, next) {
   const form = await recordRead(ctx,'form',actor.data.activeFormId);
   if(form.data.sourceItemId!==item.id)return;
   const lost=item.data.custodianId!==next.data.custodianId || next.data.equipment==='packed' || !next.data.partyAccess ||
-    (form.data.requiresOperating && !next.data.operating) || (form.data.requiresAttunement && !next.data.attuned);
+    (form.data.requiresWorn && next.data.equipment!=='worn') || (form.data.requiresOperating && !next.data.operating) || (form.data.requiresAttunement && !next.data.attuned);
   if(!lost)return;
   if(form.data.revertOnSourceLoss!==true)recordsFail('FORM_REVERSION_REQUIRED',409);
   await ctx.put(recordEdit(actor,{...actor.data,activeFormId:null,formExpiresAt:null}));

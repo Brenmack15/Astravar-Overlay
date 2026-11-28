@@ -42,7 +42,7 @@ export async function mechanicFormPreview(ctx,actorId,formId){
   }
   return {status:'preview',trackedEncounter:Boolean(a.data.encounterId),deployment:await deploymentView(ctx,a,formId),activeFormId:a.data.activeFormId,formId,projection,pools,activationSeconds:d.activationSeconds,
     durationSeconds:d.durationSeconds??null,requiresWilling:d.requiresWilling??false,
-    sourceEligible:await gearEligible(ctx,d.sourceItemId,actorId,d.requiresAttunement,d.requiresOperating)};
+    sourceEligible:await gearEligible(ctx,d.sourceItemId,actorId,d.requiresAttunement,d.requiresOperating,undefined,d.requiresWorn)};
 }
 async function defineActor(ctx,x){
   const {actorId,name,source,role,rulesProfile,level}=x;
@@ -138,7 +138,8 @@ async function defineForm(ctx,x,edit=false){
   must(new Set(suppress).size===suppress.length && !suppress.includes(x.sourceItemId),'FORM_SUPPRESSION_INVALID');
   for(const id of suppress)must((await ctx.get('item_instance',id))?.life==='active','SUPPRESSED_ITEM_UNAVAILABLE');
   if(x.sourceItemId)must(await ctx.get('item_instance',x.sourceItemId),'FORM_SOURCE_MISSING');
-  must((!x.requiresAttunement&&!x.requiresOperating)||x.sourceItemId,'FORM_SOURCE_REQUIRED');
+  must((!x.requiresAttunement&&!x.requiresOperating&&!x.requiresWorn)||x.sourceItemId,'FORM_SOURCE_REQUIRED');
+  if(x.blockedAttackPoolId)await owned(ctx,'resource_pool',x.blockedAttackPoolId,a.id);
   const poolIds=[x.deploymentPoolId,x.integrityPoolId,x.resetPoolId].filter(Boolean);
   must(new Set(poolIds).size===poolIds.length,'FORM_POOLS_MUST_BE_DISTINCT');
   for(const p of poolIds){
@@ -152,6 +153,8 @@ async function defineForm(ctx,x,edit=false){
     for(const key of ['deploymentPoolId','integrityPoolId','resetPoolId'])if(previous.data[key] && !poolIds.includes(previous.data[key]))await ctx.unlink(formId,'uses_pool',previous.data[key]);
     if(previous.data.sourceItemId && previous.data.sourceItemId!==x.sourceItemId)await ctx.unlink(formId,'requires_item',previous.data.sourceItemId);
     for(const id of previous.data.suppressedItemIds??[])if(!suppress.includes(id))await ctx.unlink(formId,'suppresses_item',id);
+    if(previous.data.blockedAttackPoolId && previous.data.blockedAttackPoolId!==x.blockedAttackPoolId)
+      await ctx.unlink(formId,'blocks_attack_pool',previous.data.blockedAttackPoolId);
     if(previous.data.orderKey!==undefined)data.orderKey=previous.data.orderKey;
     if(previous.data.inheritedRuleFormIds)data.inheritedRuleFormIds=previous.data.inheritedRuleFormIds;
     await ctx.put({...previous,title:name,data});
@@ -159,6 +162,7 @@ async function defineForm(ctx,x,edit=false){
   for(const id of suppress)await ctx.link(formId,'suppresses_item',id);
   for(const id of poolIds)await ctx.link(formId,'uses_pool',id);
   if(x.sourceItemId)await ctx.link(formId,'requires_item',x.sourceItemId);
+  if(x.blockedAttackPoolId)await ctx.link(formId,'blocks_attack_pool',x.blockedAttackPoolId);
   return {formId};
 }
 async function changeForm(ctx,x){
